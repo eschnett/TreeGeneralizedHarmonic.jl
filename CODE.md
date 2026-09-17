@@ -23,8 +23,12 @@ blocks, a global time step, regridding driven by an error indicator, and
 — through the mesh — threads, GPUs and (when TreeAMR's M7 lands) MPI,
 without this package writing any of that itself.
 
-*Status: design, reviewed three times; nothing implemented, nothing
-measured.* Markers: **(decided)** is inherited from TreeAMR,
+*Status: milestones G0–G3 are done and their numbers are in this file —
+the pointwise algebra, the stencils, the fused right-hand side, coarse-fine
+faces, the constraint monitors and the thread and precision invariants. A
+black hole arrives with G4.* (The line here said "nothing implemented,
+nothing measured" through step 3, which stopped being true at step 1;
+corrected in step 4.) Markers: **(decided)** is inherited from TreeAMR,
 TreeWave/TreeHydro or GHSO2, or was settled in review; **(proposed)** is
 a decision this document makes and still wants confirmed;
 **(predicted)** is a number a milestone will measure; **(open)** points
@@ -302,6 +306,22 @@ stagger is injection, exact for any data — applies unchanged**)**:
 | `Hsrc`, gauge source `H_b` and `∂_a H_b`, non-harmonic backgrounds only | `20` | `0` | no | `Hsrc => nothing`, then re-sampled: a function of position |
 | `diag`, constraints, speeds, masked errors, the indicator, on demand | small | `0` | no | `diag => nothing` |
 
+`diag` holds **ten** slots from step 4 **(proposed in step 4**, which is
+where the set first had to be written down**)**: the characteristic speed,
+the four components of `C_a`, the ADM Hamiltonian, the three components of
+`ℳ_i`, and the `1`/`0` mask indicator the masked norms divide by. `C_a`
+and `ℳ_i` occupy contiguous runs on purpose — `block_mapreduce` reduces a
+contiguous range of variables and a device cannot be handed an arbitrary
+index vector cell by cell. Steps 5 and 6 add the masked error, the
+interior residual and the indicator beside them.
+
+The field sets are **vertex-centered and `GHProblem` refuses anything
+else** (added in step 4). The table above already decided it; what made it
+an assertion is that the masks and the interior profiles turn an owned
+index into a position — `point_position`, written to reproduce TreeAMR's
+`coordinates` expression bit for bit — and a staggered set would be
+evaluated half a cell from where its values sit.
+
 `q` is the finite-difference order (below), and `G = q/2 + 1` because
 the Kreiss–Oliger operator of order `q + 2` reaches one point further
 than the derivatives do. TreeAMR's vertex invariant `N ≥ 2G + 2` then
@@ -414,12 +434,47 @@ batches it into one kernel per stencil kind, but it is a real
 difference from a unigrid code and one reason to expect `q = 4` or `6`
 to be the order of choice rather than `8` **(predicted; G6)**.
 
-**(predicted, G3)** On TreeAMR's M3 two-level periodic mesh the gauge
-wave converges at rate `min(q, p − 1)`: at `q = 4`, rates **3 and 4**
-for prolongation orders 4 and 6, at any restriction order and any `ε`;
-the unrefined control converges at 4 throughout. This is TreeWave's
-table for a fourth-order scheme, and it is what makes `p = 6` a
-requirement rather than a choice.
+**(Measured in step 4.)** The prediction holds, on the gauge wave
+(`A = 1/20`, one wavelength cubed, periodic) at `q = 4` on the two-level
+mesh — a `2³` root grid with **one root block refined**, so that each of
+its six faces is a coarse-fine face — held **frozen** while `N` runs over
+`8, 10, 12` (15 leaves at every resolution, every spacing shrinking with
+`N` and the block layout unchanged), a sixteenth of a crossing at
+`cfl = 1/4`. Both the mesh and the
+resolutions are a budget **(proposed in step 4)**: TreeWave's `wave_forest`
+refines a middle sub-box, which at `roots = 2` is every block or none, and
+a fourth resolution or a longer run is `N⁴` of ghost filling at 216 coarse
+points per fine ghost point. What is run measures the rate cleanly in both
+norms and costs about a minute and a half at one thread.
+
+| prolongation | restriction | `ε_KO` | L2 rate | L∞ rate |
+|---|---|---|---|---|
+| 4 | 2 or 4 | 0 | **3.18** | **3.25** |
+| 6 | 2 or 4 | 0 | **3.98** | **3.94** |
+| 4 | 2 or 4 | 0.5 | **3.26** | **3.07** |
+| 6 | 2 or 4 | 0.5 | **4.08** | **4.09** |
+| unrefined control, 4 or 6 | any | 0 | **3.98** | **3.97** |
+
+So `p = q + 2` is a requirement and not a choice: an order-4 ghost costs
+this system a whole order, and the dissipation does not change that —
+`Q_d` contributes `O(h^{p−1})` like a first derivative, exactly as the
+section above says. The **restriction order does not appear** because on
+a vertex-centered mesh restriction is injection: the `p = 2` and `p = 4`
+rows are not merely equal, they are the same computation, and
+`test/interface_tests.jl` asserts `l2 === l2` rather than a tolerance
+(TreeWave's finding, confirmed here). The control's two rows are the same
+computation for the stronger reason that an unrefined mesh never
+prolongates at all.
+
+What the interface costs in *time* is larger than what it costs in order,
+and it is TreeAMR's cost rather than this package's. At `N = 12`, `q = 4`,
+`Float64`, one thread, on the two-level mesh: a right-hand-side evaluation
+is **5211 ns** per owned point at `p = 6` and **2521 ns** at `p = 4`,
+against **1399 ns** on the unrefined mesh — and the ghost fill alone is
+**79 %** of the evaluation at `p = 6`, **56 %** at `p = 4` and **22 %**
+unrefined. The 216 coarse points per fine ghost point are real. This is
+why `test/interface_tests.jl` is the most expensive file in the suite and
+why its runs are as short as a clean rate allows.
 
 ### One right-hand-side evaluation
 
@@ -1069,6 +1124,66 @@ inside it; the modified region is not a numerical solution. Norms are
 `block_mapreduce` partials weighted by each block's `h³`, combined in
 block order, so they are bit-identical across thread counts.
 
+**(Implemented and measured in step 4**, `src/constraints.jl`.**)** Five
+things the writing settled, each stated where it is made in that file:
+
+- **Which `∂_t g`.** The gauge constraint takes it from the first
+  evolution equation, `β^i ∂_i g + (α/√γ)Π`; the ADM monitor takes
+  `∂_i∂_t g` by differentiating that along `x^i` and `∂_t∂_t g` by
+  differentiating it along `t`, with `∂_tΠ` from
+  `gh_node_rhs_expanded` — the reduced equation with its source and its
+  constraint damping, which is what "consistent with the discrete
+  dynamics" means. **The Kreiss–Oliger term is left out of both**
+  **(proposed in step 4)**: it is `O(h^{q+1})`, one order below what these
+  monitors converge at, and carrying it would mean differencing the
+  dissipation operator as well. This is the one place this package's
+  `∂_t g` and the right-hand side's differ, and the difference is below
+  the truncation error either of them measures.
+- **The Ricci tensor is assembled, not reduced (proposed in step 4).**
+  `R_ab = ∂_cΓ^c_ab −
+  ∂_bΓ^c_ca + Γ^c_cd Γ^d_ab − Γ^c_bd Γ^d_ca`, written out, rather than
+  through the generalized-harmonic identity `R_ab = −½g^{cd}∂_c∂_d g_ab +
+  ∇_(aΓ_b) + …`. The reduced form is what the evolution equations already
+  encode, so a monitor built on it would check the right-hand side against
+  itself. The price is a four-dimensional contraction and about **18 s**
+  of compilation for the first kernel specialisation (4 s for each
+  further one) — GHSO2 warned of "minutes" and this is the measured
+  figure here.
+- **The chain rule needed a one-direction spelling.** `∂_t α`, `∂_t β^j`
+  and `∂_t√γ` are not among what `metric_derivatives` returns (three
+  spatial directions, with `√γ` folded into `A^{jk}`), so `pointwise.jl`
+  gained `metric_derivatives_along`, the same five closed forms for one
+  direction **(proposed in step 4)**. The three-direction function is
+  untouched, and `test/constraints_tests.jl` asserts the two agree on
+  every spatial direction — to roundoff, for the reason under
+  [Measured results](#measured-results).
+- **The masked norm divides by the evolved volume.** Each kernel writes a
+  `1`/`0` indicator into a `diag` slot beside its values, and the L2 norm
+  is `√(Σ_b h_b³ Σ|c|² / Σ_b h_b³ Σ 1)` — so masking a region out does not
+  make the number smaller merely by diluting it with zeros
+  **(proposed in step 4)**. Where nothing is masked that is TreeAMR's
+  `volume_weighted_norm` exactly, which the tests assert rather than
+  assume.
+- **`diag` now has ten slots**: the speed, `C_a` (four), `ℋ`, `ℳ_i`
+  (three) and the mask indicator, with `C_a` and `ℳ_i` contiguous because
+  `block_mapreduce` reduces a contiguous range of variables and nothing
+  else.
+
+The numbers: on flat space both monitors are **exactly zero** at every
+order; on the six backgrounds of the table, with *analytic* second
+derivatives from `ddmetric`, `ℋ` and `ℳ_i` vanish to **1.2 eps** and
+**0.2 eps** of the size of the curvature terms; on the gauge wave across a
+coarse-fine face they converge at **5.47** (`C_a`), **4.51** (`ℋ`) and
+**5.47** (`ℳ_i`); and on harmonic Kerr (`a = 9/10`, a uniform mesh, no
+hole in the box) at **4.26**, **4.21** and **4.27**, which is `q`. The two
+rows measure different things and both are needed: the gauge wave on a
+*uniform* mesh has no constraint violation at all above roundoff — it
+depends on `x − t` alone, so the temporal and spatial truncation errors
+cancel — so the refined rows are the interface error and nothing else, and
+they converge faster than `q` because that error lives on a set of measure
+`~h`, which is worth half an order in an L2 norm. Harmonic Kerr is the
+bulk truncation error and nothing else, and it converges at `q`.
+
 **Horizon.** `ApparentHorizonFinder` (Gundlach's fast-flow method)
 takes an ADM-variable provider — `ADMVars(γ_ij, ∂_k γ_ij, K_ij)` at a
 point, or its batched form over an array of points, which is the form
@@ -1115,7 +1230,19 @@ break it:
 - **Bit-identical across thread counts.** Every reduction goes through
   `block_mapreduce` or `firing_boxes`; `test/thread_workload.jl` runs a
   gauge wave with a regrid and a chunk of a hole with its layer and
-  compares digests.
+  compares digests. **(Measured in step 4.)** It holds. The workload is
+  the gauge wave on a `2³` root grid: the initial-data cycle with its
+  flagging pass, two chunks of fixed-step RK4 on a two-level mesh, the
+  gauge-constraint monitor and its masked norms, `max_speed`, and a regrid
+  that moves data between levels — six printed lines of digests, norms and
+  mesh statistics, **character for character identical** at one and at
+  four threads. The workload carries the *gauge* monitor and not the ADM
+  one **(proposed in step 4)**: the ADM kernel is the same `map_blocks!`
+  launch reduced by the same fold, so it adds no parallel structure, and
+  compiling it costs 18 s in each of the two processes the test runs.
+  What this bit-identity does *not* mean is under
+  [Measured results](#measured-results): the same compiled code, at the
+  same call site, at a different thread count, and nothing more.
 - **`Float64` on Symmetry's H200 is the requirement** (decided in
   review). It is the machine the proof of concept runs on, and the
   precision it runs in; every device claim below is made there first.
@@ -1128,7 +1255,22 @@ break it:
   a `Float32` failure would be recorded, not fixed at the expense of
   `Float64`. The RHS kernel's register pressure and the in-kernel metric
   evaluation are the two device unknowns, and G6 measures both on the
-  H200.
+  H200. **(Measured in step 4** on `CPU()`, which is what a host test can
+  settle.**)** There is no failure to record. Everything steps 3 and 4
+  built runs at `Float32` and returns `Float32`: the fused kernel, the
+  time step, RK4, both constraint monitors, the two-level mesh with its
+  prolongated ghosts. The gauge wave converges at **3.93** at `Float32`
+  against `Float64`'s **3.94** over the two coarsest resolutions, with
+  errors `2.00e−4, 1.31e−5` against `2.00e−4, 1.30e−5` — the *same* error,
+  not merely the same rate. Two resolutions and no more, for step 2's
+  reason: the roundoff floor of a second derivative is `eps/h²`, which at
+  `Float32` and `h = 1/24` is already the size of the `Float64` truncation
+  error there, so a third point would measure the arithmetic. The
+  pointwise algebra — including step 4's `metric_derivatives_along` and
+  the four-dimensional curvature assembly — also runs at `Float32x2`, the
+  software float that has no hardware path underneath it, and agrees with
+  the `Float64` answer on the same rational data to each type's own
+  precision.
 - **GPU kernel efficiency is deferred, and here is the budget it
   competes against.** Per point and per RHS evaluation, TreeAMR's
   pattern moves roughly: the scatter (read `u`, write the working
@@ -1209,20 +1351,20 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `notes/` | verbatim copies of the inherited documents, with provenance; see `notes/README.md` |
 | `src/TreeGeneralizedHarmonic.jl` | module shell: `using`s, exports, includes |
 | `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host (amended in step 0) |
-| `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source` (all added in step 1); `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
+| `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source` (all added in step 1), and `metric_derivatives_along` — the same chain rule along **one** direction, returning `∂√γ` and `∂γ^{jk}` rather than the assembled `∂(α√γγ^{jk})`, which is what the constraint monitors need along *time* (added in step 4) — and `_pairindex`, the packed slot of a symmetric index pair, so that the file has one packing convention used on two index pairs; `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
 | `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the four `Val`s and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3) |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook |
 | `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the `:pasted` limiter |
-| `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the uniform forest builder, the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
+| `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builder — uniform, or with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
-| `src/constraints.jl` | GH and ADM constraint kernels, masked norms |
+| `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate step 5's interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` (added in step 4) |
 | `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch` |
 | `src/driver.jl` | `GHCase`, `evolve!`, the analysis record per chunk, `observer` |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1) |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
@@ -1316,12 +1458,30 @@ refinement level, short times.
   is minutes per order in three dimensions: what is run is roots `1, 2, 3`
   over an eighth of a crossing, which measures the same rate — the
   numbers are under [Measured results](#measured-results).
-- **G3 — Coarse-fine faces, static mesh.** TreeAMR's two-level mesh;
-  `constraints.jl`. *Accept:* the interface-order table (predicted rates
-  3 and 4 at `p = 4, 6` for `q = 4`, control at 4), independent of the
-  restriction order and of `ε_KO`; both constraint monitors converge on
+- **G3 — Coarse-fine faces, static mesh.** *(Done.)* TreeAMR's two-level
+  mesh; `constraints.jl`. *Accept:* the interface-order table (predicted
+  rates 3 and 4 at `p = 4, 6` for `q = 4`, control at 4), independent of
+  the restriction order and of `ε_KO`; both constraint monitors converge on
   the gauge wave across the interface; the thread-workload digests
   identical at one and four threads; G2 and G3 on `CPU()` in `Float32`.
+  All four hold; the numbers are under [The interface-order
+  rule](#the-interface-order-rule-and-what-it-costs-a-second-order-system),
+  [Analysis quantities](#analysis-quantities) and [Precision, threads,
+  devices](#precision-threads-devices), and the suite's cost is under
+  [Measured results](#measured-results). Two sentences of the acceptance
+  needed amending where they are stated rather than only here.
+  **"Both constraint monitors converge on the gauge wave across the
+  interface" is a claim about the interface and nothing else**: the same
+  case on a *uniform* mesh has no constraint violation above roundoff, so
+  the refined rows measure the interpolated ghosts alone, and they
+  converge at `q + 1/2` rather than at `q` because that error lives on a
+  set of measure `~h`. The statement that the monitors converge at `q` is
+  made on harmonic Kerr, where the violation is the bulk truncation error
+  — and both rows are in the suite, because between them they say the
+  monitors see both. And **the restriction order is not a row of the
+  table**: on a vertex-centered mesh restriction is injection, so the two
+  orders are the same computation and the test asserts bit-identity rather
+  than two equal rates.
 - **G4 — A black hole.** Kerr-Schild (`a = 0`, sampled `H`) and harmonic
   Kerr (`a = 0` and `a = 0.9`, `H = 0`) in a Dirichlet box of half-width
   `≥ 20 M`, the indicator with its mask, floor and ceiling, the interior
@@ -1587,6 +1747,69 @@ measurement: the pointwise algebra — `metric_quantities`,
 `q = 4` kernel's 1409, so the stencils are the larger half at every order
 this package uses, and the split into a stencil kernel and an algebra
 kernel that G6 will try is a split of roughly 3:1 rather than 1:1.
+
+**G3 (step 4), coarse-fine faces, the constraints and the threads.** The
+suite is **2144 assertions in 8m40** at one thread and **6m55** at
+four, on the development machine (Apple silicon, 12 CPU threads, Julia
+1.13.0), up from step 3's 1877 in 3m48. A clean archive with no
+`Manifest.toml` resolves the two pins from GitHub `main`, instantiates and
+passes with the same count. Where the growth went, and why each piece is
+what it is:
+
+| file | 1 thread | what it pays for |
+|---|---|---|
+| `type_tests.jl` | 99 s | the fused kernel, both monitors and the pointwise algebra compiled again at `Float32` (45 s) and `Float32x2` (33 s) |
+| `interface_tests.jl` | 93 s | fifteen evolutions on the two-level mesh, where the ghost fill is 79 % of an evaluation |
+| `constraints_tests.jl` | 74 s | the ADM kernel's first specialisation (18 s) and its second (4 s), and `ddmetric` on a second background (40 s) |
+| `threading_tests.jl` | 25 s | the workload twice — once in process, once in a subprocess at the other thread count |
+
+Three of the four are over `PLAN.md`'s 30 s rule of thumb, as
+`pointwise_tests.jl`, `evolution_tests.jl` and `convergence_tests.jl`
+already were, which makes six files in the suite over it; each is recorded
+here with what it buys. Three of step 4's four are **compilation**, and
+the fourth — the interface table — is the only file in the suite whose
+cost is arithmetic. Before adding to any of them, price it: a new `q` or a
+new element type is a new kernel; a new background is a new dual pass; and
+a resolution added to an interface sweep is `N⁴` of ghost filling at 216
+coarse points per fine ghost point.
+
+The cheapest thing step 4 could have done and did not is worth recording
+too: the thread workload carries the gauge monitor and not the ADM one,
+which keeps `threading_tests.jl` at 25 s instead of about 60.
+
+**The interface-order rule**, the table's own numbers and what a
+coarse-fine face costs in time, are under [The interface-order
+rule](#the-interface-order-rule-and-what-it-costs-a-second-order-system).
+Two results there are worth repeating because they are *not* the
+prediction:
+
+- **The restriction order is not a degree of freedom.** On a
+  vertex-centered mesh restriction is injection, so orders 2 and 4 are the
+  same computation: `l2 === l2`, asserted as identity and not as a
+  tolerance, at both prolongation orders. The same holds of the unrefined
+  control's two operator rows, for the stronger reason that it never
+  prolongates.
+- **A coarse-fine face costs more in time than in order.** At `p = 6` the
+  ghost fill is 79 % of a right-hand-side evaluation against 22 % on a
+  uniform mesh, and an evaluation is 3.7 times as expensive per point.
+  That is TreeAMR's cost, it is exactly the `6³ = 216` coarse points per
+  fine ghost point the section predicts, and it is what makes
+  `interface_tests.jl` the suite's most expensive file.
+
+**The constraint monitors** are under [Analysis
+quantities](#analysis-quantities), with the five decisions the writing
+settled. The sharpest of their numbers is the one with no mesh in it: on
+the six backgrounds of the table, fed the *analytic* second derivatives
+`ddmetric` returns, `ℋ` and `ℳ_i` vanish to **1.2 eps** and **0.2 eps**
+of the size of the curvature terms — which is the only test in the package
+that would catch a sign error in `∂_cΓ^c_ab − ∂_bΓ^c_ca`, since on a mesh
+such an error leaves a violation that converges at order `q` to something
+nonzero.
+
+**Threads and precision** are under [Precision, threads,
+devices](#precision-threads-devices): six digest lines identical character
+for character at one and four threads, and `Float32` reproducing the gauge
+wave's rate and its error at the two coarsest resolutions.
 
 ## Possible extensions
 

@@ -40,17 +40,19 @@ julia --project=. -e 'using Pkg; Pkg.test()'                              # the 
 julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])' # and threaded
 ```
 
-**Status: milestones G0, G1 and G2 are done — the equations are solved on
-a uniform mesh and converge at the scheme's order; coarse-fine faces are
-next.** What exists is the module shell, the `Base` bridges for software
-floating-point types, the host-copy helpers, GHSO2's node-local
-generalized-harmonic algebra together with the expanded momentum equation
-this package discretises, the centered finite-difference and
-Kreiss–Oliger weights at `q ∈ {2, 4, 6, 8}` built in exact rational
+**Status: milestones G0–G3 are done — the equations are solved on an
+adaptively refined mesh at the order the interface rule predicts, both
+constraint monitors converge, and a run is bit-identical across thread
+counts; a black hole is next.** What exists is the module shell, the
+`Base` bridges for software floating-point types, the host-copy helpers,
+GHSO2's node-local generalized-harmonic algebra together with the expanded
+momentum equation this package discretises, the centered finite-difference
+and Kreiss–Oliger weights at `q ∈ {2, 4, 6, 8}` built in exact rational
 arithmetic and rounded once into the run's type, and the mesh-side
 physics: the fused right-hand-side kernel, the cases and their initial
-data, the prescribed gauge source, the time-dependent Dirichlet boundary
-and the CFL time step.
+data, the prescribed gauge source, the time-dependent Dirichlet boundary,
+the CFL time step, and the gauge and ADM constraint monitors with their
+masked norms.
 
 The tests say the pinned TreeAMR still provides what the scheme is written
 against, that a `SpacetimeMetrics` background — including the boosted,
@@ -63,8 +65,18 @@ at **1.99, 3.95 and 5.92** for `q = 2, 4, 6`, flat space in a Dirichlet
 box with a shift and a sampled gauge source at **3.93**, Minkowski's
 right-hand side is *exactly* zero, and white noise stays bounded over a
 thousand steps with Kreiss–Oliger dissipation at `ε = 0.5` while growing
-tenfold without it. There is no refinement, no black-hole interior and no
-driver yet; those are the next three steps.
+tenfold without it.
+
+Across a coarse-fine face the same wave converges at **3.18** with an
+order-4 prolongation and **3.98** with an order-6 one, which is what makes
+`p = q + 2` a requirement rather than a taste; both constraint monitors
+converge there too, and vanish to roundoff on exact data; the whole cycle
+— initial-data adaptation, evolution, a regrid that moves data, the
+monitors and their norms — prints digests that are identical character for
+character at one and four threads; and everything runs at `Float32`,
+reproducing the gauge wave's rate and its error. There is no refinement
+indicator, no black-hole interior and no driver yet; those are the next
+three steps.
 
 The formulation and the pointwise algebra are inherited from
 `GeneralizedHarmonicSecondOrder2`, where they were validated on SBP-SAT

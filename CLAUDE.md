@@ -45,9 +45,9 @@ Three rules follow from `CODE.md` and govern every change here:
 
 ## Current state
 
-**G0, G1 and G2 are done — the right-hand side runs on a uniform mesh and
-converges at order `q`; coarse-fine faces and the constraint monitors are
-next.**
+**G0–G3 are done — the right-hand side runs on a two-level mesh at the
+interface order `CODE.md` predicts, both constraint monitors converge, and
+the run is bit-identical across thread counts. A black hole is next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -56,9 +56,9 @@ as part of the deliverable, an error indicator for refinement, `Float64`
 on Symmetry's H200 as the device requirement, no checkpointing, GPU
 kernel efficiency deferred to a research project. `PLAN.md` breaks the
 milestones G0–G6 into steps 0–10, each a brief for one agent with a fresh
-context (see its "Running a step as an agent"); step 4 (coarse-fine
-faces, the constraint monitors and the threading test) is next. `notes/`
-holds the inherited documents.
+context (see its "Running a step as an agent"); step 5 (the interior
+damping layer and the driver) is next. `notes/` holds the inherited
+documents.
 
 What exists in `src/` is the module shell, `precision.jl` (the `Base`
 bridges for software floating-point types), `device.jl` (`to_backend`,
@@ -75,7 +75,16 @@ the mesh-side physics: `evolution.jl` (the fused right-hand-side kernel in
 cases, the uniform forest builder, and the one conversion of
 `SpacetimeMetrics`' derivative index order), `gauge.jl` (`isharmonic`,
 `isstatic`, the sampled `Hsrc` and the refusal of a moving non-harmonic
-background) and `boundaries.jl` (the time-dependent Dirichlet hook).
+background) and `boundaries.jl` (the time-dependent Dirichlet hook) —
+and, from step 4, `constraints.jl`: the gauge-constraint kernel, the ADM
+one (every second derivative of `g_ab`, with the `∂_t` blocks
+reconstructed from the evolution equations and the four-dimensional Ricci
+tensor assembled rather than reduced), the `AllPoints` mask and the
+`is_evolved` predicate step 5 extends, `masked_norms` and
+`constraint_norms`. Step 4 also added `metric_derivatives_along` to
+`pointwise.jl` (the same chain rule along **one** direction, which is how
+the monitors reach `∂_t α`, `∂_t β^j` and `∂_t √γ`) and a
+`refined = true` forest to `initialdata.jl`.
 There is no interior, no refinement, no driver and no analysis record:
 those are steps 5–7.
 
@@ -93,21 +102,30 @@ seconds, and step 3's five: `gauge_tests.jl`, `initialdata_tests.jl`,
 properties nothing else can state), `convergence_tests.jl` and
 `noise_tests.jl`, over the helper `evolution_cases.jl` — the runs
 themselves, which live in `test/` because what they wrap is the
-integrator loop and `driver.jl` is step 5's.
+integrator loop and `driver.jl` is step 5's — and step 4's four:
+`constraints_tests.jl` (both monitors, against `ddmetric` on analytic
+data and against the mesh), `interface_tests.jl` (the interface-order
+table on the two-level mesh), `type_tests.jl` (`Float32` end to end,
+`Float32x2` for the algebra) and `threading_tests.jl` over the standalone
+`thread_workload.jl`.
 `Project.toml` carries the `[sources]` pins and CI is in place. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and no remote.
 
-The suite is **1877 assertions in about 3m50**, up from step 2's 1682 in
-128 s. Two things pay for it: **compiling** `SpacetimeMetrics`' nested
+The suite is **2144 assertions in about 8m40**, up from step 3's 1877 in
+3m48. Almost all of it is **compilation**, and the four
+things that pay for it are, in order: `SpacetimeMetrics`' nested
 forward-mode passes for six backgrounds at two precisions (step 1's cost,
-unchanged), and now **compiling a right-hand-side kernel per
-`(q, has gauge source, has dissipation)`** — `evolution_tests.jl` is 56 s
-and `convergence_tests.jl` 40 s, both over `PLAN.md`'s 30 s rule of thumb
-and recorded as such in `CODE.md`. The evolutions themselves are seconds.
-Before adding a row to either, price it: a new `q` is a new kernel, and a
-new background is a new dual pass. Before adding a test that
-differentiates a background, look at what `pointwise_backgrounds.jl`
+unchanged); a right-hand-side kernel per `(q, has gauge source, has
+dissipation, T)`; the ADM constraint kernel, whose first specialisation is
+**18 s** and each further one about 4 s; and — the one file whose cost is
+arithmetic rather than compilation — `interface_tests.jl`, where the ghost
+fill at `p = 6` is 79 % of every evaluation. Six files are now over
+`PLAN.md`'s 30 s rule of thumb and `CODE.md` records each with what it
+buys. Before adding a row anywhere, price it: a new `q` or a new element
+type is a new kernel; a new background is a new dual pass; a resolution
+added to an interface sweep is `N⁴` of ghost filling. Before adding a test
+that differentiates a background, look at what `pointwise_backgrounds.jl`
 already computes in one pass.
 
 ## Commands
@@ -139,9 +157,16 @@ It runs from a git worktree as happily as from the checkout, which is how
 the per-step agents work; the `[sources]` pins mean every worktree
 resolves the same two branches.
 
+The thread workload runs on its own, which is how a digest mismatch is
+bisected — `test/threading_tests.jl` starts exactly this in a subprocess:
+
+```bash
+julia --project=. -t 4 test/thread_workload.jl
+```
+
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
-the thread-independence test in step 4, and device tests behind
+and device tests behind
 `TREEGH_TEST_BACKEND` (`cuda` on Symmetry's H200 is the requirement,
 `metal` on the development machine is desirable) in an environment of
 your own that has the device package, in step 9. Neither this package
@@ -204,7 +229,41 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
 - **The interior is masked in every norm and in the indicator.**
   Constraint, error and speed kernels and the Löhner indicator write
   zero for `r < r_1`. If a number looks wrong near the hole, check the
-  mask before the physics.
+  mask before the physics. The plumbing is in place from step 4: a kernel
+  takes a `mask`, asks `is_evolved(mask, x)`, writes zero where it says no
+  and a `1`/`0` indicator into `DIAG_MASK`; `masked_norms` divides by the
+  **evolved** volume, not the domain's, so masking a region out does not
+  make the number smaller by diluting it with zeros. Step 5's `Interior`
+  adds the method; `AllPoints` is the trivial one.
+- **The `diag` slots are a contiguous-range interface.** `block_mapreduce`
+  reduces an integer or a *contiguous* range of variables and refuses
+  anything else — a device cannot be handed an arbitrary index vector cell
+  by cell — so `DIAG_CGH` (four) and `DIAG_MOM` (three) are the *first* of
+  a run and are indexed as `DIAG_CGH + a - 1`. Adding a slot in the middle
+  of either run is how that breaks.
+- **A vertex-centered field set stores the shared upper plane, and no
+  kernel writes it.** The stored size is `N + 2G + 1` per axis, and the
+  point at `N + 2G + 1` belongs to no owned range: `map_blocks!` never
+  reaches it and the Dirichlet hook or a neighbour's ghost exchange fills
+  it. So a test that reads `fs.work[:, :, :, v, :]` sees a plane of zeros
+  that means nothing; use `interiorview(fs, b, v)`. `GHProblem` refuses a
+  field set that is not vertex-centered, because `point_position` — the
+  one place an owned index becomes a position for the masks and the
+  interior profiles — assumes it.
+- **The ADM monitor costs 18 s to compile**, and about 4 s for every
+  further specialisation of `(G, q, has gauge source, T)`. It is a
+  four-dimensional Ricci tensor out of a hundred second derivatives, which
+  is the opposite of the right-hand side's streaming order and
+  deliberately so: it runs once per chunk, not once per stage. Before
+  putting it in a new test row or a new loop, count the specialisations.
+  It is *not* in `test/thread_workload.jl` for exactly this reason.
+- **A coarse-fine face is expensive in time as well as in order.** On the
+  two-level mesh at `p = 6` the ghost fill is **79 %** of a
+  right-hand-side evaluation (22 % on a uniform mesh), because a
+  tensor-product prolongation reads `6³ = 216` coarse points per fine
+  ghost point. A study on a refined mesh costs roughly four times what the
+  same study costs uniform, which is why `interface_tests.jl` runs an
+  eighth of a crossing on `N = 8, 10, 12` and not more.
 - **The three interior radii are asserted at every regrid**: `r_1`
   inside the horizon by `m` spacings of the blocks containing it
   (`m = 8` by default, never below `G + 1`); `r_1 − r_0` at least
