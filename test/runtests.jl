@@ -7,7 +7,13 @@ using TreeGeneralizedHarmonic
 # so the thread count has to be passed explicitly — see `CLAUDE.md`.
 @info "Running the tests on $(Threads.nthreads()) thread(s)"
 
-@testset "TreeGeneralizedHarmonic.jl" begin
+# `verbose = true` so that the per-testset times are printed even when
+# everything passes (added in step 1). The suite's cost is now compilation
+# of `SpacetimeMetrics`' dual passes, and which testset pays it is a thing
+# a reader of the CI log should be able to see without a failure first.
+@testset verbose = true "TreeGeneralizedHarmonic.jl" begin
     include("precision_tests.jl")
     include("prerequisite_tests.jl")
+    include("pointwise_tests.jl")
+    include("pointwise_identity_tests.jl")
 end

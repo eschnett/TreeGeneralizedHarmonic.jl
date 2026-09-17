@@ -51,11 +51,20 @@ module TreeGeneralizedHarmonic
 using TreeAMR
 
 using KernelAbstractions: Backend, CPU, allocate, get_backend
+using LinearAlgebra: det, dot, tr
+using StaticArrays: SArray, SMatrix, SVector
 
 # Devices
 export hostcopy
 
+# Pointwise algebra
+export pack_g, pack_sym
+export metric_quantities, metric_derivatives
+export adm_from_metric, adm_vars_from_state, gauge_constraint_at_node
+export gh_node_rhs, gh_node_source, gh_node_rhs_expanded
+
 include("precision.jl")
 include("device.jl")
+include("pointwise.jl")
 
 end

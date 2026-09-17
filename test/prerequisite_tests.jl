@@ -53,20 +53,11 @@ function prereq_forest(::Type{T}) where {T}
 end
 
 # The packed component order, `CODE.md`'s and GHSO2's: the column-major
-# lower triangle `(tt, tx, ty, tz, xx, xy, xz, yy, yz, zz)`. Spelled out
-# here rather than imported because `pointwise.jl`'s pack/unpack helpers
-# arrive in step 1 and this test is a claim about the *mesh*, which must
-# hold whatever the algebra later calls itself. The two orders are the
-# same, and step 1 asserts that where it matters.
-@inline prereq_pack(M::SMatrix{4,4}) =
-    (M[1, 1], M[2, 1], M[3, 1], M[4, 1],
-     M[2, 2], M[3, 2], M[4, 2],
-     M[3, 3], M[4, 3], M[4, 4])
-
-# `h = g − η`, in the element type of `g` — never through a captured
-# `Type`, which is the rule for anything a kernel reaches.
-@inline prereq_offset(g::SMatrix{4,4,T}) where {T} =
-    g - SMatrix{4,4,T}(-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+# lower triangle `(tt, tx, ty, tz, xx, xy, xz, yy, yz, zz)`, with the offset
+# `h = g − η` folded into `pack_g`. Both come from `pointwise.jl` (added in
+# step 1), which is the one place that knows the order; the spelling this
+# file carried before it existed is now asserted against it in
+# `pointwise_tests.jl` rather than maintained twice.
 
 # The initial state of `CODE.md`'s callback, in miniature: `h` from the
 # metric, and `∂_t g` from the `dmetric` pass in the ten slots the layout
@@ -87,7 +78,7 @@ end
 @inline function prereq_state(bg, x::NTuple{3,T}) where {T}
     g, dg = dmetric(bg, SVector{4,T}(zero(T), x[1], x[2], x[3]))
     dtg = SMatrix{4,4,T}(dg[a, b, 1] for a in 1:4, b in 1:4)
-    return (prereq_pack(prereq_offset(g))..., prereq_pack(dtg)...)
+    return (pack_g(g)..., pack_sym(dtg)...)
 end
 
 # One static background and one that moves. The first is the one `CODE.md`

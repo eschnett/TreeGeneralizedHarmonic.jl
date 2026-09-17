@@ -5,6 +5,7 @@ authors = ["Erik Schnetter <schnetter@gmail.com>"]
 
 [deps]
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 OrdinaryDiffEqLowOrderRK = "1344f307-1e59-4825-a18e-ace9aa3fa4c6"
 SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 SpacetimeMetrics = "77e61b41-605e-43a6-b70f-04b7dcd1f572"
@@ -13,6 +14,7 @@ TreeAMR = "91bc416d-811c-44c1-9bc4-b9c8bbdbbd08"
 
 [compat]
 KernelAbstractions = "0.9.42, 1"
+LinearAlgebra = "1.11"
 OrdinaryDiffEqLowOrderRK = "2.2.5"
 SciMLBase = "3.50.1"
 SpacetimeMetrics = "1.6"
