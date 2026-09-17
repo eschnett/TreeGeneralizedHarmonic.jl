@@ -1,0 +1,12 @@
+[deps]
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+MultiFloats = "bdf0d083-296b-4888-a5b6-7498122e68a5"
+OrdinaryDiffEqLowOrderRK = "1344f307-1e59-4825-a18e-ace9aa3fa4c6"
+SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
+SpacetimeMetrics = "77e61b41-605e-43a6-b70f-04b7dcd1f572"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TreeAMR = "91bc416d-811c-44c1-9bc4-b9c8bbdbbd08"
+
+[compat]
+MultiFloats = "3"

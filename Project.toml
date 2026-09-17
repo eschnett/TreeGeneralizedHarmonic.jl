@@ -2,3 +2,34 @@ name = "TreeGeneralizedHarmonic"
 uuid = "ec251ae6-5b3e-4df5-a9c7-7e3f01cdd68c"
 version = "0.1.0"
 authors = ["Erik Schnetter <schnetter@gmail.com>"]
+
+[deps]
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+OrdinaryDiffEqLowOrderRK = "1344f307-1e59-4825-a18e-ace9aa3fa4c6"
+SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
+SpacetimeMetrics = "77e61b41-605e-43a6-b70f-04b7dcd1f572"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+TreeAMR = "91bc416d-811c-44c1-9bc4-b9c8bbdbbd08"
+
+[compat]
+KernelAbstractions = "0.9.42, 1"
+OrdinaryDiffEqLowOrderRK = "2.2.5"
+SciMLBase = "3.50.1"
+SpacetimeMetrics = "1.6"
+StaticArrays = "1"
+TreeAMR = "0.1.0"
+julia = "1.11"
+
+# Neither TreeAMR nor SpacetimeMetrics is in the General registry, so a
+# clean clone has no way to find them: `Manifest.toml` is not tracked, and
+# Project.toml alone carries only the UUIDs. This is what makes
+# `Pkg.instantiate()` work from a fresh checkout, and therefore what makes
+# CI possible. It also requires Julia 1.11, hence the compat bound above.
+#
+# `rev = "main"` rather than a commit: both are developed alongside this
+# package. The price is that the checkouts at `~/src/jl/TreeAMR` and
+# `~/src/jl/SpacetimeMetrics` are *not* what the tests see; an unpushed
+# change there is invisible here.
+[sources]
+SpacetimeMetrics = {url = "https://github.com/eschnett/SpacetimeMetrics.jl", rev = "main"}
+TreeAMR = {url = "https://github.com/eschnett/TreeAMR.jl", rev = "main"}
