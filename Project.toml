@@ -1,0 +1,4 @@
+name = "TreeGeneralizedHarmonic"
+uuid = "ec251ae6-5b3e-4df5-a9c7-7e3f01cdd68c"
+version = "0.1.0"
+authors = ["Erik Schnetter <schnetter@gmail.com>"]
