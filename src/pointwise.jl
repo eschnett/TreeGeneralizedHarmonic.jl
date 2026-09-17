@@ -280,21 +280,22 @@ Gundlach–Pretorius constraint damping. `dg[a, b, c] = ∂_a g_bc` is
 **GHSO2's** derivative index order, derivative axis first, and its `a = 1`
 slice is `∂_t g` from the first evolution equation — not a stored field.
 
-This is the source block of [`gh_node_rhs`](@ref), copied out of it
-unchanged so that the expanded form and the flux form share one spelling
-of the algebra rather than two. `gh_node_rhs` itself stays exactly as
-`notes/pointwise-ghso2.jl` has it — it is the validated reference and the
-tests' flux identity runs through it — so the two copies coexist, and
-`test/pointwise_identity_tests.jl` asserts they agree **to roundoff** on
-every background. If that assertion ever fires, one of them has drifted;
-fix the copy, not the port. (To roundoff and not bit for bit, although the
-two are the same characters: the compiler fuses a multiply and an add in
-one inlining context and not in the other, and the observed disagreement
-is one unit in the last place — see `CLAUDE.md`, "Two spellings of one
-expression are not bit-identical".)
+This is a **second copy** of [`gh_node_rhs`](@ref)'s source block, written
+out of it character for character rather than factored out of it:
+`gh_node_rhs` keeps its own, exactly as `notes/pointwise-ghso2.jl` has it,
+because staying diffable against that file is what makes it the validated
+reference the tests' flux identity runs through. So the two copies coexist,
+and `test/pointwise_identity_tests.jl` asserts they agree **to roundoff**
+on every background. If that assertion ever fires, one of them has
+drifted; fix the copy, not the port. (To roundoff and not bit for bit,
+although the two are the same characters: the compiler fuses a multiply
+and an add in one inlining context and not in the other, and the observed
+disagreement is one unit in the last place — see `CLAUDE.md`, "Two
+spellings of one expression are not bit-identical".)
 
-It takes the coefficient set rather than `h` because the streaming kernel
-of `CODE.md`'s "One right-hand-side evaluation" has already built it: the
+It takes the coefficient set rather than `h`, as
+[`metric_derivatives`](@ref) does, because the streaming kernel of
+`CODE.md`'s "One right-hand-side evaluation" has already built it: the
 source is step 3 there, after the coefficients of step 1 and the
 per-component stencils of step 2.
 """
@@ -356,17 +357,32 @@ per-component stencils of step 2.
 end
 
 """
-    metric_derivatives(h, ∂h) -> (dα, dβ, dA)
+    metric_derivatives(gu4, α, β, γu, sqrtγ, ∂h) -> (dα, dβ, dA)
+    metric_derivatives(h, ∂h)                    -> (dα, dβ, dA)
 
 The spatial derivatives of the coefficients the expanded momentum equation
-needs, in closed form from `h` and its spatial gradients:
+needs, in closed form from the coefficient set and the state's spatial
+gradients:
 
   * `dα[i]     = ∂_i α`                    (`SVector{3}`),
   * `dβ[i, j]  = ∂_i β^j`                  (`SMatrix{3,3}`),
   * `dA[i,j,k] = ∂_i (α √γ γ^{jk})`        (`SArray{3,3,3}`).
 
-`h` is the packed offset metric and `∂h[i]` its packed derivative along
-`x^i`; because `η` is constant, `∂_i h = ∂_i g`.
+`∂h[i]` is the packed derivative of the offset metric along `x^i`; because
+`η` is constant, `∂_i h = ∂_i g`. The first four arguments are
+[`metric_quantities`](@ref)'s `gu4`, `α`, `β`, `γu` and `sqrtγ` — the
+coefficient set, taken rather than rebuilt, exactly as
+[`gh_node_source`](@ref) takes it and for the same reason: the streaming
+kernel of `CODE.md`'s "One right-hand-side evaluation" forms it *once* per
+point, in step 1 of that order, and rebuilding it here would buy a second
+`inv`, a second determinant and a second square root per point. The
+`(h, ∂h)` method is the convenience wrapper — it calls `metric_quantities`
+and forwards — and is what the tests and the host-side diagnostics use;
+`test/pointwise_tests.jl` asserts the two agree **to roundoff**, which is
+all that is true of them: the same body inlined at two call sites is
+contracted into fused multiply-adds differently, and the answers differ in
+the last place (`CLAUDE.md`, "Two spellings of one expression are not
+bit-identical" — one spelling at two call sites is already enough).
 
 This is the other half of `CODE.md`'s decision to discretise the expanded
 form `(EXPANDED)` rather than the flux form: the divergence of the flux is
@@ -388,12 +404,18 @@ through [`metric_quantities`](@ref) is the independent check, and
 
 The right-hand side contracts these to four numbers — `∂_i β^i` and
 `∂_i A^{ij}` — and the unused components fall out of the inlined code, so
-the streaming kernel of step 3 calls this and contracts rather than asking
-for a leaner shape.
+the streaming kernel contracts rather than asking for a leaner shape.
 """
 @inline function metric_derivatives(h::SVector{NC,T},
                                     ∂h::NTuple{3,SVector{NC,T}}) where {T}
-    g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(h))
+    _, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(h))
+    return metric_derivatives(gu4, α, β, γu, sqrtγ, ∂h)
+end
+
+@inline function metric_derivatives(gu4::SMatrix{4,4,T}, α::T,
+                                    β::SVector{3,T}, γu::SMatrix{3,3,T},
+                                    sqrtγ::T,
+                                    ∂h::NTuple{3,SVector{NC,T}}) where {T}
     gutt = gu4[1, 1]
 
     # ∂_i g_ab, and the inverse metric's derivative by the exact identity
@@ -479,7 +501,9 @@ what it is checked against.
     a_mul = α * sqrtγ
     A = a_mul * γu                              # A^{jk} = α√γ γ^{jk}
 
-    _, dβ, dA = metric_derivatives(h, ∂h)
+    # The coefficient set is already in hand, so it is passed rather than
+    # rebuilt — the same call the streaming kernel of step 3 makes.
+    _, dβ, dA = metric_derivatives(gu4, α, β, γu, sqrtγ, ∂h)
     divβ = dβ[1,1] + dβ[2,2] + dβ[3,3]          # ∂_i β^i
     divA = SVector{3,T}(dA[1,1,j] + dA[2,2,j] + dA[3,3,j] for j in 1:3)
 

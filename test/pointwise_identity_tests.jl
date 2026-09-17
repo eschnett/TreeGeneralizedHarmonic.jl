@@ -75,17 +75,19 @@ fd_step(::Type{Float32}) = 1.0f0 / 8
 identity_tolerance(::Type{Float64}) = 1.0e-6
 identity_tolerance(::Type{Float32}) = 1.0f-1
 
-@testset "The source and the flux have one spelling each: T=$T" for T in (Float64,
-                                                                        Float32)
+@testset "The copies of the port's source and flux still match it: T=$T" for T in
+                                                                            (Float64,
+                                                                             Float32)
     # Guards the two places where an expression from `gh_node_rhs` is
     # written down a second time, which is twice more than anyone would
-    # like. `gh_node_source` is the ported function's source block lifted
-    # out so that the expanded form does not carry a second transcription
-    # of the reduced source; `gh_fluxes` in `pointwise_backgrounds.jl` is
-    # its flux, written short so that automatic differentiation does not
-    # have to compile the source under dual numbers. If either drifts from
-    # the port, the identity tests would be measuring the copy instead of
-    # the thing this package inherited, and would still pass.
+    # like. `gh_node_source` is a copy of the ported function's source
+    # block, kept as a copy so that `gh_node_rhs` stays diffable against
+    # `notes/pointwise-ghso2.jl`; `gh_fluxes` in
+    # `pointwise_backgrounds.jl` is a copy of its flux, written short so
+    # that automatic differentiation does not have to compile the reduced
+    # source under dual numbers. If either drifts from the port, the
+    # identity tests would be measuring the copy instead of the thing this
+    # package inherited, and would still pass.
     #
     # **To roundoff and not bit for bit.** The expressions are identical
     # character for character, and `isequal` still fails on two of the

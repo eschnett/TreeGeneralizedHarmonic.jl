@@ -211,6 +211,27 @@ end
         h, _, ∂h = gh_state(bg, T(GH_TIME), x)
         dα, dβ, dA = metric_derivatives(h, ∂h)
 
+        # There are two methods, and the streaming kernel of step 3 will
+        # call the other one: the coefficient set is formed once per point,
+        # so `metric_derivatives` takes it rather than rebuilding it with a
+        # second `inv`, determinant and square root. The `(h, ∂h)` method
+        # is the wrapper that does rebuild it, and it is what the tests and
+        # the diagnostics call.
+        #
+        # **To roundoff, not `isequal`** — which is worth a sentence,
+        # because the wrapper forwards into the same body with what ought
+        # to be the same bits, and `isequal` *fails*, on 3 of 12 points at
+        # `Float64` and 6 of 12 at `Float32` **(measured in step 1)**. The
+        # two call sites inline that body into different surrounding code,
+        # and the compiler fuses a multiply and an add in one and not the
+        # other. So it is not that two *spellings* of an expression are not
+        # bit-identical (`CLAUDE.md`): one spelling, at two call sites, is
+        # already enough. The disagreement is at most `0.03 eps` of the
+        # scale below at `Float64` and `0.19 eps` at `Float32`; a swapped
+        # argument or a dropped term would be O(1) and is what this is for.
+        _, gu4, αq, βq, γuq, sqrtγq = metric_quantities(_sym4(h))
+        dα2, dβ2, dA2 = metric_derivatives(gu4, αq, βq, γuq, sqrtγq, ∂h)
+
         # The three coefficients are derivatives of quantities of order
         # one, so the size they are measured against is the size of the
         # gradients that produce them — never their own, which is zero for
@@ -218,6 +239,9 @@ end
         # roundoff-sized numbers into a ratio of order one.
         scale = max(maximum(maximum(abs, ∂h[i]) for i in 1:3), one(T))
         tol = 256 * eps(T) * scale
+        @test absdiff(dα, dα2) < 8 * eps(T) * scale
+        @test absdiff(dβ, dβ2) < 8 * eps(T) * scale
+        @test absdiff(dA, dA2) < 8 * eps(T) * scale
         @test absdiff(dα, SVector{3,T}(J[1, i] for i in 1:3)) < tol
         @test absdiff(dβ, SMatrix{3,3,T}(J[1 + j, i] for i in 1:3, j in 1:3)) <
               tol

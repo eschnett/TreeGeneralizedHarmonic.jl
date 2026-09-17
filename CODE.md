@@ -260,9 +260,9 @@ forward-mode dual pass through `metric_quantities` to **0.6 `eps`** of
 and **0.3 `eps`** of the terms that build them, with `H_a` and `∂_aH_b`
 under **2.4 `eps`** on each of the four harmonic rows.
 
-Three shapes follow, and step 3's kernel is written against them
+The shapes follow, and step 3's kernel is written against them
 **(proposed in step 1**, since `PLAN.md` fixed the argument list but not
-its spelling**)**. `metric_derivatives(h, ∂h)` returns the *full*
+its spelling**)**. `metric_derivatives` returns the *full*
 `(∂_iα, ∂_iβ^j, ∂_i(α√γγ^{jk}))` rather than the four contractions
 `(EXPANDED)` needs, because that is what a dual pass can be compared
 against; the caller contracts, and the components it does not ask for
@@ -270,10 +270,23 @@ leave the inlined code. `∂h` and `∂Π` are `NTuple{3,SVector{10}}`, and
 `∂∂h` is an `NTuple{6,SVector{10}}` in the column-major lower-triangular
 order `(xx, xy, xz, yy, yz, zz)` — the packing of a symmetric tensor, one
 index range shorter, so that the file has one packing convention and not
-two. The reduced source is `gh_node_source(g4, gu4, α, √γ, dg, H, ∂H, γ0,
-γ2)`: it takes the coefficient set rather than `h`, because by the time the
-streaming kernel reaches the source it has had the coefficients for two
-stages.
+two. Two functions take the **coefficient set** rather than `h`, because
+the kernel forms it once per point in step 1 of the order above and
+rebuilding it would buy a second `inv`, determinant and square root:
+`metric_derivatives(gu4, α, β, γu, √γ, ∂h)`, whose `(h, ∂h)` method is a
+wrapper for the tests and the host-side diagnostics — the two agree to
+roundoff and, as it turns out, not bit for bit, for the reason under
+[Measured results](#measured-results) — and
+`gh_node_source(g4, gu4, α, √γ, dg, H, ∂H, γ0, γ2)`, which the kernel
+reaches with the coefficients two stages old.
+
+`gh_node_source` is a second **copy** of the reduced source and the
+damping, not a factoring-out: `gh_node_rhs` keeps its own, so that the
+ported function stays diffable against `notes/pointwise-ghso2.jl` and goes
+on being the validated reference the flux identity runs through. The price
+is that the two can drift, and `test/pointwise_identity_tests.jl` is what
+notices — to roundoff rather than bit for bit, for the reason under
+[Measured results](#measured-results).
 
 ## Discretization
 
@@ -1031,7 +1044,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `notes/` | verbatim copies of the inherited documents, with provenance; see `notes/README.md` |
 | `src/TreeGeneralizedHarmonic.jl` | module shell: `using`s, exports, includes |
 | `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host (amended in step 0) |
-| `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source` — the ported flux form's source block lifted out so that the two forms share one spelling of it (added in step 1); `SVector{10}` state, `SMatrix{4,4}` tensors |
+| `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source` (all added in step 1); `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` |
 | `src/evolution.jl` | the fused RHS kernel in streaming order, `GHProblem`, `gh_rhs!`, the speed kernel, `gh_dt` |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc`; the harmonic/static checks |
@@ -1231,15 +1244,21 @@ statements they confirm. Two further results:
   **2.4e−16**, one `eps`; computed as `inv(g) − η` it is **1.1e−3**. At
   `Float32` and `‖h‖ = 1e−5`, **1.4e−7** against **4.2e−3**. The identity
   buys about `eps/‖h‖`, which is the whole accuracy of the wave zone.
-- **Bit-identity is not a property of an expression.** Two textually
-  identical copies of the source term, one inlined inside `gh_node_rhs`
-  and one in `gh_node_source`, differ on two of twenty-four cases at
-  `Float64`: the compiler contracts a multiply and an add into a fused
-  multiply-add in one context and not in the other. The difference is one
-  unit in the last place. This costs nothing here — the tests compare to
-  roundoff — but it says what the bit-identity the threading test of step
-  4 asserts does and does not mean: the *same* compiled code on a
-  different thread count, not the same formula written twice.
+- **Bit-identity is not a property of an expression, nor even of a
+  function.** Two textually identical copies of the source term, one
+  inlined inside `gh_node_rhs` and one in `gh_node_source`, differ on two
+  of twenty-four cases at `Float64`: the compiler contracts a multiply and
+  an add into a fused multiply-add in one context and not in the other,
+  and the answers differ in the last place. Stronger, and measured when
+  the two methods of `metric_derivatives` were added: **one** body,
+  reached through its own wrapper and directly, differs on 3 of 12 points
+  at `Float64` and 6 of 12 at `Float32` — by at most `0.03 eps` and
+  `0.19 eps` of `max_i ‖∂_i h‖`. Two call sites are enough; the code need
+  not even be written twice. This costs nothing here, because the tests
+  compare to roundoff against the scale that produced the number, but it
+  says what the bit-identity the threading test of step 4 asserts does and
+  does not mean: the *same* compiled code, at the same call site, on a
+  different thread count — and nothing more.
 
 ## Possible extensions
 

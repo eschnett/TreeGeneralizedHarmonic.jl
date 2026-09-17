@@ -236,14 +236,18 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   the interior profiles, the damping profile, the indicator's thresholds
   and floors become kernel arguments; they are `isbits` structs and
   tuples. The center is a function of `t`, never a mutated field.
-- **Two spellings of one expression are not bit-identical.** The same
-  arithmetic written twice — `gh_node_source` and the block it was lifted
-  out of, `gh_fluxes` and `gh_node_rhs`'s fluxes — disagrees in the last
-  place on this machine, because the compiler fuses a multiply and an add
-  in one inlining context and not in the other (measured in step 1).
-  Compare such copies to roundoff, not with `isequal`. The bit-identity
-  that *is* an invariant is the same compiled code at a different thread
-  count, which is what `test/threading_tests.jl` will assert.
+- **Two spellings of one expression are not bit-identical — and neither
+  are two call sites of one function.** The same arithmetic written twice
+  — `gh_node_source` and the block it copies, `gh_fluxes` and
+  `gh_node_rhs`'s fluxes — disagrees in the last place on this machine,
+  because the compiler fuses a multiply and an add in one inlining context
+  and not in the other. So does one body reached two ways:
+  `metric_derivatives`'s wrapper and its coefficient-set method disagree
+  on 3 of 12 points at `Float64` (measured in step 1). Compare any of
+  these to roundoff against the scale that produced the number, never with
+  `isequal`. The bit-identity that *is* an invariant is the same compiled
+  code, at the same call site, at a different thread count, which is what
+  `test/threading_tests.jl` will assert.
 - **Never thread anything a TreeAMR callback can reach**, and never
   accumulate into shared state in a loop of your own: bit-identity
   across thread counts is the invariant, and `test/threading_tests.jl`
