@@ -63,8 +63,13 @@ export metric_quantities, metric_derivatives
 export adm_from_metric, adm_vars_from_state, gauge_constraint_at_node
 export gh_node_rhs, gh_node_source, gh_node_rhs_expanded
 
+# Stencils
+export derivative_weights, dissipation_weights, dissipation_rank
+export apply_stencil, apply_mixed_stencil
+
 include("precision.jl")
 include("device.jl")
 include("pointwise.jl")
+include("stencils.jl")
 
 end

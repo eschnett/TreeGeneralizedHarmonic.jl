@@ -16,4 +16,5 @@ using TreeGeneralizedHarmonic
     include("prerequisite_tests.jl")
     include("pointwise_tests.jl")
     include("pointwise_identity_tests.jl")
+    include("stencils_tests.jl")
 end
