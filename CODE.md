@@ -1311,8 +1311,8 @@ standalone, including its own compilation: the step's tests evaluate no
 background at all, weights and polynomials only, so the suite's cost is
 still step 1's compilation of `SpacetimeMetrics`' nested dual passes and
 the stencils did not move it. Three of those five seconds are the two
-KernelAbstractions launches, at `Float64` and `Float32`. This is the file to copy when a later step needs
-a cheap test.
+KernelAbstractions launches, at `Float64` and `Float32`. This is the file
+to copy when a later step needs a cheap test.
 
 The weights reproduce the textbook central-difference tables entry for
 entry at `q = 2, 4, 6, 8`, for `∂` and for the compact `∂∂`, and the

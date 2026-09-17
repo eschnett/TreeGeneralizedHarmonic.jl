@@ -85,9 +85,10 @@ clean-checkout check below mean something), no `bin/`, and no remote.
 The suite's cost is now dominated by **compiling** `SpacetimeMetrics`'
 nested forward-mode passes for six backgrounds at two precisions — about
 two minutes, against step 0's eight seconds, with the evaluation itself
-in microseconds. Step 2 added 603 assertions and five seconds to it. Before adding a test that differentiates a background,
-look at what `pointwise_backgrounds.jl` already computes in one pass:
-`CODE.md`'s "Measured results" records what fusing them was worth.
+in microseconds. Step 2 added 603 assertions and five seconds to it.
+Before adding a test that differentiates a background, look at what
+`pointwise_backgrounds.jl` already computes in one pass: `CODE.md`'s
+"Measured results" records what fusing them was worth.
 
 ## Commands
 
