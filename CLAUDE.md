@@ -45,10 +45,12 @@ Three rules follow from `CODE.md` and govern every change here:
 
 ## Current state
 
-**G0–G3 are done and G4a with them — there is a black hole on the mesh:
-the interior damping layer, the driver with its per-chunk analysis
-record, and the masked error converging at order `q` on a frozen
-hierarchy around a static hole. The refinement indicator (G4b) is next.**
+**G0–G3 are done and G4a and G4b with them — there is a black hole on a
+mesh the code chose: the interior damping layer, the driver with its
+per-chunk analysis record and its regrid branch, the masked Löhner
+indicator with its interior mask, its derived level floor and its
+boundary ceiling, and the masked error converging at order `q` on a
+frozen hierarchy. The horizon finder (G4c) is next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -57,8 +59,8 @@ as part of the deliverable, an error indicator for refinement, `Float64`
 on Symmetry's H200 as the device requirement, no checkpointing, GPU
 kernel efficiency deferred to a research project. `PLAN.md` breaks the
 milestones G0–G6 into steps 0–10, each a brief for one agent with a fresh
-context (see its "Running a step as an agent"); step 6 (the refinement
-indicator) is next. `notes/` holds the inherited documents.
+context (see its "Running a step as an agent"); step 7 (the horizon
+finder) is next. `notes/` holds the inherited documents.
 
 What exists in `src/` is the module shell, `precision.jl` (the `Base`
 bridges for software floating-point types), `device.jl` (`to_backend`,
@@ -98,9 +100,19 @@ carrying the interior *variant*, and the `:pasted` variant's
 `step_limiter!`; `constraints.jl` grew the error kernel and
 `error_norms`; `gauge.jl` grew the position-dependent `γ0` profile;
 `initialdata.jl` grew `hole_forest` and the two hole cases.
-There is no refinement indicator, no horizon finder and no I/O: those are
-steps 6, 7 and 9. `evolve!` refuses `regrid = true` by name until the
-indicator exists.
+
+From step 6 there is a **mesh the code chose**: `refinement.jl` (the
+`Refinement` parameters a case carries, `lohner` with the global
+amplitude, the masked `field_scales`, the `τ` kernel into `diag`'s
+fourteenth slot, `tau_max`, the four marks with the box keyed on
+`coarsen_tol`, the derived `horizon_floor_level`, the `LevelBounds` the
+floor and the ceiling are applied through, the travelling margin,
+`refinement_centroid`, and `indicator_flags`/`gh_indicator!`, the two
+entry points the cycle and the driver call). `driver.jl` grew `adapt` (the
+initial-data cycle) and `regrid` (the branch at every chunk boundary but
+the last), and the record grew `τ_max`, the centroid and its distance from
+the analytic center. There is no horizon finder and no I/O: those are steps
+7 and 9.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -126,25 +138,35 @@ profiles, the core rule, the masks, the radius assertions firing, and one
 right-hand-side evaluation with the layer on a mesh) and
 `driver_tests.jl` (the runs: the record, the order on the frozen
 hierarchy, the three variants, the drift, the `Π` post-pass) — over the
-hole fixture in `evolution_cases.jl`. **`test/hole_runs.jl` is a
-standalone script, not part of the suite**: the `t = 50 M` runs, `q = 4`
-and the two harmonic charts are minutes rather than seconds, and its
-numbers are in `CODE.md` with the command that produced them.
+hole fixture in `evolution_cases.jl`; and step 6's `refinement_tests.jl`
+(the Löhner algebra and its global floor, the four marks on a `τ` field
+written by hand, the mask, the level floor and the ceiling, the
+initial-data cycle, and two short adaptive runs — one whose mesh does not
+move and one whose does), over that file's second hole fixture and the
+three new helpers in `evolution_cases.jl`. **`test/hole_runs.jl` is a
+standalone script, not part of the suite**: the `t = 50 M` runs, `q = 4`,
+the two harmonic charts and the indicator's calibration are minutes
+rather than seconds, and its numbers are in `CODE.md` with the command
+that produced them.
 `Project.toml` carries the `[sources]` pins and CI is in place. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and no remote.
 
-The suite is **2144 assertions in about 8m40**, up from step 3's 1877 in
-3m48. Almost all of it is **compilation**, and the four
-things that pay for it are, in order: `SpacetimeMetrics`' nested
-forward-mode passes for six backgrounds at two precisions (step 1's cost,
-unchanged); a right-hand-side kernel per `(q, has gauge source, has
-dissipation, T)`; the ADM constraint kernel, whose first specialisation is
-**18 s** and each further one about 4 s; and — the one file whose cost is
-arithmetic rather than compilation — `interface_tests.jl`, where the ghost
-fill at `p = 6` is 79 % of every evaluation. Six files are now over
-`PLAN.md`'s 30 s rule of thumb and `CODE.md` records each with what it
-buys. Before adding a row anywhere, price it: a new `q` or a new element
+The suite is **2968 assertions in 13m35** at one thread and **10m45** at
+four on the development machine, and **29m32 / 20m29** for the same 2968
+on Symmetry (step 4's paragraph said 2144 in 8m40 and was two steps
+stale). Most of it is **compilation**, and the things that pay for it are,
+in order: `SpacetimeMetrics`' nested forward-mode passes for six
+backgrounds at two precisions (step 1's cost, unchanged); a
+right-hand-side kernel per `(q, has gauge source, has dissipation,
+interior variant, T)`; the ADM constraint kernel, whose first
+specialisation is **18 s** and each further one about 4 s; and the three
+files whose cost is *arithmetic* rather than compilation —
+`driver_tests.jl` (the suite's black hole, 2m19), `interface_tests.jl`,
+where the ghost fill at `p = 6` is 79 % of every evaluation, and
+`refinement_tests.jl` (26 s, of which the two adaptive runs are 19).
+Several files are over `PLAN.md`'s 30 s rule of thumb and `CODE.md`
+records each with what it buys. Before adding a row anywhere, price it: a new `q` or a new element
 type is a new kernel; a new background is a new dual pass; a resolution
 added to an interface sweep is `N⁴` of ghost filling. Before adding a test
 that differentiates a background, look at what `pointwise_backgrounds.jl`
@@ -188,14 +210,29 @@ julia --project=. -t 4 test/thread_workload.jl
 
 The black-hole runs that are too long for the suite — the default margin
 `m = 8` at `q = 4`, the `t = 50 M` run of all three interior variants,
-and the two harmonic charts — are a **script**, run by hand, with its
-numbers recorded in `CODE.md` under "Measured results" (added in step 5).
-It takes an optional list of sections (`order`, `long`, `charts`):
+the two harmonic charts, and from step 6 the indicator's calibration and
+its adaptive run — are a **script**, run by hand, with its numbers
+recorded in `CODE.md` under "Measured results" (added in step 5). It takes
+an optional list of sections (`order`, `long`, `charts`, `indicator`):
 
 ```bash
 julia --project=. --threads=4 test/hole_runs.jl
-julia --project=. --threads=4 test/hole_runs.jl order
+julia --project=. --threads=4 test/hole_runs.jl indicator
 ```
+
+**On Symmetry** (added in step 6, and step 9 writes the batch job for
+real): the suite and the long studies run there as one SLURM job each on a
+64-core EPYC node, which is what makes them parallel — a node *core* is
+about **twice as slow** as the development machine's, so the cluster buys
+throughput and not wall clock (measured in step 6: the same 2968
+assertions in 29m32 / 20m29 at one and four threads there against
+13m35 / 10m45 here). One quirk that
+will bite a batch script: **do not export `JULIA_EXCLUSIVE=1` for the
+one-thread suite.** A one-thread parent then pins itself to a single CPU,
+and `test/threading_tests.jl`'s four-thread subprocess inherits the
+affinity mask and aborts with `Too many threads requested for
+JULIA_EXCLUSIVE option` — the environment, not the code. The `symmetry-hpc`
+skill has the rest of the cluster's mechanics.
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
@@ -339,6 +376,32 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   kink the indicator scores). Ghosts must be filled before flagging.
   Convergence claims are made on a hierarchy frozen at `t = 0`, not on
   the adapting mesh.
+- **The reference amplitude is one number for all ten components, and
+  that is not an approximation** (step 6). In the gauge wave's chart six
+  components are *identically zero*, so a per-component reference is
+  exactly zero, the floor with it, and that component's dust scores
+  `τ ≈ 1` over the whole domain — TreeWave's blast-wave trap in a chart
+  instead of in initial data.
+- **The travelling margin is dilated inside `refine_flags`, and
+  `regrid!` is then given `buffer = 0`** (step 6). TreeAMR's
+  `buffered_flags` promotes every leaf a dilated box reaches whatever the
+  application said about it, so a margin applied afterwards refines the
+  blocks the ceiling just capped — measured, 12 of 64 boundary root
+  blocks. Dilate, *then* clamp.
+- **The floor and the ceiling together are a statement about the box.**
+  `block_level_bounds` throws when a block is both in the horizon shell
+  and within the boundary margin, because the region that must be
+  resolved has met the region that must stay coarse. That is what a box
+  of half-width `5/2 M` around a hole whose horizon is at `2 M` does:
+  the refinement's reference configuration uses `5 M`, and step 5's
+  fixture — which has no refinement — keeps `5/2`. The floor's *level* is
+  derived from the interior's own radii, so a `maxlevel_cap` below it is
+  refused rather than discovered later as a `check_interior_radii`
+  failure.
+- **2:1 balance overrides the ceiling, and that is TreeAMR's invariant.**
+  A deep enough hierarchy in a small enough box pushes refinement out to
+  the boundary through balance alone. If the boundary blocks are not at
+  the coarsest level, count the levels before suspecting the ceiling.
 - **`ρ_max` is bounded by RK4's stability**, about `2.8/dt` on the
   negative real axis; the driver sets `ρ_max · dt = 1` per chunk. A run
   that blows up in the layer after raising `ρ_max` has found the

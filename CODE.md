@@ -1122,7 +1122,20 @@ cross zero or decay to `1e−16` tails score `τ ≈ 1` against a floor that
 shrinks with them, and the whole domain refines. Here the fields are the
 10 components of `h` (**proposed**; `Π` is a switch), which fall off as
 `M/r` around a hole, and `U_ref` is the largest `|h|` in the *evolved*
-region at `t = 0`. For a `1/r` field the ratio itself decreases like
+region at `t = 0`.
+
+**`U_ref` is one amplitude for all ten components, not one per component
+(proposed in step 6)**, and `Π` is left off. Per-component is the trap in
+this package's own charts rather than a refinement of the rule: in the
+gauge wave's chart six of the ten components are **identically zero**, so a
+per-component reference is exactly zero, the floor with it, and that
+component's numerical dust scores `τ ≈ 1` over the whole domain — TreeWave's
+blast-wave failure (`∂ₜu ≡ 0` at `t = 0`) met in a chart instead of in
+initial data. The ten are components of one tensor in one chart, not
+independent fields, so they share the amplitude they actually have. The
+per-component maxima are still measured, because they are what the
+calibration table reports. `ε_g = 4ε` with `ε = 1/100`, which is TreeWave's
+spelling of the same floor. For a `1/r` field the ratio itself decreases like
 `h/r`, so the indicator produces nested shells of refinement around the
 hole without being told to — coarser with distance, exactly the
 hierarchy the prescribed spheres would have been. The stencil reaches one
@@ -1167,7 +1180,17 @@ functions of position, all cheap, all block-level:
    indicator's mood. **(predicted)** the indicator asks for the floor
    level or more everywhere the floor applies, so the floor never binds
    on a calibrated run; the test that it *can* bind uses a deliberately
-   loose `refine_tol`.
+   loose `refine_tol`. **(Confirmed in step 6**, on the reference
+   configuration below: the marks with the floor and the marks without it
+   are identical at the calibrated thresholds, and with `refine_tol` raised
+   to `99/100` — above anything the data reaches — the floor is the only
+   thing that refines, on exactly the blocks whose extent meets the shell.**)**
+   **`L_h` is derived rather than stated (proposed in step 6)**: it is the
+   coarsest level whose spacing satisfies *both* requirements,
+   `h ≤ min((r_h,min − r_1)/m, (r_1 − r_0)/2(G+1))`, so a floor a caller
+   had to compute by hand cannot go stale when the box, the margin or the
+   radii move. A `maxlevel_cap` below it is refused by name, since the mesh
+   would then settle where `check_interior_radii` fires.
 3. **A level ceiling near the outer boundary.** Two things happen at
    the outer boundary that an indicator misreads: the Dirichlet data
    meets the numerical solution with a truncation-order mismatch, a kink
@@ -1178,6 +1201,26 @@ functions of position, all cheap, all block-level:
    `min(indicator's request, ceiling)`. The ceiling also keeps
    coarse-fine faces off the outer boundary, which is a legal but
    pointless configuration to exercise.
+
+   **Two things the ceiling turned out to need (step 6).** First, the
+   **travelling margin has to be dilated before the bounds are applied, not
+   after**: TreeAMR's `buffered_flags` promotes every leaf a dilated box
+   reaches, whatever this package said about it, so on any root brick small
+   enough that the boundary blocks are the refined region's neighbours the
+   margin refines them anyway — measured, 12 of 64 boundary root blocks.
+   So `refine_flags` calls `buffered_flags` itself, applies the floor and
+   the ceiling to its result, and the driver passes `buffer = 0` to
+   `regrid!` **(proposed in step 6)**. Second, **the ceiling and the floor
+   together are a statement about the box**: a block that is both in the
+   horizon shell and within the boundary margin is refused by name, because
+   the region that must be resolved and the region that must stay coarse
+   have met. That is what a box of half-width `5/2 M` around a hole whose
+   horizon is at `r = 2 M` does, which is why the refinement's reference
+   configuration below uses `5 M` where step 5's fixture used `5/2`. What
+   the ceiling does *not* override is 2:1 balance: a deep enough hierarchy
+   in a small enough box pushes refinement outward through the balance
+   condition, and that is TreeAMR's invariant rather than this package's
+   choice.
 
 **Convergence studies on a frozen hierarchy.** An error-driven mesh
 changes with the resolution, which muddles a convergence study. The
@@ -1269,6 +1312,42 @@ from the indicator. Three things the writing settled:
   or a smaller `cfl`. On the static hole `λ_max` is `1.671` for
   Kerr-Schild `a = 0` and does not move between chunks, so the recheck
   has never fired; it exists for G5, where the hole crosses the mesh.
+
+**(Implemented in step 6**, `src/refinement.jl` and the loop's two
+branches.**)** `evolve!` now takes `adapt` and `regrid`, both of which
+refuse a case with no `Refinement` by name; the parameters are one
+`isbits` struct on the case (`refine_tol`, `coarsen_tol`, `maxlevel_cap`,
+the floor's margin beyond `r_h,max`, the ceiling's margin in coarse cells
+and its level, and `ε`) rather than five fields, so that a case that is run
+on somebody else's mesh carries one `nothing`. Five things the writing
+settled, each stated where it happens:
+
+- **`τ` is materialised into `diag`, and the marks are taken from that
+  field (amended in step 6).** TreeWave and TreeHydro evaluate their
+  per-cell indicator inside `firing_boxes`' predicate and keep nothing;
+  this package's analysis record asks for `τ_max` among the mesh
+  statistics, and a firing *count* cannot give it. So one kernel writes `τ`
+  into `DIAG_TAU` — the fourteenth `diag` slot, appended — and the two box
+  sweeps read it back. That is one evaluation of the criterion instead of
+  three, and it makes the number the record holds and the number the mesh
+  was chosen by the same number by construction.
+- **The ghost fill before flagging is the monitors' own preamble.**
+  `gh_indicator!` scatters and fills with *this* `t`'s Dirichlet hook, as
+  the constraint monitors do, because `regrid!` fills ghosts only after the
+  flags exist and a stale ghost corrupts the verdict silently.
+- **`regrid!` is handed the state field set alone (amended in step 6).**
+  The loop above lists `Hsrc => nothing, diag => nothing`; both are rebuilt
+  by the fresh `GHProblem` — which is also where the gauge source is
+  re-sampled and where `check_interior_radii` re-asserts the interior's two
+  radius requirements on the new mesh — so resizing them through the
+  transfer would be work thrown away.
+- **The regrid is skipped after the last chunk (amended in step 6)**, so
+  that the forest that comes back and the state that comes back describe
+  the same mesh. TreeHydro's rule, for TreeHydro's reason.
+- **The record gains `τ_max`, the refinement centroid and its distance from
+  the analytic center**, which is the mesh-statistics row of the analysis
+  table, and the run's `passes`, `converged`, `nregrids` and the buffer
+  width it used.
 
 ## Time integration
 
@@ -1374,7 +1453,8 @@ things the writing settled, each stated where it is made in that file:
   `block_mapreduce` reduces a contiguous range of variables and nothing
   else. **(Thirteen from step 5**: the masked error, the interior
   residual and the gauge drift, appended rather than inserted, because
-  the two contiguous runs above must not move.**)**
+  the two contiguous runs above must not move. **Fourteen from step 6**:
+  the refinement indicator `τ`, appended for the same reason.**)**
 
 **(Implemented and measured in step 5.)** The error rows are one more
 kernel — the state, the analytic solution, no stencil and no ghosts, so
@@ -1405,6 +1485,26 @@ point — and three decisions:
   A general `ShellMask` does the same job for any norm, which is how
   the three interior variants are compared over "the `G` points outside
   `r_1`".
+
+**(Implemented and measured in step 6.)** The mesh-statistics row gains
+`τ_max` and the refinement centroid, and both come out of the flagging pass
+the regrid needs anyway:
+
+- **The centroid is the volume-weighted centroid of the cells above
+  `coarsen_tol` (proposed in step 6)**, taken over the bounding boxes the
+  `coarsen_tol` sweep already reports — each block's box center weighted by
+  its firing count and its cell volume. A centroid over cells rather than
+  boxes would be a third sweep of the mesh for a diagnostic.
+- **It has a bias of order the coarsest *firing* spacing, and the reason is
+  the mesh's indexing (measured in step 6).** On the static hole, where the
+  mesh and the solution are symmetric about the center, the centroid comes
+  out `1.7`–`2.4` finest spacings from it. TreeAMR's blocks own their lower
+  plane and not their upper one, so at a coarse-fine interface the coarse
+  block on the `+` side owns the interface plane while the one on the `−`
+  side starts a coarse cell further out; those interface points carry the
+  largest `τ` of their level and fire on one side only. G5's "within a few
+  finest spacings of the analytic center" has to be read against that, and
+  a tighter measurement would have to weight cells rather than boxes.
 
 The numbers: on flat space both monitors are **exactly zero** at every
 order; on the six backgrounds of the table, with *analytic* second
@@ -1756,9 +1856,21 @@ refinement level, short times.
   its three variants, the radius assertions, the per-chunk analysis
   record, the masked error at order `q` on a frozen hierarchy, the
   `Float32` row, the drift and the `Π` post-pass — the numbers are under
-  [Measured results](#measured-results). The indicator (G4b) is step 6
-  and the horizon (G4c) is step 7; the milestone is marked when they are
-  in. Two sentences of the acceptance needed amending where they are
+  [Measured results](#measured-results). **G4b (step 6) is done with it**:
+  `refinement.jl`, the masked Löhner indicator with its global amplitude,
+  the four marks, the derived level floor and the boundary ceiling, the
+  travelling margin, the initial-data cycle and the regrid branch of the
+  driver, the calibration table and the thresholds chosen from it, and the
+  refinement centroid in the record. The horizon (G4c) is step 7 and the
+  milestone is marked when it is in. Two sentences of the acceptance needed
+  amending where they are stated rather than only here. **The calibration
+  is not portable between boxes the way the thresholds are**: the
+  thresholds are a property of the solution and the spacing, but *which*
+  hierarchy they produce is a property of the box and the root brick as
+  well, so the reference configuration is recorded with them. And **the
+  indicator's mesh and the hand-built hierarchy of step 5 are not the same
+  mesh at the same cost**: see the comparison under [Measured
+  results](#measured-results). Two sentences of the acceptance needed amending where they are
   stated rather than only here. **"In a Dirichlet box of half-width
   `≥ 20 M`" is a statement about a production run and not about a test**:
   the two radius requirements need `r_h,min ≥ (m + 2G + 2)·h`, so a hole
@@ -2312,6 +2424,140 @@ whose `Float32` error is `4.2e−3` against the identity's `1.4e−7`.
 `Float32` run's analysis time series is comparable with a `Float64` one
 without a conversion at every call site; the *arithmetic* is in the type
 the caller named, which the agreement above is the test of.
+
+**G4b (step 6), the refinement indicator.** The suite is **2968 assertions
+in 13m35 at one thread and 10m45 at four** on the development machine
+(Apple silicon, 12 CPU threads, Julia 1.13.0), up from step 5's 2486 in
+11m51 and 8m33. Step 6 also ran it on **Symmetry**, one node of the
+64-core AMD EPYC `amddebugq` partition at the same Julia, where the same
+2968 take **29m32** and **20m29**: a cluster core is about **twice** as
+slow as this laptop's, so the cluster buys studies in parallel rather than
+wall clock, and the laptop column stays the one comparable with steps 0–5.
+That run is also the clean-checkout check by construction — the tree is
+copied there without any `Manifest.toml` and the `[sources]` pins resolve
+from GitHub before the job starts.
+
+| file | 1 thread | 4 threads | what it pays for |
+|---|---|---|---|
+| `driver_tests.jl` | 2m19 | 56 s | step 5's five static-hole runs, unchanged |
+| `refinement_tests.jl` | **26 s** | **16 s** | the algebra and the marks (about 1 s), the initial-data cycle (1.2 s), and the two adaptive runs (10.3 s and 8.4 s) |
+
+`refinement_tests.jl` stays inside `PLAN.md`'s 30 s rule of thumb, and what
+buys that is the fixture's `maxlevel_cap = 1`: at the calibrated cap the
+same case is 848 blocks and belongs to `test/hole_runs.jl`, which is where
+it is.
+
+**The reference configuration.** Everything below is Kerr-Schild `a = 0`,
+`q = 2`, `N = 8`, in a Dirichlet box of half-width **`5 M`** on a `4³` root
+brick, with `r_0 = 3/10`, `r_1 = 5/4` and the interior margin `m = 4`. It
+is not step 5's fixture and could not be: with the horizon at `r = 2 M` and
+a box of half-width `5/2 M`, the shell the level floor must refine and the
+margin the level ceiling must keep coarse overlap, and the refinement
+refuses that configuration by name. The margin `m = 4` (still above the
+floor `G + 1 = 3`) is what makes the interior's radius requirements need
+**one** refinement level rather than two, which is what keeps the
+suite's adaptive run at the step-5 fixture's 120 blocks and 61 440 points.
+
+**Calibration, table one: `τ_max` against `h`** on uniform meshes over the
+static hole's initial data, masked inside `r_1` (`test/hole_runs.jl
+indicator`):
+
+| roots | `h` | blocks | points | `τ_max` |
+|---|---|---|---|---|
+| 2 | 0.625 | 8 | 4 096 | **0.9343** |
+| 4 | 0.3125 | 64 | 32 768 | **0.8130** |
+| 8 | 0.15625 | 512 | 262 144 | **0.5348** |
+| 16 | 0.078125 | 4 096 | 2 097 152 | **0.2257** |
+
+`τ` falls with `h` — which is the property that makes a fixed threshold
+terminate refinement — and it falls faster than linearly once the global
+floor rather than the first differences dominates the denominator: the
+numerator is `O(h²)` and the denominator crosses over from `2|f′|h` to
+`4ε·U_ref`. `U_ref` is **1.600** at every resolution (`2M/r₁` at the
+layer's edge, which is where the evolved region's largest `|h|` is); the
+per-component maxima are `1.600` for the seven components that carry the
+`1/r` fall-off and `0.572`–`0.783` for `h_xy`, `h_xz`, `h_yz`, which is
+what a per-component floor would have used and why the shared amplitude is
+the conservative choice rather than a lossy one.
+
+**Calibration, table two: the depth the initial-data cycle reaches**, with
+the cap at 3 so that the *indicator* is what stops it, and
+`coarsen_tol = refine_tol/4`:
+
+| `refine_tol` | passes | depth | leaves | points | `h` |
+|---|---|---|---|---|---|
+| 0.80 | 2 | 1 | 120 | 61 440 | 0.15625 |
+| 0.60 | 2 | 1 | 120 | 61 440 | 0.15625 |
+| 0.50 | 4 | 2 | 848 | 434 176 | 0.078125 |
+| **0.40** | 4 | **2** | **848** | 434 176 | 0.078125 |
+| 0.30 | 4 | 2 | 862 | 441 344 | 0.078125 |
+| 0.20 | 6 | 3 | 1800 | 921 600 | 0.0390625 |
+
+The plateau is `[0.30, 0.50]`, so the defaults are **`refine_tol = 0.4`,
+`coarsen_tol = 0.1`** — mid-plateau, with the cap never binding and the
+cycle converging in four passes. The hierarchy it chooses has its finest
+spacing at `5/64`, which is the step-5 fixture's, and the
+`refine_tol = 0.2` row shows what asking for one more level costs: 2.1×
+the points for a hole that is already resolved.
+
+**The level floor does not bind at these thresholds, and does when they are
+loosened** (`test/refinement_tests.jl`, both halves on one flagging pass):
+the marks computed with the floor and without it are *identical* at
+`refine_tol = 0.4`, and with it raised to `0.99` — above anything this data
+reaches — the floor is the only thing that refines, on exactly the blocks
+whose extent meets the shell `r_1 ≤ r ≤ r_h,max`. That is `CODE.md`'s
+prediction confirmed. The derived floor level here is **1**, and the
+indicator asks for 2.
+
+**The ceiling holds, and what it took.** On the converged hierarchy every
+block within one coarse cell of the outer boundary is at level 0. It was
+**not** so before the travelling margin was moved inside the criterion:
+with TreeAMR dilating the boxes after the fact, 12 of the 64 boundary root
+blocks were refined through the margin, since on a `4³` brick the
+boundary blocks *are* the refined region's neighbours.
+
+**The adaptive run against a frozen hierarchy**, both at `refine_tol = 0.4`
+to `t = 1/2 M` with `chunk = 1/20`, the same case, the same finest spacing
+`5/64`:
+
+| mesh | leaves | points | `err_l2` | `err_linf` | `gauge_l2` |
+|---|---|---|---|---|---|
+| the indicator's | 848 | 434 176 | **1.088e−3** | **3.261e−2** | **4.403e−4** |
+| frozen (`hole_forest`, two shells) | 1128 | 577 536 | 1.060e−3 | 3.261e−2 | 3.963e−4 |
+
+The two agree to **2.7 %** in the masked L2 and to all four digits in L∞,
+and the indicator's mesh needs **75 %** of the points — the hand-built
+shells are radii applied to whole blocks, and the indicator is what decides
+per block. The interior residual is identical (`1.171e−1`), which it should
+be: it is measured inside `r_1`, where both meshes are at the floor's level.
+
+**Regrids on a static hole change nothing.** Over ten chunks of the
+adaptive run and three of the suite's, `nregrids = 0`: the hierarchy the
+cycle converged to is a fixed point of the criterion, which is
+`CODE.md`'s prediction and the sharpest statement available about an
+indicator whose input is time-independent. `τ_max` moves by less than
+`1 %` across the run (`0.2257` at `t = 0`, `0.2241` at `t = 1/2`), which is
+the truncation error growing, not the mesh.
+
+**And a regrid that *does* move the mesh rebuilds behind itself** — which a
+static hole never exercises, and which is the branch G5 lives in. The suite
+starts one run from the indicator's fixed point plus a single refined block
+in the far corner of the box: the criterion does not want it, the ceiling
+caps it at the coarsest level, and no firing block is a neighbour of it, so
+the travelling margin does not hold it either. The first regrid coarsens it
+away — **127 leaves to 120** — and the driver rebuilds the schedule, the
+problem (re-sampling the gauge source and re-asserting the interior's two
+radius requirements on the new mesh) and the state vector; the transferred
+state is still a metric and its masked error after two chunks is
+`1.36e−3`, against `1.93e−3` after three chunks on the mesh that did not
+move.
+
+**The refinement centroid is biased by one to two finest spacings**, and
+the bias is the mesh's indexing rather than the indicator's: `1.7`–`2.4`
+finest spacings on a configuration where the mesh and the solution are both
+symmetric about the hole. See [Analysis
+quantities](#analysis-quantities) for why, and read G5's "within a few
+finest spacings" against it.
 
 ## Possible extensions
 
