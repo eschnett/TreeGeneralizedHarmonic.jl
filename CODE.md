@@ -662,7 +662,13 @@ evaluation and the Dirichlet hook at every ghost fill; both must be
 kernel arguments, so `SpacetimeMetrics` — StaticArrays plus ForwardDiff
 duals, both `isbits` — has to compile as one. On the CPU backend that is
 certain; on CUDA it is expected and untested, and G0 tests it on the CPU
-while G6 tests it on the H200. If the device refuses, the fix is a
+while G6 tests it on the H200. **(Measured in step 0** on the CPU
+backend: `KerrSchild(1, 0)` and `boost(Harmonic(1, 9/10), 0.3 x̂)` both
+compile into `fill_by_coordinates!`'s `AllVariables` kernel and fill a
+20-variable, `G = 3`, vertex-centered field set over a two-level forest
+with **bit-for-bit** the values of a host loop through `coordinates`, at
+`Float64` and at `Float32`; both backgrounds, and `boost`'s wrapper
+around one, are `isbits`.**)** If the device refuses, the fix is a
 kernel-safe evaluation path *in `SpacetimeMetrics`*, not a redesign
 here: nothing in this package's structure depends on where the metric
 is evaluated, only its cost does.
@@ -981,7 +987,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 |---|---|
 | `notes/` | verbatim copies of the inherited documents, with provenance; see `notes/README.md` |
 | `src/TreeGeneralizedHarmonic.jl` | module shell: `using`s, exports, includes |
-| `src/precision.jl`, `src/device.jl` | copied from TreeWave |
+| `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host (amended in step 0) |
 | `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives; `SVector{10}` state, `SMatrix{4,4}` tensors |
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` |
 | `src/evolution.jl` | the fused RHS kernel in streaming order, `GHProblem`, `gh_rhs!`, the speed kernel, `gh_dt` |
@@ -995,7 +1001,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/driver.jl` | `GHCase`, `evolve!`, the analysis record per chunk, `observer` |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl` |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl` |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
@@ -1005,7 +1011,12 @@ pinned to GitHub `main` by `[sources]`, which puts the Julia floor at
 `OrdinaryDiffEqLowOrderRK` and `SciMLBase`, `HDF5` (from G6),
 `ApparentHorizonFinder` and `KorzynskiSpin` (from G4). Tests add
 `MultiFloats`. `bin/` adds `CairoMakie` and `SixelTerm` in its own
-environment.
+environment. The compat bounds follow TreeWave's, including
+`OrdinaryDiffEqLowOrderRK = "2.2.5"` **(proposed in step 0**, which is
+the one bound `PLAN.md` left unstated**)**. The two pins resolved in step 0
+to TreeAMR v0.1.0 and SpacetimeMetrics v1.6.0; a `[compat]` entry on a
+`[sources]` dependency is a floor on what `main` may become, not a
+selection, which is what `prerequisite_tests.jl` exists to notice.
 
 ## Milestones
 
@@ -1013,12 +1024,22 @@ Each has an acceptance test; serial `Float64` correctness first. Every
 test is three-dimensional and therefore small: `N = 8`, a few roots, one
 refinement level, short times.
 
-- **G0 — Scaffolding.** `Project.toml` with the pins, CI on 1.11 and
-  release at one and four threads, `CLAUDE.md`, this document, `notes/`;
-  `precision.jl`, `device.jl`; a prerequisite test that the pinned
-  TreeAMR exports what this package calls, and that a `SpacetimeMetrics`
-  metric with its `dmetric` pass runs as a kernel argument on `CPU()`.
-  *Accept:* a clean archive instantiates and passes.
+- **G0 — Scaffolding.** *(Done.)* `Project.toml` with the pins, CI on
+  1.11 and release at one and four threads, `CLAUDE.md`, this document,
+  `notes/`; `precision.jl`, `device.jl`; a prerequisite test that the
+  pinned TreeAMR exports what this package calls, and that a
+  `SpacetimeMetrics` metric with its `dmetric` pass runs as a kernel
+  argument on `CPU()`. *Accept:* a clean archive instantiates and passes.
+  The prerequisite test runs **two** backgrounds rather than the one
+  named above **(proposed in step 0)**: `KerrSchild(1, 0)` and
+  `boost(Harmonic(1, 9/10), 0.3 x̂)`, the proof-of-concept case itself.
+  `KerrSchild` is static, so its `Π = ∂_t g` half is identically zero and
+  a callback that filled it from the wrong slice of `dg` — the two
+  derivative index conventions above are exactly that mistake — would
+  pass; the boosted one is also the expensive case to compile, nested
+  duals through a coordinate pullback, and it compiling is what the
+  dependency risk under [Initial data and
+  backgrounds](#initial-data-and-backgrounds) is about.
 - **G1 — Pointwise algebra and stencils.** `pointwise.jl`,
   `stencils.jl`. *Accept:* against `SpacetimeMetrics` automatic
   differentiation on every background — ADM extraction, the offset
@@ -1095,8 +1116,27 @@ refinement level, short times.
 
 ## Measured results
 
-None yet. This section takes the numbers as the milestones produce
-them, each beside the prediction it confirms or corrects.
+This section takes the numbers as the milestones produce them; each also
+sits beside the prediction it confirms or corrects, in the section it
+belongs to.
+
+**G0 (step 0).** The suite is 82 assertions in 7.7 s at one thread and
+7.6 s at four, on the development machine (Apple silicon, 12 CPU threads,
+Julia 1.13.0): 0.7 s of it `precision_tests.jl` and 7.4 s
+`prerequisite_tests.jl`, which is the compilation and evaluation of the
+two `dmetric` passes and nothing else. Both are inside GHSO2's rule of
+thumb of 30 s per test file, and the evaluated metric is the cost to
+watch as the suite grows. A clean archive of the tree, with no
+`Manifest.toml`,
+resolves TreeAMR v0.1.0 and SpacetimeMetrics v1.6.0 from GitHub `main`
+through the `[sources]` pins, instantiates and passes with the same 82.
+The two backgrounds of `prerequisite_tests.jl` compile into a
+KernelAbstractions kernel on `CPU()` and fill a 20-variable, `G = 3`,
+vertex-centered field set over a two-level forest with **bit-for-bit**
+the values of a host loop through `coordinates`, at `Float64` and at
+`Float32` — see [Initial data and
+backgrounds](#initial-data-and-backgrounds). No physics is measured yet:
+`src/` holds the module shell, `precision.jl` and `device.jl`.
 
 ## Possible extensions
 

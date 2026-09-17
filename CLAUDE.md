@@ -45,25 +45,33 @@ Three rules follow from `CODE.md` and govern every change here:
 
 ## Current state
 
-**Design only.** `CODE.md` is complete and reviewed three times
-(2026-09-16): the expanded form of the momentum equation, three
-dimensions only, a pointwise damping layer instead of excision, a single
-boosted spinning black hole as the proof-of-concept target, RK4 from
-OrdinaryDiffEq, the analysis quantities as part of the deliverable, an
-error indicator for refinement, `Float64` on Symmetry's H200 as the
-device requirement, no checkpointing, GPU kernel efficiency deferred to
-a research project. `PLAN.md` breaks the milestones G0–G6 into steps
-0–10, each a brief for one agent with a fresh context (see its "Running
-a step as an agent"); step 0 (scaffolding) is next. `notes/` holds the inherited
-documents. `src/TreeGeneralizedHarmonic.jl` and `Project.toml` are still
-the package template (`hello`, `domath`) and are replaced in step 0.
-There is no `Manifest.toml`, no `test/`, no CI, no remote, and no commit
-yet.
+**Scaffolding only — G0 is done, G1 (the pointwise algebra) is next.**
+`CODE.md` is complete and reviewed three times (2026-09-16): the expanded
+form of the momentum equation, three dimensions only, a pointwise damping
+layer instead of excision, a single boosted spinning black hole as the
+proof-of-concept target, RK4 from OrdinaryDiffEq, the analysis quantities
+as part of the deliverable, an error indicator for refinement, `Float64`
+on Symmetry's H200 as the device requirement, no checkpointing, GPU
+kernel efficiency deferred to a research project. `PLAN.md` breaks the
+milestones G0–G6 into steps 0–10, each a brief for one agent with a fresh
+context (see its "Running a step as an agent"); step 1 (the pointwise
+algebra) is next. `notes/` holds the inherited documents.
+
+What exists in `src/` is the module shell, `precision.jl` (the `Base`
+bridges for software floating-point types) and `device.jl` (`to_backend`,
+`hostcopy`, `hostcopy!`) — no equations. What exists in `test/` is
+`precision_tests.jl` and `prerequisite_tests.jl`, the latter saying that
+the pinned TreeAMR still exports the names the design calls and that a
+`SpacetimeMetrics` background — `KerrSchild`, and the boosted spinning
+`Harmonic` of the proof of concept — compiles and runs as a kernel
+argument on `CPU()`, filling a field set bit-for-bit as a host loop does.
+`Project.toml` carries the `[sources]` pins and CI is in place. There is
+no `Manifest.toml` (deliberately, and permanently: it is what makes the
+clean-checkout check below mean something), no `bin/`, and no remote.
 
 ## Commands
 
-Not yet real, and listed so the section can be filled in rather than
-rewritten. After step 0 the full suite is
+The full suite, from the package root:
 
 ```bash
 julia --project=. -e 'using Pkg; Pkg.test()'
@@ -86,6 +94,10 @@ d=$(mktemp -d) && git archive HEAD | tar -x -C "$d" && \
   julia --project="$d" -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
 ```
 
+It runs from a git worktree as happily as from the checkout, which is how
+the per-step agents work; the `[sources]` pins mean every worktree
+resolves the same two branches.
+
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
 the thread-independence test in step 4, and device tests behind
@@ -101,11 +113,15 @@ Carried over from TreeAMR, TreeWave and TreeHydro where they apply, plus
 what is specific to a GR code. Each is in `CODE.md` with its reason.
 
 - **TreeAMR and SpacetimeMetrics are pinned to GitHub `main`, not to the
-  local checkouts.** Once step 0 adds the `[sources]` entries,
-  `~/src/jl/TreeAMR` and `~/src/jl/SpacetimeMetrics` are *not* what the
-  tests see; an unpushed change there is invisible here. Say so rather
-  than editing a checkout and assuming the tests see it. The entries
-  are also why the Julia floor is 1.11.
+  local checkouts.** `Project.toml`'s `[sources]` entries are what the
+  tests resolve, so `~/src/jl/TreeAMR` and `~/src/jl/SpacetimeMetrics`
+  are *not* what they see; an unpushed change there is invisible here,
+  and the local SpacetimeMetrics checkout has been behind `main` before.
+  Read what Pkg installed under `~/.julia/packages/` when in doubt about
+  an API. Say so rather than editing a checkout and assuming the tests
+  see it. The entries are also why the Julia floor is 1.11, and
+  `test/prerequisite_tests.jl` is what notices when a moving branch drops
+  a name.
 - **`notes/` is read-only.** The copies carry their provenance; when
   `CODE.md` departs from them, `CODE.md` says so. Do not "fix" a copy.
 - **Two derivative index conventions.** `SpacetimeMetrics.dmetric`
@@ -238,16 +254,17 @@ Match TreeAMR's, since the four packages are read together:
 
 ## Repository facts
 
-- **No remote and no commit yet.** When there is one, the rule from the
-  siblings applies: work on a branch, and do not push, open a pull
-  request, or merge to `main` without being asked. Each step lands on
-  `main` only after review.
+- **No remote yet.** When there is one, the rule from the siblings
+  applies: work on a branch, and do not push, open a pull request, or
+  merge to `main` without being asked. Each step lands on `main` only
+  after review.
 - `TODO.md`, when it appears, is Erik's personal to-do list. **Do not
-  modify it.** It will be gitignored.
-- `CODE.md`, `PLAN.md`, `notes/` and this file are committed.
-  `Manifest.toml` files, `bin/output/` and `docs/build/` will be
-  gitignored — no `Manifest.toml` is tracked, which is what makes the
-  clean-checkout check above mean something.
+  modify it.** It is gitignored.
+- `CODE.md`, `PLAN.md`, `README.md`, `notes/`, `src/`, `test/`,
+  `.github/` and this file are committed. `Manifest.toml` files,
+  `bin/output/` and `docs/build/` are gitignored — no `Manifest.toml` is
+  tracked, which is what makes the clean-checkout check above mean
+  something.
 - Sibling checkouts: `~/src/jl/TreeAMR` (the mesh; read its `CLAUDE.md`
   and `CODE.md` for the API and its sharp edges), `~/src/jl/TreeWave`
   and `~/src/jl/TreeHydro` (the other applications; copy the *patterns*
