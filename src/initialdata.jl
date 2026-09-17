@@ -163,29 +163,59 @@ shifted_minkowski_case(::Type{T}=Float64; A=T(1//2), w=T(2), halfwidth=T(2),
            periodic=(false, true, true), ε_KO=ε_KO, γ0=γ0, γ2=γ2)
 
 """
-    gh_forest(T = Float64, case::GHCase; N, roots)
+    gh_forest(T = Float64, case::GHCase; N, roots, refined = false)
 
-A uniform forest of `roots³` root blocks of `N³` points each, over the
-case's box and with the case's periodicity — the mesh every test in step 3
-runs on, and the one a refined hierarchy is built from later.
+A forest of `roots³` root blocks of `N³` points each, over the case's box
+and with the case's periodicity — the mesh every test in step 3 runs on,
+and, with `refined = true`, the **two-level** mesh that step 4 measures the
+interface-order rule on.
 
 `N` and `roots` have no defaults: they are the two numbers a convergence
 study varies. TreeAMR's blocks are cubes with one isotropic spacing, so
 the box has to be one too; `h = (box width)/(roots·N)`.
+
+`refined = true` refines the one root block that contains the point three
+eighths of the way along each axis, and balances — TreeWave's
+`wave_forest` pattern (added in step 4), with two differences that matter
+here. It refines a **single** block rather than a middle sub-box, because
+the interface study runs at `roots = 2`, where every root block *is* a
+half of the domain; and the refined region is a fixed *block*, so that a
+convergence study which doubles `N` leaves the block layout alone and
+every spacing halves — `CODE.md`'s frozen-hierarchy protocol under
+"Refinement and regridding", and the only way a rate measured on a refined
+mesh means anything. One refined block in a periodic `2³` root grid has a
+coarse-fine face on each of its six sides, so both directions of the
+interface — prolongation into the fine ghosts, injection into the coarse
+ones — are exercised.
 
 The leading `T` is the type the whole run is computed in and reaches the
 field set, the schedule and the state vector through the forest, which is
 the only place it has to be said (TreeWave's `wave_forest`, which this
 follows).
 """
-function gh_forest(::Type{T}, case::GHCase; N, roots) where {T}
+function gh_forest(::Type{T}, case::GHCase; N, roots, refined=false) where {T}
     widths = ntuple(d -> case.box[d][2] - case.box[d][1], Val(3))
     all(w -> w ≈ widths[1], widths) || throw(ArgumentError(
         "TreeAMR's blocks are cubes with a single spacing per level, so a " *
         "uniform forest over this box would have anisotropic cells: the " *
         "widths are $widths"))
-    return Forest{T}(ntuple(_ -> roots, Val(3)); N=N, periodic=case.periodic,
-                     extents=case.box)
+    forest = Forest{T}(ntuple(_ -> roots, Val(3)); N=N, periodic=case.periodic,
+                       extents=case.box)
+    refined || return forest
+    xref = ntuple(d -> case.box[d][1] + 3 * widths[d] / 8, Val(3))
+    targets = filter(forest.leaves) do k
+        ext = block_extent(forest, k)
+        all(d -> ext[d][1] ≤ xref[d] < ext[d][2], 1:3)
+    end
+    length(targets) == 1 || throw(ArgumentError(
+        "the two-level mesh refines exactly the one root block holding " *
+        "$xref, but $(length(targets)) blocks claim it — which means the " *
+        "reference point landed on a block face, and a mesh that depends on " *
+        "which side it lands is not a mesh a convergence study can be " *
+        "frozen on"))
+    refine!(forest, targets)
+    balance!(forest)
+    return forest
 end
 
 gh_forest(case::GHCase; kwargs...) = gh_forest(Float64, case; kwargs...)

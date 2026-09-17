@@ -61,11 +61,37 @@ function convergence_rate(hs, errs)
     return sum((x .- x̄) .* (y .- ȳ)) / sum((x .- x̄) .^ 2)
 end
 
-# The variable slots of the `diag` field set. One so far — the
-# characteristic speed the time step is taken from; steps 4 and 5 add the
-# constraint monitors, the masked error and the indicator beside it.
-const DIAG_SPEED = 1
-const NDIAG = 1
+# The variable slots of the `diag` field set: the characteristic speed the
+# time step is taken from, the two constraint monitors of step 4, and the
+# indicator that says which points a masked norm counts. Step 5 adds the
+# masked error and the interior residual, step 6 the refinement indicator.
+#
+# `DIAG_CGH` and `DIAG_MOM` are the *first* of a contiguous run — four and
+# three slots — because `block_mapreduce` reduces a contiguous range of
+# variables and nothing else: a device cannot be handed an arbitrary index
+# vector cell by cell.
+const DIAG_SPEED = 1          # λ = α√(tr γ^{ij}) + |β|
+const DIAG_CGH = 2            # C_a = Γ_a + H_a, a = t, x, y, z   (2:5)
+const DIAG_HAM = 6            # the ADM Hamiltonian constraint ℋ
+const DIAG_MOM = 7            # the ADM momentum constraint ℳ_i   (7:9)
+const DIAG_MASK = 10          # 1 where the point is evolved, 0 inside r_1
+const NDIAG = 10
+
+# The position of an **owned** point, formed exactly as TreeAMR forms it —
+# the same origin, the same spacing, the same expression in the same order
+# — so that a mask, an interior profile or a Dirichlet value computed here
+# lands on the value `coordinates(fs, b, idx)` gives and not merely near
+# it. TreeAMR's own `coordinates_kernel!` writes
+# `origin[d] + (I[d] - off[d]) * h` with `off` a whole cell along a
+# vertex-like dimension, and every field set in this package is
+# vertex-centered (`CODE.md`, "Field sets and layout"), which
+# [`GHProblem`](@ref) checks so that this line may assume it.
+@inline function point_position(origins, spacings, b::Int, I)
+    h = spacings[b]
+    origin = origins[b]
+    off = oftype(h, 1 // 1)
+    return ntuple(d -> origin[d] + (I[d] - off) * h, Val(3))
+end
 
 # --- the kernel-side stencil contractions -----------------------------------
 #
@@ -357,6 +383,14 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         "but this field set has G = $(U.G). A narrower halo makes the " *
         "dissipation read a ghost that was never filled; a wider one is " *
         "memory the scheme does not use."))
+    all(c -> c === :vertex, U.centering) || throw(ArgumentError(
+        "CODE.md fixes this package's field sets as vertex-centered — a " *
+        "finite-difference scheme wants restriction along a stagger, which " *
+        "is injection and exact for any data — but this field set is " *
+        "$(U.centering). The masks and the interior profiles turn an owned " *
+        "index into a position assuming it (`point_position`), so a " *
+        "staggered set would be evaluated half a cell from where its " *
+        "values sit."))
     backend = get_backend(U.work)
 
     HASH = !isharmonic(case.background)

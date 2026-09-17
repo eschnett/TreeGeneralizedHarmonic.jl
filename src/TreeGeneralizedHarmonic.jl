@@ -63,7 +63,7 @@ export hostcopy
 
 # Pointwise algebra
 export pack_g, pack_sym
-export metric_quantities, metric_derivatives
+export metric_quantities, metric_derivatives, metric_derivatives_along
 export adm_from_metric, adm_vars_from_state, gauge_constraint_at_node
 export gh_node_rhs, gh_node_source, gh_node_rhs_expanded
 
@@ -85,6 +85,11 @@ export dirichlet
 # Evolution
 export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate
 
+# Constraints and the masks their norms take
+export AllPoints, is_evolved, adm_constraints_at_node
+export gh_constraint!, adm_constraint!
+export masked_counts, masked_norms, constraint_norms
+
 include("precision.jl")
 include("device.jl")
 include("pointwise.jl")
@@ -93,5 +98,6 @@ include("gauge.jl")
 include("initialdata.jl")
 include("boundaries.jl")
 include("evolution.jl")
+include("constraints.jl")
 
 end

@@ -70,6 +70,24 @@ end
                          M[3,3], M[4,3], M[4,4])
 end
 
+# The packed slot of the symmetric index pair `(a, b)` — the inverse of
+# `_pack10`'s ordering, written as arithmetic rather than as a table so
+# that it folds at compile time wherever the indices are literals. Added
+# in step 4, where the second derivatives `∂_μ∂_ν g_ab` are packed by the
+# *pair* `(μν)` in exactly the order `_pack10` packs `(ab)`: one packing
+# convention in the file, used twice (`CODE.md`, "The equations").
+@inline function _pairindex(a::Integer, b::Integer)
+    i, j = max(a, b), min(a, b)
+    return (j - 1) * 4 - ((j - 1) * (j - 2)) ÷ 2 + (i - j + 1)
+end
+
+# The same, for a symmetric pair of *spatial* indices: the six slots
+# `(xx, xy, xz, yy, yz, zz)` that `gh_node_rhs_expanded` takes `∂∂h` in.
+@inline function _pairindex3(a::Integer, b::Integer)
+    i, j = max(a, b), min(a, b)
+    return (j - 1) * 3 - ((j - 1) * (j - 2)) ÷ 2 + (i - j + 1)
+end
+
 """
     pack_g(g::SMatrix{4,4,T}) -> SVector{10,T}
 
@@ -450,6 +468,51 @@ end
         for i in 1:3, j in 1:3, k in 1:3)
 
     return dα, dβ, dA
+end
+
+"""
+    metric_derivatives_along(gu4, α, β, γu, sqrtγ, ∂g) -> (∂α, ∂β, ∂sqrtγ, ∂γu)
+
+The same chain rule as [`metric_derivatives`](@ref) along **one** direction,
+and returning `∂√γ` and `∂γ^{jk}` separately rather than the assembled
+`∂_i(α√γγ^{jk})`:
+
+  * `∂α`      — the derivative of the lapse (a scalar),
+  * `∂β`      — of the shift (`SVector{3}`),
+  * `∂sqrtγ`  — of `√γ` (a scalar),
+  * `∂γu`     — of the inverse spatial metric (`SMatrix{3,3}`).
+
+`∂g` is the packed derivative of the metric along whatever direction is
+wanted — including **time**, which is what it exists for (added in step 4).
+The constraint monitors of `constraints.jl` need `∂_t α`, `∂_t β^j` and
+`∂_t(α/√γ)` to reconstruct `∂_t∂_t g` from the evolution equations, and
+`metric_derivatives` offers neither a time direction nor `∂√γ` on its own:
+it returns the three spatial directions and folds `√γ` into `A^{jk}`,
+because that is the shape `(EXPANDED)` contracts.
+
+It is therefore a **second spelling** of the same five closed forms, in the
+sense `gh_node_source` is a second spelling of `gh_node_rhs`'s source: the
+three-direction function stays exactly as step 1 measured it against a
+forward-mode dual pass, and `test/constraints_tests.jl` asserts that this
+one reproduces it on every spatial direction — to roundoff, because one
+body written twice is not bit-identical (`CODE.md`, "Measured results").
+If that assertion fires, one of the two has drifted.
+"""
+@inline function metric_derivatives_along(gu4::SMatrix{4,4,T}, α::T,
+                                          β::SVector{3,T}, γu::SMatrix{3,3,T},
+                                          sqrtγ::T,
+                                          ∂g::SVector{NC,T}) where {T}
+    gutt = gu4[1, 1]
+    dgl = _sym4(∂g)
+    dgu = -(gu4 * dgl) * gu4                     # ∂ g^{ab} = −g^{ac}(∂g_cd)g^{db}
+    dα = α*α*α * dgu[1,1] / 2                    # ∂α = ½ α³ ∂g^{tt}
+    dβ = SVector{3,T}(-(dgu[1, j+1] + β[j] * dgu[1,1]) / gutt for j in 1:3)
+    dsqrtγ = sqrtγ * sum(γu[j,k] * dgl[j+1, k+1] for j in 1:3, k in 1:3) / 2
+    dγu = SMatrix{3,3,T}(
+        dgu[j+1, k+1] + β[k]*dgu[1, j+1] + β[j]*dgu[1, k+1]
+        + β[j]*β[k]*dgu[1,1]
+        for j in 1:3, k in 1:3)
+    return dα, dβ, dsqrtγ, dγu
 end
 
 """
