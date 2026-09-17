@@ -547,7 +547,11 @@ stage update into the kernel, code generation for the register schedule
 in a way that would prevent it. `G`, `q` and the switches (dissipation,
 gauge source present or not, an interior present or not) are `Val`
 parameters, resolved once per chunk in the problem constructor, never
-per evaluation.
+per evaluation. **(Amended in step 5:** the interior's `Val` carries the
+*variant* rather than a `Bool` — `:none`, `:damped`, `:pasted`,
+`:frozen`. `PLAN.md` calls it "has interior"; it has to say *which* as
+well, because the three variants differ inside the kernel, so a `Bool`
+would have needed a second parameter beside it.**)**
 
 The kernel is *block-local*: it reads its own block's stored points and
 nothing else, so it runs on every backend unchanged. Per-block spacings
@@ -628,6 +632,27 @@ Minkowski through a Dirichlet face, and a thousand steps of noise. The
 re-check at the chunk's end arrives with the driver in step 5; the speed
 kernel, `max_speed` and `gh_dt` are in `evolution.jl` now.
 
+**(Measured in step 5.)** Two things a hole adds. First, **the speed
+kernel takes the mask like every other analysis kernel** — this section
+had not said so and the one above it had; the frozen core holds data that
+is not a numerical solution, and a *degenerate* metric there, which is
+what a stale core looks like after a regrid has interpolated it, gives a
+`NaN` speed that would then set the step for the whole hierarchy. It is
+a branch and not a multiplication, for `0 · NaN = NaN`. Second, **the
+recheck fires, and the first time it did it was right.** On the static
+Kerr-Schild hole the maximum speed is *not* at the hole: it is at the
+outer corner of the box, where the metric is nearly flat and `λ` is just
+below flat space's `√3 = 1.73205` — `1.67095` at half-width `5/2 M`. As
+the discrete solution settles, that corner drifts and `λ` climbs *past*
+`√3`, so a step sized at exactly `cfl = 1/4` from a chunk's opening value
+has no room: at `q = 2`, `h = 5/48`, `chunk = 1 M`, the recheck threw at
+`t = 25 M` with `λ_end = 1.74281` against the `1.67095` the step was
+sized from, a CFL number of `0.2574`. The remedies the message names are
+a shorter chunk or a smaller `cfl`; `cfl = 1/5` runs the same
+configuration to `t = 50 M`. This is the one measurement in the package
+that would not exist without the check, which is the argument for having
+it throw.
+
 ## Gauge and constraint damping
 
 **Prescribed gauge sources** (decided). `H_a(x)` is sampled from the
@@ -680,6 +705,21 @@ around the hole's analytic center, tapered to a small value in the wave
 zone, an `isbits` closure over `(center(t), M)` in the problem — and a
 constant `γ2 > −1`. `γ0 ≈ 1/M` near the hole is GHSO2's measured
 requirement for a stable evolution with the horizon in the domain.
+
+**(Implemented in step 5**, `src/gauge.jl`.**)** The profile is
+`γ0(x) = far + (near − far) exp(−r²/2w²)` with `r = |x − c(t)|`, and the
+three numbers are `near = 1/M`, `far = 1/(10 M)`, `width = 3 M`
+**(proposed in step 5**: `CODE.md` asked for "a Gaussian of width a few
+`M` … tapered to a small value in the wave zone" and left them open**)**.
+A Gaussian rather than a compactly supported bump because nothing depends
+on it vanishing exactly — `far` is the wave zone's rate, not zero — and
+because `C^∞` costs one `exp` per point either way. Two consequences for
+the code around it: `GHCase`'s `γ0` field now holds a *profile* and not a
+number (a bare number is wrapped in `ConstantDamping`, so every
+flat-space case of steps 3 and 4 is the arithmetic it was), and the
+right-hand-side kernel therefore forms the point's position
+unconditionally — three fused multiply-adds, which the compiler drops
+where the profile is constant and there is no interior.
 
 ## Boundaries
 
@@ -775,6 +815,47 @@ finest spacing the refinement must reach (about `0.02 M` there); the
 level floor under [Refinement](#refinement-and-regridding) is what
 guarantees it.
 
+**A ball cannot hide Kerr's singularity in the harmonic chart at
+`a = 9/10` (found in step 5, and this is the proof-of-concept case).**
+The frozen core is a *ball* of radius `r_0`, and what it has to contain is
+not a point: both `KerrSchild` and `Harmonic` solve
+`R⁴ − R²(x²+y²+z²−a²) − a²z² = 0` for their radial coordinate, so on the
+equatorial **disk** `z = 0`, `x² + y² ≤ a²` that coordinate is zero and
+every expression in the metric divides by it. The disk's coordinate
+radius is `|a|`. So the core needs `r_0 > |a|`, while the placement bound
+needs `r_0 < r_1 ≤ r_h,min − m·h`. Those are compatible in Kerr-Schild at
+`a = 9/10` — the disk is at `0.9` and `r₊ = 1.436` — and **incompatible
+in the harmonic chart**, where `r_h,min = √(M² − a²) = 0.436` is *smaller*
+than `0.9`. The Kerr horizon is oblate and the singular disk is flat; in
+the harmonic chart the disk pokes out of every sphere that fits inside the
+horizon along the axis. `check_interior_radii` refuses the configuration
+by name rather than letting a grid point on the disk become `NaN`
+(`singular_radius`), and the suite tests the refusal.
+
+This does not touch the static holes of G4 at `a = 0`, and it does not
+touch `a = 9/10` in Kerr-Schild, which runs. It **does** stand between
+here and the proof-of-concept case, which is `boost(Harmonic(M, 9/10), v)`
+— harmonic because a sampled gauge source cannot be time-dependent. Two
+ways out, neither built and neither chosen here **(open question, raised
+in step 5)**:
+
+1. **Key the interior on the chart's own radial coordinate.** `w` and `ρ`
+   become functions of `R`, the spheroidal radius the metric already
+   solves for, instead of `r = |x − c(t)|`. Then the core `R < R_0` is an
+   oblate spheroid that contains the disk exactly, the horizon is
+   `R = √(M² − a²)`, and "`m` grid points inside the horizon" is a
+   statement about `R` — the geometry becomes as clean as it is at
+   `a = 0`. The cost is that `R(x)` is a background-specific function
+   that the kernel must evaluate, so the interior stops being a function
+   of position *alone* and becomes a function of position *and the
+   background*; `CODE.md`'s "neither knows anything about blocks, ghost
+   zones or refinement levels" survives, but "a function of `r`" does
+   not. This is the smaller change and the one to try first.
+2. **Lower the spin.** `√(M² − a²) > a` needs `a < M/√2 ≈ 0.707`, so a
+   harmonic hole at `a = 0.7` admits a spherical core with room to spare
+   and `a = 0.9` does not. G5 at `a = 0.7` is a weaker proof of concept
+   and a true one.
+
 **Why it is correct to touch the interior at all.** Inside the horizon
 every characteristic points inward, so in the continuum nothing outside
 the layer depends on what happens inside it; the modified equation
@@ -831,7 +912,24 @@ the ramp widths, evaluated per point in the kernel. `ρ_max` is bounded
 by the explicit integrator: RK4 is stable on the negative real axis to
 about `2.8/dt`, and `ρ_max · dt = 1` **(proposed)** relaxes by a factor
 `e` per step, which is as strong as it needs to be; the driver derives
-`ρ_max` from `dt` each chunk. `r_0` is chosen where the analytic
+`ρ_max` from `dt` each chunk.
+
+**(Implemented in step 5**, `src/interior.jl`.**)** The smoothstep is the
+quintic `10s³ − 15s⁴ + 6s⁵`, whose value, first *and* second derivatives
+match the constants it joins. The two ramp widths are **halves of the
+layer (proposed in step 5)**, measured from opposite ends: `w` rises from
+`0` at `r_0` to `1` at the layer's midpoint and stays there, `ρ` falls
+from `ρ_max` at the midpoint to `0` at `r_1`. They are complementary, so
+no point is both frozen and undamped, and the outer half of the layer is
+the unmodified equations *plus* a relaxation — which is what makes the
+data the evolved stencils reach into the analytic solution to truncation
+order. The smoothstep **clamps its result as well as its argument
+(measured in step 5)**: the polynomial has a triple root at `s = 1`, and
+its Horner form at `s = 1 − 2⁻⁵³` returns `1 + 1.3e−15`, so without the
+clamp `w` would exceed one just inside `r_1` and amplify `F` where this
+section says the equations are untouched.
+
+`r_0` is chosen where the analytic
 solution is still moderate — `|h| ≲ 10`, a fraction of the horizon
 radius — so that `u_exact` and `F(u_exact)` are well within range
 throughout the layer; inside `r_0` the analytic solution may be
@@ -850,6 +948,32 @@ kernel — and the refinement indicator — masks the whole interior
 be reported as one or refined for its own sake. The apparent horizon
 lies outside `r_1` by the margin, and so must the interpolation
 footprint of the horizon finder (checked).
+
+**(Implemented in step 5.)** Three things the writing of the core rule
+settled, each stated where it is made in `src/interior.jl`:
+
+- **At the center the ray is undefined and `+ẑ` is taken
+  (proposed in step 5)**. It is not an arbitrary tie-break: the harmonic
+  chart is singular on the disk `z = 0, x² + y² ≤ a²` and regular on the
+  axis, so the axis is the direction whose value is safest to smear over
+  a ball.
+- **The rule is applied by *every* path that writes the analytic solution
+  onto the grid**, not only by the initial data: the error reference, the
+  `:pasted` limiter, the Dirichlet hook (where it is the identity, the
+  core being nowhere near the boundary) — and the **gauge-source
+  sampling**, which is where leaving it out bit. `H^a = −Γ^a[g_exact]` is
+  sampled at every owned point including the core, and at the center
+  `KerrSchild`'s `k^i = (…, z/r)` divides by zero. The right-hand side
+  never reads it there, because the kernel branches on the core first;
+  the constraint monitors do, and what they then report is `NaN`
+  (fixed in step 5).
+- **A masked slot is written through a branch, not multiplied by zero
+  (fixed in step 5).** Step 4's kernels wrote `keep * value` with `keep`
+  a `1`/`0`; that is the same number for every mask that exists when
+  nothing is masked, and it is not the same number once the interior is,
+  because `0 · NaN = NaN`. This is `CLAUDE.md`'s trap met in the
+  monitors rather than in the right-hand side, and it is the one place
+  where a correct-looking multiplication had to become an `if`.
 
 **Three variants, one switch** (G4 measures all three on the static
 hole, the first two on the moving one): `:damped` — `(INTERIOR)` as
@@ -921,6 +1045,42 @@ builds `Π` from the *discrete* gradients so that a static solution has
 `∂_t g = 0` to roundoff; that is kept as a **post-pass option** after the
 cycle converges, and G4 measures whether it changes the stationarity
 error of a hole visibly **(predicted: not beyond the first chunk)**.
+
+**(Measured in step 5**, `discrete_gradient_momentum!`.**)** The
+prediction is right, and the reason is worth stating because it is not
+that the post-pass fails. Inverting `∂_t g = β^i ∂_i g + (α/√γ)Π` for
+`Π` with the *scheme's own* `D_i` makes the **first** evolution
+equation's residual roundoff on a static background: on Kerr-Schild
+`a = 0` at `q = 2` the worst `|∂_t h|` over the evolved region falls from
+**1.25e−2** to **2.2e−16** with `ε_KO = 0`, which is exactly GHSO2's
+claim and is an identity, not a coincidence — the post-pass subtracts the
+same operator the kernel adds back. The **second** equation is untouched:
+`|∂_tΠ|` is `1.50e−1` before and `9.14e−2` after, a change of the same
+order as itself, and it is `∂_tΠ` that dominates. With the dissipation on
+(`ε_KO = 1/2`) even the first equation keeps a residual, because the
+Kreiss–Oliger term is `O(h^{q+1})` and is not part of the inversion:
+`2.10e−2` against `8.47e−3`. So the post-pass buys the momentum
+constraint's own equation exactly and the run nothing measurable, which
+is what "not beyond the first chunk" meant.
+
+**The hole cases** (added in step 5) are `kerr_schild_case` and
+`harmonic_kerr_case` over a shared `hole_case`: a Dirichlet box, the
+layer's two radii and the variant, GHSO2's recipe (`ε_KO = 1/2`,
+`γ0 ≈ 1/M`) as **their** defaults and nobody else's, and the chunk. The
+resolution a hole needs follows from the two radius requirements
+together, `r_h,min ≥ (m + 2G + 2)·h + r_0`, and therefore from the
+horizon's *smallest coordinate radius* — which is `2 M` for Kerr-Schild
+at `a = 0`, `M` for the harmonic chart at `a = 0` and `0.44 M` at
+`a = 9/10`. Kerr-Schild is thus the cheapest hole to put on a mesh by a
+factor of eight in points, which is why it and not the harmonic chart is
+the one the suite runs; it is also the one with a sampled gauge source,
+so the cheap case is the one that exercises the `Hsrc` path under a hole.
+`r_0` is where `|h| ≲ 10`: **`0.2 M`** for Kerr-Schild `a = 0`,
+**`0.4 M`** for harmonic `a = 0`, and — the surprise — anywhere at all
+for harmonic `a = 9/10`, whose `|h|` is between 10 and 12 from `r = 2 M`
+all the way in to `0.05 M`, the chart being singular on the ring and not
+at the origin. The spinning hole is the gentle one in amplitude and the
+expensive one in resolution.
 
 **The background is evaluated inside kernels** (decided, and a
 dependency risk). The interior's `u_exact` is needed at every RHS
@@ -1029,6 +1189,23 @@ then compared against the uniform-fine reference in TreeWave's manner
 (the tracked pulse against `uniform_pulse`). Both are needed: the frozen
 hierarchy measures the scheme, the adaptive run measures the indicator.
 
+**(Implemented in step 5**, as `hole_forest` in `initialdata.jl`.**)**
+Before the indicator exists there is nothing for it to have chosen, so
+the frozen hierarchy is built by hand: one shell radius per refinement
+level, each level refining the blocks of the level below whose extent
+reaches within that radius of the hole's center. Which blocks are
+refined therefore depends on the radii, the root brick and the number of
+levels **and on nothing else** — so raising `N` halves every spacing and
+leaves the layout exactly where it was, which is the whole content of the
+protocol above. Two things it has to get right and one it must not
+pretend to be: the shells must *nest* (a shell wider than its parent's
+would ask for a fine block outside the coarser refined region, and 2:1
+balance would answer by refining everything between them, which the
+constructor refuses); the innermost shell must contain the sphere `r_1`
+whole, or the coarsest blocks touching it are a level up and it is
+*their* spacing the two radius requirements are stated at; and it is not
+the refinement mechanism, which is step 6's.
+
 **What follows for the hole.** The indicator follows the moving hole on
 its own, and its center of refinement is a measurement to be compared
 with the analytic center — a disagreement of more than a few finest
@@ -1064,6 +1241,34 @@ ceiling. Every chunk is a fresh solve, for TreeAMR's reason (the state
 vector changes length and meaning). What the loop returns is what the
 tests assert: the analysis record per chunk, and through `observer`
 whatever the viewer wants.
+
+**(Implemented in step 5**, `src/driver.jl`, without the regrid.**)** The
+loop exists and runs the static hole; `evolve!` takes `regrid = false`
+and **refuses `true` by name** until step 6 supplies the indicator, for
+the reason the refusal says: this section's loop flags with the masked
+Löhner verdict and with nothing else, and a driver that regridded on some
+other criterion now would be a second refinement mechanism to delete
+later. For the same reason `evolve!` takes the **forest** as a keyword
+rather than building one: step 5's mesh is the frozen hierarchy of
+`hole_forest`, and step 6's is what `adapt_to_initial_data!` produces
+from the indicator. Three things the writing settled:
+
+- **`ρ_max` is what makes a chunk a restart even without a regrid.** It
+  is `1/dt` and `dt` is measured per chunk, so the interior the kernel
+  closes over is rebuilt at the top of every chunk (`with_interior`),
+  which shares the field sets, the schedule and the **sampled gauge
+  source** rather than rebuilding the problem — re-sampling `H_a` is the
+  most expensive setup phase there is and nothing about a new `ρ_max`
+  invalidates it.
+- **The record's first row is `t = 0`**, before anything has been
+  integrated, so that "the error grew from zero" is a statement a test
+  can check rather than assume; `nchunks` is the number of rows after it.
+- **The CFL recheck is `check_cfl`, and it throws** (`CODE.md`, "The time
+  step": *throw, do not warn*). It is a detector and not a guard — the
+  chunk has already been integrated — and the remedy is a shorter chunk
+  or a smaller `cfl`. On the static hole `λ_max` is `1.671` for
+  Kerr-Schild `a = 0` and does not move between chunks, so the recheck
+  has never fired; it exists for G5, where the hole crosses the mesh.
 
 ## Time integration
 
@@ -1167,7 +1372,39 @@ things the writing settled, each stated where it is made in that file:
 - **`diag` now has ten slots**: the speed, `C_a` (four), `ℋ`, `ℳ_i`
   (three) and the mask indicator, with `C_a` and `ℳ_i` contiguous because
   `block_mapreduce` reduces a contiguous range of variables and nothing
-  else.
+  else. **(Thirteen from step 5**: the masked error, the interior
+  residual and the gauge drift, appended rather than inserted, because
+  the two contiguous runs above must not move.**)**
+
+**(Implemented and measured in step 5.)** The error rows are one more
+kernel — the state, the analytic solution, no stencil and no ghosts, so
+it costs what the speed kernel costs plus one forward-mode dual pass per
+point — and three decisions:
+
+- **The error slots hold a magnitude, not twenty components
+  (proposed in step 5).** The table above says "`|u − u_exact|` per
+  component into `diag`", which would be twenty more slots, more than
+  tripling a field set that is `nvars × (N+1)³ × nblocks`, for a number
+  the record reads as one norm. What is stored is the pointwise Euclidean
+  magnitude over the twenty components, whose volume-weighted L2 *is* the
+  L2 norm of the whole state error; a per-component split, if a component
+  is ever in question, is a targeted kernel and not a permanent cost on
+  every run.
+- **The interior residual and the gauge drift are L∞ over their own
+  regions**, and each is written by the same kernel into its own slot with
+  its own region test: the residual over the layer `r_0 ≤ r < r_1`, the
+  drift over a shell at the horizon. An L2 over a region the *mask*
+  excludes would have to be divided by that region's volume, which the
+  mask's count does not hold; the number those rows are read for is the
+  worst point.
+- **The gauge drift's shell is `[r_h,min, r_h,max + (r_1 − r_0)]`
+  (proposed in step 5).** `CODE.md` asked for "the drift of `h_tt` at the
+  horizon" and did not say over what set. The outer margin is the layer's
+  own width rather than a number chosen for the occasion: it is the only
+  length in the case that is set by the hole and known to be resolved.
+  A general `ShellMask` does the same job for any norm, which is how
+  the three interior variants are compared over "the `G` points outside
+  `r_1`".
 
 The numbers: on flat space both monitors are **exactly zero** at every
 order; on the six backgrounds of the table, with *analytic* second
@@ -1243,6 +1480,18 @@ break it:
   What this bit-identity does *not* mean is under
   [Measured results](#measured-results): the same compiled code, at the
   same call site, at a different thread count, and nothing more.
+  **(Amended in step 5:** the workload stays the gauge wave and does
+  *not* grow a chunk of a hole with its layer. The sentence above was
+  written before the interior existed and promised one; what the interior
+  adds is a per-point branch inside one `map_blocks!` kernel, two more
+  `map_blocks!` launches (the error kernel and the `:pasted` limiter) and
+  three more `masked_norms` folds — no new parallel *structure*, and the
+  workload already exercises a `map_blocks!` kernel, a masked fold and
+  `max_speed`. What it would cost is a second background's dual passes and
+  two more kernel specialisations, in each of the two subprocesses the
+  test runs, for a claim the existing lines already make. The right time
+  to reconsider is G5, where the hole *moves* and the refinement follows
+  it — that is a new flagging pass, which is new parallel structure.**)**
 - **`Float64` on Symmetry's H200 is the requirement** (decided in
   review). It is the machine the proof of concept runs on, and the
   precision it runs in; every device claim below is made there first.
@@ -1353,18 +1602,18 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host (amended in step 0) |
 | `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source` (all added in step 1), and `metric_derivatives_along` — the same chain rule along **one** direction, returning `∂√γ` and `∂γ^{jk}` rather than the assembled `∂(α√γγ^{jk})`, which is what the constraint monitors need along *time* (added in step 4) — and `_pairindex`, the packed slot of a symmetric index pair, so that the file has one packing convention used on two index pairs; `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
-| `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the four `Val`s and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in |
+| `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the **five** `Val`s and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. Step 5 split the streaming body out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and added `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3) |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook |
-| `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the `:pasted` limiter |
-| `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builder — uniform, or with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
+| `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii, and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes |
+| `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4), or `hole_forest`'s nested shells around a hole (added in step 5, **here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
 | `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate step 5's interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` (added in step 4) |
 | `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch` |
-| `src/driver.jl` | `GHCase`, `evolve!`, the analysis record per chunk, `observer` |
+| `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)** |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
@@ -1503,6 +1752,33 @@ refinement level, short times.
   `Π` post-pass measured; regrids on the static hole changing nothing
   after the cycle; the same run in `Float32` on `CPU()` reaching the
   same mesh.
+  **G4a (step 5) is done**: `interior.jl`, `driver.jl`, the layer with
+  its three variants, the radius assertions, the per-chunk analysis
+  record, the masked error at order `q` on a frozen hierarchy, the
+  `Float32` row, the drift and the `Π` post-pass — the numbers are under
+  [Measured results](#measured-results). The indicator (G4b) is step 6
+  and the horizon (G4c) is step 7; the milestone is marked when they are
+  in. Two sentences of the acceptance needed amending where they are
+  stated rather than only here. **"In a Dirichlet box of half-width
+  `≥ 20 M`" is a statement about a production run and not about a test**:
+  the two radius requirements need `r_h,min ≥ (m + 2G + 2)·h`, so a hole
+  costs about `(m + 2G + 2)³` finest-level points *per `r_h,min` cubed*
+  whatever the box is, and a box of `20 M` with a uniform mesh at that
+  spacing is `10⁸` points. The boundary is exact, so a small box costs
+  accuracy and not validity; the suite runs `5/2 M` and records it.
+  And **the three variants are separated by the interior residual and by
+  what survives to `t = 50 M`, not by the constraints outside `r_1`** —
+  see the numbers; the prediction that `:damped` is the smaller of the two
+  violations holds against `:pasted` and is a 3 % effect, while the
+  residual separates `:frozen` from the other two by more than an order of
+  magnitude and the long run separates all three: only `:damped` reaches
+  `50 M`. A third sentence needed amending, in
+  [the interior](#the-interior-a-pointwise-damping-layer) where it is
+  stated: **`a = 9/10` in the harmonic chart is refused**, because the
+  chart's singular disk has coordinate radius `a` and the horizon's
+  smallest coordinate radius is `√(M² − a²)`, so no ball contains the one
+  and fits inside the other. That is G5's case, and it is the open
+  question step 5 leaves.
 - **G5 — A hole that moves.** Boosted (`|v| ≈ 0.3`), spinning
   (`a = 0.9`) Kerr in harmonic coordinates crossing the box.
   *Accept:* the indicator's refinement follows the hole, its centroid
@@ -1811,6 +2087,232 @@ devices](#precision-threads-devices): six digest lines identical character
 for character at one and four threads, and `Float32` reproducing the gauge
 wave's rate and its error at the two coarsest resolutions.
 
+**G4a (step 5), the interior and the driver.** The suite is
+**2486 assertions in 11m51** at one thread and **8m33** at four,
+on the development machine (Apple silicon, 12 CPU threads, Julia 1.13.0),
+up from step 4's 2144 in 8m40. A clean archive with no `Manifest.toml`
+resolves the two pins from GitHub `main`, instantiates and passes with the
+same count. Where the growth went:
+
+| file | 1 thread | what it pays for |
+|---|---|---|
+| `driver_tests.jl` | **2m08** | five static-hole runs: the record, the order sweep at three resolutions, the three variants, the drift, and the `Π` post-pass |
+| `interior_tests.jl` | **15 s** | the profiles, the core rule, the masks and the radius refusals (1.5 s), and one right-hand-side evaluation with the layer on a mesh (13.5 s) |
+| `type_tests.jl` | **+23 s** | the whole hole pipeline again at `Float32` |
+
+`driver_tests.jl` is now the suite's most expensive file and the third
+whose cost is *arithmetic* rather than compilation. That is a hole being a
+hole: `CODE.md`'s two radius requirements set the spacing from the
+horizon's smallest coordinate radius, and a mesh that satisfies them at
+`q = 2` is 61 440 points before anything is evolved. Before adding a run,
+price it — and prefer `test/hole_runs.jl`, which is not in the suite.
+
+**What a hole costs, before anything else.** The two radius requirements
+together are `r_h,min ≥ (m + 2G + 2)·h + r_0`, so the finest spacing is
+set by the horizon's *smallest coordinate radius* and by nothing about
+the exterior. At the default margin `m = 8` the coefficient
+`m + 2G + 2` is **14** at `q = 2` and **16** at `q = 4`, and the finest
+level has also to cover the sphere `r_1` whole. Taking `r_0` where
+`|h| ≈ 10`, that is, at `q = 2`: `h ≲ M/8` for Kerr-Schild at `a = 0`,
+`h ≲ M/23` for harmonic Kerr at `a = 0`, and `h ≲ M/36` for harmonic Kerr
+at `a = 9/10`. That factor of four and a half between the first and the
+last — a factor of ninety in points — is why the suite's hole is
+Kerr-Schild — which is
+also the one with a *sampled gauge source*, so the cheap case is the one
+that puts `Hsrc` under a hole. The amplitude, sampled along a ray that misses
+the equatorial plane, runs the other way: `|h|` reaches 10 at `r = 0.2 M`
+in Kerr-Schild at `a = 0`, at `0.4 M` in the harmonic chart at `a = 0`,
+and **nowhere** at `a = 9/10`, where along such a ray it stays between 10
+and 12 from `2 M` in to `0.05 M`. That last number is a trap and is the
+reason the paragraph says "along a ray": at `a = 9/10` the chart is not
+singular at the origin, it is singular on the **equatorial disk of
+coordinate radius `a`**, and a ray that misses the disk never sees it.
+On a grid, which does not miss it, `r_0` has to be larger than `|a|` —
+which is the finding under
+[The interior](#the-interior-a-pointwise-damping-layer) and what stops
+the harmonic chart at `a = 9/10` altogether.
+
+**The order of the scheme with the layer in place.** Kerr-Schild `a = 0`
+in a Dirichlet box of half-width `5/2 M`, on the frozen hierarchy of
+`hole_forest` — 120 leaves, 56 at level 2 around 64 at level 3, so the
+sphere `r_1` lies wholly inside the finest level and there is a
+coarse-fine face between it and the outer half of the box — with
+`r_0 = 2/5`, `r_1 = 23/20`, the default margin `m = 8`, `ε_KO = 1/2`,
+`γ0` the Gaussian profile and the `:damped` interior. `N` is raised with
+the block layout held fixed, so every spacing shrinks and nothing else
+moves. The error is the **masked** one: over `r ≥ r_1`, where the
+equations are the Einstein equations and nothing else.
+
+| `q` | `t_end` | `N` | `h` | masked L2 | masked L∞ | `C_a` L2 | layer residual |
+|---|---|---|---|---|---|---|---|
+| 2 | `3/20 M` | 6 | 5/48 | 6.381e−3 | 7.870e−2 | 6.290e−3 | 1.380e−1 |
+| 2 | | 8 | 5/64 | 3.362e−3 | 3.549e−2 | 3.527e−3 | 6.210e−2 |
+| 2 | | 10 | 1/16 | 2.115e−3 | 1.942e−2 | 2.256e−3 | 3.288e−2 |
+| | | **rate** | | **2.16** | **2.74** | **2.01** | **2.81** |
+| 4 | `1/4 M` | 8 | 5/64 | 5.464e−4 | 1.098e−2 | 1.630e−4 | 3.483e−2 |
+| 4 | | 10 | 1/16 | 1.996e−4 | 3.774e−3 | 6.387e−5 | 1.950e−2 |
+| 4 | | 12 | 5/96 | 9.021e−5 | 1.605e−3 | 3.033e−5 | 1.162e−2 |
+| | | **rate** | | **4.45** | **4.74** | **4.15** | **2.70** |
+
+Both rows are order `q` in the error and in the constraint, which is the
+claim; the `q = 2` row is the suite's (`test/driver_tests.jl`) and the
+`q = 4` row is `test/hole_runs.jl`'s. Two things in the table are not the
+headline and are worth naming. The **layer residual** converges at about
+`2.7`–`2.8` at *both* orders, which is what it should do: it is not a
+truncation error of the scheme but the balance `ρ · residual ≈ w · F`,
+and `ρ_max = 1/dt ∝ 1/h` while `F`'s truncation error is `O(h^q)` — the
+`q = 2` row is `q + 1` because of the `1/h` and the `q = 4` row is short
+of `q + 1` because at `h = 5/96` the layer is resolving a metric whose
+own gradients are the steepest thing on the mesh. And the **masked
+against unmasked** error: at `q = 2`, `N = 8`, masking the interior takes
+the L2 from `5.052e−3` to `3.362e−3` and the L∞ from `6.210e−2` to
+`3.549e−2` — the worst point of the whole domain is inside the layer,
+every time, which is the arithmetic reason the mask is not optional.
+
+**What the layer costs: `CODE.md`'s "a few percent of an RHS",
+confirmed.** The cost is one forward-mode dual pass through the
+background per *layer* point per evaluation, and it is measured on the
+same mesh and the same state with and without the interior
+(`INT = :none`, which evaluates `F` everywhere and `u_exact` nowhere):
+
+| `q` | `N` | points | in the layer | ns/point without | with | share |
+|---|---|---|---|---|---|---|
+| 4 | 12 | 207 360 | 43 162 (20.8 %) | 1142 | 1193 | **4.5 %** |
+| 2 | 8 | 61 440 | 12 714 (20.7 %) | — | — | **5.9 %** |
+
+— 246 ns per layer point at `q = 4` on four threads, which is GHSO2's
+"about a microsecond on a CPU" divided by the cores. The share is
+slightly *larger* at `q = 2` than at `q = 4` and for the obvious reason:
+the numerator is the same dual pass at both orders and the denominator is
+a right-hand side whose cost per point grows with `q`. Both are a few
+percent, and a fifth of the points paying for the analytic solution is
+what both numbers are.
+
+**The three interior variants.** `CODE.md` names three and predicts that
+`:damped` and `:pasted` both hold the static hole with constraints at
+truncation outside `r_1`, `:damped` with the smaller violation in the `G`
+points outside `r_1`, and that `:frozen` piles compressed features up
+against the freezing radius. On the fixture above (`q = 2`, `N = 8`,
+`t = 1/10 M`), with the shell of `G = 2` spacings just outside `r_1` —
+6104 points — read through a `ShellMask`:
+
+| variant | layer residual (L∞) | `C_a` L2 in the shell | `C_a` L∞ in the shell | masked error L2 |
+|---|---|---|---|---|
+| `:damped` | **6.204e−2** | 1.1054e−2 | 6.956e−2 | 2.2688e−3 |
+| `:pasted` | **0** (by construction) | 1.1360e−2 | 7.083e−2 | 2.3681e−3 |
+| `:frozen` | **6.753e−1** | 1.1062e−2 | 6.955e−2 | 2.2583e−3 |
+
+**The prediction is right about the residual and nearly silent about the
+constraints.** `:frozen`'s residual is **11 times** `:damped`'s after a
+tenth of an `M` and grows linearly with time — `7.8e−1, 1.63, 2.56, 3.56`
+at `t = 0.05, 0.1, 0.15, 0.2 M` on a coarser mesh, against `:damped`'s
+`2.42e−1, 2.56e−1, 2.57e−1, 2.57e−1`, which *saturates* after the first
+chunk. That
+is exactly the difference between a sticky wall and a sink, and it is the
+measurement the default rests on. The constraint norms in the `G` points
+outside `r_1`, on the other hand, separate the three by **3 %**:
+`:damped` is below `:pasted` as predicted, and `:frozen` is
+indistinguishable from `:damped` there over this time. So the acceptance
+criterion "their constraint norms in the `G` points outside `r_1`" is
+measured and recorded, and it is *not* what chooses the default — the
+residual is (amended in step 5). **`:damped` is confirmed as the
+default.**
+
+**To `t = 50 M`, and the prediction that was wrong.** The same
+configuration at `q = 2`, `N = 8` (`h = 5/64`, 120 leaves, `cfl = 1/5`,
+`chunk = 1 M`, 5350 steps, 19 minutes at four threads), run to `t = 50 M`
+for each variant:
+
+| variant | reaches | masked L2 at the end | `C_a` L2 | layer residual |
+|---|---|---|---|---|
+| `:damped` | **`50 M`** | 1.604e−1 | 3.951e−2 | 1.387 |
+| `:pasted` | `17 M`, then a degenerate metric | — | — | — |
+| `:frozen` | `13 M`, then a degenerate metric | — | — | — |
+
+`CODE.md` predicted that "`:damped` and `:pasted` both hold the static
+hole to `t = 50 M` … `:frozen` holds the static hole only with
+`ε_KO ≈ 0.5` and a wide ramp". **Half of that is wrong and the half that
+matters is right (measured in step 5):** with `ε_KO = 1/2` and the
+Gaussian `γ0`, *only* `:damped` reaches `t = 50 M`. `:pasted` fails at
+`17 M` and `:frozen` at `13 M`, both by the same mechanism — `√(det γ)`
+of a state that is no longer a metric — and both inside the layer. That
+is the strongest evidence for the default there is: the hard paste's
+truncation-order mismatch at a *surface* is not a small perturbation of
+the smooth layer, it is a kink that the stencils straddling it feed back
+into the interior until the metric degenerates. The same mesh one
+resolution coarser (`N = 6`, `h = 5/48`) does not hold even `:damped`,
+which fails at `21 M`: **26 points per `M` holds this hole at `q = 2` and
+19 does not**, and that is a resolution statement about a second-order
+scheme and not about the layer.
+
+What "reaches `t = 50 M`" does *not* mean is that the answer is good. The
+masked L2 error at the end is `1.6e−1` against `3.4e−3` at `t = 0.15 M`,
+and the interior residual is `1.4` — this is `q = 2` at 26 points per `M`,
+where fifty crossings of accumulated truncation error is a large number.
+The claim the row supports is *stability*, and the order claims are the
+table above.
+
+**The other two charts.** The suite's hole is Kerr-Schild at `a = 0`
+because it is the cheapest; `test/hole_runs.jl` runs the two the
+resolution argument above says are expensive, at `q = 2` to `t = 1/5 M`:
+
+| background | `r_h,min` | `r_sing` | `r_0` | `r_1` | leaves | `h` | masked L2 | `C_a` L2 | residual |
+|---|---|---|---|---|---|---|---|---|---|
+| `Harmonic(1, 0)` | 1.000 | 0 | 0.20 | 0.67 | 120 | 5/64 | 1.679e−1 | 1.736e−3 | 7.92e+1 |
+| `KerrSchild(1, 9/10)` | 1.436 | 0.900 | 0.95 | 1.25 | 1128 | 5/128 | 2.438e−3 | 1.118e−3 | 2.31e−1 |
+| `Harmonic(1, 9/10)` | 0.436 | 0.900 | — | — | — | — | **refused** | | |
+
+Both runs stay finite and both constraint norms are at the same `1e−3` as
+the suite's, which is the claim. The **harmonic hole at `a = 0` is badly
+under-resolved at this spacing and says so**: its `r_0` has to sit at
+`0.2 M`, where `|h| ≈ 29` rather than `CODE.md`'s `≲ 10`, because
+`r_h,min = M` leaves no room for a larger one at `h = 5/64` — and the
+layer's residual is `79`, three orders above the evolved region's error.
+That is the guidance in "The interior" being right: `r_0` where the
+solution is still moderate is not a nicety, and the harmonic chart at
+`a = 0` needs `h ≈ M/23` before it has one. The spinning hole in
+Kerr-Schild, at `h = 5/128` and 1128 leaves, has a residual of `0.23` and
+is the well-resolved row of the three.
+
+**The gauge drift.** GHSO2 measured a slow, constraint-preserving drift
+of the excised hole under prescribed sources at `≈ 0.14/M`, and `CODE.md`
+predicts that exact interior and boundary data lower it without removing
+it. Measured as the L∞ of `|h_tt − h_tt,exact|` over the shell from the
+horizon's smallest coordinate radius to its largest plus the layer's
+width — `[2 M, 2.75 M]` for Kerr-Schild `a = 0` with this layer — against
+time, with the initial data exact so the fit goes through the origin: at
+`q = 2`, `N = 8`, over `t = 0 … 1/4 M`, the rate is **1.95e−3 / M**.
+Over the `t = 50 M` run (`:damped`, `q = 2`, `N = 8`) the drift reaches
+`4.077e−3` at the end, a rate of about **8e−5 / M** averaged over fifty
+crossings — two thousand times below GHSO2's `0.14/M` on the excised
+hole. **`CODE.md`'s prediction is confirmed in its strong form
+(measured in step 5):** exact interior *and* boundary data do not merely
+lower the drift, they leave it at the truncation error's level, and the
+number that is measured here is the truncation error and not a gauge
+mode. The short-run rate is larger than the long-run one because the
+drift saturates rather than growing, which is what a gauge mode would not
+do.
+
+**`Float32`.** The same static-hole run — `q = 2`, `N = 8`, `t = 1/10 M`,
+the `:damped` layer, the sampled gauge source, the Gaussian `γ0` — runs
+end to end at `Float32` on `CPU()` and reaches the `Float64` answer to
+**five significant figures**: masked L2 `2.268762e−3` against
+`2.268849e−3`, masked L∞ `2.659585e−2` against `2.659472e−2`, the layer
+residual `6.204157e−2` against `6.204212e−2`, `λ_max` `1.6709520` against
+`1.6709517`, and the same step count. The gauge constraint — a difference
+of large terms near a hole, which is where `Float32` has least to give —
+agrees to `3.5e−3` against `3.5e−3`. This is the sharpest `Float32`
+result in the package, and it is the offset identities of
+[G1](#milestones) earning their keep: `metric_quantities` takes
+`g^{ab} − η^{ab}` from GHSO2's identity rather than from `inv(g) − η`,
+whose `Float32` error is `4.2e−3` against the identity's `1.4e−7`.
+
+**What the record is.** Every number the driver writes down is
+`Float64` at every element type (`precision.jl`'s `tofloat64`), so a
+`Float32` run's analysis time series is comparable with a `Float64` one
+without a conversion at every call site; the *arithmetic* is in the type
+the caller named, which the agreement above is the test of.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -1889,6 +2391,17 @@ OrdinaryDiffEq's RK4 for time integration; the analysis quantities as
 part of the deliverable; an error indicator for refinement; `Float64`
 on the H200 as the device requirement; no checkpointing; the inherited
 documents copied into `notes/`.
+
+**Opened in step 5, and the one thing that stands between this package
+and its own proof of concept: a spherical frozen core cannot be used with
+`Harmonic(M, 9/10)`.** The chart's singular set is the equatorial disk of
+coordinate radius `a`, the horizon's smallest coordinate radius is
+`√(M² − a²)`, and a ball fits between them only where `a < M/√2 ≈ 0.707`.
+The two candidate answers — key the interior on the chart's own
+spheroidal radius `R`, or run G5 at `a = 0.7` — are written out under
+[The interior](#the-interior-a-pointwise-damping-layer). Step 8 has to
+pick one before it can run the case this document is named for; nothing
+in G4 depends on it, and Kerr-Schild at `a = 9/10` runs today.
 
 Still proposed, to be confirmed or amended by the milestones that
 first touch them:

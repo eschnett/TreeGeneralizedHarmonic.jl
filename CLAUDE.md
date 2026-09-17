@@ -45,9 +45,10 @@ Three rules follow from `CODE.md` and govern every change here:
 
 ## Current state
 
-**G0–G3 are done — the right-hand side runs on a two-level mesh at the
-interface order `CODE.md` predicts, both constraint monitors converge, and
-the run is bit-identical across thread counts. A black hole is next.**
+**G0–G3 are done and G4a with them — there is a black hole on the mesh:
+the interior damping layer, the driver with its per-chunk analysis
+record, and the masked error converging at order `q` on a frozen
+hierarchy around a static hole. The refinement indicator (G4b) is next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -56,9 +57,8 @@ as part of the deliverable, an error indicator for refinement, `Float64`
 on Symmetry's H200 as the device requirement, no checkpointing, GPU
 kernel efficiency deferred to a research project. `PLAN.md` breaks the
 milestones G0–G6 into steps 0–10, each a brief for one agent with a fresh
-context (see its "Running a step as an agent"); step 5 (the interior
-damping layer and the driver) is next. `notes/` holds the inherited
-documents.
+context (see its "Running a step as an agent"); step 6 (the refinement
+indicator) is next. `notes/` holds the inherited documents.
 
 What exists in `src/` is the module shell, `precision.jl` (the `Base`
 bridges for software floating-point types), `device.jl` (`to_backend`,
@@ -85,8 +85,22 @@ tensor assembled rather than reduced), the `AllPoints` mask and the
 `pointwise.jl` (the same chain rule along **one** direction, which is how
 the monitors reach `∂_t α`, `∂_t β^j` and `∂_t √γ`) and a
 `refined = true` forest to `initialdata.jl`.
-There is no interior, no refinement, no driver and no analysis record:
-those are steps 5–7.
+
+From step 5 there is a **black hole**: `interior.jl` (the `C²` profiles
+`w` and `ρ`, the core rule, `HoleCenter`, the horizon's analytic
+coordinate radii, the `InteriorMask` and `ShellMask` every norm takes,
+and `check_interior_radii` — the two placement bounds, asserted wherever
+a problem is built and therefore after every regrid) and `driver.jl`
+(`evolve!`, the chunked loop with the CFL recheck and the per-chunk
+analysis record, `observer`, and GHSO2's discrete-gradient `Π`
+post-pass). `evolution.jl` grew the `(INTERIOR)` term, a fifth `Val`
+carrying the interior *variant*, and the `:pasted` variant's
+`step_limiter!`; `constraints.jl` grew the error kernel and
+`error_norms`; `gauge.jl` grew the position-dependent `γ0` profile;
+`initialdata.jl` grew `hole_forest` and the two hole cases.
+There is no refinement indicator, no horizon finder and no I/O: those are
+steps 6, 7 and 9. `evolve!` refuses `regrid = true` by name until the
+indicator exists.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -107,7 +121,15 @@ integrator loop and `driver.jl` is step 5's — and step 4's four:
 data and against the mesh), `interface_tests.jl` (the interface-order
 table on the two-level mesh), `type_tests.jl` (`Float32` end to end,
 `Float32x2` for the algebra) and `threading_tests.jl` over the standalone
-`thread_workload.jl`.
+`thread_workload.jl`; and step 5's two — `interior_tests.jl` (the
+profiles, the core rule, the masks, the radius assertions firing, and one
+right-hand-side evaluation with the layer on a mesh) and
+`driver_tests.jl` (the runs: the record, the order on the frozen
+hierarchy, the three variants, the drift, the `Π` post-pass) — over the
+hole fixture in `evolution_cases.jl`. **`test/hole_runs.jl` is a
+standalone script, not part of the suite**: the `t = 50 M` runs, `q = 4`
+and the two harmonic charts are minutes rather than seconds, and its
+numbers are in `CODE.md` with the command that produced them.
 `Project.toml` carries the `[sources]` pins and CI is in place. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and no remote.
@@ -162,6 +184,17 @@ bisected — `test/threading_tests.jl` starts exactly this in a subprocess:
 
 ```bash
 julia --project=. -t 4 test/thread_workload.jl
+```
+
+The black-hole runs that are too long for the suite — the default margin
+`m = 8` at `q = 4`, the `t = 50 M` run of all three interior variants,
+and the two harmonic charts — are a **script**, run by hand, with its
+numbers recorded in `CODE.md` under "Measured results" (added in step 5).
+It takes an optional list of sections (`order`, `long`, `charts`):
+
+```bash
+julia --project=. --threads=4 test/hole_runs.jl
+julia --project=. --threads=4 test/hole_runs.jl order
 ```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
@@ -229,12 +262,26 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
 - **The interior is masked in every norm and in the indicator.**
   Constraint, error and speed kernels and the Löhner indicator write
   zero for `r < r_1`. If a number looks wrong near the hole, check the
-  mask before the physics. The plumbing is in place from step 4: a kernel
-  takes a `mask`, asks `is_evolved(mask, x)`, writes zero where it says no
-  and a `1`/`0` indicator into `DIAG_MASK`; `masked_norms` divides by the
-  **evolved** volume, not the domain's, so masking a region out does not
-  make the number smaller by diluting it with zeros. Step 5's `Interior`
-  adds the method; `AllPoints` is the trivial one.
+  mask before the physics. **Write the masked slot through a branch, not
+  as `keep * value`** (step 5): the masked region may hold a `NaN`, and
+  `0 · NaN = NaN` — the same trap as the frozen core's, met in the
+  monitors.
+- **Every path that puts the analytic solution on the grid goes through
+  the core rule**, `core_position` — the initial data, the error
+  reference, the `:pasted` limiter, the Dirichlet hook *and the
+  gauge-source sample*. The last is the one that was forgotten once
+  (step 5): `H^a = −Γ^a[g_exact]` is sampled at every owned point
+  including the center, where `KerrSchild`'s `k^i` divides by zero, and
+  the `NaN` surfaces in the constraint monitors and nowhere else.
+- **The mask plumbing.** A kernel takes a `mask`, asks
+  `is_evolved(mask, x)`, writes zero where it says no and a `1`/`0`
+  indicator into `DIAG_MASK`; `masked_norms` divides by the **evolved**
+  volume, not the domain's, so masking a region out does not make the
+  number smaller by diluting it with zeros. `AllPoints` is the trivial
+  mask, `InteriorMask` is `r ≥ r_1` at that call's `t`, and `ShellMask`
+  is a band — which is how the three interior variants are compared over
+  "the `G` points outside `r_1`" and how the gauge drift is read at the
+  horizon.
 - **The `diag` slots are a contiguous-range interface.** `block_mapreduce`
   reduces an integer or a *contiguous* range of variables and refuses
   anything else — a device cannot be handed an arbitrary index vector cell
@@ -264,6 +311,15 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   ghost point. A study on a refined mesh costs roughly four times what the
   same study costs uniform, which is why `interface_tests.jl` runs an
   eighth of a crossing on `N = 8, 10, 12` and not more.
+- **A spherical frozen core cannot hide Kerr's singularity in the
+  harmonic chart at `a = 0.9`** (found in step 5, and it is the
+  proof-of-concept case). Both Kerr charts are singular on the equatorial
+  **disk** of coordinate radius `|a|`, not at a point, so the core needs
+  `r_0 > |a|`; the placement bound needs `r_0 < r_h,min`, and harmonic
+  Kerr's `r_h,min = √(M²−a²) = 0.436` is smaller than `0.9`. A ball fits
+  only where `a < M/√2`. `check_interior_radii` refuses it by name
+  (`singular_radius`); `CODE.md`'s "Open questions" has the two ways out.
+  Kerr-Schild at `a = 0.9` runs, because `r₊ = 1.436 > 0.9`.
 - **The three interior radii are asserted at every regrid**: `r_1`
   inside the horizon by `m` spacings of the blocks containing it
   (`m = 8` by default, never below `G + 1`); `r_1 − r_0` at least
@@ -317,11 +373,22 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   (`H ≡ 0`) — a boost preserves the harmonic condition. The refusal's
   message says this; do not weaken it.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
-  dissipation" and — from step 5 — "has interior" are `Val` parameters
-  built in `GHProblem`'s constructor. Building them per evaluation
-  recompiles or dispatches dynamically on every RK stage. The price is
-  paid at compile time instead: a test row at a new `q` is a new kernel,
-  which is most of what `evolution_tests.jl`'s 56 s are.
+  dissipation" and — from step 5 — the interior *variant* (`:none`,
+  `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in
+  one parameter) are `Val` parameters built in `GHProblem`'s constructor.
+  Building them per evaluation recompiles or dispatches dynamically on
+  every RK stage. The price is paid at compile time instead: a test row
+  at a new `q` is a new kernel, which is most of what
+  `evolution_tests.jl`'s 56 s are, and each interior variant is another
+  one. The interior itself is rebuilt per chunk anyway, because
+  `ρ_max = 1/dt`; `with_interior` shares the field sets and the sampled
+  gauge source rather than rebuilding the problem, which would re-sample
+  `H_a`.
+- **KernelAbstractions refuses a `return` statement anywhere in a kernel
+  body**, closures included. That is why the streaming right-hand side
+  lives in `gh_rhs_at_point`, a plain `@inline` function: the frozen
+  core's branch has to be an `if` *around* the whole computation, and it
+  cannot be an early exit.
 - **A `@generated` method must not convert to the caller's type.** Its
   generator may only call methods that existed when the generated function
   was *defined*, and this package is precompiled long before a driver loads
