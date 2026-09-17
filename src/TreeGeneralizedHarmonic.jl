@@ -50,8 +50,12 @@ module TreeGeneralizedHarmonic
 
 using TreeAMR
 
+import SpacetimeMetrics
+using KernelAbstractions: @Const, @index, @kernel
 using KernelAbstractions: Backend, CPU, allocate, get_backend
 using LinearAlgebra: det, dot, tr
+using SpacetimeMetrics: AbstractMetric, GaugeWave, Harmonic, KerrSchild,
+                        Minkowski, ShiftedMinkowski, dmetric, gauge_source_grad
 using StaticArrays: SArray, SMatrix, SVector
 
 # Devices
@@ -67,9 +71,27 @@ export gh_node_rhs, gh_node_source, gh_node_rhs_expanded
 export derivative_weights, dissipation_weights, dissipation_rank
 export apply_stencil, apply_mixed_stencil
 
+# Gauge sources
+export isharmonic, isstatic, sample_gauge_source!
+
+# Cases, backgrounds and initial data
+export GHCase, gh_forest
+export minkowski_case, gauge_wave_case, shifted_minkowski_case
+export background_state, state_tuple, state_callback, fill_exact!
+
+# Boundaries
+export dirichlet
+
+# Evolution
+export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate
+
 include("precision.jl")
 include("device.jl")
 include("pointwise.jl")
 include("stencils.jl")
+include("gauge.jl")
+include("initialdata.jl")
+include("boundaries.jl")
+include("evolution.jl")
 
 end
