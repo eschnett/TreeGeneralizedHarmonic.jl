@@ -325,6 +325,30 @@ production codes use them, and G6 measures what they cost on this mesh
 (the interface rule below makes high `q` expensive in a way it is not on
 a unigrid).
 
+`derivative_weights(T, Val(q), Val(m))` returns the weights for **unit
+spacing**, in the offset order `−q/2 … q/2`; the `1/h^m` is the caller's,
+read once per point as a per-block coefficient **(decided in step 2**,
+which is where the formula had to be split between the weights and the
+kernel; `CODE.md` had said only that the weights exist**)**. One weight
+vector therefore serves every refinement level. Both are `@generated`, so
+the `Rational{BigInt}` construction happens while the method compiles and
+what it emits is each weight's exact numerator and denominator as `Int`
+literals with one division between them — an `SVector` a device kernel
+holds in registers, with no rational and no `BigInt` anywhere in it, and at
+`Float64` and `Float32` no division either once LLVM has folded it. The
+conversion is emitted rather than performed in the generator for a reason
+that cost step 2 a debugging session; see [Measured
+results](#measured-results).
+
+The mixed derivative has no weights of its own — it is the product of two
+first-derivative vectors, and the sum over the *second* axis is the inner
+one **(decided in step 2**: the two orders are equal in exact arithmetic
+and differ in the last place in floating point, so which one it is belongs
+to the operator and not to the implementation**)**. Measured in step 2 on
+`exp(sin x)·cos(y/2)`: the tensor product converges at the same rate as
+the one-dimensional first derivative, 2.0, 3.98, 5.95, 7.79 at `q = 2, 4,
+6, 8`.
+
 ### Kreiss–Oliger dissipation
 
 The standard operator of order `2r = q + 2`, per dimension, on all 20
@@ -335,7 +359,21 @@ fields:
 with `h_d` the block's own spacing, so that a refinement level's
 dissipation scales with its resolution and `ε ∈ (0, 1)` is neutral to
 the CFL condition. It is added inside the RHS kernel, read from the
-same ghosted working array, and has no separate launch. Its role is
+same ghosted working array, and has no separate launch.
+
+`dissipation_weights(T, Val(r))` carries `(−1)^{r+1}`, the `2^{−2r}` and
+the undivided `(Δ_+Δ_−)^r`; the caller applies `ε` and a **single**
+`1/h_d`, which is what `h_d^{2r−1}` against `(Δ_+Δ_−)^r`'s own `h_d^{−2r}`
+leaves **(decided in step 2**, the same split as the derivative weights
+above**)**. So `Q_d u = (ε/h_d) · (the contraction)`, and two consequences
+are measured rather than asserted (step 2, in `Rational`, exactly): the
+center weight is `−binom(2r, r)/2^{2r} < 0` and the grid-scale mode
+`u_j = (−1)^j` is an eigenvector with eigenvalue exactly `−1`, so
+**the sign is damping** and Nyquist is damped at exactly `ε/h_d`. On a
+periodic grid the operator is negative semidefinite. `Q_d` annihilates
+polynomials of degree `< 2r` and is `O(h^{2r−1}) = O(h^{q+1})` on smooth
+data, one order better than the scheme, which is why it does not tighten
+the interface-order rule below. Its role is
 GHSO2's second finding under "sonic-surface instability"
 (`notes/methods-ghso2.md`): the grid-scale layer of that instability on
 a black hole whose horizon lies in the evolved domain is cured by
@@ -1045,7 +1083,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/TreeGeneralizedHarmonic.jl` | module shell: `using`s, exports, includes |
 | `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host (amended in step 0) |
 | `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source` (all added in step 1); `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
-| `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` |
+| `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
 | `src/evolution.jl` | the fused RHS kernel in streaming order, `GHProblem`, `gh_rhs!`, the speed kernel, `gh_dt` |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc`; the harmonic/static checks |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook |
@@ -1108,7 +1146,7 @@ refinement level, short times.
   is what the
   dependency risk under [Initial data and
   backgrounds](#initial-data-and-backgrounds) is about.
-- **G1 — Pointwise algebra and stencils.** `pointwise.jl`,
+- **G1 — Pointwise algebra and stencils.** *(Done.)* `pointwise.jl`,
   `stencils.jl`. *Accept:* against `SpacetimeMetrics` automatic
   differentiation on every background — ADM extraction, the offset
   identities at `‖h‖ ~ 1e−13`, GHSO2's identity `∂_tΠ − ∂_iF^i = msrc`
@@ -1119,8 +1157,13 @@ refinement level, short times.
   a trivial kernel on `CPU()`. `pointwise.jl` and its half of the
   acceptance are done (step 1); `stencils.jl` and the weights are step 2,
   which marks the milestone. The numbers are under [Measured
-  results](#measured-results), and the one thing the step found that the
-  design did not say: `‖h‖ ~ 1e−13` is a claim about the *offsets*
+  results](#measured-results). Step 2 found that the acceptance was one
+  claim short of the design: "exact to degree `q`" is the *first*
+  derivative's statement, and the compact second derivative is exact to
+  degree `q + 1` by the symmetry of an even `q`; both are asserted, with
+  their "and not one degree higher" halves, in `Rational` (amended in step
+  2). And the one thing the step found that the design did not say:
+  `‖h‖ ~ 1e−13` is a claim about the *offsets*
   `g^{ab} − η^{ab}`, `det g + 1`, `det γ − 1` — `α`, `β^i` and `√γ` are
   built from them and are accurate to a relative `eps` **as values**,
   which is not the same statement and is the one a test can make about
@@ -1259,6 +1302,85 @@ statements they confirm. Two further results:
   says what the bit-identity the threading test of step 4 asserts does and
   does not mean: the *same* compiled code, at the same call site, on a
   different thread count — and nothing more.
+
+**G1b (step 2), the stencils.** The suite is 1682 assertions in 128 s at
+one thread and 122 s at four, on the development machine (Apple silicon,
+12 CPU threads, Julia 1.13.0), up from step 1's 1079 in 124 s. Of that,
+`stencils_tests.jl` is **603** assertions in **5 s** of testset time — 7 s
+standalone, including its own compilation: the step's tests evaluate no
+background at all, weights and polynomials only, so the suite's cost is
+still step 1's compilation of `SpacetimeMetrics`' nested dual passes and
+the stencils did not move it. Three of those five seconds are the two
+KernelAbstractions launches, at `Float64` and `Float32`. This is the file to copy when a later step needs
+a cheap test.
+
+The weights reproduce the textbook central-difference tables entry for
+entry at `q = 2, 4, 6, 8`, for `∂` and for the compact `∂∂`, and the
+Kreiss–Oliger binomial rows at `r = 2, 3, 4, 5`, **as exact rationals**.
+Rounded into `Float64` and into `Float32` every entry is **bit-identical**
+to the correctly rounded conversion of the exact rational — which is what
+"built in exact arithmetic and rounded once" means when it is stated as
+something a test can fail — and at `Float32x2` it is equal on every weight
+this package uses, asserted to within an ulp for the reason below.
+
+Exactness, asserted in `Rational` at an off-grid center and a spacing that
+is not a power of two: `∂` is exact on polynomials of degree `≤ q` and not
+`q + 1`; `∂∂` on degree `≤ q + 1` and not `q + 2`; the tensor-product
+`∂_x∂_y` on degree `≤ q` in each variable separately and not `q + 1` in
+either; `Q_d` annihilates degree `< 2r` and not `2r`. The dissipation's
+grid-scale eigenvalue is exactly `−1`, its center weight is negative at
+every `r`, and on a periodic grid `⟨u, Q_d u⟩ < 0` on random data — the
+damping sign, three ways.
+
+Observed order on `exp(sin x)` at `x = 0.37` in `Float64`, measured over
+the finest pair of spacings at which the truncation error is still a
+thousand times the roundoff floor `~eps/h^m` (choosing the window by that
+rule rather than by hand is what makes these reproduce):
+
+| `q` | `∂` | `∂∂` | `∂_x∂_y` | `Q_d`, nominal `2r−1` |
+|---|---|---|---|---|
+| 2 | 2.00 | 2.00 | 2.00 | 3.00 (3) |
+| 4 | 4.00 | 4.00 | 3.98 | 5.00 (5) |
+| 6 | 5.99 | 6.21 | 5.95 | 7.38 (7) |
+| 8 | 7.95 | 7.87 | 7.79 | 8.75 (9) |
+
+The deviations at `q = 6` and `8` are the window and not the stencil, and
+they are worth knowing before G2 and G3 measure convergence rates on this
+mesh: at `m = 2` the contraction's own floating-point error reaches the
+truncation error by `h = 1/32` at `q = 8`, so a fourth-order operator has
+about three clean decades of resolution to converge in and an eighth-order
+one has about one. A rate measured on too fine a grid measures `eps/h^m`.
+
+**A `@generated` method may not convert to the caller's type.** The first
+implementation built the weights and converted them *inside* the generator,
+emitting `T` literals. It passed at `Float64` and `Float32` and threw at
+`Float32x2`: `MethodError: MultiFloat{Float32,2}(::BigFloat) … The
+applicable method may be too new: running in world age 39155, while current
+world is 39162`. A generator may only call methods that existed when the
+generated function was defined, and this package is precompiled long before
+a driver loads MultiFloats — so the failure appears only when
+`TreeGeneralizedHarmonic` is loaded *first*, which is what `runtests.jl` and
+every driver do, and not when a test file happens to load MultiFloats above
+it. What the method emits instead is each weight's exact numerator and
+denominator as `Int` literals with one division between them, so the
+conversion happens at the call site in the caller's world. The emitted code
+still holds no rational and no `BigInt`, and at `Float64` and `Float32` the
+division folds away entirely: the LLVM for `apply_stencil(derivative_weights
+(Float64, Val(4), Val(1)), u, i)` contains no `fdiv` and no `sitofp`. The
+cost is that "rounded once" is now the type's own division: correctly
+rounded, and therefore bit-identical to converting the exact rational, at
+every IEEE type; equal on every weight this package uses at `Float32x2`;
+and one ulp away on 3 of 11 sampled ratios at `Float64x2`, whose division is
+not correctly rounded. This is the trap the type-genericity rule exists to
+catch, and it is why `Float32x2` is in the suite.
+
+One thing the step found that is not about the stencils: the *tests* need
+`Rational{BigInt}` and not `Rational{Int}`. A monomial of degree `q + 2` at
+an off-grid rational point overflows a 64-bit denominator at `q = 6`
+already. `Rational` arithmetic is checked, so this arrived as an
+`OverflowError` in the test rather than as a wrong answer — TreeAMR's
+reason for `BigInt` in its own weight construction, seen from the other
+side.
 
 ## Possible extensions
 

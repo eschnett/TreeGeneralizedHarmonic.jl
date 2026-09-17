@@ -40,13 +40,19 @@ julia --project=. -e 'using Pkg; Pkg.test()'                              # the 
 julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])' # and threaded
 ```
 
-**Status: scaffolding only — milestone G0 is done and G1 is next.** What
-exists is the module shell, the `Base` bridges for software floating-point
-types, the host-copy helpers, and the tests that say the pinned TreeAMR
-still provides what the scheme is written against and that a
-`SpacetimeMetrics` background — including the boosted, spinning one the
-proof of concept runs — compiles and runs as a kernel argument. There are
-no equations yet.
+**Status: milestones G0 and G1 are done — the pointwise algebra and the
+stencils exist; the right-hand side on the mesh is next.** What exists is
+the module shell, the `Base` bridges for software floating-point types, the
+host-copy helpers, GHSO2's node-local generalized-harmonic algebra together
+with the expanded momentum equation this package discretises, and the
+centered finite-difference and Kreiss–Oliger weights at `q ∈ {2, 4, 6, 8}`,
+built in exact rational arithmetic and rounded once into the run's type.
+The tests say the pinned TreeAMR still provides what the scheme is written
+against, that a `SpacetimeMetrics` background — including the boosted,
+spinning one the proof of concept runs — compiles and runs as a kernel
+argument, and that the algebra and the weights agree with an independent
+source: automatic differentiation for the equations, exact rational
+arithmetic for the stencils. Nothing in `src/` reads a field set yet.
 
 The formulation and the pointwise algebra are inherited from
 `GeneralizedHarmonicSecondOrder2`, where they were validated on SBP-SAT

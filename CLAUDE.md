@@ -45,8 +45,8 @@ Three rules follow from `CODE.md` and govern every change here:
 
 ## Current state
 
-**G0 is done and G1 is half done — the pointwise algebra exists, the
-stencils are next.**
+**G0 and G1 are done — the pointwise algebra and the stencils exist; the
+right-hand side is next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -55,16 +55,19 @@ as part of the deliverable, an error indicator for refinement, `Float64`
 on Symmetry's H200 as the device requirement, no checkpointing, GPU
 kernel efficiency deferred to a research project. `PLAN.md` breaks the
 milestones G0–G6 into steps 0–10, each a brief for one agent with a fresh
-context (see its "Running a step as an agent"); step 2 (the stencils) is
-next. `notes/` holds the inherited documents.
+context (see its "Running a step as an agent"); step 3 (the right-hand
+side and the gauge wave) is next. `notes/` holds the inherited documents.
 
 What exists in `src/` is the module shell, `precision.jl` (the `Base`
 bridges for software floating-point types), `device.jl` (`to_backend`,
 `hostcopy`, `hostcopy!`) and `pointwise.jl` — GHSO2's node-local algebra
 ported from `notes/pointwise-ghso2.jl`, plus the expanded momentum
 equation this package discretises (`metric_derivatives`,
-`gh_node_rhs_expanded`) and `gh_node_source`. There is still no mesh-side
-physics: nothing in `src/` reads a field set.
+`gh_node_rhs_expanded`) and `gh_node_source`, and `stencils.jl` — the
+centered finite-difference and Kreiss–Oliger weights at order `q`, built
+in `Rational` and rounded once into `T` by a `@generated` method, plus the
+host-side `apply_stencil` the tests measure them with. There is still no
+mesh-side physics: nothing in `src/` reads a field set.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, and a
@@ -72,7 +75,9 @@ What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 `CPU()`, filling a field set bit-for-bit as a host loop does), and the
 pointwise pair — `pointwise_tests.jl` and `pointwise_identity_tests.jl`
 over a shared `pointwise_backgrounds.jl`, which is where the six
-backgrounds of `CODE.md`'s table and the analytic data are built.
+backgrounds of `CODE.md`'s table and the analytic data are built, and
+`stencils_tests.jl`, which evaluates no background at all and costs
+seconds.
 `Project.toml` carries the `[sources]` pins and CI is in place. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and no remote.
@@ -80,7 +85,7 @@ clean-checkout check below mean something), no `bin/`, and no remote.
 The suite's cost is now dominated by **compiling** `SpacetimeMetrics`'
 nested forward-mode passes for six backgrounds at two precisions — about
 two minutes, against step 0's eight seconds, with the evaluation itself
-in microseconds. Before adding a test that differentiates a background,
+in microseconds. Step 2 added 603 assertions and five seconds to it. Before adding a test that differentiates a background,
 look at what `pointwise_backgrounds.jl` already computes in one pass:
 `CODE.md`'s "Measured results" records what fusing them was worth.
 
@@ -222,6 +227,24 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   interior" are `Val` parameters built in `GHProblem`'s constructor.
   Building them per evaluation recompiles or dispatches dynamically on
   every RK stage.
+- **A `@generated` method must not convert to the caller's type.** Its
+  generator may only call methods that existed when the generated function
+  was *defined*, and this package is precompiled long before a driver loads
+  MultiFloats: a generator that wrote `T(w)` for a rational `w` worked at
+  `Float64` and `Float32` and threw "the applicable method may be too new"
+  at `Float32x2`. Emit the exact integers and let the call site divide.
+  The symptom only appears when this package is loaded *before* the type's
+  package, which is what `runtests.jl` does — so a test file that loads
+  MultiFloats above `TreeGeneralizedHarmonic` hides it.
+- **The stencil weights are for unit spacing, and the dissipation's
+  factor of `h` is a single one.** `derivative_weights` is divided by
+  `h^m` at the call site; `dissipation_weights` is multiplied by `ε/h_d`,
+  because the `h_d^{2r−1}` of `CODE.md`'s formula cancels all but one
+  power against `(D₊D₋)^r`'s own `h_d^{−2r}`. The weights already carry
+  `(−1)^{r+1}`, the `2^{−2r}` and therefore the *damping* sign: Nyquist is
+  damped at exactly `ε/h_d`. A run that blows up faster the larger `ε_KO`
+  is has that sign backwards, and `test/stencils_tests.jl` asserts it as
+  an exact rational eigenvalue.
 - **The recipe near a hole is `ε_KO ≈ 0.5`, `γ0 ≈ 1/M`.** GHSO2
   measured both as requirements with the horizon in the domain
   (`notes/methods-ghso2.md`); a run that blows up at the sonic surface
