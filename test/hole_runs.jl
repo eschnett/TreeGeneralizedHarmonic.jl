@@ -25,6 +25,13 @@
 # needs is not a free choice: `CODE.md`'s two radius requirements together
 # are `r_h,min ≥ (m + 2G + 2)·h + r_0`, so a chart with a smaller
 # `r_h,min` needs a proportionally finer mesh and nothing else changes.
+#
+# Step 6 adds the `indicator` section: the calibration `CODE.md` asks the
+# thresholds to be chosen from — `τ_max` against `h` on uniform meshes, and
+# the depth the initial-data cycle reaches against `refine_tol` — and the
+# adaptive run at the chosen thresholds against a frozen hierarchy of the
+# same finest spacing. It is here rather than in the suite because at the
+# calibrated thresholds this hole asks for 848 blocks.
 
 import Printf
 using TreeAMR
@@ -43,7 +50,7 @@ const T = Float64
 say(fmt, args...) = println(Printf.format(Printf.Format(fmt), args...))
 
 # Which sections to run; all of them by default.
-const SECTIONS = isempty(ARGS) ? ["order", "long", "charts"] : ARGS
+const SECTIONS = isempty(ARGS) ? ["order", "long", "charts", "indicator"] : ARGS
 
 """
 The frozen hierarchy: one shell radius per refinement level. A radius of
@@ -263,6 +270,101 @@ if "charts" in SECTIONS
         h, nb = layer_spacing(out.forest, out.interior, zero(T))
         say("    layer spacing h=%.5f over %d blocks", h, nb)
         r.finite || error("$(nameof(typeof(bg))) a=$a went non-finite")
+    end
+end
+
+# --- (4) the refinement indicator: calibration, and the adaptive run -------
+#
+# `CODE.md`, "Refinement and regridding": "Thresholds are calibrated as
+# TreeWave calibrates them: `τ_max` on uniform meshes at successive `h` on
+# the static hole, tabulated, thresholds chosen mid-plateau". Two tables,
+# TreeWave's two, and then the run they justify.
+#
+# The reference configuration is `adaptive_hole_fixture`'s and is the one
+# `CODE.md` records the numbers for: Kerr-Schild `a = 0` in a box of
+# half-width `5 M` on a `4³` root brick with `N = 8`, `r_0 = 3/10`,
+# `r_1 = 5/4`, margin `m = 4`. The box is four times the suite's step-5 one
+# because the ceiling and the floor need room between them: with the
+# horizon at `r = 2` and a box of half-width `5/2`, the shell that must be
+# refined and the shell that must stay coarse overlap, and
+# `block_level_bounds` says so.
+if "indicator" in SECTIONS
+    println("\n=== (4) the refinement indicator ===")
+    q = 2
+    G = q ÷ 2 + 1
+    ops = Operators(prolongation=q + 2, restriction=q + 2)
+    ref_case(; kwargs...) = adaptive_hole_fixture(T; kwargs...)
+
+    println("\n-- τ_max against h on uniform meshes (masked, N = 8) --")
+    for roots in (2, 4, 8, 16)
+        case = ref_case(; maxlevel_cap=1)
+        pass = gh_tau_pass(T, case; N=8, roots=roots, q=q)
+        h = minimum_spacing(T, pass.forest)
+        say("  roots=%2d h=%8.5f blocks=%5d points=%9d  τ_max=%.4f  " *
+            "U_ref=%.4f", roots, h, nleaves(pass.forest),
+            nleaves(pass.forest) * 8^3, pass.τ_max, pass.scale)
+        println("     per-component U_ref: ",
+                join((Printf.format(Printf.Format("%.4f"), s)
+                      for s in pass.scales), " "))
+    end
+
+    println("\n-- the depth the initial-data cycle reaches, against " *
+            "refine_tol (cap 3) --")
+    for rt in (T(4 // 5), T(3 // 5), T(1 // 2), T(2 // 5), T(3 // 10),
+               T(1 // 5))
+        case = ref_case(; refine_tol=rt, coarsen_tol=rt / 4, maxlevel_cap=3)
+        t0 = time()
+        cyc = gh_adapt_cycle(T, case; N=8, roots=4, q=q)
+        say("  refine_tol=%.2f coarsen_tol=%.3f → passes=%d converged=%s " *
+            "depth=%d leaves=%4d points=%8d h=%8.5f τ_max=%.4f %.1fs",
+            rt, rt / 4, cyc.passes, cyc.converged, maxlevel(cyc.forest),
+            nleaves(cyc.forest), nleaves(cyc.forest) * 8^3,
+            minimum_spacing(T, cyc.forest), cyc.τ_max, time() - t0)
+        println("     levels ", forest_levels(cyc.forest), "  centroid ",
+                cyc.centroid === nothing ? nothing :
+                round.(cyc.centroid; digits=4), "  offset/h ",
+                cyc.centroid === nothing ? nothing :
+                round(sqrt(sum(abs2, cyc.centroid)) /
+                      minimum_spacing(T, cyc.forest); digits=2))
+    end
+
+    println("\n-- the adaptive run at the calibrated thresholds, against a " *
+            "frozen hierarchy of the same finest spacing --")
+    # The mesh the indicator chooses, evolved with the regrid on.
+    let case = ref_case(; maxlevel_cap=3, chunk=T(1 // 20))
+        forest = gh_forest(T, case; N=8, roots=4)
+        t0 = time()
+        out = evolve!(T, case; forest=forest, q=q, ops=ops, t_end=T(1 // 2),
+                      adapt=true, regrid=true)
+        r = out.records[end]
+        say("  adaptive : leaves=%4d levels=%s points=%8d h=%8.5f " *
+            "passes=%d regrids=%d steps=%4d", out.nblocks,
+            string(out.levels), out.nblocks * 8^3, out.h, out.passes,
+            out.nregrids, out.nsteps)
+        say("             err_l2=%10.3e err_inf=%10.3e gauge_l2=%10.3e " *
+            "res=%10.3e τ_max=%.4f offset/h=%.2f  %.1fs", r.err_l2,
+            r.err_linf, r.gauge_l2, r.residual, r.τ_max,
+            r.centroid_offset / out.h, time() - t0)
+
+        # The same case on a hierarchy chosen by hand, with the same finest
+        # spacing: `CODE.md`'s frozen-hierarchy protocol, and what the
+        # adaptive run is compared against. The shells are the radii that
+        # reproduce the indicator's own layout — the ball the floor covers
+        # and the region the ceiling leaves alone — so the two differ only
+        # in what the indicator decided about the outside.
+        frozen = hole_forest(T, case; N=8, roots=4, radii=(T(5 // 2), T(5 // 2)))
+        t1 = time()
+        fout = evolve!(T, case; forest=frozen, q=q, ops=ops, t_end=T(1 // 2))
+        fr = fout.records[end]
+        say("  frozen   : leaves=%4d levels=%s points=%8d h=%8.5f steps=%4d",
+            fout.nblocks, string(fout.levels), fout.nblocks * 8^3, fout.h,
+            fout.nsteps)
+        say("             err_l2=%10.3e err_inf=%10.3e gauge_l2=%10.3e " *
+            "res=%10.3e τ_max=%.4f  %.1fs", fr.err_l2, fr.err_linf,
+            fr.gauge_l2, fr.residual, fr.τ_max, time() - t1)
+        say("  ratios   : err_l2 %.3f  err_inf %.3f  gauge_l2 %.3f  " *
+            "points %.3f", r.err_l2 / fr.err_l2, r.err_linf / fr.err_linf,
+            r.gauge_l2 / fr.gauge_l2, out.nblocks / fout.nblocks)
     end
 end
 

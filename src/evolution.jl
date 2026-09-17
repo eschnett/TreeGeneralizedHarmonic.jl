@@ -64,7 +64,8 @@ end
 # The variable slots of the `diag` field set: the characteristic speed the
 # time step is taken from, the two constraint monitors of step 4, and the
 # indicator that says which points a masked norm counts. Step 5 adds the
-# masked error and the interior residual, step 6 the refinement indicator.
+# masked error and the interior residual, step 6 the refinement indicator —
+# **appended**, never inserted, for the reason the next paragraph gives.
 #
 # `DIAG_CGH` and `DIAG_MOM` are the *first* of a contiguous run — four and
 # three slots — because `block_mapreduce` reduces a contiguous range of
@@ -78,7 +79,8 @@ const DIAG_MASK = 10          # 1 where the point is evolved, 0 inside r_1
 const DIAG_ERR = 11           # ‖u − u_exact‖, masked to the evolved region
 const DIAG_RES = 12           # the same, inside the layer r_0 ≤ r < r_1
 const DIAG_DRIFT = 13         # |h_tt − h_tt,exact| in a shell at the horizon
-const NDIAG = 13
+const DIAG_TAU = 14           # the Löhner indicator τ, masked inside r_1
+const NDIAG = 14
 
 # **The error slots are magnitudes, not components (proposed in step 5.)**
 # `CODE.md`'s analysis table says "`|u − u_exact|` per component into

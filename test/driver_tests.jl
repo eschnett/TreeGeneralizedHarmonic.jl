@@ -37,13 +37,13 @@ using KernelAbstractions: CPU
     end
 
     # The keywords that are refused are refused by name, so that a caller
-    # is told which step supplies the thing they asked for.
-    @testset "the driver refuses what step 5 does not have" begin
+    # is told what they asked for and why it is not on offer. (The refusal
+    # of `regrid` and `adapt` on a case with no refinement parameters is
+    # `refinement_tests.jl`'s, since that is where the parameters are.)
+    @testset "the driver refuses what a case cannot mean" begin
         case = hole_fixture(T; q=q)
         forest = hole_fixture_forest(T, case; N=8)
         ops = Operators(prolongation=q + 2, restriction=q + 2)
-        @test_throws ArgumentError evolve!(T, case; forest=forest, q=q, ops=ops,
-                                           t_end=T(1 // 10), regrid=true)
         @test_throws ArgumentError evolve!(Float32, case; forest=forest, q=q,
                                            ops=ops, t_end=T(1 // 10))
         @test_throws ArgumentError evolve!(T, case; forest=forest, q=q, ops=ops,

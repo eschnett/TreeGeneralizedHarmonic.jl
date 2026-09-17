@@ -39,6 +39,10 @@ using TreeGeneralizedHarmonic
     # expensive thing, and a failure above it is cheaper to read.
     include("interior_tests.jl")
     include("driver_tests.jl")
+    # Step 6's. After `driver_tests.jl` because its last testset is a run
+    # through `evolve!` with the regrid branch on, and a failure in the
+    # driver itself is cheaper to read than one in the loop that drives it.
+    include("refinement_tests.jl")
     include("type_tests.jl")
     include("threading_tests.jl")
 end

@@ -26,8 +26,9 @@
 #   * **Everything that threads is on the path.** The initial-data cycle
 #     with its flagging pass (`firing_boxes`, a reduction per block), the
 #     ghost fill at a coarse-fine face, the fused right-hand side, a
-#     regrid that moves data, `block_mapreduce` through `max_speed` and
-#     the masked constraint norms, and `volume_weighted_norm`.
+#     regrid that moves data, `block_mapreduce` through `max_speed`, the
+#     masked constraint norms and — from step 6 — the indicator's own
+#     reference amplitude and its `τ_max`, and `volume_weighted_norm`.
 #   * **No randomness and no timing.** Every number printed is a function
 #     of the case and the mesh.
 #
@@ -76,27 +77,46 @@ order is `q + 2` because anything less costs the scheme an order
 configuration a real run would.
 """
 function gh_workload(; N=8, roots=2, q=4, chunks=2, steps=6, buffer=1,
-                     threshold=1 // 40)
+                     threshold=1 // 40, refine_tol=1 // 2, coarsen_tol=1 // 8)
     T = Float64
-    case = gauge_wave_case(T; A=T(1 // 20), d=one(T), ε_KO=T(1 // 2),
+    base = gauge_wave_case(T; A=T(1 // 20), d=one(T), ε_KO=T(1 // 2),
                            γ0=one(T), γ2=T(-1 // 2))
+    # The real refinement parameters are attached to the case so that the
+    # **indicator's own reductions** — the masked reference amplitude
+    # (`block_mapreduce` per component), `τ_max`, the firing counts and the
+    # centroid — are evaluated and digested at every chunk below. They are
+    # the newest per-block folds in the package and they belong under the
+    # bit-identity claim. No interior means no level floor and a periodic
+    # box means no ceiling, so what they produce here is the indicator's
+    # verdict and nothing else's.
+    case = with_refinement(base,
+                           Refinement(T; refine_tol=T(refine_tol),
+                                      coarsen_tol=T(coarsen_tol),
+                                      maxlevel_cap=1, floor_margin=zero(T),
+                                      ceiling_cells=0))
     ops = Operators(prolongation=q + 2, restriction=q + 2)
+    G = q ÷ 2 + 1
     forest = gh_forest(T, case; N=N, roots=roots)
-    fs = FieldSet{T}(forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3))
+    fs = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3))
 
-    # Refine where the wave's *positive* crest is. The per-cell test and
-    # the bounding box run through `firing_boxes`, so they are a kernel and
-    # a reduction and only the verdict is on the host; `h_tt` is variable 1.
-    # This is not the refinement criterion — step 6 has that — it is the
-    # cheapest one that keeps the mesh interesting while the wave crosses
-    # it. The threshold is **signed**, which picks one crest out of the two
-    # a wavelength has: with `abs` the two crests refine symmetric halves
-    # of a `2³` root grid and the mesh never changes again, and what is
-    # wanted is a slab that travels along `x` and drags the refinement with
-    # it. `1/40` against an amplitude of `1/20` puts the slab's leading
-    # edge one cell inside the first block's `+x` face, so the buffer
-    # dilation reaches the second block a few steps in and the regrid below
-    # really transfers data.
+    # **What drives the mesh here is not the indicator, and that is
+    # deliberate (step 6).** One wavelength on a `2³` root brick puts a
+    # crest in *every* block, so the indicator — which scores the crests and
+    # nothing else — refines the whole domain uniformly, leaves no
+    # coarse-fine face, and never changes the mesh again; a partial mesh
+    # would need four root blocks per axis, which is four and a half times
+    # the arithmetic in a workload that runs twice per suite. So the mesh
+    # is still driven by the signed threshold below, whose slab travels
+    # along `x` and drags the refinement with it, and the indicator is
+    # *measured* at every chunk instead. What the digest then covers is
+    # every reduction either of them makes.
+    #
+    # The threshold is **signed**, which picks one crest out of the two a
+    # wavelength has: with `abs` the two crests refine symmetric halves of
+    # the root grid and the mesh never changes again. `1/40` against an
+    # amplitude of `1/20` puts the slab's leading edge one cell inside the
+    # first block's `+x` face, so the buffer dilation reaches the second
+    # block a few steps in and the regrid below really transfers data.
     thr = T(threshold)
     fires(work, idx, b, x) = work[idx..., 1, b] > thr
     function flags_now(f)
@@ -150,12 +170,23 @@ function gh_workload(; N=8, roots=2, q=4, chunks=2, steps=6, buffer=1,
         # whatever forest it is handed, which is `CODE.md`'s
         # "`diag => nothing`, then re-sampled" spelled as a constructor.
         fill_ghosts!(fs, schedule)
+        # The indicator on the same filled ghosts, digested but not acted
+        # on: `τ_max` and the reference amplitude are `block_mapreduce`
+        # folds, the firing counts come out of `firing_boxes`, and the
+        # centroid and the marks are host passes in block order — every one
+        # of them a place a thread-dependent reduction would show.
+        ind = indicator_flags(fs, case, t; G=G, buffer=buffer)
         changed = regrid!(forest, fs => schedule; flags=flags_now(fs),
                           buffer=buffer, boundary=dirichlet(case, t))
         changed && (schedule = GhostSchedule(fs, ops))
         push!(lines, string("regrid ", chunk, " changed ", changed, " leaves ",
                             nleaves(forest), " ", digest(string(forest.leaves)),
-                            " maxlevel ", maxlevel(forest)))
+                            " maxlevel ", maxlevel(forest),
+                            " τ ", repr(ind.τ_max), " U_ref ", repr(ind.scale),
+                            " firing ", ind.nfiring, " marks ",
+                            digest(string(ind.flags)), " centroid ",
+                            ind.centroid === nothing ? "none" :
+                            digest(string(ind.centroid))))
     end
 
     # The state the last regrid *transferred*, digested after the fact.

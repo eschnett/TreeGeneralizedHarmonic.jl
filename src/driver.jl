@@ -20,18 +20,22 @@
 #     has found the integrator, not the physics.
 #   * **The boundary hook goes to three places** — `fill_ghosts!` (inside
 #     the right-hand side), `regrid!`, and `adapt_to_initial_data!` — each
-#     with that call's `t`. Step 6 is the first to exercise the last two;
-#     forgetting the second is the bug that arrives one chunk late.
+#     with that call's `t`. All three are here from step 6; forgetting the
+#     second is the bug that arrives one chunk late, and passing a stale
+#     `t` is the bug that arrives as a boundary reflection.
 #   * **Chunks are counted, not accumulated.** `nchunks = ceilint(t_end /
 #     chunk)` and `stop = min(c · chunk, t_end)`, never a
 #     `while t < t_end − tiny` guard: an absolute slack is meaningless at a
 #     type whose ulp is larger than it (TreeHydro's note on precision).
 #
-# What this step does **not** do is regrid. `regrid = true` is refused by
-# name until step 6 supplies the indicator: `CODE.md`'s driver flags with
-# the masked Löhner verdict and adapts the initial data with it, and a
-# driver that regridded on some other criterion would be a second
-# refinement mechanism to delete later.
+# **The mesh (added in step 6).** `adapt = true` runs `CODE.md`'s
+# initial-data cycle with the masked Löhner indicator before the first
+# chunk, and `regrid = true` flags with the same indicator at every chunk
+# boundary but the last. Both refuse a case with no [`Refinement`](@ref) by
+# name, because this package has exactly one refinement mechanism: a driver
+# that regridded on some other criterion would be a second one to delete
+# later. The regrid is skipped after the final chunk, so the forest that
+# comes back and the state that comes back describe the same mesh.
 
 """
     check_cfl(dt, h_min, cfl, λ_end; chunk = nothing, λ = nothing)
@@ -113,7 +117,8 @@ end
 
 """
     evolve!([T], case::GHCase; forest, q, ops, t_end, chunk = case's,
-            cfl = 1//4, regrid = false, adm_every = 0, backend = CPU(),
+            cfl = 1//4, regrid = false, adapt = false, buffer = nothing,
+            maxpasses = 8, adm_every = 0, backend = CPU(),
             observer = nothing, ρ_max_factor = 1)
 
 **The** time-stepping loop: fill the initial data on `forest`, then evolve
@@ -130,10 +135,9 @@ asking the case for its interior.
 ## Why a chunk is a restart
 
 Regridding changes both the *length* and the *meaning* of the state
-vector, so each chunk is a fresh fixed-step `solve`. Step 5 does not regrid
-— see `regrid` below — but the loop is written as the restart it will be,
-because `ρ_max` already changes from chunk to chunk and that is the same
-rebuild.
+vector, so each chunk is a fresh fixed-step `solve`. It is a restart even
+when nothing regrids, because `ρ_max` changes from chunk to chunk and that
+is the same rebuild.
 
 ## The step, the relaxation rate, and the recheck
 
@@ -150,24 +154,41 @@ taken violated the bound.
 At every chunk boundary, and once at `t = 0`: the masked gauge-constraint
 norms, the masked error against the analytic solution, the interior
 residual, the gauge drift in the horizon shell, the fastest speed, the step
-and the mesh statistics. The ADM monitor runs every `adm_every`-th chunk
-(`0` means never, which is what a short run wants — `CODE.md` prices it at
-about one right-hand-side evaluation and compiles in 18 s). **Every norm is
-masked** by the interior at that chunk's `t`: the layer and the core are not
-a numerical solution and are not reported as one.
+and the mesh statistics — including, for a case that carries a
+[`Refinement`](@ref), the indicator's `τ_max` and the refinement centroid
+against the analytic center. The ADM monitor runs every `adm_every`-th
+chunk (`0` means never, which is what a short run wants — `CODE.md` prices
+it at about one right-hand-side evaluation and compiles in 18 s). **Every
+norm is masked** by the interior at that chunk's `t`: the layer and the core
+are not a numerical solution and are not reported as one.
 
 ## Keywords
 
 `forest` has no default: the mesh is the study's, built by
-[`gh_forest`](@ref) or [`hole_forest`](@ref), and from step 6 by the
-indicator's own cycle. `q`, `ops`, `t_end` and `chunk` have none either,
-for `PLAN.md`'s reason — the operator order in particular, since this
-system takes second derivatives and a prolongation below `q + 2` costs the
-scheme an order.
+[`gh_forest`](@ref) or [`hole_forest`](@ref) — or, with `adapt = true`, by
+the indicator's own cycle starting from whichever of those was passed.
+`q`, `ops`, `t_end` and `chunk` have none either, for `PLAN.md`'s reason —
+the operator order in particular, since this system takes second
+derivatives and a prolongation below `q + 2` costs the scheme an order.
 
-`regrid` accepts `false` only. The indicator, the level floor and the
-ceiling are step 6's, and `CODE.md`'s loop flags with them; the keyword is
-here already so that the signature does not change when they arrive.
+`adapt` runs `CODE.md`'s initial-data cycle before the first chunk: fill,
+flag with [`indicator_flags`](@ref), regrid *without transferring*, and
+re-evaluate the initial data on the new mesh, until the hierarchy stops
+changing — re-evaluating rather than interpolating, since interpolating
+would bake the coarse mesh's resolution into the refined blocks. It throws
+if the cycle has not converged within `maxpasses`.
+
+`regrid` flags with the same indicator at the end of every chunk but the
+last, and rebuilds the schedule, the problem (which re-samples the gauge
+source and **re-asserts the interior's radius requirements**) and the state
+vector whenever the mesh moved. It is skipped after the final chunk so that
+the forest and the state that come back describe the same mesh. Both
+keywords refuse a case with no `Refinement` by name.
+
+`buffer` is the travelling margin in cells; left at `nothing` it is derived
+by [`refinement_buffer`](@ref) from the hole's own speed and the chunk,
+`|v| · chunk`, which is one cell for a static hole and grows with `|v|` in
+G5.
 
 `observer(p, t, u)` is called with the state scattered into `p.U` and the
 analysis record for that chunk already written — once at `t = 0` and once
@@ -184,16 +205,19 @@ evolve!(::Type{S}, case::GHCase{T}; kwargs...) where {S,T} = throw(ArgumentError
 
 function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                  chunk=case.chunk, cfl=T(1 // 4), regrid::Bool=false,
+                 adapt::Bool=false, buffer=nothing, maxpasses::Integer=8,
                  adm_every::Integer=0, backend=CPU(), observer=nothing,
                  ρ_max_factor=one(T)) where {T}
-    regrid && throw(ArgumentError(
-        "evolve! accepts regrid = false only: the refinement indicator with " *
-        "its interior mask, its level floor around the horizon and its " *
-        "ceiling at the outer boundary is step 6 (CODE.md, \"Refinement and " *
-        "regridding\"), and CODE.md's loop flags with it and with nothing " *
-        "else. A driver that regridded on some other criterion now would be " *
-        "a second refinement mechanism to delete later. The keyword is here " *
-        "so that the signature does not change when the indicator arrives."))
+    (regrid || adapt) && case.refinement === nothing && throw(ArgumentError(
+        "evolve! was asked to $(regrid ? "regrid" : "adapt the initial data") " *
+        "but this case carries no refinement parameters, so there are no " *
+        "thresholds to flag with. Build the case with `refinement = " *
+        "Refinement(T; refine_tol, coarsen_tol, maxlevel_cap, floor_margin, " *
+        "…)`: CODE.md's loop flags with the masked Löhner indicator — its " *
+        "interior mask, its level floor around the horizon and its ceiling at " *
+        "the outer boundary — and with nothing else, and a driver that " *
+        "regridded on some other criterion would be a second refinement " *
+        "mechanism to delete later."))
     t_end, chunk, cfl = T(t_end), T(chunk), T(cfl)
     t_end > 0 || throw(ArgumentError("t_end must be positive, got $t_end."))
     chunk > 0 || throw(ArgumentError(
@@ -210,14 +234,55 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     G = q ÷ 2 + 1
     U = FieldSet{T}(forest, 2NC; G=G, centering=vertexcentered(3),
                     backend=backend)
+
+    # The travelling margin, in cells at the finest level the indicator may
+    # reach: `CODE.md`'s `|v| · chunk`, the hole's own speed times the
+    # regrid cadence, plus one — TreeAMR measured that a margin narrower
+    # than the motion it covers is worse than none at all. A static hole
+    # still gets the one cell.
+    speed = sqrt(sum(abs2, case.center.v))
+    bufferwidth = buffer !== nothing ? Int(buffer) :
+                  case.refinement === nothing ? 0 :
+                  refinement_buffer(forest, case.refinement.maxlevel_cap,
+                                    speed * chunk)
+
+    # The initial-data cycle, or the plain fill. The cycle fills the data
+    # itself — that is what it is for: it re-evaluates it on each new mesh
+    # rather than interpolating, since interpolating would bake the coarse
+    # mesh's resolution into the blocks the refinement just bought.
+    passes = 0
+    converged = true
     schedule = GhostSchedule(U, ops)
-    fill_exact!(U, case, zero(T))
+    if adapt
+        # The margin is dilated inside the indicator, so that the level
+        # ceiling is applied *after* it — `buffer = 0` here and there is
+        # what `refine_flags` means by "the caller passes zero".
+        criterion(fs) = indicator_flags(fs, case, zero(T); G=G,
+                                        buffer=bufferwidth).flags
+        schedule, passes, converged = adapt_to_initial_data!(
+            U, ops; initial=state_callback(case, zero(T)), flags=criterion,
+            buffer=0, maxpasses=maxpasses,
+            boundary=dirichlet(case, zero(T)))
+        converged || throw(ErrorException(
+            "the initial-data cycle had not converged after $passes passes: " *
+            "the hierarchy was still changing when maxpasses ran out. The " *
+            "cycle re-evaluates the initial data on each new mesh rather " *
+            "than interpolating it, so it terminates when the criterion " *
+            "stops asking for anything new — and a criterion that never " *
+            "stops is either a maxlevel_cap too high for the data or a " *
+            "refine_tol below what the mesh can reach. Raise maxpasses only " *
+            "if the passes were still making progress."))
+    else
+        fill_exact!(U, case, zero(T))
+    end
     u = statevector(U)
     gather!(u, U)
 
     # The problem is built once here — the gauge source is sampled in it,
     # which is the expensive setup phase — and only its interior is
-    # replaced per chunk.
+    # replaced per chunk. Its constructor is also where `CODE.md`'s two
+    # interior radius requirements are asserted, so the mesh the cycle just
+    # chose is checked before anything is integrated on it.
     p0 = GHProblem(U, schedule, case; q=q, t=zero(T))
     shell = horizon_shell(case)
     # **The record is `Float64` whatever the run computes in.** That is
@@ -231,6 +296,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
 
     records = NamedTuple[]
     nsteps = 0
+    nregrids = 0
     λ_initial = zero(T)
 
     function record!(p, t, u, dt, steps, λ, λ_end, cflnum)
@@ -247,6 +313,15 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         end
         gh_error!(p, u, t; shell=shell)
         e = error_norms(p)
+        # The indicator last, and only where the case refines: it writes
+        # `DIAG_TAU` and reads nothing the norms above left behind, and the
+        # flags it produces are what the regrid below uses — one evaluation
+        # of the criterion per chunk, so that the number the record holds
+        # and the number the mesh was chosen by are the same number.
+        ind = case.refinement === nothing ? nothing :
+              gh_indicator!(p, u, t; buffer=bufferwidth)
+        centroid = ind === nothing || ind.centroid === nothing ? nothing :
+                   ntuple(d -> R(ind.centroid[d]), 3)
         rec = (t=R(t), dt=R(dt), steps=steps, λ=R(λ), λ_end=R(λ_end),
                cfl=R(cflnum),
                gauge_l2=R(maximum(c.gauge_l2)),
@@ -256,12 +331,16 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                err_l2=R(e.err_l2), err_linf=R(e.err_linf),
                residual=R(e.residual), drift=R(e.drift),
                ρ_max=R(interior_ρ_max(p.interior)),
+               τ_max=ind === nothing ? nothing : R(ind.τ_max),
+               centroid=centroid,
+               centroid_offset=centroid === nothing ? nothing :
+                               R(centroid_offset(case, t, ind.centroid)),
                nblocks=nleaves(forest), levels=forest_levels(forest),
                h=R(minimum_spacing(T, forest)),
                finite=all(isfinite, u))
         push!(records, rec)
         observer === nothing || observer(p, t, u)
-        return rec
+        return ind
     end
 
     # `t = 0`, before anything has been integrated: the record's first row
@@ -303,14 +382,51 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         λ_end = max_speed_of(p, u, stop)
         cflnum = check_cfl(dt_used, h_min, cfl, λ_end; chunk=c, λ=λ)
 
-        # (3) the record, and whatever is watching.
-        record!(p, stop, u, dt_used, steps, λ, λ_end, cflnum)
+        # (3) the record, and whatever is watching — before the regrid that
+        # would invalidate the mesh the record describes.
+        ind = record!(p, stop, u, dt_used, steps, λ, λ_end, cflnum)
+
+        # (4) the regrid, on the flags the record has already computed from
+        # this state, with this `t`'s hook. **Not after the last chunk**:
+        # the forest that comes back is then the one the returned state was
+        # computed on. `regrid!` is handed the state field set alone — the
+        # fresh `GHProblem` below allocates a new `diag` and re-samples the
+        # gauge source on the new mesh, so resizing either of them through
+        # the transfer would be work thrown away (amended in step 6;
+        # `CODE.md`'s loop lists all three).
+        if regrid && c < nchunks && ind !== nothing
+            moved = regrid!(forest, U => schedule; flags=ind.flags, buffer=0,
+                            boundary=dirichlet(case, stop))
+            if moved
+                nregrids += 1
+                schedule = GhostSchedule(U, ops)
+                p = GHProblem(U, schedule, case; q=q, t=stop)
+                u = statevector(U)
+                gather!(u, U)
+                # The transferred state has not been through a step, so the
+                # `:pasted` variant's limiter has not run on it; every other
+                # variant compiles this away.
+                paste_interior!(p, u, stop)
+            end
+        end
     end
 
     return (records=records, nsteps=nsteps, nchunks=length(records) - 1,
+            nregrids=nregrids, passes=passes, converged=converged,
+            buffer=bufferwidth,
             λ_initial=R(λ_initial), h=R(minimum_spacing(T, forest)),
             nblocks=nleaves(forest), levels=forest_levels(forest),
             interior=p.interior, problem=p, U=U, u=u, forest=forest)
+end
+
+# The distance from the indicator's centroid to the hole's analytic center
+# at this time — `CODE.md`'s "the refinement centroid against the analytic
+# center", which G5 asks to stay within a few finest spacings. A case with
+# no hole measures it against the origin, which is where its `HoleCenter`
+# already is.
+function centroid_offset(case::GHCase{T}, t, centroid) where {T}
+    c = center_at(case.center, T(t))
+    return sqrt(sum(abs2, SVector{3,T}(centroid) - c))
 end
 
 # `max_speed` reads the working array, so the state has to be there first.

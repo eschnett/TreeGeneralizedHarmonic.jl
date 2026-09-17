@@ -77,7 +77,7 @@ export apply_stencil, apply_mixed_stencil
 export isharmonic, isstatic, sample_gauge_source!
 
 # Cases, backgrounds and initial data
-export GHCase, with_interior, gh_forest, hole_forest
+export GHCase, with_interior, with_refinement, gh_forest, hole_forest
 export minkowski_case, gauge_wave_case, shifted_minkowski_case
 export hole_case, kerr_schild_case, harmonic_kerr_case
 export background_state, state_tuple, case_state_tuple, state_callback
@@ -105,6 +105,12 @@ export AllPoints, is_evolved, adm_constraints_at_node
 export gh_constraint!, adm_constraint!, gh_error!
 export masked_counts, masked_norms, constraint_norms, error_norms
 
+# Refinement: the masked Löhner indicator, its marks and its bounds
+export Refinement, lohner, cell_tau, field_scales, field_scale
+export gh_tau!, tau_max, gh_indicator!, indicator_flags, refine_flags
+export LevelBounds, level_bounds, block_level_bounds, horizon_floor_level
+export refinement_buffer, refinement_centroid
+
 # The driver
 export evolve!, check_cfl, forest_levels, horizon_shell
 export discrete_gradient_momentum!
@@ -119,6 +125,10 @@ include("initialdata.jl")
 include("boundaries.jl")
 include("evolution.jl")
 include("constraints.jl")
+# After `constraints.jl` and before `driver.jl`: the indicator dispatches on
+# `GHCase` and `GHProblem` and reuses the monitors' scatter-and-fill
+# preamble, and the driver is what calls it.
+include("refinement.jl")
 include("driver.jl")
 
 end

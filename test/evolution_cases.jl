@@ -252,6 +252,138 @@ function gh_hole_run(::Type{T}, case::GHCase{T}; N, q, t_end, roots=1,
     return out
 end
 
+# --- the indicator's hole (added in step 6) ---------------------------------
+#
+# A *second* hole fixture, because the refinement needs room the step-5 one
+# does not have: `CODE.md`'s level ceiling holds the blocks within a few
+# coarse cells of the outer boundary at the coarsest level, and its level
+# floor refines the shell from `r_1` out past the horizon — so a box whose
+# half-width is only `5/4` of the horizon's coordinate radius has the two
+# regions touching, and `block_level_bounds` throws saying exactly that.
+# This fixture is the reference configuration of `CODE.md`'s calibration:
+# the same Kerr-Schild hole in a box of half-width `5 M` on a `4³` root
+# brick, at the margin `m = 4` rather than the default `8` so that the
+# level the interior needs is one rather than two — which is what keeps the
+# mesh at the *same* 120 blocks and 61 440 points as the step-5 fixture
+# while the indicator, not a hand-written shell list, chooses them.
+
+"""
+The suite's **adaptive**-hole fixture: Kerr-Schild (`a = 0`) in a box of
+half-width `5 M` with `CODE.md`'s refinement parameters attached — the
+thresholds calibrated in step 6 (`refine_tol = 2/5`, `coarsen_tol = 1/10`,
+mid-plateau of the table under "Measured results"), the level floor derived
+from the interior's own radii, and the ceiling one coarse cell deep.
+
+`maxlevel_cap = 1` is the suite's, not the calibration's: at the calibrated
+thresholds the indicator asks for level 2 around this hole and the mesh is
+848 blocks, which is `test/hole_runs.jl`'s business and not a test file's.
+Capping at one level keeps the fixture at the step-5 fixture's size and has
+the side effect of exercising the `(Keep, box)` mark, which is the mark a
+block *at the cap* reports and which nothing else in the suite reaches.
+
+`margin = 4` rather than `CODE.md`'s default `8`: the floor level is
+`min((r_h,min − r_1)/m, (r_1 − r_0)/(2(G+1)))` in spacings, so the margin is
+what decides whether this hole needs one refinement level or two. `m = 4` is
+still above the floor `G + 1 = 3` the interior insists on.
+"""
+function adaptive_hole_fixture(::Type{T}=Float64; q=2, M=one(T), a=zero(T),
+                               refine_tol=T(2 // 5), coarsen_tol=T(1 // 10),
+                               maxlevel_cap=1, floor_margin=zero(T),
+                               ceiling_cells=1, margin=4, r_0=T(3 // 10),
+                               r_1=T(5 // 4), halfwidth=T(5),
+                               chunk=T(1 // 20), kwargs...) where {T}
+    ref = Refinement(T; refine_tol=refine_tol, coarsen_tol=coarsen_tol,
+                     maxlevel_cap=maxlevel_cap, floor_margin=floor_margin,
+                     ceiling_cells=ceiling_cells)
+    return kerr_schild_case(T; M=M, a=a, halfwidth=halfwidth, r_0=r_0, r_1=r_1,
+                            chunk=chunk, margin=margin, refinement=ref,
+                            kwargs...)
+end
+
+"""
+Fill a uniform mesh with a case's exact data at `t`, fill its ghosts with
+that `t`'s hook, and evaluate the indicator into a scratch `diag` — one
+pass over the criterion and no time stepping at all, which is what every
+claim about `τ` itself is made on.
+
+The ghost fill is not optional and is the reason this helper exists:
+Löhner's stencil reaches one point past the block face, and `regrid!` fills
+ghosts only *after* the flags are computed, for its own prolongation.
+
+It stops short of the marks, because `τ` is defined on any mesh while the
+marks are not: the level bounds refuse a `maxlevel_cap` below the level the
+interior's radii need, and the calibration table sweeps `h` over meshes far
+coarser than that.
+"""
+function gh_tau_pass(::Type{T}, case::GHCase{T}; N, roots, q=2, t=zero(T),
+                     forest=nothing,
+                     ops=Operators(prolongation=q + 2, restriction=q + 2),
+                     backend=CPU()) where {T}
+    f = forest === nothing ? gh_forest(T, case; N=N, roots=roots) : forest
+    U = FieldSet{T}(f, 20; G=q ÷ 2 + 1, centering=vertexcentered(3),
+                    backend=backend)
+    sched = GhostSchedule(U, ops)
+    fill_exact!(U, case, T(t))
+    boundary = dirichlet(case, T(t))
+    boundary === nothing ? fill_ghosts!(U, sched) :
+    fill_ghosts!(U, sched; boundary=boundary)
+    origins = TreeGeneralizedHarmonic.to_backend(backend, block_origins(f, T))
+    spacings = TreeGeneralizedHarmonic.to_backend(backend, block_spacings(f, T))
+    mask = interior_mask(case.interior, T(t))
+    scales = field_scales(U, mask, origins, spacings)
+    τfs = FieldSet{T}(f, TreeGeneralizedHarmonic.NDIAG; G=0,
+                      centering=U.centering, backend=backend)
+    gh_tau!(τfs, U, origins, spacings, mask; scale=maximum(scales),
+            ε=case.refinement === nothing ? T(1 // 100) : case.refinement.ε)
+    return (forest=f, U=U, schedule=sched, τfs=τfs, scales=scales,
+            scale=maximum(scales), τ_max=tau_max(τfs),
+            origins=origins, spacings=spacings, mask=mask)
+end
+
+"""
+[`gh_tau_pass`](@ref) followed by the marks: the indicator's whole verdict
+on one filled mesh, as `regrid!` would take it.
+"""
+function gh_flagging_pass(::Type{T}, case::GHCase{T}; N, roots, q=2,
+                          t=zero(T), buffer=0, forest=nothing,
+                          ops=Operators(prolongation=q + 2, restriction=q + 2),
+                          backend=CPU()) where {T}
+    pass = gh_tau_pass(T, case; N=N, roots=roots, q=q, t=t, forest=forest,
+                       ops=ops, backend=backend)
+    out = indicator_flags(pass.U, case, T(t); G=q ÷ 2 + 1, buffer=buffer)
+    return (forest=pass.forest, U=pass.U, schedule=pass.schedule,
+            τfs=pass.τfs, scales=pass.scales, out...)
+end
+
+"""
+`CODE.md`'s initial-data cycle on a case: fill, flag with the indicator,
+regrid without transferring, re-evaluate — until the hierarchy stops
+changing. Returns the mesh it converged to together with the verdict on it.
+
+This is [`evolve!`](@ref)`(; adapt = true)` without the evolution, which is
+what a test of the *mesh* wants: no right-hand side is evaluated, so the
+whole cycle costs a handful of initial-data fills.
+"""
+function gh_adapt_cycle(::Type{T}, case::GHCase{T}; N, roots, q=2, buffer=1,
+                        maxpasses=8,
+                        ops=Operators(prolongation=q + 2, restriction=q + 2),
+                        backend=CPU()) where {T}
+    G = q ÷ 2 + 1
+    forest = gh_forest(T, case; N=N, roots=roots)
+    U = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3),
+                    backend=backend)
+    criterion(fs) = indicator_flags(fs, case, zero(T); G=G, buffer=buffer).flags
+    sched, passes, converged = adapt_to_initial_data!(
+        U, ops; initial=state_callback(case, zero(T)), flags=criterion,
+        buffer=0, maxpasses=maxpasses, boundary=dirichlet(case, zero(T)))
+    boundary = dirichlet(case, zero(T))
+    boundary === nothing ? fill_ghosts!(U, sched) :
+    fill_ghosts!(U, sched; boundary=boundary)
+    out = indicator_flags(U, case, zero(T); G=G, buffer=buffer)
+    return (forest=forest, U=U, schedule=sched, passes=passes,
+            converged=converged, out...)
+end
+
 """
 The constraint norms of a run's final state over the shell of `width`
 spacings just **outside** `r_1` — `CODE.md`'s "the `G` points outside

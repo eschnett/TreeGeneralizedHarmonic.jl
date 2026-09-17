@@ -62,10 +62,20 @@ it belongs: it is a statement about RK4's stability and not about the
 hole.
 
 `center` and `velocity` are the hole's analytic trajectory `c(t) = c₀ + v
-t` — the thing the interior, the damping profile and (from step 6) the
-refinement centroid all measure a distance from. `chunk` is the regrid
+t` — the thing the interior, the damping profile and the refinement
+centroid all measure a distance from. `chunk` is the regrid
 cadence [`evolve!`](@ref) runs at; zero means "not a case that is
 evolved in chunks", and the driver says so rather than assuming one.
+
+**The refinement (added in step 6).** `refinement` is `nothing` — a case
+that is run on a mesh somebody else chose, which is every case up to step 5
+and every frozen-hierarchy convergence study — or a [`Refinement`](@ref)
+carrying the two thresholds, the level cap and the two geometric
+corrections. `CODE.md` lists those as fields of the case; they are one
+struct, so that a case without refinement carries one `nothing` rather than
+five placeholders. [`evolve!`](@ref) refuses `regrid = true` and
+`adapt = true` on a case without one, because this package has exactly one
+refinement mechanism.
 
 **A moving non-harmonic background is refused here**, with the message
 `CODE.md` asks for under "Gauge and constraint damping": such a background
@@ -86,7 +96,7 @@ right-hand side needs a case two steps before there is a driver, and a
 struct cannot be defined twice. `driver.jl` adds `evolve!` and the
 refinement fields step 6 needs.
 """
-struct GHCase{T,B,D,I}
+struct GHCase{T,B,D,I,R}
     background::B
     box::NTuple{3,Tuple{T,T}}
     periodic::NTuple{3,Bool}
@@ -95,6 +105,7 @@ struct GHCase{T,B,D,I}
     γ2::T
     center::HoleCenter{T}
     interior::I                  # an `Interior`, or `nothing`
+    refinement::R                # a `Refinement`, or `nothing`
     chunk::T
 end
 
@@ -102,7 +113,8 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
                 center=(zero(T), zero(T), zero(T)),
                 velocity=(zero(T), zero(T), zero(T)), interior=nothing,
                 r_0=zero(T), r_1=zero(T), margin::Integer=8,
-                w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), chunk=zero(T)) where {T}
+                w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), refinement=nothing,
+                chunk=zero(T)) where {T}
     isharmonic(background) || isstatic(background) || throw(ArgumentError(
         "this background is neither harmonic nor static, so its prescribed " *
         "gauge source H_a(x − vt) depends on time, and CODE.md's Hsrc field " *
@@ -132,10 +144,11 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
     int = interior === nothing ? nothing :
           Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
                    margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp)
-    return GHCase{T,typeof(background),typeof(damping),typeof(int)}(
+    return GHCase{T,typeof(background),typeof(damping),typeof(int),
+                  typeof(refinement)}(
         background, ntuple(d -> (T(box[d][1]), T(box[d][2])), Val(3)),
         ntuple(d -> Bool(periodic[d]), Val(3)), T(ε_KO), damping, T(γ2), c,
-        int, T(chunk))
+        int, refinement, T(chunk))
 end
 
 GHCase(background; kwargs...) = GHCase(Float64, background; kwargs...)
@@ -153,9 +166,26 @@ A reconstruction and not a mutation, for the reason
 and every evaluation.
 """
 with_interior(case::GHCase{T}, interior) where {T} =
-    GHCase{T,typeof(case.background),typeof(case.γ0),typeof(interior)}(
+    GHCase{T,typeof(case.background),typeof(case.γ0),typeof(interior),
+           typeof(case.refinement)}(
         case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
-        case.center, interior, case.chunk)
+        case.center, interior, case.refinement, case.chunk)
+
+"""
+    with_refinement(case::GHCase, refinement) -> GHCase
+
+The same case carrying different refinement parameters — what a test that
+loosens `refine_tol` to watch the level floor bind changes between two
+flagging passes, and what a study that sweeps the thresholds varies.
+
+A reconstruction and not a mutation, for the reason
+[`with_interior`](@ref) is.
+"""
+with_refinement(case::GHCase{T}, refinement) where {T} =
+    GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
+           typeof(refinement)}(
+        case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
+        case.center, case.interior, refinement, case.chunk)
 
 """
     minkowski_case(T = Float64; L, ε_KO, γ0, γ2)
@@ -264,13 +294,14 @@ function hole_case(::Type{T}, background; halfwidth, r_0, r_1, chunk,
                    γ0=GaussianDamping(T; near=1 / T(M), far=1 / (10 * T(M)),
                                       width=3 * T(M),
                                       center=HoleCenter(T, center, velocity)),
-                   γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2)) where {T}
+                   γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
+                   refinement=nothing) where {T}
     return GHCase(T, background;
                   box=ntuple(_ -> (-T(halfwidth), T(halfwidth)), Val(3)),
                   periodic=(false, false, false), ε_KO=ε_KO, γ0=γ0, γ2=γ2,
                   center=center, velocity=velocity, interior=interior,
                   r_0=r_0, r_1=r_1, margin=margin, w_ramp=w_ramp,
-                  ρ_ramp=ρ_ramp, chunk=chunk)
+                  ρ_ramp=ρ_ramp, refinement=refinement, chunk=chunk)
 end
 
 hole_case(background; kwargs...) = hole_case(Float64, background; kwargs...)
