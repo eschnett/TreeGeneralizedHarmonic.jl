@@ -1033,11 +1033,17 @@ refinement level, short times.
   The prerequisite test runs **two** backgrounds rather than the one
   named above **(proposed in step 0)**: `KerrSchild(1, 0)` and
   `boost(Harmonic(1, 9/10), 0.3 x̂)`, the proof-of-concept case itself.
-  `KerrSchild` is static, so its `Π = ∂_t g` half is identically zero and
-  a callback that filled it from the wrong slice of `dg` — the two
-  derivative index conventions above are exactly that mistake — would
-  pass; the boosted one is also the expensive case to compile, nested
-  duals through a coordinate pullback, and it compiling is what the
+  `KerrSchild` is static, so the `∂_t g` its `dmetric` pass returns
+  vanishes identically and a callback that filled the momentum half from
+  the wrong slice of `dg` — the two derivative index conventions above
+  are exactly that mistake — would pass. (That test fills those ten slots
+  with `∂_t g` as a *stand-in*: the evolved `Π` above is densitised and
+  Lie-advected, and equals `∂_t g` only where the shift vanishes and
+  `α = √γ`. Nothing in step 0 evolves anything, and the claim under test
+  is about the kernel argument; the real `Π` arrives with
+  `initialdata.jl`.) The boosted case is also the expensive one to
+  compile, nested duals through a coordinate pullback, and it compiling
+  is what the
   dependency risk under [Initial data and
   backgrounds](#initial-data-and-backgrounds) is about.
 - **G1 — Pointwise algebra and stencils.** `pointwise.jl`,

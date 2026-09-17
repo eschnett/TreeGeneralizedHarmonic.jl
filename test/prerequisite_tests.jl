@@ -69,22 +69,33 @@ end
     g - SMatrix{4,4,T}(-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
 
 # The initial state of `CODE.md`'s callback, in miniature: `h` from the
-# metric and `Π = ∂_t g` from the `dmetric` pass. `dmetric` returns
-# `dg[a, b, c] = ∂_c g_ab` — the derivative axis *last* — so the time
-# derivative is `dg[:, :, 1]`. That is the convention this package converts
-# in `initialdata.jl` and nowhere else; here it is used as it comes.
+# metric, and `∂_t g` from the `dmetric` pass in the ten slots the layout
+# reserves for the momentum. `dmetric` returns `dg[a, b, c] = ∂_c g_ab` —
+# the derivative axis *last* — so the time derivative is `dg[:, :, 1]`.
+# That is the convention this package converts in `initialdata.jl` and
+# nowhere else; here it is used as it comes.
+#
+# **`∂_t g` is a stand-in for the `Π` slot, not `Π`.** The evolved
+# momentum is `Π_ab = (√γ/α)(∂_t − β^i ∂_i) g_ab = √|g| n^μ ∂_μ g_ab`,
+# densitised and Lie-advected (`CODE.md`, "The equations"); it coincides
+# with `∂_t g` only where the shift vanishes and `α = √γ`, which is
+# nowhere near a black hole. Nothing here evolves anything, and the claim
+# under test is about the *kernel argument* — that a background with its
+# forward-mode pass compiles and produces the same numbers inside a
+# launch as on the host — so the stand-in is deliberate and the real `Π`
+# arrives with `initialdata.jl` in step 3.
 @inline function prereq_state(bg, x::NTuple{3,T}) where {T}
     g, dg = dmetric(bg, SVector{4,T}(zero(T), x[1], x[2], x[3]))
-    Π = SMatrix{4,4,T}(dg[a, b, 1] for a in 1:4, b in 1:4)
-    return (prereq_pack(prereq_offset(g))..., prereq_pack(Π)...)
+    dtg = SMatrix{4,4,T}(dg[a, b, 1] for a in 1:4, b in 1:4)
+    return (prereq_pack(prereq_offset(g))..., prereq_pack(dtg)...)
 end
 
 # One static background and one that moves. The first is the one `CODE.md`
 # names as the non-harmonic hole; the second is the proof-of-concept case
 # itself, `boost(Harmonic(M, a), v)`, which is the expensive one to
 # compile — nested duals through a coordinate pullback — and the one whose
-# `Π` is not identically zero, so that both halves of the state are
-# compared against something.
+# `∂_t g` is not identically zero, so that both halves of the packed state
+# are compared against something.
 prereq_backgrounds(::Type{T}) where {T} =
     (KerrSchild{T}(1, 0),
      boost(Harmonic{T}(1, 9 // 10), SVector{3,T}(3 // 10, 0, 0)))
@@ -139,8 +150,8 @@ prereq_backgrounds(::Type{T}) where {T} =
         @test eltype(fs.work) === T                # no promotion on the way in
     end
 
-    # The boosted hole moves, so its `Π = ∂_t g` is not zero anywhere; a
-    # form that filled the `Π` half from the wrong slice of `dg` — the
+    # The boosted hole moves, so its `∂_t g` is not zero anywhere; a form
+    # that filled the momentum half from the wrong slice of `dg` — the
     # derivative axis is *last* in `dmetric`'s convention and *first* in
     # GHSO2's — would leave it zero and pass every test above.
     moving = last(prereq_backgrounds(T))

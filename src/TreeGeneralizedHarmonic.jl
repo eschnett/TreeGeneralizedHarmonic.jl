@@ -6,11 +6,18 @@ second order in space, first order in time — on
 [TreeAMR](https://github.com/eschnett/TreeAMR.jl)'s octree of uniform
 blocks:
 
-    ∂ₜh_ab = Π_ab
+    ∂ₜh_ab = β^i ∂_i h_ab + (α/√γ) Π_ab
     ∂ₜΠ_ab = (the second-order reduction of  R_ab = 0,  expanded)
 
-with `h_ab = g_ab − η_ab` the offset metric, `Π_ab` its time derivative,
-and a prescribed gauge source `H_a` with the usual constraint damping.
+with `h_ab = g_ab − η_ab` the offset metric and
+
+    Π_ab = (√γ/α)(∂ₜ − β^i ∂_i) g_ab = √|g| n^μ ∂_μ g_ab
+
+the **densitised, Lie-advected momentum** — the derivative along the unit
+normal, weighted by `√|g|`, and *not* `∂ₜ h_ab`, which is the first line.
+`α`, `β^i` and `√γ` are read off `h` pointwise. A prescribed gauge source
+`H_a` and the usual constraint damping close the system; see "The
+equations" in `CODE.md`.
 
 TreeAMR supplies the mesh and its operations and deliberately contains no
 physics, so this package is where the physics lives.
