@@ -45,7 +45,8 @@ Three rules follow from `CODE.md` and govern every change here:
 
 ## Current state
 
-**Scaffolding only — G0 is done, G1 (the pointwise algebra) is next.**
+**G0 is done and G1 is half done — the pointwise algebra exists, the
+stencils are next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -54,20 +55,34 @@ as part of the deliverable, an error indicator for refinement, `Float64`
 on Symmetry's H200 as the device requirement, no checkpointing, GPU
 kernel efficiency deferred to a research project. `PLAN.md` breaks the
 milestones G0–G6 into steps 0–10, each a brief for one agent with a fresh
-context (see its "Running a step as an agent"); step 1 (the pointwise
-algebra) is next. `notes/` holds the inherited documents.
+context (see its "Running a step as an agent"); step 2 (the stencils) is
+next. `notes/` holds the inherited documents.
 
 What exists in `src/` is the module shell, `precision.jl` (the `Base`
-bridges for software floating-point types) and `device.jl` (`to_backend`,
-`hostcopy`, `hostcopy!`) — no equations. What exists in `test/` is
-`precision_tests.jl` and `prerequisite_tests.jl`, the latter saying that
-the pinned TreeAMR still exports the names the design calls and that a
-`SpacetimeMetrics` background — `KerrSchild`, and the boosted spinning
-`Harmonic` of the proof of concept — compiles and runs as a kernel
-argument on `CPU()`, filling a field set bit-for-bit as a host loop does.
+bridges for software floating-point types), `device.jl` (`to_backend`,
+`hostcopy`, `hostcopy!`) and `pointwise.jl` — GHSO2's node-local algebra
+ported from `notes/pointwise-ghso2.jl`, plus the expanded momentum
+equation this package discretises (`metric_derivatives`,
+`gh_node_rhs_expanded`) and `gh_node_source`. There is still no mesh-side
+physics: nothing in `src/` reads a field set.
+
+What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
+(the pinned TreeAMR still exports the names the design calls, and a
+`SpacetimeMetrics` background compiles and runs as a kernel argument on
+`CPU()`, filling a field set bit-for-bit as a host loop does), and the
+pointwise pair — `pointwise_tests.jl` and `pointwise_identity_tests.jl`
+over a shared `pointwise_backgrounds.jl`, which is where the six
+backgrounds of `CODE.md`'s table and the analytic data are built.
 `Project.toml` carries the `[sources]` pins and CI is in place. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and no remote.
+
+The suite's cost is now dominated by **compiling** `SpacetimeMetrics`'
+nested forward-mode passes for six backgrounds at two precisions — about
+two minutes, against step 0's eight seconds, with the evaluation itself
+in microseconds. Before adding a test that differentiates a background,
+look at what `pointwise_backgrounds.jl` already computes in one pass:
+`CODE.md`'s "Measured results" records what fusing them was worth.
 
 ## Commands
 
@@ -221,6 +236,14 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   the interior profiles, the damping profile, the indicator's thresholds
   and floors become kernel arguments; they are `isbits` structs and
   tuples. The center is a function of `t`, never a mutated field.
+- **Two spellings of one expression are not bit-identical.** The same
+  arithmetic written twice — `gh_node_source` and the block it was lifted
+  out of, `gh_fluxes` and `gh_node_rhs`'s fluxes — disagrees in the last
+  place on this machine, because the compiler fuses a multiply and an add
+  in one inlining context and not in the other (measured in step 1).
+  Compare such copies to roundoff, not with `isequal`. The bit-identity
+  that *is* an invariant is the same compiled code at a different thread
+  count, which is what `test/threading_tests.jl` will assert.
 - **Never thread anything a TreeAMR callback can reach**, and never
   accumulate into shared state in a loop of your own: bit-identity
   across thread counts is the invariant, and `test/threading_tests.jl`

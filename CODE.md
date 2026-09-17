@@ -241,6 +241,40 @@ summation-by-parts identity across block or level boundaries to
 preserve, so the flux form would cost ghosts and buy nothing this mesh
 can use (decided in review).
 
+**(Measured in step 1.)** Both hold. On the six backgrounds of the table
+at two points each, in `Float64`, the residual of `∂_tΠ − ∂_iF^i − msrc`
+on analytic data is between `2e−11` and `4e−8` relative to the size of
+the terms that make it up, and it falls by a factor of **16** when the
+fourth-order difference's step is halved: the residual *is* that
+difference's truncation error, and the ported source is the vacuum
+Einstein equation in this gauge. (Minkowski is exactly zero and the gauge
+wave sits at roundoff, `7e−15`, at every step: it depends on `x − t`
+alone, so the temporal and the spatial truncation errors cancel.)
+`(EXPANDED)`'s `∂_tΠ` and `(FLUX)`'s agree to **under one `eps`** of the
+size of the terms when the flux's divergence is taken exactly by
+automatic differentiation rather than by a stencil, on every background
+and at both `Float64` and `Float32` — the expansion is the same equation
+to the last bit. The closed-form coefficient derivatives agree with a
+forward-mode dual pass through `metric_quantities` to **0.6 `eps`** of
+`max_i ‖∂_i h‖`, and `C_a` and `Z_ab` vanish on exact data to **1.5 `eps`**
+and **0.3 `eps`** of the terms that build them, with `H_a` and `∂_aH_b`
+under **2.4 `eps`** on each of the four harmonic rows.
+
+Three shapes follow, and step 3's kernel is written against them
+**(proposed in step 1**, since `PLAN.md` fixed the argument list but not
+its spelling**)**. `metric_derivatives(h, ∂h)` returns the *full*
+`(∂_iα, ∂_iβ^j, ∂_i(α√γγ^{jk}))` rather than the four contractions
+`(EXPANDED)` needs, because that is what a dual pass can be compared
+against; the caller contracts, and the components it does not ask for
+leave the inlined code. `∂h` and `∂Π` are `NTuple{3,SVector{10}}`, and
+`∂∂h` is an `NTuple{6,SVector{10}}` in the column-major lower-triangular
+order `(xx, xy, xz, yy, yz, zz)` — the packing of a symmetric tensor, one
+index range shorter, so that the file has one packing convention and not
+two. The reduced source is `gh_node_source(g4, gu4, α, √γ, dg, H, ∂H, γ0,
+γ2)`: it takes the coefficient set rather than `h`, because by the time the
+streaming kernel reaches the source it has had the coefficients for two
+stages.
+
 ## Discretization
 
 ### Field sets and layout
@@ -367,7 +401,16 @@ scalarised straight-line code — GHAccel found that the compiler does
 not register-allocate a large `SVector` expression well unless every
 element is spelled out, and generated its kernel for that reason; this
 package does the same, by hand or by generation, and the choice is an
-implementation detail of G1.
+implementation detail of G1. **(Decided in step 1: by hand.)** The
+expanded form is written as elementwise `SVector{10}` combinations of the
+stencils and the coefficients, which `StaticArrays` unrolls into scalar
+arithmetic with no loop and no branch; `test/pointwise_tests.jl` asserts
+that every pointwise function allocates **zero bytes**, which is the part
+of "kernel-safe" a host test can settle. Whether that unrolling is also
+the register schedule GHAccel needed is a question about `ptxas` output
+and belongs to G6, which measures it; generating the code is the fallback
+the milestone leaves open, not a thing to do before there is a
+measurement.
 
 This is the whole of the design's commitment to GPU kernel efficiency.
 Beyond it, the **black-box attempts** G6 makes and records are: the
@@ -988,7 +1031,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `notes/` | verbatim copies of the inherited documents, with provenance; see `notes/README.md` |
 | `src/TreeGeneralizedHarmonic.jl` | module shell: `using`s, exports, includes |
 | `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host (amended in step 0) |
-| `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives; `SVector{10}` state, `SMatrix{4,4}` tensors |
+| `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source` — the ported flux form's source block lifted out so that the two forms share one spelling of it (added in step 1); `SVector{10}` state, `SMatrix{4,4}` tensors |
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` |
 | `src/evolution.jl` | the fused RHS kernel in streaming order, `GHProblem`, `gh_rhs!`, the speed kernel, `gh_dt` |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc`; the harmonic/static checks |
@@ -1001,17 +1044,23 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/driver.jl` | `GHCase`, `evolve!`, the analysis record per chunk, `observer` |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl` |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`. `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1) |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
 pinned to GitHub `main` by `[sources]`, which puts the Julia floor at
 1.11 as in the siblings), `KernelAbstractions`, `StaticArrays`
 (kernel-safe, and what `SpacetimeMetrics` speaks),
-`OrdinaryDiffEqLowOrderRK` and `SciMLBase`, `HDF5` (from G6),
+`OrdinaryDiffEqLowOrderRK` and `SciMLBase`, `LinearAlgebra` (`det`, `dot`
+and `tr` on `StaticArrays`, which the pointwise algebra uses; a standard
+library, added in step 1 and not listed when `PLAN.md` enumerated step 0's
+`Project.toml` **(proposed in step 1)**), `HDF5` (from G6),
 `ApparentHorizonFinder` and `KorzynskiSpin` (from G4). Tests add
-`MultiFloats`. `bin/` adds `CairoMakie` and `SixelTerm` in its own
-environment. The compat bounds follow TreeWave's, including
+`MultiFloats` and `ForwardDiff` — the latter because the checks on the
+expanded form differentiate the analytic solution one layer above the one
+`SpacetimeMetrics` takes internally (added in step 1). `bin/` adds
+`CairoMakie` and `SixelTerm` in its own environment. The compat bounds
+follow TreeWave's, including
 `OrdinaryDiffEqLowOrderRK = "2.2.5"` **(proposed in step 0**, which is
 the one bound `PLAN.md` left unstated**)**. The two pins resolved in step 0
 to TreeAMR v0.1.0 and SpacetimeMetrics v1.6.0; a `[compat]` entry on a
@@ -1054,7 +1103,15 @@ refinement level, short times.
   coefficient derivatives against a dual pass, the vanishing of `C_a`
   and `Z_ab` on exact data; rational stencil weights reproducing the
   textbook tables and exact to degree `q`; every function callable from
-  a trivial kernel on `CPU()`.
+  a trivial kernel on `CPU()`. `pointwise.jl` and its half of the
+  acceptance are done (step 1); `stencils.jl` and the weights are step 2,
+  which marks the milestone. The numbers are under [Measured
+  results](#measured-results), and the one thing the step found that the
+  design did not say: `‖h‖ ~ 1e−13` is a claim about the *offsets*
+  `g^{ab} − η^{ab}`, `det g + 1`, `det γ − 1` — `α`, `β^i` and `√γ` are
+  built from them and are accurate to a relative `eps` **as values**,
+  which is not the same statement and is the one a test can make about
+  what `metric_quantities` returns.
 - **G2 — The RHS on a uniform periodic mesh.** `evolution.jl`,
   `initialdata.jl`, `gauge.jl`; the gauge wave and shifted Minkowski
   cases; RK4. *Accept:* Minkowski and shifted Minkowski are stationary
@@ -1143,6 +1200,46 @@ the values of a host loop through `coordinates`, at `Float64` and at
 `Float32` — see [Initial data and
 backgrounds](#initial-data-and-backgrounds). No physics is measured yet:
 `src/` holds the module shell, `precision.jl` and `device.jl`.
+
+**G1a (step 1), the pointwise algebra.** The suite is 1007 assertions in
+124 s at one thread and 116 s at four, on the development machine
+(Apple silicon, 12 CPU threads, Julia 1.13.0), up from step 0's 82 in
+7.7 s. Essentially all of the growth is **compilation**: the six
+backgrounds of the table, at `Float64` and `Float32`, under
+`SpacetimeMetrics`' nested forward-mode passes — `dmetric` once,
+`gauge_source_grad` twice, and once more for the pass the tests take on
+top of them. Evaluation is microseconds. Three measurements shaped the
+test files and are recorded so that a later change does not undo them:
+fusing the three separate dual passes the tests needed (`∂_iΠ`,
+`∂_i∂_j h`, `∂_iF^i`) into **one** jacobian cut the suite from 156 s to
+124 s; writing the analytic flux out rather than reading it off
+`gh_node_rhs` — whose reduced source is four rank-three contractions that
+the dual layers multiply — cut the two identity testsets from 253 s to
+28 s; and asking the proof-of-concept case rather than Kerr-Schild for
+the second-derivative packing check cost twenty seconds. What is left is
+`pointwise_tests.jl` at about 77 s and `pointwise_identity_tests.jl` at
+about 19 s, so the first is over `PLAN.md`'s rule of thumb of 30 s per
+file and is recorded as such: splitting it further moves the compilation
+rather than removing it, and the remedy, if one is wanted, is fewer
+backgrounds or fewer precisions, which is a narrower claim.
+
+The physics numbers are in [The equations](#the-equations) beside the
+statements they confirm. Two further results:
+
+- **The offset identities.** At `‖h‖ = 1e−13` in `Float64` the offset
+  `g^{ab} − η^{ab}` from GHSO2's identity has a relative error of
+  **2.4e−16**, one `eps`; computed as `inv(g) − η` it is **1.1e−3**. At
+  `Float32` and `‖h‖ = 1e−5`, **1.4e−7** against **4.2e−3**. The identity
+  buys about `eps/‖h‖`, which is the whole accuracy of the wave zone.
+- **Bit-identity is not a property of an expression.** Two textually
+  identical copies of the source term, one inlined inside `gh_node_rhs`
+  and one in `gh_node_source`, differ on two of twenty-four cases at
+  `Float64`: the compiler contracts a multiply and an add into a fused
+  multiply-add in one context and not in the other. The difference is one
+  unit in the last place. This costs nothing here — the tests compare to
+  roundoff — but it says what the bit-identity the threading test of step
+  4 asserts does and does not mean: the *same* compiled code on a
+  different thread count, not the same formula written twice.
 
 ## Possible extensions
 
