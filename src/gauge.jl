@@ -141,8 +141,20 @@ once per chunk, after every regrid, never per evaluation.
 the refusal in [`GHCase`](@ref) is what makes that true, and passing the
 time anyway keeps the call sites honest about which time's data they
 asked for.
+
+**`interior` is not optional where there is a hole (fixed in step 5).**
+`H^a = −Γ^a[g_exact]` is evaluated at every owned point of the domain,
+*including the frozen core*, where the analytic solution is singular — at
+the center itself `KerrSchild`'s `k^i = (…, z/r)` divides by zero and the
+sample is `NaN`. Nothing in the right-hand side reads it there, because
+the kernel branches on the core before it reaches [`gauge_at`](@ref); the
+constraint monitors do read it, and `0 · NaN = NaN` is what a masked norm
+then reports (`CLAUDE.md`). So this takes the interior and applies
+[`core_position`](@ref), exactly as every other path that evaluates the
+background on a grid does.
 """
-function sample_gauge_source!(Hsrc::FieldSet{T,3}, bg, t) where {T}
+function sample_gauge_source!(Hsrc::FieldSet{T,3}, bg, t;
+                              interior=nothing) where {T}
     Hsrc.nvars == 20 || throw(ArgumentError(
         "the gauge-source field set holds H_b (4) and ∂_a H_b (16) = 20 " *
         "variables, but this one has $(Hsrc.nvars)"))
@@ -151,7 +163,9 @@ function sample_gauge_source!(Hsrc::FieldSet{T,3}, bg, t) where {T}
         "differenced, so its field set has G = 0 (CODE.md, \"Field sets and " *
         "layout\"), but this one has G = $(Hsrc.G)"))
     tt = T(t)
-    fill_by_coordinates!(AllVariables(x -> gauge_tuple(bg, tt, x)), Hsrc)
+    fill_by_coordinates!(
+        AllVariables(x -> gauge_tuple(bg, tt, core_position(interior, tt, x))),
+        Hsrc)
     return Hsrc
 end
 
@@ -194,3 +208,94 @@ end
 @inline gauge_at(::Type{T}, Hwork, idx::NTuple{3,Int}, b::Int,
                  ::Val{false}) where {T} =
     (zero(SVector{4,T}), zero(SMatrix{4,4,T}))
+
+# --- the constraint-damping rate, as a function of position -----------------
+#
+# `CODE.md`, "Gauge and constraint damping": the Gundlach–Pretorius term
+# `Z_ab` carries `γ0(x)`, a **function of position** — a Gaussian of width
+# a few `M` around the hole's analytic center, tapered to a small value in
+# the wave zone — and a constant `γ2`. GHSO2 measured `γ0 ≈ 1/M` near the
+# hole as the requirement for a stable evolution with the horizon in the
+# domain (`notes/methods-ghso2.md`: `γ0 = 0` blows up at the surface-gravity
+# rate `κ`, `γ0 = 1/M` is stable with constraints flat at truncation), and
+# it is *near the hole* that the measurement was made: the same rate out in
+# the wave zone damps nothing that is there and costs a term everywhere.
+#
+# Both profiles are `isbits` and are evaluated per point inside the kernel
+# (added in step 5, replacing the constant `γ0` field of `GHCase` that
+# steps 3 and 4 carried). A flat-space case takes [`ConstantDamping`](@ref)
+# and the arithmetic is what it was.
+
+"""
+    ConstantDamping(γ0)
+
+One constraint-damping rate everywhere — what every case without a hole
+uses, and what `GHCase` wraps a bare number in.
+
+It ignores the position and the time, so the kernel's `damping_rate` call
+folds away to a field load and the flat-space runs of steps 3 and 4 are the
+arithmetic they were.
+"""
+struct ConstantDamping{T}
+    γ0::T
+end
+
+ConstantDamping(::Type{T}, γ0) where {T} = ConstantDamping{T}(T(γ0))
+
+@inline damping_rate(d::ConstantDamping, t, x) = d.γ0
+
+"""
+    GaussianDamping(T = Float64; near, far, width, center)
+
+`CODE.md`'s position-dependent rate: `γ0(x) = far + (near − far)
+exp(−r²/2w²)` with `r = |x − c(t)|` the distance to the hole's analytic
+center — `near` at the hole, falling to `far` in the wave zone over a width
+`w` of a few `M`.
+
+A Gaussian rather than a compactly supported bump because it is `C^∞` and
+because nothing depends on it vanishing exactly: `far` is the wave zone's
+rate, not zero. `center` is a [`HoleCenter`](@ref) and is evaluated at the
+call's `t`, so the profile follows a moving hole without anything being
+updated.
+
+`isbits`, and a kernel argument at every right-hand-side evaluation.
+"""
+struct GaussianDamping{T}
+    near::T
+    far::T
+    width::T
+    center::HoleCenter{T}
+end
+
+function GaussianDamping(::Type{T}=Float64; near, far, width, center) where {T}
+    T(width) > 0 || throw(ArgumentError(
+        "the damping profile's width must be positive, got $width: it is the " *
+        "Gaussian's width, a few M by CODE.md's recipe, and a zero width is " *
+        "a rate that is `far` everywhere except at one point."))
+    (T(near) ≥ 0 && T(far) ≥ 0) || throw(ArgumentError(
+        "both constraint-damping rates must satisfy γ0 ≥ 0, got near = " *
+        "$near and far = $far: the term enters ∂_tΠ with a factor −α√γ, so " *
+        "a negative rate drives the violation it is there to damp."))
+    c = center isa HoleCenter ? HoleCenter{T}(SVector{3,T}(center.c0),
+                                              SVector{3,T}(center.v)) :
+        HoleCenter(T, center)
+    return GaussianDamping{T}(T(near), T(far), T(width), c)
+end
+
+@inline function damping_rate(d::GaussianDamping{T}, t, x) where {T}
+    c = center_at(d.center, t)
+    d1 = x[1] - c[1]
+    d2 = x[2] - c[2]
+    d3 = x[3] - c[3]
+    r² = d1 * d1 + d2 * d2 + d3 * d3
+    return d.far + (d.near - d.far) * exp(-r² / (2 * d.width * d.width))
+end
+
+"""
+    damping_bounds(profile) -> (lo, hi)
+
+The smallest and largest value the profile takes anywhere — what `GHCase`
+checks `γ0 ≥ 0` on, since a profile has no single number to check.
+"""
+damping_bounds(d::ConstantDamping) = (d.γ0, d.γ0)
+damping_bounds(d::GaussianDamping) = (min(d.near, d.far), max(d.near, d.far))

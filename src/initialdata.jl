@@ -27,19 +27,45 @@
 # vanishes and `α = √γ`.
 
 """
-    GHCase(T = Float64, background; box, periodic, ε_KO, γ0, γ2)
+    GHCase(T = Float64, background; box, periodic, ε_KO, γ0, γ2,
+           center = (0, 0, 0), velocity = (0, 0, 0), interior = nothing,
+           r_0 = 0, r_1 = 0, margin = 8, w_ramp = 1//2, ρ_ramp = 1//2,
+           chunk = 0)
 
-A case: the background, the box it is evolved in, and the parameters of
-the scheme that are properties of the physics rather than of the mesh.
+A case: the background, the box it is evolved in, the hole's analytic
+trajectory and its damping layer, and the parameters of the scheme that
+are properties of the physics rather than of the mesh.
 
 `CODE.md`'s table under "Initial data and backgrounds" is the list of
 backgrounds; `box` is the domain's `(lo, hi)` per dimension and `periodic`
 says which dimensions close on themselves (the others take the Dirichlet
-hook of [`dirichlet`](@ref)). `ε_KO` is the Kreiss–Oliger amplitude,
-`γ0 ≥ 0` and `γ2 > −1` the Gundlach–Pretorius damping parameters. None has
-a default: each is a number a run is judged by, and `CODE.md` records
-`ε_KO ≈ 0.5` and `γ0 ≈ 1/M` as GHSO2's *recipe near a hole*, not as
-something a flat-space test should inherit silently.
+hook of [`dirichlet`](@ref)). `ε_KO` is the Kreiss–Oliger amplitude and
+`γ2 > −1` the Gundlach–Pretorius trace parameter. Neither has a default:
+each is a number a run is judged by, and `CODE.md` records `ε_KO ≈ 0.5`
+and `γ0 ≈ 1/M` as GHSO2's *recipe near a hole*, not as something a
+flat-space test should inherit silently.
+
+**`γ0` is a profile, not a number (added in step 5).** `CODE.md`, "Gauge
+and constraint damping", makes the constraint-damping rate a function of
+position — a Gaussian around the hole's center, tapered in the wave zone
+— so this keyword takes a [`ConstantDamping`](@ref) or a
+[`GaussianDamping`](@ref); a bare number is wrapped in the first, which is
+what every case without a hole passes and what steps 3 and 4 already do.
+
+**The interior (added in step 5).** `interior` is `nothing` — no hole,
+which is every case up to step 4 — or one of `CODE.md`'s three variants
+`:damped`, `:pasted`, `:frozen`, in which case `r_0` and `r_1` are the
+frozen core's and the layer's radii and an [`Interior`](@ref) is built
+around this case's `center` and `velocity`. The layer's `ρ_max` is left at
+zero here and set by the driver to `1/dt` once per chunk, which is where
+it belongs: it is a statement about RK4's stability and not about the
+hole.
+
+`center` and `velocity` are the hole's analytic trajectory `c(t) = c₀ + v
+t` — the thing the interior, the damping profile and (from step 6) the
+refinement centroid all measure a distance from. `chunk` is the regrid
+cadence [`evolve!`](@ref) runs at; zero means "not a case that is
+evolved in chunks", and the driver says so rather than assuming one.
 
 **A moving non-harmonic background is refused here**, with the message
 `CODE.md` asks for under "Gauge and constraint damping": such a background
@@ -50,24 +76,33 @@ preserves `□x^a = 0` — which is why it is the case.
 
 The struct is `isbits` whenever the background is, because the whole case
 travels into kernels: the Dirichlet hook closes over it at every ghost
-fill, and from step 5 the interior's `u_exact` does at every evaluation.
+fill, and the interior's `u_exact` does at every evaluation. That is why
+the absent interior is a field of concrete type `Nothing` behind a type
+parameter rather than a `Union`, and why the variant is a `Val`.
 
 **(Amended in step 3.)** `CODE.md`'s file table put `GHCase` in
 `driver.jl`. It is here instead, with the backgrounds it is made of: the
 right-hand side needs a case two steps before there is a driver, and a
-struct cannot be defined twice. `driver.jl` adds `evolve!` and the fields
-the interior and the refinement need.
+struct cannot be defined twice. `driver.jl` adds `evolve!` and the
+refinement fields step 6 needs.
 """
-struct GHCase{T,B}
+struct GHCase{T,B,D,I}
     background::B
     box::NTuple{3,Tuple{T,T}}
     periodic::NTuple{3,Bool}
     ε_KO::T
-    γ0::T
+    γ0::D                        # a damping profile, not a number
     γ2::T
+    center::HoleCenter{T}
+    interior::I                  # an `Interior`, or `nothing`
+    chunk::T
 end
 
-function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2) where {T}
+function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
+                center=(zero(T), zero(T), zero(T)),
+                velocity=(zero(T), zero(T), zero(T)), interior=nothing,
+                r_0=zero(T), r_1=zero(T), margin::Integer=8,
+                w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), chunk=zero(T)) where {T}
     isharmonic(background) || isstatic(background) || throw(ArgumentError(
         "this background is neither harmonic nor static, so its prescribed " *
         "gauge source H_a(x − vt) depends on time, and CODE.md's Hsrc field " *
@@ -78,22 +113,49 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2) where {T}
         "instead: a boost preserves the harmonic condition □x^a = 0, so the " *
         "boosted hole in harmonic coordinates has H ≡ 0 and needs no source " *
         "at all. That is why it is the proof-of-concept case."))
-    γ0 ≥ 0 || throw(ArgumentError(
-        "the constraint-damping rate must satisfy γ0 ≥ 0 — the term enters " *
-        "∂_tΠ with a factor −α√γ, so a negative γ0 drives the constraint " *
-        "violation it is there to damp — but γ0 = $γ0"))
+    damping = γ0 isa Real ? ConstantDamping(T, γ0) : γ0
+    first(damping_bounds(damping)) ≥ 0 || throw(ArgumentError(
+        "the constraint-damping rate must satisfy γ0 ≥ 0 everywhere — the " *
+        "term enters ∂_tΠ with a factor −α√γ, so a negative γ0 drives the " *
+        "constraint violation it is there to damp — but this profile falls " *
+        "to $(first(damping_bounds(damping)))"))
     γ2 > -1 || throw(ArgumentError(
         "the Gundlach–Pretorius trace parameter must satisfy γ2 > −1 at the " *
         "continuum level for the damped system to stay well posed, but " *
         "γ2 = $γ2"))
     all(d -> box[d][2] > box[d][1], 1:3) || throw(ArgumentError(
         "every dimension of the box needs hi > lo, but box = $box"))
-    return GHCase{T,typeof(background)}(
+    T(chunk) ≥ 0 || throw(ArgumentError(
+        "the chunk length is a regrid cadence and cannot be negative, got " *
+        "$chunk; zero means the case states none and evolve! must be told."))
+    c = HoleCenter(T, center, velocity)
+    int = interior === nothing ? nothing :
+          Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
+                   margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp)
+    return GHCase{T,typeof(background),typeof(damping),typeof(int)}(
         background, ntuple(d -> (T(box[d][1]), T(box[d][2])), Val(3)),
-        ntuple(d -> Bool(periodic[d]), Val(3)), T(ε_KO), T(γ0), T(γ2))
+        ntuple(d -> Bool(periodic[d]), Val(3)), T(ε_KO), damping, T(γ2), c,
+        int, T(chunk))
 end
 
 GHCase(background; kwargs...) = GHCase(Float64, background; kwargs...)
+
+"""
+    with_interior(case::GHCase, interior) -> GHCase
+
+The same case carrying a different [`Interior`](@ref) — what the driver
+builds once per chunk when it replaces the layer's `ρ_max` with `1/dt`,
+and what a test that compares `CODE.md`'s three variants changes between
+runs.
+
+A reconstruction and not a mutation, for the reason
+[`with_ρ_max`](@ref) is: the case is a kernel argument at every ghost fill
+and every evaluation.
+"""
+with_interior(case::GHCase{T}, interior) where {T} =
+    GHCase{T,typeof(case.background),typeof(case.γ0),typeof(interior)}(
+        case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
+        case.center, interior, case.chunk)
 
 """
     minkowski_case(T = Float64; L, ε_KO, γ0, γ2)
@@ -163,6 +225,92 @@ shifted_minkowski_case(::Type{T}=Float64; A=T(1//2), w=T(2), halfwidth=T(2),
            periodic=(false, true, true), ε_KO=ε_KO, γ0=γ0, γ2=γ2)
 
 """
+    hole_case(T = Float64, background; halfwidth, r_0, r_1, chunk,
+              M = 1, center = (0,0,0), velocity = (0,0,0),
+              interior = :damped, margin = 8, ε_KO = 1//2,
+              γ0 = GHSO2's recipe, γ2 = 0, w_ramp, ρ_ramp)
+
+A black hole in a **Dirichlet** box, with the damping layer of
+`CODE.md`'s "The interior" and GHSO2's recipe near a hole — the shape both
+[`kerr_schild_case`](@ref) and [`harmonic_kerr_case`](@ref) take, written
+once because the only thing that differs between them is the chart.
+
+The box is `[-halfwidth, halfwidth]³` and is Dirichlet in **every**
+dimension: the exact solution is known everywhere at every time, so the
+boundary data is the solution (`CODE.md`, "Boundaries"). `CODE.md`'s G4
+asks for `halfwidth ≥ 20 M`; the suite's runs are far smaller and say so
+where they are written, because the boundary is exact and a small box
+costs accuracy rather than validity.
+
+`ε_KO = 1//2` and `γ0 ≈ 1/M` are **GHSO2's measured requirements** with the
+horizon in the domain (`notes/methods-ghso2.md`: `γ0 = 0` blows up at the
+surface-gravity rate `κ`, and the grid-scale layer is cured by
+`ε_KO ≈ 0.5`), so they are the defaults *here* and nowhere else — a
+flat-space case has no business inheriting them silently. The default
+`γ0` is a [`GaussianDamping`](@ref) of width `3 M` around the hole,
+`1/M` at the center and `1/(10 M)` in the wave zone
+**(proposed in step 5**: `CODE.md` asks for "a Gaussian of width a few `M`
+… tapered to a small value in the wave zone" and leaves the three numbers
+open**)**.
+
+`r_0`, `r_1` and `chunk` have no defaults: the two radii are what
+[`check_interior_radii`](@ref) measures against the mesh and the horizon,
+and the chunk is the cadence the analysis record is written at.
+"""
+function hole_case(::Type{T}, background; halfwidth, r_0, r_1, chunk,
+                   M=one(T), center=(zero(T), zero(T), zero(T)),
+                   velocity=(zero(T), zero(T), zero(T)), interior=:damped,
+                   margin::Integer=8, ε_KO=T(1 // 2),
+                   γ0=GaussianDamping(T; near=1 / T(M), far=1 / (10 * T(M)),
+                                      width=3 * T(M),
+                                      center=HoleCenter(T, center, velocity)),
+                   γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2)) where {T}
+    return GHCase(T, background;
+                  box=ntuple(_ -> (-T(halfwidth), T(halfwidth)), Val(3)),
+                  periodic=(false, false, false), ε_KO=ε_KO, γ0=γ0, γ2=γ2,
+                  center=center, velocity=velocity, interior=interior,
+                  r_0=r_0, r_1=r_1, margin=margin, w_ramp=w_ramp,
+                  ρ_ramp=ρ_ramp, chunk=chunk)
+end
+
+hole_case(background; kwargs...) = hole_case(Float64, background; kwargs...)
+
+"""
+    kerr_schild_case(T = Float64; M = 1, a = 0, halfwidth, r_0, r_1, chunk, …)
+
+`CODE.md`'s fourth row: a hole in **Kerr-Schild** Cartesian coordinates,
+which is horizon-penetrating and *not* harmonic — so it carries a
+**sampled gauge source**, and it is the case that puts the `Hsrc` path
+under a hole rather than under a shift.
+
+Its horizon's smallest coordinate radius is `r₊ = M + √(M² − a²)`, twice
+the harmonic chart's at `a = 0`, which makes it the cheaper of the two
+holes to resolve and the one a first test should use.
+
+Every other keyword is [`hole_case`](@ref)'s.
+"""
+kerr_schild_case(::Type{T}=Float64; M=one(T), a=zero(T), kwargs...) where {T} =
+    hole_case(T, KerrSchild(T(M), T(a)); M=T(M), kwargs...)
+
+"""
+    harmonic_kerr_case(T = Float64; M = 1, a = 0, halfwidth, r_0, r_1, chunk, …)
+
+`CODE.md`'s fifth row: a hole in **fully harmonic** Cartesian coordinates,
+horizon penetrating and harmonic — `H ≡ 0` exactly, so no `Hsrc` field set
+exists and the kernel is compiled without the gauge-source terms — and the
+chart the proof-of-concept case is a boost of.
+
+Its horizon's smallest coordinate radius is `√(M² − a²)`, which is `M` at
+`a = 0` and about `0.44 M` at `a = 9/10`: the spinning hole is the
+expensive one, and `CODE.md` names those bounds, not the exterior, as what
+sets the finest spacing a run needs.
+
+Every other keyword is [`hole_case`](@ref)'s.
+"""
+harmonic_kerr_case(::Type{T}=Float64; M=one(T), a=zero(T), kwargs...) where {T} =
+    hole_case(T, Harmonic(T(M), T(a)); M=T(M), kwargs...)
+
+"""
     gh_forest(T = Float64, case::GHCase; N, roots, refined = false)
 
 A forest of `roots³` root blocks of `N³` points each, over the case's box
@@ -221,6 +369,71 @@ end
 gh_forest(case::GHCase; kwargs...) = gh_forest(Float64, case; kwargs...)
 
 """
+    hole_forest(T = Float64, case::GHCase; N, roots, center = case's, radii,
+                levels = length(radii))
+
+A **fixed** nested hierarchy of `levels` shells around `center`: the
+uniform forest of [`gh_forest`](@ref), then, for each level `ℓ`, every
+leaf of level `ℓ − 1` whose extent reaches within `radii[ℓ]` of the center
+refined and the forest balanced.
+
+This is **not** the refinement mechanism. The indicator that chooses a
+mesh from the solution is step 6's `refinement.jl`; this is the *frozen
+hierarchy* `CODE.md`'s convergence protocol is stated on — "the block
+layout is unchanged and every spacing halves" — and the first mesh the
+interior layer is tested on. Which blocks are refined depends on `radii`,
+`roots` and `levels` and on nothing else, so **doubling `N` leaves the
+layout alone and halves every spacing**, which is the only way a rate
+measured around a hole means anything. TreeAMR's `wave_forest` pattern,
+as [`gh_forest`](@ref)`(; refined = true)` is.
+
+`radii` is one radius per level and must decrease: the shells nest, and a
+shell that grew outward would refine a region its parent level does not
+cover, which 2:1 balance would then have to repair by refining half the
+domain. The default `center` is the case's own `c(0)`, because that is
+where its hole is at the time the hierarchy is built.
+
+`levels` is `length(radii)` and is accepted explicitly so that a caller
+that says both is told when they disagree rather than silently getting one
+of them.
+"""
+function hole_forest(::Type{T}, case::GHCase; N, roots,
+                     center=center_at(case.center, zero(T)), radii,
+                     levels::Integer=length(radii)) where {T}
+    length(radii) == levels || throw(ArgumentError(
+        "hole_forest takes one radius per refinement level, but levels = " *
+        "$levels and radii has $(length(radii)) entries: the shells are the " *
+        "hierarchy, and a level without a radius has nothing to be built " *
+        "around."))
+    all(ℓ -> radii[ℓ] > 0, 1:levels) || throw(ArgumentError(
+        "every shell radius must be positive, got radii = $radii"))
+    all(ℓ -> radii[ℓ] ≤ radii[ℓ - 1], 2:levels) || throw(ArgumentError(
+        "the shells must nest, so the radii must not increase with the " *
+        "level, but radii = $radii. A shell wider than its parent's would " *
+        "ask for a fine block outside the coarser refined region, and 2:1 " *
+        "balance would answer by refining everything between them."))
+    forest = gh_forest(T, case; N=N, roots=roots)
+    c = ntuple(d -> T(center[d]), Val(3))
+    for ℓ in 1:levels
+        R = T(radii[ℓ])
+        targets = filter(forest.leaves) do k
+            level(k) == ℓ - 1 &&
+                _box_meets_ball(block_extent(T, forest, k), c, R)
+        end
+        isempty(targets) && throw(ArgumentError(
+            "no leaf of level $(ℓ - 1) comes within radii[$ℓ] = $R of " *
+            "$c, so shell $ℓ would refine nothing: either the center is " *
+            "outside the box, or the radii fall faster than the block size " *
+            "does and the hierarchy stops before the level it was asked for."))
+        refine!(forest, targets)
+        balance!(forest)
+    end
+    return forest
+end
+
+hole_forest(case::GHCase; kwargs...) = hole_forest(Float64, case; kwargs...)
+
+"""
     background_state(background, t, x) -> (h, Π, ∂h)
 
 The analytic state of a background at `(t, x)`: the offset metric
@@ -274,13 +487,36 @@ opinion about a quantity the scheme has to produce for itself.
 end
 
 """
+    case_state_tuple(background, interior, t, x) -> NTuple{20}
+
+The 20 evolved values the *case* puts at `x`: the background's, except
+inside the frozen core, where [`core_position`](@ref) sends the query to
+the sphere `r_0` along the ray.
+
+`CODE.md`, "The frozen core": the core holds finite data and is never
+read, and it is filled with the analytic solution on the sphere `r_0`
+along the ray — continuous at `r_0`, finite everywhere. This is the one
+function that applies that rule, and every path that writes the analytic
+solution into a field set goes through it: the initial data, the error
+reference, and the Dirichlet hook (where the core is nowhere near the
+boundary and the rule is the identity, which is why it costs nothing to
+be consistent).
+
+`interior === nothing` is no hole and the rule is the identity, so the
+whole branch folds away for every case up to step 4.
+"""
+@inline case_state_tuple(bg, interior, t, x) =
+    state_tuple(bg, t, core_position(interior, t, x))
+
+"""
     state_callback(case::GHCase, t) -> AllVariables
 
 The case's exact state at time `t` as the coordinate callback
 `fill_by_coordinates!` and `adapt_to_initial_data!` take: `x ↦ (h…, Π…)`,
-once per point, all 20 variables at once.
+once per point, all 20 variables at once — with the frozen core's rule
+applied (added in step 5; see [`case_state_tuple`](@ref)).
 
-It closes over the background and over `t` — both `isbits`, neither a
+It closes over the background, the interior and `t` — all `isbits`, none a
 `Type` — so it is a kernel argument like any other and runs wherever the
 field set lives (`CODE.md`, "Initial data and backgrounds"; the dependency
 risk it names is what `test/prerequisite_tests.jl` settles on the CPU).
@@ -292,8 +528,9 @@ reference at the end of a chunk, the Dirichlet data at every ghost fill
 """
 function state_callback(case::GHCase{T}, t) where {T}
     bg = case.background
+    int = case.interior
     tt = T(t)
-    return AllVariables(x -> state_tuple(bg, tt, x))
+    return AllVariables(x -> case_state_tuple(bg, int, tt, x))
 end
 
 """

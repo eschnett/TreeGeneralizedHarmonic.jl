@@ -75,7 +75,19 @@ const DIAG_CGH = 2            # C_a = Γ_a + H_a, a = t, x, y, z   (2:5)
 const DIAG_HAM = 6            # the ADM Hamiltonian constraint ℋ
 const DIAG_MOM = 7            # the ADM momentum constraint ℳ_i   (7:9)
 const DIAG_MASK = 10          # 1 where the point is evolved, 0 inside r_1
-const NDIAG = 10
+const DIAG_ERR = 11           # ‖u − u_exact‖, masked to the evolved region
+const DIAG_RES = 12           # the same, inside the layer r_0 ≤ r < r_1
+const DIAG_DRIFT = 13         # |h_tt − h_tt,exact| in a shell at the horizon
+const NDIAG = 13
+
+# **The error slots are magnitudes, not components (proposed in step 5.)**
+# `CODE.md`'s analysis table says "`|u − u_exact|` per component into
+# `diag`", which would be twenty more slots — more than tripling a field
+# set that is `nvars × (N+1)³ × nblocks` — for a number the record reads
+# as one norm. What is stored instead is the pointwise Euclidean magnitude
+# over the twenty components, whose volume-weighted L2 *is* the L2 norm of
+# the whole state error; the per-component split, if a component is ever
+# in question, is a targeted kernel and not a permanent cost on every run.
 
 # The position of an **owned** point, formed exactly as TreeAMR forms it —
 # the same origin, the same spacing, the same expression in the same order
@@ -158,35 +170,43 @@ end
 end
 
 """
-    gh_rhs_kernel!(du, work, Hwork, spacings, γ0, γ2, ε_KO,
-                   ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS})
+    gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
+                    ::Val{q}, ::Val{HASH}, ::Val{DISS}) -> (∂ₜh, ∂ₜΠ)
 
-The fused right-hand side at one owned point, in `CODE.md`'s streaming
-order. `du` is in **state layout** (no ghosts, so the global index is used
-as it comes); `work` is the ghosted working array (so the same index plus
-`G`). `Hwork` is the gauge source's working array or `nothing`.
+`F(u)` at one owned point: the fused right-hand side of `(EXPANDED)`, in
+`CODE.md`'s streaming order, with the Kreiss–Oliger term and the source
+already in it.
 
-The four `Val`s are built once per chunk in [`GHProblem`](@ref) and
-resolved when the kernel compiles: the ghost width, the difference order,
-whether there is a gauge source, and whether there is dissipation.
-Building them per evaluation would recompile or dispatch dynamically at
-every RK stage (`CLAUDE.md`).
+It is a **plain function called from the kernel** rather than the kernel's
+own body (restructured in step 5). The reason is `CODE.md`'s rule that `F`
+is never evaluated where `w = 0`: the frozen core holds finite but stale
+data on which `F` may be `NaN`, and `0 · NaN = NaN`, so the kernel has to
+branch *around* this whole computation — and KernelAbstractions refuses a
+`return` statement anywhere in a kernel body, closures included, so the
+branch cannot be an early exit. Inlined, the generated code and the
+streaming order are what they were; `test/evolution_tests.jl`'s comparison
+against [`gh_node_rhs_expanded`](@ref) is unchanged and still passes at the
+same tolerance.
 
-What it computes, per point:
+`var` is the point's linear index in `work`, `st` the per-axis strides and
+`sv` the per-variable one ([`work_strides`](@ref)); `γ0` is this point's
+constraint-damping rate, which is now a **profile** evaluated by the
+caller (`CODE.md`, "Gauge and constraint damping").
+
+What it computes:
 
     ∂ₜh_ab = β^i ∂_i h_ab + (α/√γ) Π_ab                    + Q_d h_ab
     ∂ₜΠ_ab = β^i ∂_i Π_ab + (∂_iβ^i) Π_ab
            + α√γ γ^{ij} ∂_i∂_j h_ab + ∂_i(α√γ γ^{ij}) ∂_j h_ab
            − α√γ (S0_ab + Z_ab)                            + Q_d Π_ab
 
-`(EXPANDED)` of `CODE.md`'s "The equations", plus the Kreiss–Oliger term.
 The source `S0 + Z` is [`gh_node_source`](@ref) and the coefficient
 derivatives are [`metric_derivatives`](@ref) — the same functions
-[`gh_node_rhs_expanded`](@ref) calls, which is what makes that function
-the reference this kernel is checked against on analytic data
-(`test/evolution_tests.jl`). The two are not bit-identical and are not
-expected to be: one body reached from two call sites is contracted into
-fused multiply-adds differently (`CODE.md`, "Measured results").
+[`gh_node_rhs_expanded`](@ref) calls, which is what makes that function the
+reference this kernel is checked against on analytic data. The two are not
+bit-identical and are not expected to be: one body reached from two call
+sites is contracted into fused multiply-adds differently (`CODE.md`,
+"Measured results").
 
 **The `∂_t g` the source is given is the accumulated `∂ₜh`, dissipation
 included** — the two accumulators per component that the streaming order
@@ -196,28 +216,14 @@ means. The difference is `O(h^{q+1})`, the dissipation's own order
 **(recorded in step 3**, where `CODE.md` had said only "from `h`, `∂_i h`,
 `∂_t h` and the coefficients"**)**.
 """
-@kernel function gh_rhs_kernel!(du, @Const(work), Hwork, @Const(spacings),
-                                γ0, γ2, ε_KO, ::Val{G}, ::Val{q},
-                                ::Val{HASH}, ::Val{DISS}) where {G,q,HASH,DISS}
-    I = @index(Global, NTuple)                    # (i1, i2, i3, block)
-    b = I[4]
-    inner = ntuple(d -> I[d], Val(3))             # state-layout index
-    T = eltype(du)
-
-    inv_h = inv(spacings[b])
+@inline function gh_rhs_at_point(::Type{T}, work, Hwork, inner, b::Int,
+                                 var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
+                                 ::Val{q}, ::Val{HASH},
+                                 ::Val{DISS}) where {T,q,HASH,DISS}
     inv_h² = inv_h * inv_h
     w1 = derivative_weights(T, Val(q), Val(1))
     w2 = derivative_weights(T, Val(q), Val(2))
     wD = dissipation_weights(T, dissipation_rank(Val(q)))
-    εh = ε_KO * inv_h
-
-    # The point's linear index in the working array — the owned index plus
-    # the ghost width along each axis — and the strides the stencils step
-    # by. `var` is the first variable's base; variable `v` is `var + (v−1)·sv`.
-    st, sv, sb = work_strides(work)
-    var = 1 + (b - 1) * sb +
-          (I[1] + G[1] - 1) * st[1] + (I[2] + G[2] - 1) * st[2] +
-          (I[3] + G[3] - 1) * st[3]
 
     # (1) the state at the point, the 30 first derivatives of `h`, and the
     #     coefficients built from them once.
@@ -272,8 +278,6 @@ means. The difference is `O(h^{q+1})`, the dissipation's own order
                            axis_stencil(wD, work, bΠ, st[2]) +
                            axis_stencil(wD, work, bΠ, st[3]))
         end
-        # Not `return`: KernelAbstractions refuses a `return` statement
-        # anywhere in a kernel body, closures included.
         (∂ₜh_v, ∂ₜΠ_v)
     end
     ∂ₜh = SVector{NC,T}(ntuple(v -> acc[v][1], Val(NC)))
@@ -284,38 +288,192 @@ means. The difference is `O(h^{q+1})`, the dissipation's own order
     #     ghosts to read.
     Hl, dHl = gauge_at(T, Hwork, inner, b, Val(HASH))
     msrc = gh_node_source(g4, gu4, α, sqrtγ, _dg4(∂ₜh, ∂h), Hl, dHl, γ0, γ2)
+    return ∂ₜh, ∂ₜΠ + msrc
+end
 
-    ntuple(Val(NC)) do v
-        du[inner..., v, b] = ∂ₜh[v]
-        du[inner..., NC + v, b] = ∂ₜΠ[v] + msrc[v]
-        nothing
+"""
+    gh_rhs_kernel!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
+                   interior, t, ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS},
+                   ::Val{INT})
+
+The right-hand side at one owned point: `F(u)` from
+[`gh_rhs_at_point`](@ref), modified inside the hole by `CODE.md`'s
+`(INTERIOR)`,
+
+    ∂_t u = w(r) · F(u)  −  ρ(r) · (u − u_exact(x, t)) .
+
+`du` is in **state layout** (no ghosts, so the global index is used as it
+comes); `work` is the ghosted working array (so the same index plus `G`).
+`Hwork` is the gauge source's working array or `nothing`.
+
+The **five** `Val`s are built once per chunk in [`GHProblem`](@ref) and
+resolved when the kernel compiles: the ghost width, the difference order,
+whether there is a gauge source, whether there is dissipation, and — added
+in step 5 — which of `CODE.md`'s interior variants is running, `:none`
+meaning there is no hole. Building them per evaluation would recompile or
+dispatch dynamically at every RK stage (`CLAUDE.md`).
+
+**The interior's fifth `Val` is the variant and not a `Bool`
+(proposed in step 5.)** `CODE.md` and `PLAN.md` call it "has interior";
+`:none`, `:damped`, `:pasted` and `:frozen` say that and *which*, in one
+parameter, and the three variants differ in the kernel — `:frozen` has
+`ρ ≡ 0` and `:pasted` freezes the whole ball `r < r_1` — so a `Bool` would
+have needed a second parameter beside it.
+
+**The three branches, in the order they must be in.** The core predicate
+is asked *before* any stencil is touched, because the frozen core holds
+finite but stale data on which `F` may be `NaN` and `0 · NaN = NaN`
+(`CLAUDE.md`). Outside `r_1` the answer is `F` itself and not `1·F − 0·(…)`,
+which also saves the analytic solution's dual pass at every point of the
+evolved region — `u_exact` is evaluated in the layer and nowhere else.
+"""
+@kernel function gh_rhs_kernel!(du, @Const(work), Hwork, @Const(origins),
+                                @Const(spacings), bg, damping, γ2, ε_KO,
+                                interior, t, ::Val{G}, ::Val{q}, ::Val{HASH},
+                                ::Val{DISS}, ::Val{INT}) where {G,q,HASH,DISS,
+                                                                INT}
+    I = @index(Global, NTuple)                    # (i1, i2, i3, block)
+    b = I[4]
+    inner = ntuple(d -> I[d], Val(3))             # state-layout index
+    T = eltype(du)
+
+    inv_h = inv(spacings[b])
+    εh = ε_KO * inv_h
+
+    # The point's linear index in the working array — the owned index plus
+    # the ghost width along each axis — and the strides the stencils step
+    # by. `var` is the first variable's base; variable `v` is `var + (v−1)·sv`.
+    st, sv, sb = work_strides(work)
+    var = 1 + (b - 1) * sb +
+          (I[1] + G[1] - 1) * st[1] + (I[2] + G[2] - 1) * st[2] +
+          (I[3] + G[3] - 1) * st[3]
+
+    # The position, for the damping profile and for the interior. Three
+    # fused multiply-adds per point, and the compiler drops them where
+    # neither asks (a constant `γ0` and `INT === :none`).
+    x = point_position(origins, spacings, b, I)
+    γ0 = damping_rate(damping, t, x)
+
+    if INT === :none
+        ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
+                                   inv_h, γ0, γ2, εh, Val(q), Val(HASH),
+                                   Val(DISS))
+        ntuple(Val(NC)) do v
+            du[inner..., v, b] = ∂ₜh[v]
+            du[inner..., NC + v, b] = ∂ₜΠ[v]
+            nothing
+        end
+    else
+        r = interior_radius(interior, t, x)
+        if is_frozen(interior, r)
+            # `du = 0`, and `F` is not evaluated: this is the branch
+            # `CLAUDE.md` says must come before the stencils.
+            ntuple(Val(2 * NC)) do v
+                du[inner..., v, b] = zero(T)
+                nothing
+            end
+        else
+            ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
+                                       inv_h, γ0, γ2, εh, Val(q), Val(HASH),
+                                       Val(DISS))
+            if r ≥ interior.r_1
+                ntuple(Val(NC)) do v
+                    du[inner..., v, b] = ∂ₜh[v]
+                    du[inner..., NC + v, b] = ∂ₜΠ[v]
+                    nothing
+                end
+            else
+                w, ρ = interior_profiles(interior, r)
+                he, Πe, _ = background_state(bg, t, x)
+                ntuple(Val(NC)) do v
+                    du[inner..., v, b] =
+                        w * ∂ₜh[v] - ρ * (work[var + (v - 1) * sv] - he[v])
+                    du[inner..., NC + v, b] =
+                        w * ∂ₜΠ[v] - ρ * (work[var + (NC + v - 1) * sv] - Πe[v])
+                    nothing
+                end
+            end
+        end
     end
 end
 
 """
-    gh_speed_kernel!(speed, work, ::Val{G})
+    gh_paste_kernel!(u, origins, spacings, bg, interior, t, ::Val{G})
+
+The `:pasted` variant's overwrite: the analytic state written into every
+owned point with `r < r_1`, straight into the **state** array.
+
+`CODE.md`, "Why a smooth layer and not a hard paste": overwriting a ball
+with the analytic solution is `(INTERIOR)` in the limit `ρ → ∞` on a step
+profile, and it is implemented exactly through RK4's `step_limiter!`, as
+TreeHydro implements its atmosphere reset. This is the **one** place in
+the package where the state is written outside the integrator's own
+arithmetic, and [`gh_step_limiter!`](@ref) is the only caller
+(`CLAUDE.md`, "The RHS never mutates `u`": do not add a third place).
+
+The core rule applies here as everywhere the analytic solution is written
+into a grid: inside `r_0` the query goes to the sphere `r_0` along the ray
+([`core_position`](@ref)), because the solution is singular at the center.
+"""
+@kernel function gh_paste_kernel!(u, @Const(origins), @Const(spacings), bg,
+                                  interior, t, ::Val{G}) where {G}
+    I = @index(Global, NTuple)
+    b = I[4]
+    inner = ntuple(d -> I[d], Val(3))
+    T = eltype(u)
+
+    x = point_position(origins, spacings, b, I)
+    r = interior_radius(interior, t, x)
+    if r < interior.r_1
+        vals = case_state_tuple(bg, interior, t, x)
+        ntuple(Val(2 * NC)) do v
+            u[inner..., v, b] = vals[v]
+            nothing
+        end
+    end
+end
+
+"""
+    gh_speed_kernel!(speed, work, origins, spacings, mask, ::Val{G})
 
 GHSO2's conservative bound on the coordinate characteristic speed at one
 owned point, `λ = α √(tr γ^{ij}) + |β|`, written into the `diag` field
-set's speed slot.
+set's speed slot — and **zero where the mask says the point is not
+evolved**.
 
 It reads the point and nothing else — no stencil, no ghosts — so it is the
 cheapest kernel in the package and can be run at every chunk boundary
 without thinking about it. `block_mapreduce(max)` over its output is
 [`max_speed`](@ref); see `CODE.md`, "The time step".
+
+**The mask is not optional (added in step 5.)** `CODE.md` lists the speed
+kernel among the ones that write zero for `r < r_1`, and the reason is the
+same as everywhere else: the frozen core holds data that is not a
+numerical solution, and a *degenerate* metric there — which is what a
+stale core looks like once it has been interpolated by a regrid — gives a
+`NaN` or an enormous `λ`, which would then set the time step for the whole
+hierarchy. A branch and not a multiplication, because `0 · NaN = NaN`.
+The layer's own speeds go with it; they are bounded by the evolved
+region's, since `w ≤ 1` scales the characteristics down and `ρ_max·dt = 1`
+bounds the relaxation separately.
 """
-@kernel function gh_speed_kernel!(speed, @Const(work), ::Val{G}) where {G}
+@kernel function gh_speed_kernel!(speed, @Const(work), @Const(origins),
+                                  @Const(spacings), mask, ::Val{G}) where {G}
     I = @index(Global, NTuple)
     b = I[4]
     inner = ntuple(d -> I[d], Val(3))
     c = ntuple(d -> I[d] + G[d], Val(3))
     T = eltype(speed)
 
-    hv = SVector{NC,T}(ntuple(v -> work[c..., v, b], Val(NC)))
-    _, _, α, β, γu, _ = metric_quantities(_sym4(hv))
-    speed[inner..., DIAG_SPEED, b] =
-        α * sqrt(γu[1, 1] + γu[2, 2] + γu[3, 3]) +
-        sqrt(β[1] * β[1] + β[2] * β[2] + β[3] * β[3])
+    if is_evolved(mask, point_position(origins, spacings, b, I))
+        hv = SVector{NC,T}(ntuple(v -> work[c..., v, b], Val(NC)))
+        _, _, α, β, γu, _ = metric_quantities(_sym4(hv))
+        speed[inner..., DIAG_SPEED, b] =
+            α * sqrt(γu[1, 1] + γu[2, 2] + γu[3, 3]) +
+            sqrt(β[1] * β[1] + β[2] * β[2] + β[3] * β[3])
+    else
+        speed[inner..., DIAG_SPEED, b] = zero(T)
+    end
 end
 
 """
@@ -346,28 +504,29 @@ a background that reaches this point is static, so the time it is sampled
 at cannot matter. `CODE.md`, "Gauge and constraint damping", and the
 refusal in [`GHCase`](@ref) are the two halves of that sentence.
 """
-struct GHProblem{T,G,q,HASH,DISS,F,S,H,D,O,V,C}
+struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I}
     U::F
     schedule::S
     Hsrc::H                      # the sampled gauge source, or `nothing`
-    diag::D                      # speeds now; constraints and errors later
-    # Per block, on the backend the field set lives on. The kernel of this
-    # step reads the spacings only; the origins are what the interior
-    # profiles, the masks and the damping profile of step 5 turn a cell
-    # index into a position with, and they are uploaded here because that
-    # is where the per-chunk metadata belongs.
+    diag::D                      # the speed, the monitors, the errors
+    # Per block, on the backend the field set lives on. The origins are
+    # what the interior profiles, the masks and the damping profile turn a
+    # cell index into a position with, and they are uploaded here because
+    # that is where the per-chunk metadata belongs.
     origins::O
     spacings::V
     case::C
+    interior::I                  # an `Interior` at this chunk's ρ_max, or `nothing`
     hasdirichlet::Bool
     valG::Val{G}
     valq::Val{q}
     valH::Val{HASH}
     valdiss::Val{DISS}
+    valint::Val{INT}
 end
 
 function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
-                   t=zero(T)) where {T}
+                   t=zero(T), interior=case.interior, margin_check=true) where {T}
     q ≥ 2 && iseven(q) || throw(ArgumentError(
         "the finite-difference order must be even and at least 2, so that " *
         "the centered stencils have an integer half-width q/2 and CODE.md's " *
@@ -397,7 +556,7 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
     Hsrc = if HASH
         fs = FieldSet{T}(U.forest, 2NC; G=0, centering=U.centering,
                          backend=backend)
-        sample_gauge_source!(fs, case.background, t)
+        sample_gauge_source!(fs, case.background, t; interior=interior)
         fs
     else
         nothing
@@ -410,11 +569,45 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
     DISS = !iszero(case.ε_KO)
     hasdirichlet = !all(case.periodic)
 
-    return GHProblem{T,U.G,Int(q),HASH,DISS,typeof(U),typeof(schedule),
+    # CODE.md asks for the two radius requirements "at every regrid", and a
+    # fresh problem is built after every one — so this is where they are
+    # checked, on the mesh as it now is. `margin_check = false` exists for
+    # the one caller that has a reason not to: a test that builds a problem
+    # in order to watch the check fire elsewhere.
+    INT = interior_variant(interior)
+    if interior !== nothing && margin_check
+        check_interior_radii(U.forest, interior, case.background, q ÷ 2 + 1;
+                             t=t)
+    end
+
+    return GHProblem{T,U.G,Int(q),HASH,DISS,INT,typeof(U),typeof(schedule),
                      typeof(Hsrc),typeof(diag),typeof(origins),
-                     typeof(spacings),typeof(case)}(
-        U, schedule, Hsrc, diag, origins, spacings, case, hasdirichlet,
-        Val(U.G), Val(Int(q)), Val(HASH), Val(DISS))
+                     typeof(spacings),typeof(case),typeof(interior)}(
+        U, schedule, Hsrc, diag, origins, spacings, case, interior,
+        hasdirichlet, Val(U.G), Val(Int(q)), Val(HASH), Val(DISS), Val(INT))
+end
+
+"""
+    with_interior(p::GHProblem, interior) -> GHProblem
+
+The same problem carrying a different [`Interior`](@ref) — what the driver
+builds at the start of every chunk once it knows that chunk's `dt`, since
+`CODE.md` sets `ρ_max · dt = 1`.
+
+It shares the field sets, the schedule, the sampled gauge source and the
+uploaded geometry: rebuilding a whole [`GHProblem`](@ref) would re-sample
+the gauge source, which is the most expensive setup phase there is and
+which nothing about a new `ρ_max` invalidates.
+"""
+function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior) where {T,G,q,
+                                                                       HASH,
+                                                                       DISS}
+    INT = interior_variant(interior)
+    return GHProblem{T,G,q,HASH,DISS,INT,typeof(p.U),typeof(p.schedule),
+                     typeof(p.Hsrc),typeof(p.diag),typeof(p.origins),
+                     typeof(p.spacings),typeof(p.case),typeof(interior)}(
+        p.U, p.schedule, p.Hsrc, p.diag, p.origins, p.spacings, p.case,
+        interior, p.hasdirichlet, p.valG, p.valq, p.valH, p.valdiss, Val(INT))
 end
 
 # The gauge source's working array, or `nothing` where there is none. The
@@ -448,10 +641,56 @@ function gh_rhs!(du, u, p::GHProblem, t)
         fill_ghosts!(p.U, p.schedule)
     end
     map_blocks!(gh_rhs_kernel!, p.U, statearray(du, p.U), p.U.work,
-                gauge_work(p.Hsrc), p.spacings, p.case.γ0, p.case.γ2,
-                p.case.ε_KO, p.valG, p.valq, p.valH, p.valdiss)
+                gauge_work(p.Hsrc), p.origins, p.spacings, p.case.background,
+                p.case.γ0, p.case.γ2, p.case.ε_KO, p.interior, eltype(p.U.work)(t),
+                p.valG, p.valq, p.valH, p.valdiss, p.valint)
     return nothing
 end
+
+"""
+    gh_step_limiter!(u, integrator, p::GHProblem, t)
+
+RK4's `step_limiter!` hook: for the `:pasted` variant, the analytic
+solution written over the ball `r < r_1` at the end of every step; for
+every other variant, nothing at all.
+
+`CODE.md`, "Three variants, one switch": the hard paste is `(INTERIOR)` in
+the limit `ρ → ∞` on a step profile, and RK4's limiter hook is where it can
+be implemented *exactly*. It is also the only place in this package where
+the state is written outside the integrator — `CLAUDE.md`, "The RHS never
+mutates `u`" — and the dispatch below is what keeps it to one place: the
+`:none`, `:damped` and `:frozen` methods are empty and compile away, so the
+same `RK4(; step_limiter! = gh_step_limiter!)` serves every run.
+
+`u` arrives in state layout and `statearray(u, p.U)` is the block view, as
+`PLAN.md`'s "Sharp edges" says.
+"""
+gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:none},
+                 t) where {T,G,q,HASH,DISS} = nothing
+gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:damped},
+                 t) where {T,G,q,HASH,DISS} = nothing
+gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:frozen},
+                 t) where {T,G,q,HASH,DISS} = nothing
+
+function gh_step_limiter!(u, integrator,
+                          p::GHProblem{T,G,q,HASH,DISS,:pasted},
+                          t) where {T,G,q,HASH,DISS}
+    map_blocks!(gh_paste_kernel!, p.U, statearray(u, p.U), p.origins,
+                p.spacings, p.case.background, p.interior, T(t), p.valG)
+    return nothing
+end
+
+# A limiter is also wanted on the *initial* state of a `:pasted` run and
+# after every regrid, since neither went through a step. Same kernel, no
+# integrator.
+"""
+    paste_interior!(p::GHProblem, u, t)
+
+Apply the `:pasted` variant's overwrite to `u` without an integrator —
+what the driver does to the initial data and to a freshly regridded state,
+neither of which went through a step. A no-op for the other variants.
+"""
+paste_interior!(p::GHProblem, u, t) = gh_step_limiter!(u, nothing, p, t)
 
 """
     max_speed(p::GHProblem) -> T
@@ -467,8 +706,10 @@ order**, so the answer does not depend on the thread count
 It reads the working array, not a state vector: call it after a
 `scatter!`, which is what [`gh_dt`](@ref) does.
 """
-function max_speed(p::GHProblem{T}) where {T}
-    map_blocks!(gh_speed_kernel!, p.U, p.diag.work, p.U.work, p.valG)
+function max_speed(p::GHProblem{T}; t=zero(T),
+                   mask=interior_mask(p.interior, t)) where {T}
+    map_blocks!(gh_speed_kernel!, p.U, p.diag.work, p.U.work, p.origins,
+                p.spacings, mask, p.valG)
     # `zero(T)` as the identity rather than `typemin`: a characteristic
     # speed is `α√(tr γ^{ij}) + |β| ≥ 0`, and `typemin` is not defined for
     # every type this package runs in. A `NaN` still propagates, which is
@@ -492,9 +733,9 @@ It scatters `u` into the working array on the way — the speed kernel reads
 the working array — which is scratch and about to be overwritten by the
 first evaluation anyway. `u` itself is untouched.
 """
-function gh_dt(p::GHProblem{T}, u; cfl) where {T}
+function gh_dt(p::GHProblem{T}, u; cfl, t=zero(T)) where {T}
     scatter!(p.U, u)
-    λ = max_speed(p)
+    λ = max_speed(p; t=t)
     isfinite(λ) && λ > 0 || throw(ArgumentError(
         "the maximum characteristic speed α√(tr γ^{ij}) + |β| came out as " *
         "$λ, so there is no CFL-limited time step: the state is either not " *

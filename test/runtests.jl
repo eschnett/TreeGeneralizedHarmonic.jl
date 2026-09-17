@@ -32,6 +32,13 @@ using TreeGeneralizedHarmonic
     # diff of two long outputs.
     include("constraints_tests.jl")
     include("interface_tests.jl")
+    # Step 5's two. `interior_tests.jl` is the algebra, the predicates and
+    # one right-hand-side evaluation; `driver_tests.jl` is the runs, and
+    # it comes after every other run file for the same reason
+    # `threading_tests.jl` comes last — a hole is the suite's most
+    # expensive thing, and a failure above it is cheaper to read.
+    include("interior_tests.jl")
+    include("driver_tests.jl")
     include("type_tests.jl")
     include("threading_tests.jl")
 end

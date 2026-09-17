@@ -34,9 +34,13 @@ using TreeGeneralizedHarmonic: _dg4, _sym4, gauge_at, gauge_work
 # `Q_d` to both halves and corrects the source by the difference two calls
 # to `gh_node_source` make — which is exactly, and only, the design choice
 # spelled out.
-function host_rhs_at(fs, prob, case, q, b, idx::NTuple{3,Int})
+function host_rhs_at(fs, prob, case, q, b, idx::NTuple{3,Int},
+                     t=zero(eltype(fs.work)))
     T = eltype(fs.work)
     work = fs.work
+    # The constraint-damping rate is a *profile* from step 5 on, evaluated
+    # at the point; the kernel does the same, so the reference has to.
+    γ0 = damping_rate(case.γ0, T(t), coordinates(fs, b, idx))
     w1 = derivative_weights(T, Val(q), Val(1))
     w2 = derivative_weights(T, Val(q), Val(2))
     wD = dissipation_weights(T, dissipation_rank(Val(q)))
@@ -71,15 +75,15 @@ function host_rhs_at(fs, prob, case, q, b, idx::NTuple{3,Int})
               gauge_at(T, prob.Hsrc.work, owned, b, Val(true))
 
     ∂ₜh, ∂ₜΠ = gh_node_rhs_expanded(hv, Πv, ∂h, ∂Π, ∂∂h, Hl, dHl,
-                                    case.γ0, case.γ2)
+                                    γ0, case.γ2)
     iszero(case.ε_KO) && return ∂ₜh, ∂ₜΠ
 
     Qh = SVector{10,T}(ntuple(v -> Q(v), Val(10)))
     QΠ = SVector{10,T}(ntuple(v -> Q(10 + v), Val(10)))
     g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(hv))
     Δsrc = gh_node_source(g4, gu4, α, sqrtγ, _dg4(∂ₜh + Qh, ∂h), Hl, dHl,
-                          case.γ0, case.γ2) -
-           gh_node_source(g4, gu4, α, sqrtγ, _dg4(∂ₜh, ∂h), Hl, dHl, case.γ0,
+                          γ0, case.γ2) -
+           gh_node_source(g4, gu4, α, sqrtγ, _dg4(∂ₜh, ∂h), Hl, dHl, γ0,
                           case.γ2)
     return ∂ₜh + Qh, ∂ₜΠ + QΠ + Δsrc
 end

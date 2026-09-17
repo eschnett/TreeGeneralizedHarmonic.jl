@@ -180,3 +180,101 @@ function gh_noise_growth(::Type{T}, case::GHCase{T}; N, roots, q, nsteps,
             l2_ratio=l2_1 / l2_0, linf_ratio=linf_1 / linf_0,
             dt=dt, t_end=t_end, nsteps=nsteps, finite=all(isfinite, u1))
 end
+
+# --- the black hole (added in step 5) ---------------------------------------
+#
+# From here on the runs go through `evolve!` — `driver.jl`'s one chunked
+# loop — rather than through a bare `solve`, because that is what step 5
+# built and what `CODE.md` judges a run by. What is written here is the
+# *fixture*: the mesh and the parameters the suite's hole runs share,
+# picked so that `check_interior_radii` passes at the coarsest resolution
+# of the sweep and the whole sweep fits in a test file.
+
+"""
+The suite's static-hole fixture: Kerr-Schild (`a = 0`, sampled `H`) on a
+box of half-width `5/2 M`, with the frozen hierarchy
+[`hole_forest`](@ref) builds around the origin.
+
+**Why these numbers.** `CODE.md`'s two radius requirements are
+`r_1 ≤ r_h,min − m·h` and `r_1 − r_0 ≥ 2(G+1)·h`, so together they need
+`r_h,min ≥ (m + 2G + 2)·h + r_0` — the resolution is set by the horizon's
+*smallest coordinate radius*, and Kerr-Schild's `r₊ = 2 M` is the largest
+of the three holes in the table (harmonic Kerr's is `M` at `a = 0` and
+`0.44 M` at `a = 9/10`). That is why the cheap case is this one. At
+`q = 2`, `G = 2`, the default margin `m = 8`, `r_0 = 2/5` (where
+`|h| ≈ 5`, `CODE.md`'s "still moderate") and `h = 5/48` at the coarsest
+`N` of the sweep (`N = 6`), the bound is `r_1 ≤ 2 − 8h = 1.167` and the
+thickness `r_1 − r_0 ≥ 6h = 0.625`, both of which `r_1 = 23/20` clears —
+with the default margin `m = 8` and not the floor.
+
+The hierarchy is **three shells and genuinely nested**: the third catches
+only the level-2 blocks that reach within `M` of the center, so the
+sphere `r_1` lies wholly inside the finest level while the outer half of
+the box stays a level coarser — 120 leaves with a coarse-fine face
+between them, at every `N`. Doubling `N` halves every spacing and changes
+nothing else, which is `CODE.md`'s frozen-hierarchy protocol; a fixture
+whose shells caught every block would be a uniform mesh with no interface
+in it, and the interface is where a hole on a refined mesh is different
+from a hole on a uniform one.
+"""
+function hole_fixture(::Type{T}=Float64; q=2, M=one(T), a=zero(T),
+                      variant=:damped, margin=8, r_0=T(2 // 5),
+                      r_1=T(23 // 20), halfwidth=T(5 // 2), chunk=T(1 // 10),
+                      kwargs...) where {T}
+    return kerr_schild_case(T; M=M, a=a, halfwidth=halfwidth, r_0=r_0, r_1=r_1,
+                            chunk=chunk, margin=margin, interior=variant,
+                            kwargs...)
+end
+
+"""
+The forest the fixture runs on: [`hole_forest`](@ref) with three shells.
+The first two catch every block (a root block and its eight children all
+touch the center), the third catches only the level-2 blocks within `M`
+of it — so the mesh is `56` blocks at level 2 around `64` at level 3, and
+the layout does not depend on `N`.
+"""
+hole_fixture_forest(::Type{T}, case::GHCase{T}; N, roots=1,
+                    radii=(T(3), T(3), one(T))) where {T} =
+    hole_forest(T, case; N=N, roots=roots, radii=radii)
+
+"""
+One static-hole run through [`evolve!`](@ref), returning the driver's
+record together with the spacing and the block count that produced it —
+the shape a convergence table is built from.
+"""
+function gh_hole_run(::Type{T}, case::GHCase{T}; N, q, t_end, roots=1,
+                     radii=(T(3), T(3), one(T)),
+                     ops=Operators(prolongation=q + 2, restriction=q + 2),
+                     backend=CPU(), kwargs...) where {T}
+    forest = hole_fixture_forest(T, case; N=N, roots=roots, radii=radii)
+    out = evolve!(T, case; forest=forest, q=q, ops=ops, t_end=T(t_end),
+                  backend=backend, kwargs...)
+    return out
+end
+
+"""
+The constraint norms of a run's final state over the shell of `width`
+spacings just **outside** `r_1` — `CODE.md`'s "the `G` points outside
+`r_1`", the only points at which the three interior variants can differ
+before the difference has had time to propagate.
+
+The shell is a [`ShellMask`](@ref), so it is the same masked-norm
+machinery every other row of the record uses.
+"""
+function gh_outside_shell_norms(out; width=nothing)
+    p = out.problem
+    T = eltype(p.U.work)
+    int = p.interior
+    G = first(p.U.G)
+    w = width === nothing ? G : width
+    h = T(out.h)
+    c = center_at(int.center, T(out.records[end].t))
+    mask = ShellMask{T}(c, int.r_1, int.r_1 + w * h)
+    gh_constraint!(p, out.u, T(out.records[end].t); mask=mask)
+    c1 = constraint_norms(p)
+    gh_error!(p, out.u, T(out.records[end].t); mask=mask)
+    e = error_norms(p)
+    return (gauge_l2=maximum(c1.gauge_l2), gauge_linf=maximum(c1.gauge_linf),
+            err_l2=e.err_l2, err_linf=e.err_linf,
+            npoints=sum(masked_counts(p)))
+end

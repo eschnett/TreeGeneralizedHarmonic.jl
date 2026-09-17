@@ -224,3 +224,48 @@ end
         @test a ≈ b rtol = 0.05
     end
 end
+
+@testset "Float32 runs the static hole with its layer end to end" begin
+    # `PLAN.md`'s step-5 acceptance: the same static-hole run in `Float32`
+    # on `CPU()`, reaching the same result to `Float32` accuracy. This is
+    # the sharpest `Float32` test in the package, because a hole is where
+    # the offset identities earn their keep — `metric_quantities` takes
+    # `g^{ab} − η^{ab}` from GHSO2's identity rather than from `inv(g) − η`,
+    # and at `Float32` the difference between the two is `1.4e−7` against
+    # `4.2e−3` (`CODE.md`, "Measured results").
+    #
+    # `CODE.md` asks for the `Float32` row to be *recorded*, pass or fail,
+    # and never fixed at `Float64`'s expense.
+    q = 2
+    rows = map((Float64, Float32)) do T
+        case = hole_fixture(T; q=q, chunk=T(1 // 20))
+        out = gh_hole_run(T, case; N=8, q=q, t_end=T(1 // 10))
+        r = out.records[end]
+        (T=T, err_l2=Float64(r.err_l2), err_linf=Float64(r.err_linf),
+         gauge_l2=Float64(r.gauge_l2), residual=Float64(r.residual),
+         λ=Float64(r.λ), dt=Float64(r.dt), steps=r.steps, finite=r.finite,
+         typed=r.err_l2 isa Float64 && out.h isa Float64 &&
+               r.λ isa Float64)
+    end
+    @info "the static hole at Float64 and at Float32" rows
+    f64, f32 = rows
+    @test f32.finite
+    # The **record** is `Float64` at every element type — `precision.jl`'s
+    # `tofloat64` is what makes an analysis time series comparable between
+    # a `Float32` run and a `Float64` one — while the *arithmetic* is in
+    # the type the caller named, which the agreement below is the test of.
+    @test f32.typed
+    # And the answers agree to `Float32`'s accuracy. The tolerance is the
+    # `Float32` roundoff floor of a second derivative at this spacing,
+    # `eps(Float32)/h² ≈ 5e−6`, against a truncation error of `5e−3`:
+    # about three digits, which is what the numbers below have.
+    @test f32.err_l2 ≈ f64.err_l2 rtol = 0.02
+    @test f32.err_linf ≈ f64.err_linf rtol = 0.02
+    @test f32.residual ≈ f64.residual rtol = 0.02
+    @test f32.λ ≈ f64.λ rtol = 1e-5
+    @test f32.steps == f64.steps
+    # The constraint norm is a *difference* of large terms near a hole, so
+    # it is the number `Float32` is allowed to differ on most; it is
+    # recorded rather than tied down.
+    @test f32.gauge_l2 ≈ f64.gauge_l2 rtol = 0.25
+end

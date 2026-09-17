@@ -27,8 +27,10 @@
 
 using SpacetimeMetrics: Harmonic, Minkowski, ddmetric
 using StaticArrays: SArray, SMatrix, SVector
-using TreeGeneralizedHarmonic: DIAG_CGH, DIAG_MASK, NDIAG, _dg4_last,
-                               _pairindex, _pairindex3, _sym4, gauge_at
+using TreeGeneralizedHarmonic: DIAG_CGH, DIAG_DRIFT, DIAG_ERR, DIAG_HAM,
+                               DIAG_MASK, DIAG_MOM, DIAG_RES, DIAG_SPEED,
+                               NDIAG, _dg4_last, _pairindex, _pairindex3,
+                               _sym4, gauge_at
 import TreeGeneralizedHarmonic: is_evolved
 
 isdefined(@__MODULE__, :gh_backgrounds) || include("pointwise_backgrounds.jl")
@@ -359,5 +361,14 @@ end
     @test length(rec.mom_l2) == 3
     @test rec.gauge_l2[1] == masked_norms(prob, DIAG_CGH).l2
     @test rec.ham_l2 == 0                  # no ADM pass has run into `diag`
-    @test NDIAG == 10
+    # The slot map, asserted rather than assumed: `block_mapreduce` reduces
+    # a *contiguous* range of variables and nothing else, so `DIAG_CGH` and
+    # `DIAG_MOM` are the first of a run of four and of three and must stay
+    # where they are. Step 5 appended three slots (the masked error, the
+    # interior residual and the gauge drift) and moved none
+    # (amended in step 5).
+    @test (DIAG_SPEED, DIAG_CGH, DIAG_HAM, DIAG_MOM, DIAG_MASK) ==
+          (1, 2, 6, 7, 10)
+    @test (DIAG_ERR, DIAG_RES, DIAG_DRIFT) == (11, 12, 13)
+    @test NDIAG == 13
 end

@@ -44,6 +44,7 @@ right-hand side branch once, on a `Bool` it stores, instead of handing
 function dirichlet(case::GHCase{T}, t) where {T}
     all(case.periodic) && return nothing
     bg = case.background
+    int = case.interior
     tt = T(t)
-    return CellBoundary(AllVariables((x, δ) -> state_tuple(bg, tt, x)))
+    return CellBoundary(AllVariables((x, δ) -> case_state_tuple(bg, int, tt, x)))
 end

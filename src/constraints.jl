@@ -239,13 +239,76 @@ the one ported function written against `dmetric`.
     Hl, _ = gauge_at(T, Hwork, inner, b, Val(HASH))
     Cl = g4 * gauge_constraint_at_node(g4, _dg4_last(∂ₜh, ∂h), gu4 * Hl)
 
-    keep = is_evolved(mask, point_position(origins, spacings, b, I)) ?
-           one(T) : zero(T)
+    # **A branch, not a multiplication by zero (fixed in step 5).** Step 4
+    # wrote `keep * Cl[a]`, which is the same number for every mask that
+    # exists when nothing is masked. It is not the same number once the
+    # interior is: the frozen core holds stale data on which `C_a` may be
+    # `NaN`, and `0 · NaN = NaN` — `CLAUDE.md`'s trap, met here rather than
+    # in the right-hand side. Every masked slot in this file is written
+    # through a branch for that reason.
+    keep = is_evolved(mask, point_position(origins, spacings, b, I))
     ntuple(Val(4)) do a
-        diag[inner..., DIAG_CGH + a - 1, b] = keep * Cl[a]
+        diag[inner..., DIAG_CGH + a - 1, b] = keep ? Cl[a] : zero(T)
         nothing
     end
-    diag[inner..., DIAG_MASK, b] = keep
+    diag[inner..., DIAG_MASK, b] = keep ? one(T) : zero(T)
+end
+
+"""
+    gh_error_kernel!(diag, work, origins, spacings, bg, interior, mask, t,
+                     r_shell_lo, r_shell_hi, ::Val{G})
+
+The three error rows of `CODE.md`'s analysis table, in one launch over the
+owned points:
+
+  * `DIAG_ERR` — `‖u − u_exact‖` at the point, zero where the mask says the
+    point is not evolved, with the mask indicator beside it in `DIAG_MASK`
+    so that [`masked_norms`](@ref) divides by the *evolved* volume;
+  * `DIAG_RES` — the same magnitude, nonzero only in the damping layer
+    `r_0 ≤ r < r_1`: `CODE.md`'s "interior residual, the layer's own
+    health", read in L∞;
+  * `DIAG_DRIFT` — `|h_tt − h_tt,exact|` in the shell
+    `r_shell_lo ≤ r ≤ r_shell_hi`, which the driver sets to a band around
+    the horizon. Its L∞ against time is the *gauge drift* GHSO2 measured at
+    `≈ 0.14/M` on the excised hole (`notes/methods-ghso2.md`), and `h_tt`
+    is the component that carries it: the lapse is read off `g_tt`.
+
+It reads the point and nothing else — no stencil, no ghosts — so it is as
+cheap as the speed kernel and can run at every chunk. The analytic solution
+is one forward-mode dual pass through the background per point, which is
+the expensive part and the reason this is a per-chunk quantity rather than
+a per-step one.
+
+`interior === nothing` is no hole: the residual and the drift slots are
+written zero, which is what a case without an interior should report.
+"""
+@kernel function gh_error_kernel!(diag, @Const(work), @Const(origins),
+                                  @Const(spacings), bg, interior, mask, t,
+                                  r_shell_lo, r_shell_hi, ::Val{G}) where {G}
+    I = @index(Global, NTuple)
+    b = I[4]
+    inner = ntuple(d -> I[d], Val(3))
+    c = ntuple(d -> I[d] + G[d], Val(3))
+    T = eltype(diag)
+
+    x = point_position(origins, spacings, b, I)
+    vals = case_state_tuple(bg, interior, t, x)
+    # A fold rather than an accumulator: a kernel body may not close over a
+    # mutated local, and the summation order of a norm is part of it.
+    e² = _fold(ntuple(Val(2 * NC)) do v
+        d = work[c..., v, b] - vals[v]
+        d * d
+    end)
+    e = sqrt(e²)
+
+    keep = is_evolved(mask, x)
+    diag[inner..., DIAG_MASK, b] = keep ? one(T) : zero(T)
+    diag[inner..., DIAG_ERR, b] = keep ? e : zero(T)
+    r = interior_radius(interior, t, x)
+    diag[inner..., DIAG_RES, b] = in_layer(interior, r) ? e : zero(T)
+    inshell = (r_shell_lo ≤ r) & (r ≤ r_shell_hi)
+    diag[inner..., DIAG_DRIFT, b] =
+        inshell ? abs(work[c..., 1, b] - vals[1]) : zero(T)
 end
 
 """
@@ -278,12 +341,14 @@ differencing the dissipation operator as well.
 """
 @kernel function adm_constraint_kernel!(diag, @Const(work), Hwork,
                                         @Const(origins), @Const(spacings),
-                                        γ0, γ2, mask, ::Val{G}, ::Val{q},
-                                        ::Val{HASH}) where {G,q,HASH}
+                                        damping, γ2, mask, t, ::Val{G},
+                                        ::Val{q}, ::Val{HASH}) where {G,q,HASH}
     I = @index(Global, NTuple)
     b = I[4]
     inner = ntuple(d -> I[d], Val(3))
     T = eltype(diag)
+    x = point_position(origins, spacings, b, I)
+    γ0 = damping_rate(damping, t, x)
 
     inv_h = inv(spacings[b])
     inv_h² = inv_h * inv_h
@@ -344,14 +409,13 @@ differencing the dissipation operator as well.
           ∂∂h[1], ∂∂h[2], ∂∂h[3], ∂∂h[4], ∂∂h[5], ∂∂h[6])
     ℋ, ℳ = adm_constraints_at_node(g4, gu4, α, β, _dg4(∂ₜh, ∂h), _ddg4(dd))
 
-    keep = is_evolved(mask, point_position(origins, spacings, b, I)) ?
-           one(T) : zero(T)
-    diag[inner..., DIAG_HAM, b] = keep * ℋ
+    keep = is_evolved(mask, x)
+    diag[inner..., DIAG_HAM, b] = keep ? ℋ : zero(T)
     ntuple(Val(3)) do i
-        diag[inner..., DIAG_MOM + i - 1, b] = keep * ℳ[i]
+        diag[inner..., DIAG_MOM + i - 1, b] = keep ? ℳ[i] : zero(T)
         nothing
     end
-    diag[inner..., DIAG_MASK, b] = keep
+    diag[inner..., DIAG_MASK, b] = keep ? one(T) : zero(T)
 end
 
 # The state → working array → ghosts preamble both monitors share. It is
@@ -369,7 +433,7 @@ function _prepare_monitor!(p::GHProblem, u, t)
 end
 
 """
-    gh_constraint!(p::GHProblem, u, t; mask = AllPoints())
+    gh_constraint!(p::GHProblem, u, t; mask = interior_mask(p.interior, t))
 
 Evaluate the gauge constraint `C_a` of the state `u` at time `t` into
 `p.diag`, and return `p`.
@@ -382,7 +446,8 @@ a monitor run on unfilled ghosts measures whatever was left there.
 [`constraint_norms`](@ref) is what turns the field into the numbers the
 record holds.
 """
-function gh_constraint!(p::GHProblem, u, t; mask=AllPoints())
+function gh_constraint!(p::GHProblem{T}, u, t;
+                        mask=interior_mask(p.interior, T(t))) where {T}
     _prepare_monitor!(p, u, t)
     map_blocks!(gh_constraint_kernel!, p.U, p.diag.work, p.U.work,
                 gauge_work(p.Hsrc), p.origins, p.spacings, mask,
@@ -391,7 +456,7 @@ function gh_constraint!(p::GHProblem, u, t; mask=AllPoints())
 end
 
 """
-    adm_constraint!(p::GHProblem, u, t; mask = AllPoints())
+    adm_constraint!(p::GHProblem, u, t; mask = interior_mask(p.interior, t))
 
 Evaluate the ADM Hamiltonian and momentum constraints of the state `u` at
 time `t` into `p.diag`, and return `p`.
@@ -400,12 +465,61 @@ The expensive monitor — every second derivative of the metric, and the
 four-dimensional Ricci tensor — so `CODE.md` runs it every `k`-th chunk
 where the gauge constraint runs at every one.
 """
-function adm_constraint!(p::GHProblem, u, t; mask=AllPoints())
+function adm_constraint!(p::GHProblem{T}, u, t;
+                         mask=interior_mask(p.interior, T(t))) where {T}
     _prepare_monitor!(p, u, t)
     map_blocks!(adm_constraint_kernel!, p.U, p.diag.work, p.U.work,
                 gauge_work(p.Hsrc), p.origins, p.spacings, p.case.γ0,
-                p.case.γ2, mask, p.valG, p.valq, p.valH)
+                p.case.γ2, mask, eltype(p.U.work)(t), p.valG, p.valq, p.valH)
     return p
+end
+
+"""
+    gh_error!(p::GHProblem, u, t; mask = interior_mask(p.interior, t),
+              shell = (0, -1))
+
+Evaluate the error against the analytic solution, the interior residual
+and the gauge drift of the state `u` at time `t` into `p.diag`, and return
+`p`.
+
+No stencil and no ghosts — [`gh_error_kernel!`](@ref) reads the point —
+so this needs the scatter and nothing else. `shell` is the band of radii
+the drift is measured over, `(lo, hi)`; the default is empty, and the
+driver passes a band around the horizon.
+
+The mask defaults to the problem's own interior at this `t`, which is
+`CODE.md`'s rule that the modified region is never reported as a numerical
+solution; [`AllPoints`](@ref) is how a test asks for the unmasked number
+and sees how much larger it is.
+"""
+function gh_error!(p::GHProblem{T}, u, t; mask=interior_mask(p.interior, T(t)),
+                   shell=(zero(T), -one(T))) where {T}
+    scatter!(p.U, u)
+    map_blocks!(gh_error_kernel!, p.U, p.diag.work, p.U.work, p.origins,
+                p.spacings, p.case.background, p.interior, mask, T(t),
+                T(shell[1]), T(shell[2]), p.valG)
+    return p
+end
+
+"""
+    error_norms(p::GHProblem) -> NamedTuple
+
+The three error rows of the analysis record, from whatever
+[`gh_error!`](@ref) last wrote into `p.diag`: `err_l2` and `err_linf`
+(masked, over the evolved region), `residual` (the layer's L∞) and `drift`
+(the horizon shell's L∞ of `|h_tt − h_tt,exact|`).
+
+The residual and the drift are L∞ only, as `CODE.md`'s table asks: an L2
+over a region the mask excludes would have to be divided by that region's
+own volume, and the number those rows are read for is the worst point.
+"""
+function error_norms(p::GHProblem{T}) where {T}
+    counts = masked_counts(p)
+    err = masked_norms(p, DIAG_ERR; counts=counts)
+    res = masked_norms(p, DIAG_RES; counts=counts)
+    drift = masked_norms(p, DIAG_DRIFT; counts=counts)
+    return (err_l2=err.l2, err_linf=err.linf, residual=res.linf,
+            drift=drift.linf)
 end
 
 """

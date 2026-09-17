@@ -54,6 +54,8 @@ import SpacetimeMetrics
 using KernelAbstractions: @Const, @index, @kernel
 using KernelAbstractions: Backend, CPU, allocate, get_backend
 using LinearAlgebra: det, dot, tr
+using OrdinaryDiffEqLowOrderRK: RK4
+using SciMLBase: ODEProblem, solve
 using SpacetimeMetrics: AbstractMetric, GaugeWave, Harmonic, KerrSchild,
                         Minkowski, ShiftedMinkowski, dmetric, gauge_source_grad
 using StaticArrays: SArray, SMatrix, SVector
@@ -75,29 +77,48 @@ export apply_stencil, apply_mixed_stencil
 export isharmonic, isstatic, sample_gauge_source!
 
 # Cases, backgrounds and initial data
-export GHCase, gh_forest
+export GHCase, with_interior, gh_forest, hole_forest
 export minkowski_case, gauge_wave_case, shifted_minkowski_case
-export background_state, state_tuple, state_callback, fill_exact!
+export hole_case, kerr_schild_case, harmonic_kerr_case
+export background_state, state_tuple, case_state_tuple, state_callback
+export fill_exact!
+
+# Gauge and constraint damping, as a function of position
+export ConstantDamping, GaussianDamping, damping_rate, damping_bounds
+
+# The interior: the damping layer and the frozen core
+export HoleCenter, center_at, Interior, with_ρ_max, interior_variant
+export interior_profiles, is_frozen, in_layer, core_position, smoothstep
+export InteriorMask, ShellMask, interior_mask
+export horizon_min_radius, horizon_max_radius, singular_radius
+export layer_spacing, check_interior_radii
 
 # Boundaries
 export dirichlet
 
 # Evolution
 export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate
+export gh_step_limiter!, paste_interior!
 
 # Constraints and the masks their norms take
 export AllPoints, is_evolved, adm_constraints_at_node
-export gh_constraint!, adm_constraint!
-export masked_counts, masked_norms, constraint_norms
+export gh_constraint!, adm_constraint!, gh_error!
+export masked_counts, masked_norms, constraint_norms, error_norms
+
+# The driver
+export evolve!, check_cfl, forest_levels, horizon_shell
+export discrete_gradient_momentum!
 
 include("precision.jl")
 include("device.jl")
 include("pointwise.jl")
 include("stencils.jl")
+include("interior.jl")
 include("gauge.jl")
 include("initialdata.jl")
 include("boundaries.jl")
 include("evolution.jl")
 include("constraints.jl")
+include("driver.jl")
 
 end
