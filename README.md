@@ -40,19 +40,31 @@ julia --project=. -e 'using Pkg; Pkg.test()'                              # the 
 julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])' # and threaded
 ```
 
-**Status: milestones G0 and G1 are done — the pointwise algebra and the
-stencils exist; the right-hand side on the mesh is next.** What exists is
-the module shell, the `Base` bridges for software floating-point types, the
-host-copy helpers, GHSO2's node-local generalized-harmonic algebra together
-with the expanded momentum equation this package discretises, and the
-centered finite-difference and Kreiss–Oliger weights at `q ∈ {2, 4, 6, 8}`,
-built in exact rational arithmetic and rounded once into the run's type.
+**Status: milestones G0, G1 and G2 are done — the equations are solved on
+a uniform mesh and converge at the scheme's order; coarse-fine faces are
+next.** What exists is the module shell, the `Base` bridges for software
+floating-point types, the host-copy helpers, GHSO2's node-local
+generalized-harmonic algebra together with the expanded momentum equation
+this package discretises, the centered finite-difference and
+Kreiss–Oliger weights at `q ∈ {2, 4, 6, 8}` built in exact rational
+arithmetic and rounded once into the run's type, and the mesh-side
+physics: the fused right-hand-side kernel, the cases and their initial
+data, the prescribed gauge source, the time-dependent Dirichlet boundary
+and the CFL time step.
+
 The tests say the pinned TreeAMR still provides what the scheme is written
 against, that a `SpacetimeMetrics` background — including the boosted,
 spinning one the proof of concept runs — compiles and runs as a kernel
-argument, and that the algebra and the weights agree with an independent
-source: automatic differentiation for the equations, exact rational
-arithmetic for the stencils. Nothing in `src/` reads a field set yet.
+argument, that the algebra and the weights agree with an independent
+source (automatic differentiation for the equations, exact rational
+arithmetic for the stencils), and that the kernel evaluates the same
+equation the validated pointwise reference does. The gauge wave converges
+at **1.99, 3.95 and 5.92** for `q = 2, 4, 6`, flat space in a Dirichlet
+box with a shift and a sampled gauge source at **3.93**, Minkowski's
+right-hand side is *exactly* zero, and white noise stays bounded over a
+thousand steps with Kreiss–Oliger dissipation at `ε = 0.5` while growing
+tenfold without it. There is no refinement, no black-hole interior and no
+driver yet; those are the next three steps.
 
 The formulation and the pointwise algebra are inherited from
 `GeneralizedHarmonicSecondOrder2`, where they were validated on SBP-SAT

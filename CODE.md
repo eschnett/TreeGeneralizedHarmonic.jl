@@ -305,8 +305,11 @@ stagger is injection, exact for any data — applies unchanged**)**:
 `q` is the finite-difference order (below), and `G = q/2 + 1` because
 the Kreiss–Oliger operator of order `q + 2` reaches one point further
 than the derivatives do. TreeAMR's vertex invariant `N ≥ 2G + 2` then
-puts `N ≥ 8, 10, 12` at `q = 4, 6, 8`; the tests use `N = 8`, the
-proof-of-concept runs `N = 16` or `32`. The working array is
+puts `N ≥ 8, 10, 12` at `q = 4, 6, 8`; the tests use `N = 8` where that
+allows it and `N = 10` at `q = 6` **(amended in step 3**, where the
+invariant bit: `FieldSet` refuses `N = 8` at `q = 6`, so `PLAN.md`'s "the
+gauge wave at `q = 2, 4, 6` on `N = 8`" was one row wider than the mesh
+permits**)**, the proof-of-concept runs `N = 16` or `32`. The working array is
 `((N + 2G + 1)/N)^3` times the state: 2.6 at `N = 16, G = 3`, 1.7 at
 `N = 32`, which is the price of wide ghosts on small blocks and the
 reason `N = 32` is expected to be the default **(predicted; G6 measures
@@ -379,6 +382,17 @@ GHSO2's second finding under "sonic-surface instability"
 a black hole whose horizon lies in the evolved domain is cured by
 dissipation at `ε ≈ 0.5`; smooth runs without a hole need little or
 none. `ε` is a case parameter.
+
+**(Measured in step 3.)** Both halves hold on the mesh. The gauge wave at
+`q = 4` converges at **4.12** with `ε_KO = 0.5` against **3.95** without
+it, so the term is `O(h^{q+1})` as claimed and costs the scheme nothing;
+and white noise of amplitude `1e−8` on flat space, over a thousand steps
+— eighteen crossings of the box — falls to **0.66** of its initial L2
+norm with `ε_KO = 0.5` and **grows by 9.2** without it, in L∞ by **30.5**.
+The kernel compiles the dissipation away entirely when `ε_KO = 0`
+(`Val(false)`), which is worth about a fifth of an evaluation
+(1106 against 1409 ns per point at `q = 4`), and a run with
+`ε_KO = 1e−300` gives the same numbers as one with the term compiled out.
 
 ### The interface-order rule, and what it costs a second-order system
 
@@ -490,6 +504,56 @@ The RHS never mutates `u`, and it is a pure function of `(u, t)`
 (TreeAMR's contract): the interior treatment below is a term *in* the
 right-hand side, not a write to the state.
 
+**(Implemented and measured in step 3.)** The kernel is the order above,
+written by hand: `h`, `Π` and the thirty `∂_i h` at the point; the
+coefficient set and its two contractions `∂_iβ^i`, `∂_i(α√γγ^{ij})`;
+then `ntuple(Val(10))` over the components, each forming three `∂_iΠ`,
+three compact and three tensor-product second derivatives and, where
+there is dissipation, six more contractions — all consumed into two
+accumulators before the next component starts; then `gh_node_source`. It agrees with
+`gh_node_rhs_expanded` on analytic data, on three backgrounds and at
+`q = 2, 4, 6` with and without dissipation, to **under 1e−12** of the size
+of the terms, and Minkowski's `du` is **exactly** zero at every order.
+
+Two things the writing settled that the design had left open:
+
+- **The `∂_t g` the source is given is the accumulated `∂ₜh`, dissipation
+  included** (recorded in step 3). Two accumulators per component is what
+  the order above budgets, and keeping an undissipated copy would be ten
+  more live values; it is also the honest answer, since the reduced
+  source's `−Γ^ν ∂_ν g_ab` means the time derivative of the solution
+  being evolved, which is the one with `Q_d` in it. The difference is
+  `O(h^{q+1})`, the dissipation's own order, and the convergence rates
+  above are measured with it.
+- **The stencils address the working array by a linear index** — a base
+  index per point and one stride per axis — rather than by an
+  `(i, j, k, v, b)` tuple per load. The array is dense and column-major,
+  so the two name the same element and the output is bit-identical; the
+  reason is cost. Measured at `q = 4` in `Float64` on one thread: the
+  stencil half of the kernel is **1376 ns** per point with the cartesian
+  index and **573 ns** with the linear one, and the whole right-hand side
+  went from 2770 to 2117 ns. Five-dimensional index arithmetic at every
+  one of the ~1600 loads a point takes is not a cost the compiler removes.
+
+What an evaluation costs, per owned point, on the development machine
+(Apple silicon, 12 CPU threads, `Float64`, `N` at the vertex invariant,
+`ε_KO = 0.5`, one gauge-source-free case) — the kernel alone, and the
+whole of `gh_rhs!` with the scatter and the ghost fill around it:
+
+| `q` | kernel, 1 thread | `gh_rhs!`, 1 thread | kernel, 4 threads | `gh_rhs!`, 4 threads |
+|---|---|---|---|---|
+| 2 | 617 ns | 1032 ns | 173 ns | 290 ns |
+| 4 | 1244 ns | 1860 ns | 332 ns | 508 ns |
+| 6 | 1611 ns | 2208 ns | 409 ns | 595 ns |
+| 8 | 2330 ns | 3002 ns | 603 ns | 763 ns |
+
+The scatter and the ghost fill are **a third of an evaluation** at `q = 4`
+and do not grow with the order, which is the traffic estimate under
+[Precision, threads, devices](#precision-threads-devices) seen from the
+host: the kernel's arithmetic and the mesh pattern around it are of the
+same order, and neither dominates. Threading is worth 3.6–3.9× on four
+threads, and the numbers above are what G6 measures the H200 against.
+
 ### The time step
 
     dt = cfl · minimum_spacing(forest) / λ_max,
@@ -500,6 +564,14 @@ once per chunk from a speed slot in `diag` (a kernel writes it,
 `block_mapreduce(max)` reduces it) and re-checked at the chunk's end as
 TreeHydro does — throw, do not warn, if the step used violated the bound.
 `cfl = 1/4` **(proposed** default, GHSO2's**)**.
+
+**(Measured in step 3.)** `λ_max` is exactly `√3` on flat space — the
+conservative bound, not the physical speed 1 — and larger wherever there
+is a shift. Every run of step 3 took its step from it at `cfl = 1/4` and
+none needed a smaller one: the gauge wave at `q = 2, 4, 6`, shifted
+Minkowski through a Dirichlet face, and a thousand steps of noise. The
+re-check at the chunk's end arrives with the driver in step 5; the speed
+kernel, `max_speed` and `gh_dt` are in `evolution.jl` now.
 
 ## Gauge and constraint damping
 
@@ -528,6 +600,25 @@ Two consequences shape the case list:
   non-harmonic background that is not static, and says why; in-kernel
   sources are an extension.
 
+**How the two questions are answered** (step 3, `src/gauge.jl`), because
+they are not the same kind of question. **Harmonicity is a table** over
+the background types, not a measurement: it decides a `Val` parameter and
+whether an `Hsrc` field set exists at all, so it has to be exactly right,
+and a harmonic background's sampled `H^a` is **1.4e−16** rather than zero
+— eight orders below a non-harmonic one's `0.02 … 0.07`, but no threshold
+on that number is a fact about a spacetime. `translate`, `rotate` and
+`boost` take the inner metric's answer, since an affine change of
+coordinates preserves `□x^a = 0`; the gauge-wave transformation is
+harmonic over Minkowski and is not claimed to be over anything else; the
+fallback is `false`, which costs a sampling pass and is never wrong about
+the physics. **Staticity is measured**, and exactly: a static background's
+metric expression does not mention `t`, so the `t` partial of `dmetric`'s
+pass is an identical zero and the test is `iszero` with no tolerance to
+choose. `test/gauge_tests.jl` checks the table against the measurement on
+every row, which is also what would notice if one of `SpacetimeMetrics`'
+unexported wrapper types were renamed on `main` — they are listed in
+`prerequisite_tests.jl` for that reason.
+
 **Constraint damping** (decided): the Gundlach–Pretorius term `Z_ab`,
 with `γ0(x)` a *function of position* — a Gaussian of width a few `M`
 around the hole's analytic center, tapered to a small value in the wave
@@ -539,8 +630,15 @@ requirement for a stable evolution with the horizon in the domain.
 
 ### Periodic
 
-Free, through the tree. The gauge wave, shifted Minkowski and the
-robust-stability tests are periodic in every dimension.
+Free, through the tree. The gauge wave and the robust-stability tests are
+periodic in every dimension. **Shifted Minkowski is not** (amended in step
+3): its profile `ψ′(x) = A sech²(x/w)` is a function of `x` alone and is
+*even* in it, so closing the box in `x` would join two equal values with
+opposite gradients — a kink, which no stencil resolves and which every
+error norm would then report as truncation error. That case is therefore
+Dirichlet in `x` and periodic in `y` and `z`, which its solution does not
+depend on at all, and it is what puts the hook below under test at G2
+rather than at G4.
 
 ### Outer boundary: Dirichlet from the background, at the current time
 
@@ -563,6 +661,17 @@ This is the only outer boundary the package has. A radiative condition
 for a solution that is *not* known at the boundary needs a hook that
 reads the interior, which TreeAMR's device form cannot do — see
 [Possible extensions](#possible-extensions).
+
+**(Measured in step 3.)** The hook writes the analytic state into the
+outer ghosts and into the shared upper plane **bit for bit** — the same
+numbers `state_tuple` gives on the host at `coordinates(fs, b, idx)`,
+because TreeAMR's boundary kernel builds its position the same way
+`coordinates` does — and a run of shifted Minkowski through it converges
+at order `q` (3.93 in L2 at `q = 4`), which is the statement that a
+Dirichlet face costs the scheme nothing. `dirichlet(case, t)` returns
+`nothing` where the case is periodic in every dimension, so the
+right-hand side branches once on a `Bool` the problem stores rather than
+handing `fill_ghosts!` an argument whose type depends on the case.
 
 ### The interior: a pointwise damping layer
 
@@ -732,10 +841,18 @@ trajectory.
 |---|---|---|---|---|
 | Minkowski + noise | `Minkowski()` | 0 | yes | robust stability; dissipation |
 | gauge wave | `GaugeWave(A, d)` | 0 | no | the scheme's order; the interface-order rule |
-| shifted Minkowski | `ShiftedMinkowski(A, w)` | sampled | yes | a nonzero shift; the gauge-source path |
+| shifted Minkowski | `ShiftedMinkowski(A, w)` | sampled | yes | a nonzero shift; the gauge-source path; the Dirichlet hook |
 | Kerr-Schild | `KerrSchild(M, a)` | sampled | yes | a hole with a non-harmonic gauge source |
 | harmonic Kerr | `Harmonic(M, a)` | 0 | yes | a hole in harmonic gauge; spin |
 | **boosted harmonic Kerr** | `boost(Harmonic(M, a), v)` | 0 | no | **the proof-of-concept case**: a spinning hole crossing the mesh |
+
+Each case is also its box and its periodicity, and the parameters that are
+properties of the physics rather than of the mesh (`ε_KO`, `γ0`, `γ2`);
+that is `GHCase`, which lives here with the backgrounds it is made of
+rather than in `driver.jl` **(amended in step 3**: the right-hand side
+needs a case two steps before there is a driver, and a struct cannot be
+defined twice**)**. Its constructor is where a moving non-harmonic
+background is refused.
 
 A background gives the initial state through one callback,
 `x ↦ (h_ab, Π_ab)` at time `t`, with `Π` from `∂_t g` (the `dmetric`
@@ -906,6 +1023,16 @@ package accepts the same cap for the same reason: correctness and a
 shared pattern first. GHSO2's native tableau-generic stepper with fused
 stage updates is the extension that lifts it, listed below with what it
 needs.
+
+**(Measured in step 3.)** The integrator is `RK4()` with
+`adaptive = false`, `save_everystep = false` and `dt` from `gh_dt`, and it
+is what every convergence rate above was measured through. At `cfl = 1/4`
+the time error does not contaminate the spatial one even at `q = 6`,
+because `dt ∝ h` makes it `O(h⁴)` with a factor `cfl⁴ ≈ 0.004` in front
+and the runs are short: the measured rate is 5.92, not 4. That headroom is
+a property of the *time* the studies run for — an eighth of a crossing —
+and a longer run at `q = 6` would need a smaller `cfl` or a higher-order
+tableau to keep it, which is worth knowing before G3 lengthens anything.
 
 The relaxation rate of the interior layer is bounded by RK4's stability
 on the negative real axis, and `ρ_max · dt = 1` keeps it well inside;
@@ -1084,18 +1211,18 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host (amended in step 0) |
 | `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source` (all added in step 1); `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
-| `src/evolution.jl` | the fused RHS kernel in streaming order, `GHProblem`, `gh_rhs!`, the speed kernel, `gh_dt` |
-| `src/gauge.jl` | sampling prescribed sources into `Hsrc`; the harmonic/static checks |
+| `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the four `Val`s and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in |
+| `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3) |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook |
 | `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the `:pasted` limiter |
-| `src/initialdata.jl` | backgrounds, the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conventions |
+| `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the uniform forest builder, the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
 | `src/constraints.jl` | GH and ADM constraint kernels, masked norms |
 | `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch` |
 | `src/driver.jl` | `GHCase`, `evolve!`, the analysis record per chunk, `observer` |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`. `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1) |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1) |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
@@ -1168,15 +1295,27 @@ refinement level, short times.
   built from them and are accurate to a relative `eps` **as values**,
   which is not the same statement and is the one a test can make about
   what `metric_quantities` returns.
-- **G2 — The RHS on a uniform periodic mesh.** `evolution.jl`,
-  `initialdata.jl`, `gauge.jl`; the gauge wave and shifted Minkowski
-  cases; RK4. *Accept:* Minkowski and shifted Minkowski are stationary
-  to roundoff (the RHS is exactly zero on data the stencils reproduce);
-  the gauge wave converges at order `q` for `q = 2, 4, 6` on
+- **G2 — The RHS on a uniform periodic mesh.** *(Done.)* `evolution.jl`,
+  `initialdata.jl`, `gauge.jl`, `boundaries.jl`; the gauge wave and
+  shifted Minkowski cases; RK4. *Accept:* Minkowski and shifted Minkowski
+  are stationary to roundoff (the RHS is exactly zero on data the stencils
+  reproduce); the gauge wave converges at order `q` for `q = 2, 4, 6` on
   `N = 8`, roots `2 … 8`; white noise on flat space stays bounded for
   a thousand steps with `ε_KO > 0` and its growth without is recorded;
   the RHS is pure and never mutates `u`; the fused kernel's throughput
-  per point recorded.
+  per point recorded. Three of those sentences needed amending, and step 3
+  amended them where they are stated rather than only here:
+  **Minkowski is exactly stationary and shifted Minkowski is not** — its
+  `Π` is built from the *analytic* spatial gradients, which the stencils
+  reproduce only to truncation order, so it is stationary to `O(h^q)` and
+  what converges at order `q` is its error (GHSO2 built `Π` from the
+  discrete gradients to make the stronger statement true, and `CODE.md`
+  keeps that as a G4 post-pass; `PLAN.md`'s step 3 had it right where this
+  line did not). **`N = 8` does not exist at `q = 6`**, where TreeAMR's
+  vertex invariant forces `N ≥ 10`. And **roots `2 … 8` over one crossing**
+  is minutes per order in three dimensions: what is run is roots `1, 2, 3`
+  over an eighth of a crossing, which measures the same rate — the
+  numbers are under [Measured results](#measured-results).
 - **G3 — Coarse-fine faces, static mesh.** TreeAMR's two-level mesh;
   `constraints.jl`. *Accept:* the interface-order table (predicted rates
   3 and 4 at `p = 4, 6` for `q = 4`, control at 4), independent of the
@@ -1382,6 +1521,73 @@ already. `Rational` arithmetic is checked, so this arrived as an
 reason for `BigInt` in its own weight construction, seen from the other
 side.
 
+**G2 (step 3), the right-hand side on a uniform mesh.** The suite is 1877
+assertions in **3m48** at one thread and **3m21** at four, on the
+development machine (Apple silicon, 12 CPU threads, Julia 1.13.0), up from
+step 2's 1682 in 128 s. A clean archive with no `Manifest.toml` resolves
+the two pins from GitHub `main`, instantiates and passes with the same
+1877. The growth is the physics: `evolution_tests.jl` is **56 s** and
+`convergence_tests.jl` **40 s** of it, both over `PLAN.md`'s 30 s rule of
+thumb and recorded as such — a row of either costs a kernel specialisation
+to compile, and the evolutions themselves are seconds.
+
+**The order of the scheme.** The gauge wave (`A = 1/20`, one wavelength
+cubed, periodic, `ε_KO = 0`, `γ0 = 1`), evolved an eighth of a crossing at
+`cfl = 1/4` on roots `1, 2, 3`, and shifted Minkowski (`A = 1/2`, `w = 2`)
+a quarter of a crossing on roots `2, 3, 4` through a Dirichlet face:
+
+| case | `q` | `N` | `h` | L2 rate | L∞ rate |
+|---|---|---|---|---|---|
+| gauge wave | 2 | 8 | 1/8 … 1/24 | **1.99** | **1.94** |
+| gauge wave | 4 | 8 | 1/8 … 1/24 | **3.95** | **3.92** |
+| gauge wave | 6 | 10 | 1/10 … 1/30 | **5.92** | **5.92** |
+| gauge wave, `ε_KO = 0.5` | 4 | 8 | 1/8 … 1/24 | **4.12** | — |
+| shifted Minkowski, Dirichlet in `x` | 4 | 8 | 1/4 … 1/8 | **3.93** | **3.90** |
+
+The errors at `q = 4` are `2.0e−4, 1.3e−5, 2.6e−6` in L2, and at `q = 6`
+`5.3e−6, 8.8e−8, 7.9e−9` — four orders above the roundoff floor at the
+finest, which is what makes the rate a measurement of truncation error and
+not of `eps/h²` (step 2's warning about the window). Shifted Minkowski's
+rate is **3.6** at the profile width `w = 1` and **3.93** at `w = 2`: at
+`h = L/16` the sech² profile is not resolved, and the shortfall is the
+case's parameters and not the scheme — which is worth knowing before a
+hole, whose features are sharper still, is put on a mesh this coarse.
+
+**Stationarity.** Minkowski's `du` is **exactly** zero — every component,
+at `q = 2, 4, 6`, with and without dissipation, at any `t` — and a run of
+it through RK4 returns the initial state with an error of exactly zero.
+Shifted Minkowski is stationary only to truncation, for the reason under
+G2 above.
+
+**Robust stability** (`N = 8`, one root block, `q = 4`, `γ0 = 1`,
+`γ2 = 0`, white noise of amplitude `1e−8` on all 20 variables): over a
+thousand steps — eighteen crossings of the box — the L2 norm falls to
+**0.66** of its initial value at `ε_KO = 0.5` and **grows by 9.2** at
+`ε_KO = 0`; in L∞, **×2.10** against **×30.5**. The L∞ ratio at
+`ε_KO = 0.5` is a transient rather than a rate: 3.10, 2.53, 2.10, 1.45 at
+250, 500, 1000, 2000 steps, so the norm turns over and falls. This is
+GHSO2's `ε_KO ≈ 0.5` confirmed on a finite-difference mesh, at the one
+configuration where the answer is not confounded by a hole.
+
+**The kernel against the reference.** `gh_rhs_kernel!` and
+`gh_node_rhs_expanded`, evaluated on the same working array at sampled
+points of every block, agree to **under 1e−12** of the size of the terms
+that build `∂ₜΠ` — on the gauge wave, on shifted Minkowski (with its
+sampled gauge source) and on harmonic Kerr in a box off centre, at
+`q = 2, 4, 6`, with `ε_KO = 0` and `0.5`. Not bit for bit, and not asked
+to be: two call sites of one body are contracted differently (step 1's
+finding, now seen from the mesh). Two evaluations at the same `(u, t)`
+*are* bit-identical, and `u` is untouched by either.
+
+**What an evaluation costs** is the table under [One right-hand-side
+evaluation](#one-right-hand-side-evaluation), together with the linear
+index that bought a quarter of it. Two further numbers from the same
+measurement: the pointwise algebra — `metric_quantities`,
+`metric_derivatives`, `gh_node_source` — is **505 ns** per point of the
+`q = 4` kernel's 1409, so the stencils are the larger half at every order
+this package uses, and the split into a stencil kernel and an algebra
+kernel that G6 will try is a split of roughly 3:1 rather than 1:1.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -1475,10 +1681,19 @@ first touch them:
 3. **The streaming-order fused kernel** against the stencil/algebra
    split, decided by measured spills and time (G2 on the CPU, G6 on the
    H200); anything beyond the black-box attempts is research, not a
-   milestone.
+   milestone. *G2's half is in*: the fused kernel runs at 1244 ns per
+   owned point at `q = 4` on one CPU thread, of which the pointwise
+   algebra is 505 ns and the stencils the rest, and the mesh pattern
+   around it adds another 616. A host CPU says nothing about spills, so
+   the question stays open for the H200; what G2 adds to it is that the
+   split it would be measured against is 3:1 and not 1:1.
 4. **In-kernel evaluation of `SpacetimeMetrics`** on the H200 (G6); the
    structure does not depend on it, the cost does.
 5. **The defaults** — `q = 4`, `N = 32`, `cfl = 1/4`, `ε_KO = 0.5`,
    `γ0 = 1/M` near the hole, `m = 8`, a layer of `2(G + 1)` spacings,
    `ρ_max · dt = 1`, the indicator's thresholds — are starting values
-   for G4–G6 to confirm or move.
+   for G4–G6 to confirm or move. Three of them survived G2 on flat space
+   and on a gauge wave: `cfl = 1/4` (no run needed less), `ε_KO = 0.5`
+   (the noise test, and no order lost) and `q = 4` as the development
+   order (`q = 2, 6, 8` all run, at 0.5×, 1.3× and 1.9× the cost of
+   `q = 4`). None of that is yet a statement about a hole.

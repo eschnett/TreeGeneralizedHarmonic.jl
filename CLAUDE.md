@@ -45,8 +45,9 @@ Three rules follow from `CODE.md` and govern every change here:
 
 ## Current state
 
-**G0 and G1 are done — the pointwise algebra and the stencils exist; the
-right-hand side is next.**
+**G0, G1 and G2 are done — the right-hand side runs on a uniform mesh and
+converges at order `q`; coarse-fine faces and the constraint monitors are
+next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -55,40 +56,59 @@ as part of the deliverable, an error indicator for refinement, `Float64`
 on Symmetry's H200 as the device requirement, no checkpointing, GPU
 kernel efficiency deferred to a research project. `PLAN.md` breaks the
 milestones G0–G6 into steps 0–10, each a brief for one agent with a fresh
-context (see its "Running a step as an agent"); step 3 (the right-hand
-side and the gauge wave) is next. `notes/` holds the inherited documents.
+context (see its "Running a step as an agent"); step 4 (coarse-fine
+faces, the constraint monitors and the threading test) is next. `notes/`
+holds the inherited documents.
 
 What exists in `src/` is the module shell, `precision.jl` (the `Base`
 bridges for software floating-point types), `device.jl` (`to_backend`,
-`hostcopy`, `hostcopy!`) and `pointwise.jl` — GHSO2's node-local algebra
+`hostcopy`, `hostcopy!`), `pointwise.jl` — GHSO2's node-local algebra
 ported from `notes/pointwise-ghso2.jl`, plus the expanded momentum
 equation this package discretises (`metric_derivatives`,
-`gh_node_rhs_expanded`) and `gh_node_source`, and `stencils.jl` — the
+`gh_node_rhs_expanded`) and `gh_node_source` — `stencils.jl` — the
 centered finite-difference and Kreiss–Oliger weights at order `q`, built
 in `Rational` and rounded once into `T` by a `@generated` method, plus the
-host-side `apply_stencil` the tests measure them with. There is still no
-mesh-side physics: nothing in `src/` reads a field set.
+host-side `apply_stencil` the tests measure them with — and, from step 3,
+the mesh-side physics: `evolution.jl` (the fused right-hand-side kernel in
+`CODE.md`'s streaming order, `GHProblem`, `gh_rhs!`, the speed kernel and
+`gh_dt`, `convergence_rate`), `initialdata.jl` (`GHCase`, the three
+cases, the uniform forest builder, and the one conversion of
+`SpacetimeMetrics`' derivative index order), `gauge.jl` (`isharmonic`,
+`isstatic`, the sampled `Hsrc` and the refusal of a moving non-harmonic
+background) and `boundaries.jl` (the time-dependent Dirichlet hook).
+There is no interior, no refinement, no driver and no analysis record:
+those are steps 5–7.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
-(the pinned TreeAMR still exports the names the design calls, and a
+(the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
-`CPU()`, filling a field set bit-for-bit as a host loop does), and the
+`CPU()` filling a field set bit-for-bit as a host loop does, and the
+*unexported* metric wrappers `gauge.jl` dispatches on still exist), the
 pointwise pair — `pointwise_tests.jl` and `pointwise_identity_tests.jl`
 over a shared `pointwise_backgrounds.jl`, which is where the six
-backgrounds of `CODE.md`'s table and the analytic data are built, and
+backgrounds of `CODE.md`'s table and the analytic data are built —
 `stencils_tests.jl`, which evaluates no background at all and costs
-seconds.
+seconds, and step 3's five: `gauge_tests.jl`, `initialdata_tests.jl`,
+`evolution_tests.jl` (the kernel against `gh_node_rhs_expanded`, and the
+properties nothing else can state), `convergence_tests.jl` and
+`noise_tests.jl`, over the helper `evolution_cases.jl` — the runs
+themselves, which live in `test/` because what they wrap is the
+integrator loop and `driver.jl` is step 5's.
 `Project.toml` carries the `[sources]` pins and CI is in place. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and no remote.
 
-The suite's cost is now dominated by **compiling** `SpacetimeMetrics`'
-nested forward-mode passes for six backgrounds at two precisions — about
-two minutes, against step 0's eight seconds, with the evaluation itself
-in microseconds. Step 2 added 603 assertions and five seconds to it.
-Before adding a test that differentiates a background, look at what
-`pointwise_backgrounds.jl` already computes in one pass: `CODE.md`'s
-"Measured results" records what fusing them was worth.
+The suite is **1877 assertions in about 3m50**, up from step 2's 1682 in
+128 s. Two things pay for it: **compiling** `SpacetimeMetrics`' nested
+forward-mode passes for six backgrounds at two precisions (step 1's cost,
+unchanged), and now **compiling a right-hand-side kernel per
+`(q, has gauge source, has dissipation)`** — `evolution_tests.jl` is 56 s
+and `convergence_tests.jl` 40 s, both over `PLAN.md`'s 30 s rule of thumb
+and recorded as such in `CODE.md`. The evolutions themselves are seconds.
+Before adding a row to either, price it: a new `q` is a new kernel, and a
+new background is a new dual pass. Before adding a test that
+differentiates a background, look at what `pointwise_backgrounds.jl`
+already computes in one pass.
 
 ## Commands
 
@@ -159,7 +179,20 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `coordinates(fs, b, idx)` takes **stored** indices; a kernel launched
   by `map_blocks!` (default range) gets the owned index and adds `G`.
   Every stencil reaches `±(q/2 + 1)` and `G = q/2 + 1` is exactly that.
-  Getting this wrong produces plots that look almost right.
+  Getting this wrong produces plots that look almost right. The
+  right-hand-side kernel does the addition **once**, into a linear index,
+  and the stencils step by a stride per axis — same element, a quarter of
+  the time (measured in step 3), and one place to get it wrong instead of
+  1600.
+- **`N = 8` does not exist at every order.** TreeAMR's vertex invariant
+  is `N ≥ 2G + 2`, so `q = 4, 6, 8` need `N ≥ 8, 10, 12`. The tests use
+  `N = 10` at `q = 6`; `PLAN.md`'s "`N = 8`, `q = 2, 4, 6`" was one row
+  wider than the mesh allows, and `FieldSet` says so rather than running.
+- **KernelAbstractions refuses a `return` in a kernel** — anywhere in the
+  body, closures included, which is what `ntuple(Val(10)) do v … end` is.
+  End the block with the value instead. The error names the kernel and
+  arrives at precompilation, so it is cheap; it is here because the
+  package's own convention asks for an explicit `return` everywhere else.
 - **The RHS never mutates `u`.** The interior layer is a term of the
   right-hand side, `du = w F(u) − ρ (u − u_exact)`. Only the `:pasted`
   variant writes the state, and only from RK4's `step_limiter!`. Do not
@@ -225,9 +258,11 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   (`H ≡ 0`) — a boost preserves the harmonic condition. The refusal's
   message says this; do not weaken it.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
-  interior" are `Val` parameters built in `GHProblem`'s constructor.
-  Building them per evaluation recompiles or dispatches dynamically on
-  every RK stage.
+  dissipation" and — from step 5 — "has interior" are `Val` parameters
+  built in `GHProblem`'s constructor. Building them per evaluation
+  recompiles or dispatches dynamically on every RK stage. The price is
+  paid at compile time instead: a test row at a new `q` is a new kernel,
+  which is most of what `evolution_tests.jl`'s 56 s are.
 - **A `@generated` method must not convert to the caller's type.** Its
   generator may only call methods that existed when the generated function
   was *defined*, and this package is precompiled long before a driver loads
