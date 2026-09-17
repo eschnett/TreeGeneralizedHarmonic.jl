@@ -220,6 +220,19 @@ const SPACETIMEMETRICS_NAMES = (
     :Minkowski, :GaugeWave, :ShiftedMinkowski, :KerrSchild, :Harmonic,
 )
 
+# The metric *wrappers* `SpacetimeMetrics` builds but does not export.
+# `src/gauge.jl`'s `isharmonic` dispatches on them — `boost` and `rotate`
+# preserve the harmonic condition, the gauge-wave transformation preserves
+# it only over Minkowski — and its fallback is `false`, so a rename on
+# `main` would not throw: it would quietly give a harmonic background a
+# sampled gauge source, or refuse a moving one. Named here so that the
+# rename is a failure at the top of the suite with the name in it
+# (added in step 3).
+const SPACETIMEMETRICS_INTERNAL = (
+    :TranslatedMetric, :RotatedMetric, :BoostedMetric, :GaugeWaveMetric,
+    :ShiftedMinkowskiMetric,
+)
+
 @testset "The pinned dependencies export the names this package calls" begin
     # A name list rather than a call: every one of these is reached for in
     # steps 1–10, and the cheapest place to find out that a `main` renamed
@@ -229,4 +242,6 @@ const SPACETIMEMETRICS_NAMES = (
     # exists — see `CLAUDE.md`, "Things that will bite".
     @test setdiff(TREEAMR_NAMES, names(TreeAMR)) == Symbol[]
     @test setdiff(SPACETIMEMETRICS_NAMES, names(SpacetimeMetrics)) == Symbol[]
+    @test filter(n -> !isdefined(SpacetimeMetrics, n),
+                 collect(SPACETIMEMETRICS_INTERNAL)) == Symbol[]
 end

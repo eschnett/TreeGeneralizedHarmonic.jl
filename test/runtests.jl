@@ -17,4 +17,13 @@ using TreeGeneralizedHarmonic
     include("pointwise_tests.jl")
     include("pointwise_identity_tests.jl")
     include("stencils_tests.jl")
+    include("gauge_tests.jl")
+    include("initialdata_tests.jl")
+    include("evolution_tests.jl")
+    # `evolution_cases.jl` is a helper, not a test file: the two studies
+    # below are runs, and the runs are written once (TreeAMR includes
+    # `test/wave.jl` the same way).
+    include("evolution_cases.jl")
+    include("convergence_tests.jl")
+    include("noise_tests.jl")
 end

@@ -1,0 +1,145 @@
+# The runs the evolution tests measure: a convergence study, a
+# robust-stability study, and the fixtures both are built from.
+#
+# This file is a *helper*, not a test file — `runtests.jl` includes it
+# before the test files that use it, as TreeAMR includes `test/wave.jl`.
+# It lives here rather than in `src/` because what it wraps is the
+# integrator loop, and `CODE.md`'s driver (`evolve!`, the chunked loop
+# with regridding and the per-chunk analysis record) is step 5's. Writing
+# half a driver now and replacing it then would leave two of them; what
+# the step-3 tests need is the *shortest* thing that turns a `GHProblem`
+# into an error norm.
+#
+# Everything here is generic in the element type and in the backend, for
+# the reason `PLAN.md` gives under "Ground rules": retrofitting those is a
+# rewrite, and steps 4 and 9 add the tests of the property, not the
+# property.
+
+using KernelAbstractions: CPU
+using OrdinaryDiffEqLowOrderRK: RK4
+using Random: MersenneTwister
+using SciMLBase: ODEProblem, solve
+using TreeGeneralizedHarmonic: ceilint
+
+"""
+The state field set and the problem for a case on a uniform mesh, built
+the way every run in this package builds them: 20 variables, `G = q/2 + 1`,
+vertex-centered, prolongation `p = q + 2`.
+
+The operator order is spelled out at the call site and never defaulted
+(`CLAUDE.md`, "The interface-order rule"): this system takes second
+derivatives, so a ghost filled at order `q + 1` or below costs the scheme
+an order, and a default would hide exactly that.
+"""
+function gh_setup(::Type{T}, case::GHCase{T}; N, roots, q,
+                  ops=Operators(prolongation=q + 2, restriction=q + 2),
+                  backend=CPU()) where {T}
+    forest = gh_forest(T, case; N=N, roots=roots)
+    fs = FieldSet{T}(forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3),
+                     backend=backend)
+    problem = GHProblem(fs, GhostSchedule(fs, ops), case; q=q)
+    return forest, fs, problem
+end
+
+"""
+Evolve `case` to `t_end` with fixed-step RK4 and return the
+volume-weighted L2 and L∞ errors against the analytic solution, with the
+spacing and the step count that produced them.
+
+The pattern is TreeWave's `wave_errors`: sample the exact solution at
+`t = 0`, integrate, sample it again at `t_end` into a field set of the
+*same layout* (a different ghost width or centering would sample it at
+different points), and subtract state vectors. The time step comes from
+[`gh_dt`](@ref) — the CFL bound of the initial state — and is then
+trimmed so that the run lands exactly on `t_end`, which is what makes a
+convergence study compare solutions at one time.
+
+`save_everystep = false`: nothing between the ends is wanted, and at 20
+variables on a 3D mesh the intermediate states are the memory.
+"""
+function gh_errors(::Type{T}, case::GHCase{T}; N, roots, q, t_end,
+                   cfl=T(1 // 4), ops=Operators(prolongation=q + 2,
+                                                restriction=q + 2),
+                   backend=CPU()) where {T}
+    forest, fs, problem = gh_setup(T, case; N=N, roots=roots, q=q, ops=ops,
+                                   backend=backend)
+    fill_exact!(fs, case, zero(T))
+    u0 = statevector(fs)
+    gather!(u0, fs)
+
+    t_end = T(t_end)
+    dt = gh_dt(problem, u0; cfl=cfl)
+    nsteps = max(1, ceilint(t_end / dt))
+    dt = t_end / nsteps
+
+    sol = solve(ODEProblem(gh_rhs!, u0, (zero(T), t_end), problem), RK4();
+                dt=dt, adaptive=false, save_everystep=false)
+
+    exact = FieldSet{T}(forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3),
+                        backend=backend)
+    fill_exact!(exact, case, t_end)
+    uexact = statevector(exact)
+    gather!(uexact, exact)
+
+    err = sol.u[end] .- uexact
+    return (l2=volume_weighted_norm(fs, err),
+            linf=volume_weighted_norm(fs, err; p=Inf),
+            h=minimum_spacing(T, forest), nsteps=nsteps,
+            nblocks=nleaves(forest))
+end
+
+"""
+White noise of amplitude `amplitude` on top of the case's exact state, as
+a state vector.
+
+Drawn from a seeded generator on the host, in the state vector's own
+order, so the perturbation is the same at every thread count and can be
+replayed from the seed — which is the only way a stability claim about
+"noise" is a claim at all. It perturbs all 20 variables, `Π` as much as
+`h`: a perturbation of `h` alone is a constrained initial datum in one
+sense and this test is about the unconstrained ones.
+"""
+function gh_noisy_state(::Type{T}, fs, case::GHCase{T}; amplitude,
+                        seed=20260917) where {T}
+    fill_exact!(fs, case, zero(T))
+    u = statevector(fs)
+    gather!(u, fs)
+    rng = MersenneTwister(seed)
+    a = T(amplitude)
+    for i in eachindex(u)
+        u[i] += a * (2 * rand(rng, T) - 1)
+    end
+    return u
+end
+
+"""
+Run `nsteps` fixed steps of RK4 on noise-perturbed data and report how the
+perturbation grew: its L2 and L∞ norms at the start and at the end, and
+the ratios.
+
+`CODE.md`'s robust-stability case (`PLAN.md` step 3): white noise of
+amplitude `1e−8` on flat space must stay bounded over a thousand steps
+with `ε_KO = 0.5`, and what it does without dissipation is recorded rather
+than asserted. The norms are of `u` itself, because the exact solution of
+this case is `h = Π = 0` and the state *is* the perturbation.
+"""
+function gh_noise_growth(::Type{T}, case::GHCase{T}; N, roots, q, nsteps,
+                         amplitude=T(1 // 10)^8, cfl=T(1 // 4),
+                         ops=Operators(prolongation=q + 2, restriction=q + 2),
+                         seed=20260917, backend=CPU()) where {T}
+    forest, fs, problem = gh_setup(T, case; N=N, roots=roots, q=q, ops=ops,
+                                   backend=backend)
+    u0 = gh_noisy_state(T, fs, case; amplitude=amplitude, seed=seed)
+    dt = gh_dt(problem, u0; cfl=cfl)
+    t_end = nsteps * dt
+    sol = solve(ODEProblem(gh_rhs!, u0, (zero(T), t_end), problem), RK4();
+                dt=dt, adaptive=false, save_everystep=false)
+    u1 = sol.u[end]
+    l2_0 = volume_weighted_norm(fs, u0)
+    l2_1 = volume_weighted_norm(fs, u1)
+    linf_0 = volume_weighted_norm(fs, u0; p=Inf)
+    linf_1 = volume_weighted_norm(fs, u1; p=Inf)
+    return (l2_0=l2_0, l2_1=l2_1, linf_0=linf_0, linf_1=linf_1,
+            l2_ratio=l2_1 / l2_0, linf_ratio=linf_1 / linf_0,
+            dt=dt, t_end=t_end, nsteps=nsteps, finite=all(isfinite, u1))
+end
