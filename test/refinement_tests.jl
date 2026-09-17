@@ -11,7 +11,9 @@
 #     tested as the logic they are and not through a hole's metric;
 #   * the **criterion on a hole** — a flagging pass and the initial-data
 #     cycle, which fill initial data but evaluate no right-hand side, and
-#     one short adaptive *run*, which does.
+#     two short adaptive *runs*, which do: one whose mesh is already the
+#     criterion's fixed point and does not move, and one that starts a
+#     block away from it so that the regrid actually transfers.
 #
 # The calibration table the thresholds come from, and the adaptive run at
 # the calibrated cap, are in `test/hole_runs.jl`: at `refine_tol = 2/5` the
@@ -439,6 +441,55 @@ using StaticArrays: SVector
               offset_in_h=last_r.centroid_offset / out.h,
               err_l2=last_r.err_l2, gauge_l2=last_r.gauge_l2,
               residual=last_r.residual)
+    end
+
+    # The other half of the loop, and the one a static hole does not reach
+    # on its own: what the driver does when the mesh *does* move. The mesh
+    # here is the indicator's own fixed point plus one refined block in the
+    # far corner of the box — a block the criterion does not want, the
+    # ceiling caps at the coarsest level, and no firing block is a
+    # neighbour of, so the travelling margin does not hold it either. The
+    # first regrid coarsens it away, and the driver has to rebuild the
+    # schedule, the problem (which re-samples the gauge source and
+    # re-asserts the interior's radii on the new mesh) and the state
+    # vector. G5's moving hole is this branch at every chunk.
+    @testset "a regrid that moves the mesh rebuilds everything behind it" begin
+        case = adaptive_hole_fixture(T)
+        forest = gh_forest(T, case; N=8, roots=4)
+        targets = filter(forest.leaves) do k
+            ext = block_extent(T, forest, k)
+            inner = all(d -> -T(5 // 2) ≤ ext[d][1] && ext[d][2] ≤ T(5 // 2),
+                        1:3)
+            corner = all(d -> ext[d][1] ≥ T(5 // 2), 1:3)
+            inner || corner
+        end
+        @test length(targets) == 9              # the inner 8, and the corner
+        refine!(forest, targets)
+        balance!(forest)
+        @test nleaves(forest) == 127
+        out = evolve!(T, case; forest=forest, q=q, ops=ops, t_end=T(1 // 10),
+                      regrid=true)
+        @test out.nregrids == 1
+        # It settled on the indicator's own fixed point, from the other
+        # side: the corner the hand-built mesh refined is gone.
+        @test out.nblocks == 120
+        @test out.levels == [56, 64]
+        @test out.records[1].nblocks == 127
+        @test out.records[end].nblocks == 120
+        @test all(r -> r.finite, out.records)
+        @test out.h ≈ T(5 // 32)
+        # The state came through the transfer: still a metric, still
+        # converging on the analytic solution, and the interior's radius
+        # assertions hold on the mesh that came out (the fresh `GHProblem`
+        # is where they are checked).
+        @test all(isfinite, out.u)
+        @test out.records[end].err_l2 < 1 // 10
+        info = check_interior_radii(out.forest, out.interior,
+                                    case.background, G)
+        @test info.h ≈ T(5 // 32)
+        @info("a regrid that moved the mesh", from=out.records[1].nblocks,
+              to=out.nblocks, nregrids=out.nregrids,
+              err_l2=out.records[end].err_l2, τ_max=out.records[end].τ_max)
     end
 
     # The criterion is generic in the element type like everything else
