@@ -33,8 +33,8 @@ an order, and a default would hide exactly that.
 """
 function gh_setup(::Type{T}, case::GHCase{T}; N, roots, q,
                   ops=Operators(prolongation=q + 2, restriction=q + 2),
-                  backend=CPU()) where {T}
-    forest = gh_forest(T, case; N=N, roots=roots)
+                  refined=false, backend=CPU()) where {T}
+    forest = gh_forest(T, case; N=N, roots=roots, refined=refined)
     fs = FieldSet{T}(forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3),
                      backend=backend)
     problem = GHProblem(fs, GhostSchedule(fs, ops), case; q=q)
@@ -60,9 +60,9 @@ variables on a 3D mesh the intermediate states are the memory.
 function gh_errors(::Type{T}, case::GHCase{T}; N, roots, q, t_end,
                    cfl=T(1 // 4), ops=Operators(prolongation=q + 2,
                                                 restriction=q + 2),
-                   backend=CPU()) where {T}
+                   refined=false, backend=CPU()) where {T}
     forest, fs, problem = gh_setup(T, case; N=N, roots=roots, q=q, ops=ops,
-                                   backend=backend)
+                                   refined=refined, backend=backend)
     fill_exact!(fs, case, zero(T))
     u0 = statevector(fs)
     gather!(u0, fs)
@@ -86,6 +86,43 @@ function gh_errors(::Type{T}, case::GHCase{T}; N, roots, q, t_end,
             linf=volume_weighted_norm(fs, err; p=Inf),
             h=minimum_spacing(T, forest), nsteps=nsteps,
             nblocks=nleaves(forest))
+end
+
+"""
+The two constraint monitors of a case's **exact** state at time `t`, on
+the mesh `N`, `roots`, `refined` describes, as the norms the analysis
+record holds.
+
+Exact data is the sharp setting for a monitor: the continuum constraints
+vanish on it identically, so whatever the monitor reports is the
+*discretization's* violation and nothing else — roundoff where the
+stencils are exact (flat space), the interface error on a two-level mesh,
+and the bulk truncation error where the background is genuinely curved.
+There is no evolution here for the same reason; `gh_errors` is where a
+run's accumulated error is measured.
+
+Both kernels fill their ghosts with this `t`'s hook before they read a
+stencil, so the numbers are the mesh's and not the boundary's.
+"""
+function gh_constraint_run(::Type{T}, case::GHCase{T}; N, roots, q, t=zero(T),
+                           ops=Operators(prolongation=q + 2,
+                                         restriction=q + 2),
+                           refined=false, mask=AllPoints(),
+                           backend=CPU()) where {T}
+    forest, fs, problem = gh_setup(T, case; N=N, roots=roots, q=q, ops=ops,
+                                   refined=refined, backend=backend)
+    fill_exact!(fs, case, T(t))
+    u = statevector(fs)
+    gather!(u, fs)
+    gh_constraint!(problem, u, T(t); mask=mask)
+    gauge = constraint_norms(problem)
+    adm_constraint!(problem, u, T(t); mask=mask)
+    adm = constraint_norms(problem)
+    return (gauge_l2=maximum(gauge.gauge_l2), gauge_linf=maximum(gauge.gauge_linf),
+            ham_l2=adm.ham_l2, ham_linf=adm.ham_linf,
+            mom_l2=maximum(adm.mom_l2), mom_linf=maximum(adm.mom_linf),
+            h=minimum_spacing(T, forest), nblocks=nleaves(forest),
+            problem=problem, fs=fs, u=u)
 end
 
 """

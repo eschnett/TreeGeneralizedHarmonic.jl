@@ -26,4 +26,12 @@ using TreeGeneralizedHarmonic
     include("evolution_cases.jl")
     include("convergence_tests.jl")
     include("noise_tests.jl")
+    # Step 4's four. They come after `evolution_cases.jl` because all of
+    # them are runs; `threading_tests.jl` is last because it starts a
+    # subprocess, and a failure anywhere above is cheaper to read than a
+    # diff of two long outputs.
+    include("constraints_tests.jl")
+    include("interface_tests.jl")
+    include("type_tests.jl")
+    include("threading_tests.jl")
 end
