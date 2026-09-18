@@ -2703,8 +2703,8 @@ are unfixed as of this writing:
   function taking the arguments, at `--check-bounds=yes` as
   `julia-actions/julia-runtest` runs it as well as at `auto`, and under
   `--code-coverage=user`, which every cell was getting by default and
-  which was the most promising guess of the three — coverage instrumen­
-  tation is a standard way to break an `@allocated` claim. It is not this
+  which was the most promising guess of the three — coverage instrumentation is a standard way to break an `@allocated`
+  claim. It is not this
   one: the measurement is 0 with instrumentation demonstrably active,
   `.cov` files being written for `stencils.jl` and for 47 of StaticArrays'
   files and 22 of TreeAMR's in the same process. So neither the spelling,
