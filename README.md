@@ -1,6 +1,7 @@
 # TreeGeneralizedHarmonic.jl
 
 [![CI](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/actions/workflows/CI.yml)
+[![codecov](https://codecov.io/gh/eschnett/TreeGeneralizedHarmonic.jl/graph/badge.svg?token=T3096JWXD3)](https://codecov.io/gh/eschnett/TreeGeneralizedHarmonic.jl)
 
 `TreeGeneralizedHarmonic` solves the vacuum Einstein equations in the
 generalized harmonic formulation — second order in space, first order in
