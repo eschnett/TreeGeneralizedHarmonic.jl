@@ -48,6 +48,16 @@ jobs:
           - version: "1"
             os: ubuntu-latest
             threads: 4
+          # Coverage rides exactly one cell, marked here rather than
+          # spelled as a condition on the steps below, so that moving it is
+          # a one-line change. This entry overwrites no matrix key, so it
+          # merges into the serial Linux cell on the current release rather
+          # than adding a fifth -- which is the behaviour the entry above
+          # has to work around, and is wanted here.
+          - version: "1"
+            os: ubuntu-latest
+            threads: 1
+            coverage: true
     steps:
       - uses: actions/checkout@v7
       # `KorzynskiSpin` is a private repository, so its `[sources]` entry is
@@ -74,6 +84,21 @@ jobs:
       - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        with:
+          # `julia-runtest` instruments every cell by default, and this
+          # suite is long enough that that is most of an hour of runner
+          # time bought for nothing: the cells run the same lines, so only
+          # the one the badge reads needs to report them. Gating to `main`
+          # and to a manual dispatch keeps pull requests to the tests
+          # alone, and keeps the upload path exercisable from a branch.
+          #
+          # Coverage is *not* what makes the 1.11 allocation claims fail,
+          # which was the first guess once it turned out every cell was
+          # instrumented -- measured here, `@allocated` of both weight
+          # functions is 0 at 1.11.9 under `--code-coverage=user`, with
+          # instrumentation demonstrably reaching TreeGH, StaticArrays and
+          # TreeAMR. See "Measured results" in `CODE.md`.
+          coverage: ${{ matrix.coverage == true && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}
         env:
           # The suite must pass, with identical numbers, threaded as well
           # as serial. One entry of the matrix is enough to guard that:
@@ -83,6 +108,15 @@ jobs:
           # 4; the entry is here from the start so that the threaded path
           # is exercised while it is being written.)
           JULIA_NUM_THREADS: ${{ matrix.threads || 1 }}
+      - uses: julia-actions/julia-processcoverage@v1
+        if: ${{ matrix.coverage == true && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}
+      - uses: codecov/codecov-action@v5
+        if: ${{ matrix.coverage == true && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # A Codecov outage should not turn a green test run red.
+          fail_ci_if_error: false
 
   # There is deliberately no viewer job and no figure job yet. TreeWave has
   # both because `bin/` is a second environment with its own copies of the

@@ -2701,8 +2701,14 @@ are unfixed as of this writing:
   `derivative_weights` and `dissipation_weights` is **0** — measured
   through the tests' own loop-over-closures spelling *and* through a named
   function taking the arguments, at `--check-bounds=yes` as
-  `julia-actions/julia-runtest` runs it as well as at `auto`. So neither
-  the spelling nor the bounds-checking flag is the mechanism, and whatever
+  `julia-actions/julia-runtest` runs it as well as at `auto`, and under
+  `--code-coverage=user`, which every cell was getting by default and
+  which was the most promising guess of the three — coverage instrumen­
+  tation is a standard way to break an `@allocated` claim. It is not this
+  one: the measurement is 0 with instrumentation demonstrably active,
+  `.cov` files being written for `stencils.jl` and for 47 of StaticArrays'
+  files and 22 of TreeAMR's in the same process. So neither the spelling,
+  the bounds-checking flag nor coverage is the mechanism, and whatever
   is left needs the full suite's context — `runtests.jl` loads this
   package before `MultiFloats`, and `derivative_weights` is `@generated`,
   which is the one interaction this package already knows is order-
