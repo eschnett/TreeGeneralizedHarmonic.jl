@@ -2696,6 +2696,22 @@ are unfixed as of this writing:
   (`stencils_tests.jl:347`). Both are zero on 1.13. So the claim holds on
   the version the suite usually runs and not on the version `[sources]`
   makes the floor; one of the two is wrong.
+
+  **It does not reproduce in isolation.** On 1.11.9 here, `@allocated` of
+  `derivative_weights` and `dissipation_weights` is **0** — measured
+  through the tests' own loop-over-closures spelling *and* through a named
+  function taking the arguments, at `--check-bounds=yes` as
+  `julia-actions/julia-runtest` runs it as well as at `auto`. So neither
+  the spelling nor the bounds-checking flag is the mechanism, and whatever
+  is left needs the full suite's context — `runtests.jl` loads this
+  package before `MultiFloats`, and `derivative_weights` is `@generated`,
+  which is the one interaction this package already knows is order-
+  dependent. TreeHydro is the closest comparison and is **green**: its
+  `riemann_tests.jl` asserts the same `@allocated(…) == 0` of
+  `face_states` and `riemann_flux`, its matrix pins `1.11` explicitly, and
+  it differs in two ways worth trying here — the measurement goes through
+  a top-level named function that takes the arguments, and the functions
+  return plain `NTuple{M,T}` rather than `SVector`/`SMatrix`.
 - On **1.13 at four threads on Linux**, four exact-equality assertions
   fail: `first_r.err_l2 == 0`, `err_linf == 0` and `residual == 0`
   evaluate to `3.2e−17`, `1.4e−15` and `1.2e−13`

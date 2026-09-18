@@ -33,6 +33,17 @@ jobs:
         # entries, which 1.11 introduced.
         version: ["1.11", "1"]
         os: [ubuntu-latest, macOS-latest]
+        # `threads` is a matrix key with one value rather than something
+        # the `include:` below adds, and that is load-bearing. An include
+        # entry that only *adds* keys merges into every combination it
+        # matches, so spelling the threaded cell as `{version: "1", os:
+        # ubuntu-latest, threads: 4}` against a two-key matrix silently
+        # turned the serial Linux cell into the threaded one instead of
+        # adding a fifth job -- which is why the four exact-equality
+        # failures of 2026-09-18 could not be attributed to the thread
+        # count or to the compiler. An include that *overwrites* a matrix
+        # key adds a combination, which is what this spelling buys.
+        threads: [1]
         include:
           - version: "1"
             os: ubuntu-latest
