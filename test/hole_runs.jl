@@ -37,6 +37,7 @@ import Printf
 using TreeAMR
 using TreeGeneralizedHarmonic
 using KernelAbstractions: CPU
+using StaticArrays: SVector
 import SpacetimeMetrics as SM
 
 include(joinpath(@__DIR__, "evolution_cases.jl"))
@@ -50,7 +51,8 @@ const T = Float64
 say(fmt, args...) = println(Printf.format(Printf.Format(fmt), args...))
 
 # Which sections to run; all of them by default.
-const SECTIONS = isempty(ARGS) ? ["order", "long", "charts", "indicator"] : ARGS
+const SECTIONS = isempty(ARGS) ?
+                 ["order", "long", "charts", "indicator", "horizon"] : ARGS
 
 """
 The frozen hierarchy: one shell radius per refinement level. A radius of
@@ -365,6 +367,117 @@ if "indicator" in SECTIONS
         say("  ratios   : err_l2 %.3f  err_inf %.3f  gauge_l2 %.3f  " *
             "points %.3f", r.err_l2 / fr.err_l2, r.err_linf / fr.err_linf,
             r.gauge_l2 / fr.gauge_l2, out.nblocks / fout.nblocks)
+    end
+end
+
+# --- (5) the horizon, in the charts a test file cannot afford -------------
+#
+# `CODE.md`, "Analysis quantities": for Kerr the reference values are
+# `A = 4π(r₊² + a²)`, `M_irr = √(A/16π)`, `J = M a` and `M_ch = M`, and the
+# suite checks them on the one hole it can afford — Kerr-Schild `a = 0` on
+# the step-5 fixture. The other two rows are here, because the mesh each of
+# them needs is not a mesh a test file can build:
+#
+#   * **Kerr-Schild `a = 9/10`**, the proof-of-concept spin, where the
+#     numbers have content: `J = 0.9` rather than zero, an axis to recover,
+#     `A = 4π(r₊² + a²) = 28.4` rather than `16π`, and a horizon that is
+#     genuinely oblate (`r_min = 1.436`, `r_max = 1.695`). Its layer needs
+#     `h ≈ 0.04 M` — `r_0 > |a|` for the chart's singular disk and
+#     `r_1 + 4h ≤ r₊` for the placement — and that is 1128 blocks.
+#   * **Harmonic Kerr `a = 0`**, the second chart, whose horizon is at
+#     `r = M` rather than `2 M` and which carries no gauge source at all.
+#
+# Both are *sampled* data: the claim is about the analysis, not about an
+# evolution, and `notes/methods-ghso2.md` validates the same quantities the
+# same way ("Validated on sampled Kerr-Schild data"). The third row is the
+# trace over a run, which is the other half of `CODE.md`'s table — the
+# horizon rows at every `k`-th chunk, and what they do while the hole sits
+# still.
+if "horizon" in SECTIONS
+    println("\n=== (5) the horizon ===")
+    q = 2
+    G = q ÷ 2 + 1
+    ops = Operators(prolongation=q + 2, restriction=q + 2)
+
+    println("\n-- Kerr's numbers from sampled data --")
+    # Each row carries its own seed radius as well as its own layer: the
+    # fast flow's transient dips inside the seed sphere, and a query whose
+    # window reaches `r_1` is refused by design — so the seed is placed
+    # outside the horizon and the layer is placed with room under it. The
+    # harmonic chart needs **`h = 5/128`** for that, which is the spacing
+    # `CODE.md` predicted it would need before it has an `r_0` where `|h|`
+    # is still moderate (`≈ M/23`); at `h = 5/64`, the spacing the
+    # "other charts" table uses, `r_0 = 0.2` forces `r_1 = 0.67` against a
+    # horizon at `1.0` and the flow's first iterates reach the layer.
+    for (label, bg, r_0, r_1, N, radii, N_ah, r_seed) in
+        (("KS a=0", SM.KerrSchild(one(T), T(0)), T(2 // 5), T(23 // 20), 8,
+          (T(10), T(10), one(T)), 16, T(17 // 10)),
+         ("Harmonic a=0", SM.Harmonic(one(T), T(0)), T(3 // 10), T(3 // 5),
+          8, (T(10), T(10), T(3 // 2), T(6 // 5)), 16, T(13 // 10)),
+         ("KS a=0.9", SM.KerrSchild(one(T), T(9 // 10)), T(19 // 20), T(5 // 4),
+          8, (T(10), T(10), T(8 // 5), T(5 // 4)), 20, T(19 // 10)))
+        local M = one(T)
+        local a = bg.spin
+        local case = hole_case(T, bg; M=M, halfwidth=T(5 // 2), r_0=r_0,
+                               r_1=r_1, chunk=T(1 // 10), margin=4)
+        local forest = shells(case, N, radii)
+        local fs = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3),
+                               backend=CPU())
+        local t0 = time()
+        local p = GHProblem(fs, GhostSchedule(fs, ops), case; q=q)
+        fill_exact!(fs, case, zero(T))
+        local u = statevector(fs)
+        gather!(u, fs)
+        local setup = time() - t0
+        # A displaced guess, as `PLAN.md` asks: the finder recentres.
+        local t1 = time()
+        local o = try
+            find_gh_horizon(p, u, zero(T); N=N_ah, r_seed=r_seed,
+                            origin=SVector{3,T}(T(1 // 10), T(-1 // 20),
+                                                T(3 // 40)))
+        catch e
+            say("%-13s blocks=%4d h=%7.5f  **FAILED**: %s", label,
+                nleaves(forest), minimum_spacing(T, forest),
+                first(split(sprint(showerror, e), '\n')))
+            nothing
+        end
+        local find = time() - t1
+        o === nothing && continue
+        # Kerr's own values, for the same `M` and `a`.
+        local rp = M + sqrt(M^2 - a^2)
+        local area = 4π * (rp^2 + a^2)
+        local M_irr = sqrt(area / (16π))
+        say("%-13s blocks=%4d h=%7.5f N_ah=%2d iters=%3d  setup %5.1fs " *
+            "find %5.2fs", label, nleaves(forest), minimum_spacing(T, forest),
+            N_ah, o.iters, setup, find)
+        say("   r_min %.6f (%.6f)  r_mean %.6f  r_max %.6f (%.6f)",
+            o.r_min, horizon_min_radius(bg), o.r_mean, o.r_max,
+            horizon_max_radius(bg))
+        say("   area  %.6f (%.6f, rel %8.2e)   M_irr %.6f (%.6f)",
+            o.area, area, abs(o.area - area) / area, o.M_irr, M_irr)
+        say("   J     %.6f (%.6f)   M_ch %.6f (%.6f)   axis (%.4f, %.4f, " *
+            "%.4f)", o.J, M * a, o.M_ch, M, o.spin_axis[1], o.spin_axis[2],
+            o.spin_axis[3])
+        say("   centre offset %.3e   |H| %.3e   success %s / spin %s",
+            o.center_offset, o.H_norm, o.success, o.spin_success)
+    end
+
+    println("\n-- the horizon rows of a run: Kerr-Schild a = 0 to t = 10 M --")
+    let case = with_horizon(kerr_schild_case(T; M=1, a=0, halfwidth=T(5 // 2),
+                                             r_0=T(2 // 5), r_1=T(23 // 20),
+                                             chunk=one(T), margin=8),
+                            Horizon(T; every=1, N=16))
+        local forest = shells(case, 8, (T(10), T(10), one(T)))
+        local t0 = time()
+        local out = evolve!(T, case; forest=forest, q=q, ops=ops,
+                            t_end=T(10), cfl=T(1 // 5))
+        say("  %d chunks, %d steps, %.1fs", out.nchunks, out.nsteps,
+            time() - t0)
+        for r in out.records
+            say("   t=%5.2f  r=(%.6f, %.6f, %.6f)  area %.6f  M_irr %.6f  " *
+                "J %9.2e  M_ch %.6f  offset %8.2e", r.t, r.r_min, r.r_mean,
+                r.r_max, r.area, r.M_irr, r.J, r.M_ch, r.center_offset)
+        end
     end
 end
 

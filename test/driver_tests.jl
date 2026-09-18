@@ -77,6 +77,15 @@ using KernelAbstractions: CPU
             @test r.nblocks == 120
             @test r.levels == [0, 0, 56, 64]
             @test r.h ≈ minimum_spacing(T, out.forest)
+            # The horizon rows exist on every record and are empty here,
+            # so the record's *shape* does not depend on the case: this
+            # fixture carries no `Horizon` (added in step 7, whose own
+            # file measures them where it does).
+            for k in (:horizon_success, :origin, :r_min, :r_mean, :r_max,
+                      :area, :M_irr, :J, :spin_axis, :M_ch, :hlm)
+                @test haskey(r, k)
+                @test getfield(r, k) === nothing
+            end
         end
         # The initial data is exact, so the error starts at zero and grows;
         # the constraints do not start at zero, because a finite-difference

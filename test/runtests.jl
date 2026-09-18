@@ -43,6 +43,11 @@ using TreeGeneralizedHarmonic
     # through `evolve!` with the regrid branch on, and a failure in the
     # driver itself is cheaper to read than one in the loop that drives it.
     include("refinement_tests.jl")
+    # Step 7's. After `driver_tests.jl` and `refinement_tests.jl` because
+    # it finds the horizon of both of their meshes — the fixture's frozen
+    # hierarchy and the one the indicator chose — and because a failure in
+    # either is cheaper to read than one in the analysis on top of them.
+    include("horizon_tests.jl")
     include("type_tests.jl")
     include("threading_tests.jl")
 end

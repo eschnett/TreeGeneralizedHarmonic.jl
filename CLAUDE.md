@@ -45,12 +45,14 @@ Three rules follow from `CODE.md` and govern every change here:
 
 ## Current state
 
-**G0–G3 are done and G4a and G4b with them — there is a black hole on a
-mesh the code chose: the interior damping layer, the driver with its
-per-chunk analysis record and its regrid branch, the masked Löhner
-indicator with its interior mask, its derived level floor and its
-boundary ceiling, and the masked error converging at order `q` on a
-frozen hierarchy. The horizon finder (G4c) is next.**
+**G0–G4 are done — there is a black hole on a mesh the code chose, and the
+code knows where its horizon is: the interior damping layer, the driver
+with its per-chunk analysis record and its regrid branch, the masked
+Löhner indicator with its interior mask, its derived level floor and its
+boundary ceiling, the masked error converging at order `q` on a frozen
+hierarchy, and the apparent horizon with its area, `M_irr`, Korzyński `J`
+and `M_ch` at Kerr's values in both charts and at `a = 9/10`. The moving
+hole (G5) is next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -59,8 +61,8 @@ as part of the deliverable, an error indicator for refinement, `Float64`
 on Symmetry's H200 as the device requirement, no checkpointing, GPU
 kernel efficiency deferred to a research project. `PLAN.md` breaks the
 milestones G0–G6 into steps 0–10, each a brief for one agent with a fresh
-context (see its "Running a step as an agent"); step 7 (the horizon
-finder) is next. `notes/` holds the inherited documents.
+context (see its "Running a step as an agent"); step 8 (a hole that
+moves) is next. `notes/` holds the inherited documents.
 
 What exists in `src/` is the module shell, `precision.jl` (the `Base`
 bridges for software floating-point types), `device.jl` (`to_backend`,
@@ -111,8 +113,21 @@ floor and the ceiling are applied through, the travelling margin,
 entry points the cycle and the driver call). `driver.jl` grew `adapt` (the
 initial-data cycle) and `regrid` (the branch at every chunk boundary but
 the last), and the record grew `τ_max`, the centroid and its distance from
-the analytic center. There is no horizon finder and no I/O: those are steps
-7 and 9.
+the analytic center.
+
+From step 7 the code **knows where the horizon is**: `horizon.jl` —
+`locate_block` and `interpolate`/`interpolate_grad` (the *stopgap* point
+interpolator, `find_leaf` then a tensor-product Lagrange window of
+`q + 2` points, batched and threaded over a host array, with the
+footprint guard that refuses a query reading inside `r_1`),
+`GHADMProvider` (the batched `ADMVars` provider, `Float64` out whatever
+the run computes in, with a one-entry cache because `KorzynskiSpin` asks
+for `γ` and `K` in two calls with the same points), `find_gh_horizon`
+(the fast flow, the proper area, `M_irr`, the Korzyński `J` with its
+axis, `M_ch`) and `Horizon`, the cadence and resolution the case carries.
+`initialdata.jl`'s `GHCase` grew a sixth type parameter for it and
+`with_horizon`; `driver.jl`'s record grew the horizon rows, seeded from
+the previous find. There is no I/O and no CLI: those are step 9.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -143,28 +158,36 @@ hole fixture in `evolution_cases.jl`; and step 6's `refinement_tests.jl`
 written by hand, the mask, the level floor and the ceiling, the
 initial-data cycle, and two short adaptive runs — one whose mesh does not
 move and one whose does), over that file's second hole fixture and the
-three new helpers in `evolution_cases.jl`. **`test/hole_runs.jl` is a
-standalone script, not part of the suite**: the `t = 50 M` runs, `q = 4`,
-the two harmonic charts and the indicator's calibration are minutes
-rather than seconds, and its numbers are in `CODE.md` with the command
-that produced them.
+three new helpers in `evolution_cases.jl`; and step 7's
+`horizon_tests.jl` (the interpolator's exactness and its rate, the
+footprint guard, Kerr's horizon from a displaced guess on both the step-5
+fixture and the mesh the indicator chose, and the record's horizon rows at
+the case's cadence). **`test/hole_runs.jl` is a standalone script, not
+part of the suite**: the `t = 50 M` runs, `q = 4`, the two harmonic
+charts, the indicator's calibration and — from step 7 — the horizon
+section (Kerr's numbers at `a = 9/10` and in the harmonic chart, on meshes
+of a thousand blocks) are minutes rather than seconds, and its numbers are
+in `CODE.md` with the command that produced them.
 `Project.toml` carries the `[sources]` pins and CI is in place. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and no remote.
 
-The suite is **2968 assertions in 13m35** at one thread and **10m45** at
-four on the development machine, and **29m32 / 20m29** for the same 2968
-on Symmetry (step 4's paragraph said 2144 in 8m40 and was two steps
-stale). Most of it is **compilation**, and the things that pay for it are,
-in order: `SpacetimeMetrics`' nested forward-mode passes for six
+The suite is **3444 assertions in 12m31** at one thread and **8m38** at
+four on the development machine (step 6 measured 2968 in 13m35 / 10m45
+here and 29m32 / 20m29 on Symmetry; the wall clock went *down* while the
+count went up, so read each step's numbers as that step's rather than as a
+regression). Most of it is **compilation**, and the things that pay for it
+are, in order: `SpacetimeMetrics`' nested forward-mode passes for six
 backgrounds at two precisions (step 1's cost, unchanged); a
 right-hand-side kernel per `(q, has gauge source, has dissipation,
 interior variant, T)`; the ADM constraint kernel, whose first
-specialisation is **18 s** and each further one about 4 s; and the three
+specialisation is **18 s** and each further one about 4 s; and the four
 files whose cost is *arithmetic* rather than compilation —
-`driver_tests.jl` (the suite's black hole, 2m19), `interface_tests.jl`,
-where the ghost fill at `p = 6` is 79 % of every evaluation, and
-`refinement_tests.jl` (26 s, of which the two adaptive runs are 19).
+`driver_tests.jl` (the suite's black hole, 1m59 / 44.8 s),
+`interface_tests.jl`, where the ghost fill at `p = 6` is 79 % of every
+evaluation, `refinement_tests.jl` (22.1 / 12.8 s) and `horizon_tests.jl`
+(28.7 / 12.8 s, of which the two evolutions are most: the interpolator's
+own claims are under two seconds and a *find* is a tenth of one).
 Several files are over `PLAN.md`'s 30 s rule of thumb and `CODE.md`
 records each with what it buys. Before adding a row anywhere, price it: a new `q` or a new element
 type is a new kernel; a new background is a new dual pass; a resolution
@@ -213,12 +236,20 @@ The black-hole runs that are too long for the suite — the default margin
 the two harmonic charts, and from step 6 the indicator's calibration and
 its adaptive run — are a **script**, run by hand, with its numbers
 recorded in `CODE.md` under "Measured results" (added in step 5). It takes
-an optional list of sections (`order`, `long`, `charts`, `indicator`):
+an optional list of sections (`order`, `long`, `charts`, `indicator`,
+`horizon`):
 
 ```bash
 julia --project=. --threads=4 test/hole_runs.jl
 julia --project=. --threads=4 test/hole_runs.jl indicator
+julia --project=. --threads=4 test/hole_runs.jl horizon
 ```
+
+The `horizon` section (added in step 7) is Kerr's `A`, `M_irr`, `J` and
+`M_ch` from sampled data in both charts and at `a = 9/10`, plus the
+horizon rows of a `t = 10 M` run; its two spinning-hole meshes are about a
+thousand blocks each, which is why they are here and not in the suite. It
+takes about eight minutes at four threads.
 
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a
@@ -257,7 +288,13 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   an API. Say so rather than editing a checkout and assuming the tests
   see it. The entries are also why the Julia floor is 1.11, and
   `test/prerequisite_tests.jl` is what notices when a moving branch drops
-  a name.
+  a name. From step 7 the same holds for `ApparentHorizonFinder` and
+  `KorzynskiSpin` — and **`KorzynskiSpin`'s pin is an `ssh` URL because
+  its GitHub repository is private**. It resolves on a machine with
+  Erik's key (here and on Symmetry) and **not** in GitHub Actions or in an
+  anonymous clean checkout; that is recorded as blocked in `CODE.md`, and
+  it becomes an `https` URL the day the repository is public. Do not
+  vendor the package and do not add a local-path source.
 - **`notes/` is read-only.** The copies carry their provenance; when
   `CODE.md` departs from them, `CODE.md` says so. Do not "fix" a copy.
 - **Two derivative index conventions.** `SpacetimeMetrics.dmetric`
@@ -406,6 +443,33 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   negative real axis; the driver sets `ρ_max · dt = 1` per chunk. A run
   that blows up in the layer after raising `ρ_max` has found the
   integrator, not the physics.
+- **The horizon finder reads only the evolved region, and it says so by
+  throwing.** The interpolation window is `q + 2` points per axis, `G` of
+  them on each side of the query's cell, so a query *outside* `r_1` can
+  still read *inside* it. The guard is on the footprint and not on the
+  query point, and it is exact (the footprint is a lattice, so the nearest
+  of its points to the center is the per-axis nearest). A find that fails
+  because of it is recorded in the run's record as
+  `horizon_success = false` with the message in `horizon_note`, never
+  thrown out of `evolve!`: the horizon is a diagnostic. If a find fails,
+  read `r_1 + (q+2)h/2` against the horizon's smallest coordinate radius
+  before suspecting the finder — and remember that the fast flow's
+  *transient* dips below its seed, which is how the harmonic chart at
+  `h = 5/64` fails and the same chart at `5/128` does not.
+- **Ghosts must be filled before anything is interpolated**, with that
+  call's hook. `find_gh_horizon` scatters and fills; `gh_adm_provider` and
+  `interpolate` do not, and an unfilled halo makes the metric garbage
+  exactly at the block faces — which the fast flow then walks into the
+  layer to escape.
+- **The Korzyński spin is what a find costs**, not the interpolation:
+  `16×`, `45×` and `105×` a right-hand-side evaluation at
+  `N_ah = 12, 16, 20`, against `1.7×`, `2.7×` and `3.6×` for the find
+  itself — one batch of 496 interpolated `ADMVars` is 0.26 ms. Lower the
+  cadence or pass `spin = false` before lowering `N_ah`. Its `unif_tol` is
+  `1e-8` here and not the library's `1e-13`, because interpolated data has
+  a residual floor of its own (`2.2e−5` at `h = 5/64`): the tighter
+  tolerance reports `success = false` on every find and returns the same
+  `J`.
 - **The analysis quantities are part of the deliverable**: masked
   constraint norms, the interior residual, horizon location, area,
   `M_irr`, `J`, `M_ch`, the refinement centroid, mesh statistics, at

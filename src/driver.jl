@@ -162,6 +162,15 @@ it at about one right-hand-side evaluation and compiles in 18 s). **Every
 norm is masked** by the interior at that chunk's `t`: the layer and the core
 are not a numerical solution and are not reported as one.
 
+A case that carries a [`Horizon`](@ref) adds the horizon rows every `k`-th
+chunk (added in step 7): the found `origin` and its distance from the
+analytic center, the coordinate radii `r_min`, `r_mean`, `r_max`, the
+proper `area`, `M_irr`, the Korzyński `J` with its `spin_axis`, `M_ch`, and
+the shape `hlm` — which is also the next find's seed. They are `nothing` on
+a chunk the cadence skips, as the ADM rows are, and a find that fails
+leaves `horizon_success = false` and its message in `horizon_note` rather
+than ending the run.
+
 ## Keywords
 
 `forest` has no default: the mesh is the study's, built by
@@ -298,6 +307,11 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     nsteps = 0
     nregrids = 0
     λ_initial = zero(T)
+    # The previous find's shape, which the next one is seeded with
+    # (`CODE.md`: "Each find is seeded with the previous result, recentred
+    # on `c(t)`"). It is the *shape* that is carried and not the origin:
+    # `find_gh_horizon` recentres on the analytic center at every call.
+    hlm_seed = nothing
 
     function record!(p, t, u, dt, steps, λ, λ_end, cflnum)
         gh_constraint!(p, u, t)
@@ -313,6 +327,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         end
         gh_error!(p, u, t; shell=shell)
         e = error_norms(p)
+        # The horizon, every `k`-th chunk of the record — `CODE.md`'s
+        # cadence, counted on the same `length(records)` the ADM monitor
+        # is. It runs *before* the indicator and after the norms because
+        # it scatters and fills ghosts of its own; nothing it does
+        # survives into the flags.
+        hz = horizon_row(p, u, t, hlm_seed, length(records))
+        hz.hlm === nothing || (hlm_seed = hz.hlm)
         # The indicator last, and only where the case refines: it writes
         # `DIAG_TAU` and reads nothing the norms above left behind, and the
         # flags it produces are what the regrid below uses — one evaluation
@@ -330,6 +351,11 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                mom_l2=adm.mom_l2, mom_linf=adm.mom_linf,
                err_l2=R(e.err_l2), err_linf=R(e.err_linf),
                residual=R(e.residual), drift=R(e.drift),
+               horizon_success=hz.success, origin=hz.origin,
+               center_offset=hz.center_offset, r_min=hz.r_min,
+               r_mean=hz.r_mean, r_max=hz.r_max, area=hz.area,
+               M_irr=hz.M_irr, J=hz.J, spin_axis=hz.spin_axis,
+               M_ch=hz.M_ch, hlm=hz.hlm, horizon_note=hz.note,
                ρ_max=R(interior_ρ_max(p.interior)),
                τ_max=ind === nothing ? nothing : R(ind.τ_max),
                centroid=centroid,
@@ -457,6 +483,46 @@ function max_speed_of(p::GHProblem{T}, u, t) where {T}
         "a state that is identically zero — which no initial data of this " *
         "package produces, h = 0 being Minkowski, whose speed is √3."))
     return λ
+end
+
+# The horizon rows of one record entry: the find at `t` when this is a
+# `k`-th chunk and the case asks for one, and a row of `nothing` otherwise.
+# `CODE.md`'s analysis table, "every `k`-th chunk, `k` a case parameter".
+#
+# **The find is caught (proposed in step 7).** The horizon is a
+# *diagnostic* — nothing in the evolution reads it — and a diagnostic that
+# ends a run is worse than one that says it failed: the interpolating
+# provider throws by design where a query reaches the layer, and a flow
+# that wanders inward for one chunk would otherwise take the whole run and
+# its record with it. What the record holds instead is
+# `horizon_success = false` and the message in `horizon_note`, beside the
+# chunk it happened at, and a test asserts on `horizon_success` rather than
+# on the absence of an exception.
+function horizon_row(p::GHProblem{T}, u, t, seed, index) where {T}
+    empty = (success=nothing, origin=nothing, center_offset=nothing,
+             r_min=nothing, r_mean=nothing, r_max=nothing, area=nothing,
+             M_irr=nothing, J=nothing, spin_axis=nothing, M_ch=nothing,
+             hlm=nothing, note=nothing)
+    hz = p.case.horizon
+    hz === nothing && return empty
+    hz.every > 0 && iszero(mod(index, hz.every)) || return empty
+    out = try
+        find_gh_horizon(p, u, t; N=hz.N,
+                        r_seed=iszero(hz.r_seed) ? nothing :
+                               tofloat64(hz.r_seed),
+                        hlm=seed, spin=hz.spin, unif_tol=hz.unif_tol,
+                        atol=hz.atol, maxiters=hz.maxiters,
+                        verbosity=hz.verbosity)
+    catch e
+        e isa InterruptException && rethrow()
+        return merge(empty, (success=false,
+                             note=first(split(sprint(showerror, e), '\n'))))
+    end
+    return (success=out.success, origin=Tuple(out.origin),
+            center_offset=out.center_offset, r_min=out.r_min,
+            r_mean=out.r_mean, r_max=out.r_max, area=out.area,
+            M_irr=out.M_irr, J=out.J, spin_axis=Tuple(out.spin_axis),
+            M_ch=out.M_ch, hlm=out.hlm, note=nothing)
 end
 
 # The interior the kernel sees this chunk: the case's radii and variant at

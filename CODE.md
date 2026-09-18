@@ -1551,6 +1551,55 @@ the analytic center, and the refinement follows the indicator. A run in
 which the found horizon and the analytic center disagree by more than a
 few finest spacings has found a bug, not a feature to track.
 
+**(Implemented and measured in step 7**, `src/horizon.jl`.**)** Five
+things the writing settled, each stated where it is made in that file:
+
+- **The guard is on the footprint and it is exact (proposed in step 7).**
+  `CODE.md` asks the provider to throw "if a query point's interpolation
+  footprint reaches `r_1`", which is a statement about `(q+2)³` points and
+  not about the query. The footprint is a tensor-product lattice, so the
+  nearest of its points to the hole's center is the per-axis nearest in
+  each direction, and the test is three clamped roundings and a sum of
+  squares — exact, rather than the bounding box's conservative
+  `√3·(q+2)h/2`. It fires on a query that is *outside* `r_1` and reads
+  inside it, which is the whole point of putting it on the footprint.
+- **The radii are measured from the analytic center (proposed in step
+  7).** `CODE.md` says "the coordinate radii of the surface points" and
+  not from where. The two claims made on them — that the horizon encloses
+  the layer by the margin `m`, and that `r_min` and `r_max` are
+  [`horizon_min_radius`](#the-interior-a-pointwise-damping-layer) and
+  `horizon_max_radius` — are both statements about the center the layer is
+  built around, so that is the center. The distance between the two
+  centers is a row of its own, `center_offset`, and it is the number the
+  paragraph above turns into a bug report. `r_mean` is the `sin θ`-weighted
+  mean over the collocation points, which is `∮ r dΩ/4π` to the accuracy
+  of the grid's own quadrature.
+- **A failed find is recorded, not thrown (proposed in step 7).** The
+  horizon is a diagnostic and nothing in the evolution reads it, so a
+  find that throws — the guard refusing a flow that wandered inward, a
+  seed sphere outside the box — leaves `horizon_success = false` and the
+  message in `horizon_note` beside the chunk it happened at, and the run
+  goes on. A diagnostic that ends a run loses the record that would have
+  said why.
+- **The spin's uniformization tolerance is `1e-8` and not the library's
+  `1e-13` (proposed in step 7).** `1e-13` is the round-off floor of
+  *analytic* Cauchy data; data interpolated off a finite-difference mesh
+  has a floor set by its own error — `2.2e−5` on the suite's hole at
+  `h = 5/64` — so the library's default stalls there and reports
+  `success = false` on every find while returning the same `J` to eleven
+  digits. The looser tolerance makes the flag mean something and does not
+  move the number.
+- **The cadence is a `Horizon` struct on the case**, like
+  [`Refinement`](#refinement-and-regridding) and for the same reason: a
+  driver keyword would make `k` a property of the run rather than of the
+  study. It carries `every`, the finder's `N`, the seed radius (zero
+  meaning "derive it from the background's analytic radii"), whether to
+  compute the spin, and the three tolerances.
+
+The numbers are under [Measured results](#measured-results): Kerr's
+`A`, `M_irr`, `J` and `M_ch` recovered from sampled data in both charts
+and at `a = 9/10`, the interpolation's order, and what a find costs.
+
 ## Precision, threads, devices
 
 Inherited discipline, restated where this package has more places to
@@ -1674,7 +1723,17 @@ What this package needs from TreeAMR. None blocks G0–G3.
 1. **Point interpolation from a field set** (G4, for the horizon
    finder). `find_leaf` plus block-local Lagrange interpolation, batched
    over a host array of points. Written here first as a stopgap;
-   TreeAMR's `TODO.md` lists "generic interpolation".
+   TreeAMR's `TODO.md` lists "generic interpolation". **(Written in step
+   7**, `src/horizon.jl`: `locate_block` — the descent TreeAMR does not
+   export, root brick to finest cell to the first ancestor that is a leaf
+   — and `interpolate`/`interpolate_grad`, the tensor-product Lagrange
+   window of `q + 2` points with its value and its gradient formed in one
+   pass. Two things the port upstream will have to keep: the window is
+   *half* the ghost width on each side, which is what makes a query
+   anywhere in a block readable without crossing into another block's
+   array at `G = q/2 + 1`; and the batch is what makes it threaded, with
+   one output slot per input point and no accumulation, so the answer does
+   not depend on the thread count.**)**
 2. **A device reduce-to-scalar** (TreeAMR `TODO.md`) would let the
    per-chunk norms stay on the device; today `block_mapreduce` copies
    one value per block back, which is fine at chunk frequency.
@@ -1709,7 +1768,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4), or `hole_forest`'s nested shells around a hole (added in step 5, **here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
 | `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate step 5's interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` (added in step 4) |
-| `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch` |
+| `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
@@ -1724,7 +1783,19 @@ pinned to GitHub `main` by `[sources]`, which puts the Julia floor at
 and `tr` on `StaticArrays`, which the pointwise algebra uses; a standard
 library, added in step 1 and not listed when `PLAN.md` enumerated step 0's
 `Project.toml` **(proposed in step 1)**), `HDF5` (from G6),
-`ApparentHorizonFinder` and `KorzynskiSpin` (from G4). Tests add
+`ApparentHorizonFinder` and `KorzynskiSpin` (from G4, added in step 7,
+both pinned to GitHub `main` by `[sources]` like the first two and both
+listed in `test/Project.toml` as well, because `prerequisite_tests.jl`
+holds them to the same standard: a moving `main` that dropped a name must
+fail at the top of the suite). **`KorzynskiSpin` is pinned over `ssh`,
+because its GitHub repository is private** — an anonymous `https` clone
+gets a 404, so `git@github.com:eschnett/KorzynskiSpin.jl.git` is the only
+URL that resolves it. That works on a machine with Erik's key, here and
+on Symmetry, and **not** in GitHub Actions or in an anonymous clean
+checkout: **(blocked in step 7: the repository is private; the pin
+becomes the `https` URL of the other three the day it is made public, and
+nothing else changes.)** Vendoring the package or adding a local-path
+source would hide the gap instead of stating it. Tests add
 `MultiFloats` and `ForwardDiff` — the latter because the checks on the
 expanded form differentiate the analytic solution one layer above the one
 `SpacetimeMetrics` takes internally (added in step 1). `bin/` adds
@@ -1734,7 +1805,9 @@ follow TreeWave's, including
 the one bound `PLAN.md` left unstated**)**. The two pins resolved in step 0
 to TreeAMR v0.1.0 and SpacetimeMetrics v1.6.0; a `[compat]` entry on a
 `[sources]` dependency is a floor on what `main` may become, not a
-selection, which is what `prerequisite_tests.jl` exists to notice.
+selection, which is what `prerequisite_tests.jl` exists to notice. The
+two added in step 7 resolved to `ApparentHorizonFinder` v2.1.0 and
+`KorzynskiSpin` v1.1.0.
 
 ## Milestones
 
@@ -1831,7 +1904,7 @@ refinement level, short times.
   table**: on a vertex-centered mesh restriction is injection, so the two
   orders are the same computation and the test asserts bit-identity rather
   than two equal rates.
-- **G4 — A black hole.** Kerr-Schild (`a = 0`, sampled `H`) and harmonic
+- **G4 — A black hole.** *(Done.)* Kerr-Schild (`a = 0`, sampled `H`) and harmonic
   Kerr (`a = 0` and `a = 0.9`, `H = 0`) in a Dirichlet box of half-width
   `≥ 20 M`, the indicator with its mask, floor and ceiling, the interior
   layer, the recipe (`ε_KO = 0.5`, `γ0 = 1/M`), `driver.jl`,
@@ -1861,8 +1934,21 @@ refinement level, short times.
   the four marks, the derived level floor and the boundary ceiling, the
   travelling margin, the initial-data cycle and the regrid branch of the
   driver, the calibration table and the thresholds chosen from it, and the
-  refinement centroid in the record. The horizon (G4c) is step 7 and the
-  milestone is marked when it is in. Two sentences of the acceptance needed
+  refinement centroid in the record. **G4c (step 7) closes it**:
+  `horizon.jl`, the stopgap interpolator with its footprint guard, the
+  batched interpolating `ADMVars` provider, `find_gh_horizon` over
+  `ApparentHorizonFinder` and `KorzynskiSpin`, and the horizon rows of the
+  analysis record at the case's own cadence — with Kerr's `A`, `M_irr`,
+  `J` and `M_ch` recovered from sampled data in both charts and at
+  `a = 9/10`, from a displaced guess, enclosing the layer by the margin.
+  Two sentences of the acceptance needed amending where *they* are stated.
+  **"harmonic Kerr at `a = 0.9`" is not among the rows**, for step 5's
+  reason: the chart is refused by `check_interior_radii`, so the spinning
+  hole's horizon is measured in Kerr-Schild, where `r₊ = 1.436 > |a|`, and
+  the second chart is harmonic Kerr at `a = 0`. And **the horizon rows are
+  not measured in the suite at `a = 9/10`**: the layer of a spinning hole
+  needs `h ≈ 0.04 M` and that is a thousand blocks, so the suite runs
+  `a = 0` and `test/hole_runs.jl` runs the rest. Two further sentences needed
   amending where they are stated rather than only here. **The calibration
   is not portable between boxes the way the thresholds are**: the
   thresholds are a property of the solution and the spacing, but *which*
@@ -2558,6 +2644,129 @@ finest spacings on a configuration where the mesh and the solution are both
 symmetric about the hole. See [Analysis
 quantities](#analysis-quantities) for why, and read G5's "within a few
 finest spacings" against it.
+
+**G4c (step 7), the horizon.** The suite is **3444 assertions in 12m31**
+at one thread and **8m38** at four on the development
+machine (Apple silicon, 12 CPU threads, Julia 1.13.0), up from step 6's
+2968. `test/horizon_tests.jl` is **28.7 s / 12.8 s** of that (one thread /
+four) and 51 s run on its own — the difference is the right-hand-side
+kernel and the hole fixture, which `driver_tests.jl` has already compiled
+by the time it runs. Its two evolutions are most of it; the interpolator's
+own claims, which evaluate no background at all, are under two seconds.
+(The same runs put `driver_tests.jl` at `1m59 / 44.8 s` and
+`refinement_tests.jl` at `22.1 / 12.8 s`; step 6 recorded `2m19` and `26 s`
+for those at four threads, so the machine or the depot is faster than it
+was, and the step-6 numbers should be read as that step's and not as a
+regression here.)
+Two further pins are resolved, `ApparentHorizonFinder` v2.1.0 and
+`KorzynskiSpin` v1.1.0, and `prerequisite_tests.jl` holds both to the same
+standard as the first two — including a find of Kerr's horizon on
+*analytic* Cauchy data at `a = 9/10`, which recovers the area to `1e−8`
+and `J = M a` to `1e−6` with the axis along `ẑ`, and is the baseline
+everything below is measured against.
+
+**One acceptance item is blocked**, and is recorded under [File
+layout](#file-layout): `KorzynskiSpin`'s GitHub repository is private, so
+its `[sources]` pin is an `ssh` URL. The clean-checkout check — a
+`git archive` of the tree with no `Manifest.toml`, instantiated and tested
+— resolves all four pins and passes here, **3444 assertions in
+12m26**, and it **cannot** pass in GitHub Actions or in an anonymous
+clone until the repository is made public.
+
+**`Float32`.** The same find on a `Float32` field set gives the `Float64`
+answer to **seven digits** — `r_mean` `2.0005742` against `2.0005741`, area
+`50.294445` against `50.294440`, `M_irr` and `M_ch` to `5e−8` — because the
+interpolation is a weighted sum of twenty numbers of order one and the
+finder itself is `Float64` whatever the field set is. It converges in 26
+iterations rather than 51: the fast flow's stall detector reaches
+`Float32`'s floor sooner, and `H_norm` bottoms out at `4.4e−6` rather than
+`1.2e−14`.
+
+**The interpolator.** Order `q + 2` over the containing block's stored
+points reproduces a polynomial of degree `q + 1` to `1e−12` at every query
+point of a two-level mesh — values and gradients, on the fine side of a
+coarse-fine face as well, since a prolongation of order `p = q + 2` is
+itself exact on that degree — and a polynomial of degree `q + 2` not at
+all. On Kerr-Schild's *analytic* metric sampled onto the step-5 fixture at
+`N = 6` and `N = 12` (`h = 5/48` and `5/96`), queried on the sphere
+`r = 1.9 M`, the worst component of `h` converges at **4.19** and its
+gradient at **2.81**, against `q + 2 = 4` and `q + 1 = 3`. That one order
+between them is why `K_ij` is one order behind `γ_ij` in the ADM data, as
+`notes/methods-ghso2.md` measured on spectral elements, and it is what
+sets the accuracy of everything below.
+
+**Kerr's numbers from sampled data** (`test/hole_runs.jl horizon`, a
+displaced guess at `(0.1, −0.05, 0.075)` and a seed sphere outside the
+horizon; `q = 2`, the layer in place, the guard on):
+
+| background | leaves | `h` | `N_ah` | `r_min` (exact) | `r_max` (exact) | `A` rel. err. | `M_irr` (exact) | `J` (exact) | `M_ch` | axis | offset |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `KerrSchild(1, 0)` | 120 | 5/64 | 16 | 1.999903 (2) | 2.000002 (2) | 4.42e−5 | 0.999978 (1) | 2e−6 (0) | 0.999978 | `−ẑ` | 7.6e−6 |
+| `Harmonic(1, 0)` | 960 | 5/128 | 16 | 0.999990 (1) | 1.000014 (1) | 2.66e−6 | 1.000001 (1) | 2e−6 (0) | 1.000001 | `−ẑ` | 7.1e−6 |
+| `KerrSchild(1, 9/10)` | 1128 | 5/128 | 20 | 1.436965 (1.435890) | 1.692431 (1.694633) | 1.85e−4 | 0.847238 (0.847316) | **0.899980** (0.9) | 0.999954 | `+ẑ` | 1.2e−6 |
+
+Every entry is at or below the interpolation's own accuracy, which is what
+"to interpolation accuracy" in G4's acceptance asks. The spinning row is
+the one with content: the horizon is genuinely oblate (`r_min` and `r_max`
+differ by 18 %), `J = M a` comes back to `2e−5` relative, the axis is
+`ẑ` to four digits, and `M_ch = √(M_irr² + J²/4M_irr²)` recovers `M` to
+`5e−5` from an `M_irr` that is `0.847`. **The spin axis is signed and the
+sign is not physics**: `±ẑ` are the same axis, and `KorzynskiSpin`
+returns whichever the flow's orientation gives — the two `a = 0` rows,
+whose `J` is `2e−6`, point along `−ẑ` for no reason at all.
+
+**The harmonic chart needed a finer mesh than the "other charts" table
+uses, and it is the mesh `CODE.md` predicted (measured in step 7).** At
+`h = 5/64` — step 5's harmonic row — `r_0` has to sit at `0.2 M` and
+therefore `r_1` at `0.67 M` against a horizon at `1.0 M`, and the fast
+flow's *transient* dips into the layer: the guard refuses the query and
+the find fails, which is the guard being right. At `h = 5/128` the same
+chart takes `r_0 = 0.3` (where `|h| ≈ 6.7` rather than `29`) and
+`r_1 = 0.6`, and the find is the second row above — the best of the three.
+That is [the interior](#the-interior-a-pointwise-damping-layer)'s
+"`h ≈ M/23` before it has a moderate `r_0`" confirmed from a second
+direction.
+
+**The horizon of a run, and what it says about the solution.** Kerr-Schild
+`a = 0` on the step-5 fixture (`q = 2`, `N = 8`, `h = 5/64`, `cfl = 1/5`,
+the `:damped` layer) to `t = 10 M`, the horizon found at every chunk:
+
+| `t/M` | 0 | 2 | 4 | 6 | 8 | 10 |
+|---|---|---|---|---|---|---|
+| `r_mean` | 1.999954 | 1.996744 | 1.995522 | 1.994715 | 1.993868 | 1.993114 |
+| `A` | 50.263262 | 50.064133 | 50.004753 | 49.968571 | 49.933017 | 49.903602 |
+| `M_irr` | 0.999978 | 0.997995 | 0.997403 | 0.997042 | 0.996687 | 0.996394 |
+| offset | 7.6e−6 | 7.4e−5 | 1.2e−4 | 2.7e−4 | 4.1e−4 | 5.8e−4 |
+
+The horizon **shrinks by 0.7 % over ten crossings** and its center wanders
+by `5.8e−4 M`, which is `0.0075` of a finest spacing — far inside
+`CODE.md`'s "a few finest spacings", so the finder agrees with the layer
+and there is no bug to report. The shrinkage is the *solution's*
+truncation error at `q = 2` and 26 points per `M`, the same drift the
+masked error and the gauge drift already show; `J` stays at `1e−6` and
+`M_ch` tracks `M_irr` to the last digit, which is what a Schwarzschild
+hole should do.
+
+**What a find costs** (`q = 2`, 120 leaves, four threads; one
+right-hand-side evaluation on the same mesh is `38.6 ms`):
+
+| `N_ah` | surface points | iterations | find | find + spin |
+|---|---|---|---|---|
+| 12 | 276 | 51 | 0.067 s (1.7 RHS) | 0.637 s (16.5 RHS) |
+| 16 | 496 | 54 | 0.106 s (2.7 RHS) | 1.739 s (45 RHS) |
+| 20 | 780 | 51 | 0.140 s (3.6 RHS) | 4.037 s (105 RHS) |
+
+**The interpolation is not what a find costs**: one batch of 496 points
+— the location, the guard and `(q+2)³ × 20` loads with the gradient — is
+**0.26 ms**, `0.5 µs` per point, and a find is fifty of those. The spin is
+the cost, it is inside `KorzynskiSpin`'s uniformization and Möbius
+algebra, and it grows steeply with the grid (`16×`, `45×`, `105×` a
+right-hand side). Two consequences for G5 and G6: the horizon cadence `k`
+is a real parameter and not a formality, and `spin = false` is the knob to
+reach for before `N_ah` is lowered. The uniformization's residual floor on
+interpolated data is **`2.2e−5`** at `h = 5/64`, which is what the
+`unif_tol` decision under [Analysis quantities](#analysis-quantities) is
+about.
 
 ## Possible extensions
 

@@ -4,7 +4,9 @@ version = "0.1.0"
 authors = ["Erik Schnetter <schnetter@gmail.com>"]
 
 [deps]
+ApparentHorizonFinder = "2326d305-03d0-4260-ba27-fc7d1edfc55d"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+KorzynskiSpin = "dddeb715-7fc8-4947-8935-98683755b697"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 OrdinaryDiffEqLowOrderRK = "1344f307-1e59-4825-a18e-ace9aa3fa4c6"
 SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
@@ -13,7 +15,9 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TreeAMR = "91bc416d-811c-44c1-9bc4-b9c8bbdbbd08"
 
 [compat]
+ApparentHorizonFinder = "2.1"
 KernelAbstractions = "0.9.42, 1"
+KorzynskiSpin = "1.1"
 LinearAlgebra = "1.11"
 OrdinaryDiffEqLowOrderRK = "2.2.5"
 SciMLBase = "3.50.1"
@@ -22,16 +26,29 @@ StaticArrays = "1"
 TreeAMR = "0.1.0"
 julia = "1.11"
 
-# Neither TreeAMR nor SpacetimeMetrics is in the General registry, so a
-# clean clone has no way to find them: `Manifest.toml` is not tracked, and
-# Project.toml alone carries only the UUIDs. This is what makes
-# `Pkg.instantiate()` work from a fresh checkout, and therefore what makes
-# CI possible. It also requires Julia 1.11, hence the compat bound above.
+# None of the four is in the General registry, so a clean clone has no way
+# to find them: `Manifest.toml` is not tracked, and Project.toml alone
+# carries only the UUIDs. This is what makes `Pkg.instantiate()` work from
+# a fresh checkout, and therefore what makes CI possible. It also requires
+# Julia 1.11, hence the compat bound above.
 #
-# `rev = "main"` rather than a commit: both are developed alongside this
-# package. The price is that the checkouts at `~/src/jl/TreeAMR` and
-# `~/src/jl/SpacetimeMetrics` are *not* what the tests see; an unpushed
+# `rev = "main"` rather than a commit: all four are developed alongside
+# this package. The price is that the checkouts at `~/src/jl/TreeAMR`,
+# `~/src/jl/SpacetimeMetrics`, `~/src/jl/ApparentHorizonFinder` and
+# `~/src/jl/KorzynskiSpin.jl` are *not* what the tests see; an unpushed
 # change there is invisible here.
+#
+# **KorzynskiSpin is pinned over ssh because its GitHub repository is
+# private** (added in step 7). An anonymous https clone gets a 404, so
+# `git@github.com:…` is the only URL that resolves it — which it does on
+# a machine with Erik's key, here and on Symmetry, and **not** in GitHub
+# Actions or in an anonymous clean checkout. That is a known, recorded
+# gap (`CODE.md`, "Measured results", step 7): the line becomes the https
+# URL of the other three the day the repository is made public, and
+# nothing else changes. Vendoring the package or adding a local-path
+# source would hide the gap instead of stating it.
 [sources]
+ApparentHorizonFinder = {url = "https://github.com/eschnett/ApparentHorizonFinder.jl", rev = "main"}
+KorzynskiSpin = {url = "git@github.com:eschnett/KorzynskiSpin.jl.git", rev = "main"}
 SpacetimeMetrics = {url = "https://github.com/eschnett/SpacetimeMetrics.jl", rev = "main"}
 TreeAMR = {url = "https://github.com/eschnett/TreeAMR.jl", rev = "main"}

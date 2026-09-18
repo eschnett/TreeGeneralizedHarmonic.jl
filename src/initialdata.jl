@@ -77,6 +77,14 @@ five placeholders. [`evolve!`](@ref) refuses `regrid = true` and
 `adapt = true` on a case without one, because this package has exactly one
 refinement mechanism.
 
+**The horizon (added in step 7).** `horizon` is `nothing` — a case whose
+record carries no horizon rows, which is every case with no hole — or a
+[`Horizon`](@ref) carrying the cadence `k`, the finder's resolution and its
+seed. `CODE.md`'s analysis table puts the horizon rows "every `k`-th chunk,
+`k` a case parameter", so it is a field of the case for the same reason
+`refinement` is: a driver keyword would make the cadence a property of the
+run rather than of the study.
+
 **A moving non-harmonic background is refused here**, with the message
 `CODE.md` asks for under "Gauge and constraint damping": such a background
 has a gauge source `H_a(x − vt)` that a per-chunk sample cannot represent,
@@ -96,7 +104,7 @@ right-hand side needs a case two steps before there is a driver, and a
 struct cannot be defined twice. `driver.jl` adds `evolve!` and the
 refinement fields step 6 needs.
 """
-struct GHCase{T,B,D,I,R}
+struct GHCase{T,B,D,I,R,H}
     background::B
     box::NTuple{3,Tuple{T,T}}
     periodic::NTuple{3,Bool}
@@ -106,6 +114,7 @@ struct GHCase{T,B,D,I,R}
     center::HoleCenter{T}
     interior::I                  # an `Interior`, or `nothing`
     refinement::R                # a `Refinement`, or `nothing`
+    horizon::H                   # a `Horizon`, or `nothing`
     chunk::T
 end
 
@@ -114,7 +123,7 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
                 velocity=(zero(T), zero(T), zero(T)), interior=nothing,
                 r_0=zero(T), r_1=zero(T), margin::Integer=8,
                 w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), refinement=nothing,
-                chunk=zero(T)) where {T}
+                horizon=nothing, chunk=zero(T)) where {T}
     isharmonic(background) || isstatic(background) || throw(ArgumentError(
         "this background is neither harmonic nor static, so its prescribed " *
         "gauge source H_a(x − vt) depends on time, and CODE.md's Hsrc field " *
@@ -145,10 +154,10 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
           Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
                    margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp)
     return GHCase{T,typeof(background),typeof(damping),typeof(int),
-                  typeof(refinement)}(
+                  typeof(refinement),typeof(horizon)}(
         background, ntuple(d -> (T(box[d][1]), T(box[d][2])), Val(3)),
         ntuple(d -> Bool(periodic[d]), Val(3)), T(ε_KO), damping, T(γ2), c,
-        int, refinement, T(chunk))
+        int, refinement, horizon, T(chunk))
 end
 
 GHCase(background; kwargs...) = GHCase(Float64, background; kwargs...)
@@ -167,9 +176,9 @@ and every evaluation.
 """
 with_interior(case::GHCase{T}, interior) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(interior),
-           typeof(case.refinement)}(
+           typeof(case.refinement),typeof(case.horizon)}(
         case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
-        case.center, interior, case.refinement, case.chunk)
+        case.center, interior, case.refinement, case.horizon, case.chunk)
 
 """
     with_refinement(case::GHCase, refinement) -> GHCase
@@ -183,9 +192,25 @@ A reconstruction and not a mutation, for the reason
 """
 with_refinement(case::GHCase{T}, refinement) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
-           typeof(refinement)}(
+           typeof(refinement),typeof(case.horizon)}(
         case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
-        case.center, case.interior, refinement, case.chunk)
+        case.center, case.interior, refinement, case.horizon, case.chunk)
+
+"""
+    with_horizon(case::GHCase, horizon) -> GHCase
+
+The same case carrying different horizon-analysis parameters — what a test
+that wants the horizon rows of an otherwise ordinary fixture changes, and
+what a run that wants them at a different cadence or resolution varies.
+
+A reconstruction and not a mutation, for the reason
+[`with_interior`](@ref) is (added in step 7).
+"""
+with_horizon(case::GHCase{T}, horizon) where {T} =
+    GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
+           typeof(case.refinement),typeof(horizon)}(
+        case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
+        case.center, case.interior, case.refinement, horizon, case.chunk)
 
 """
     minkowski_case(T = Float64; L, ε_KO, γ0, γ2)
@@ -295,13 +320,14 @@ function hole_case(::Type{T}, background; halfwidth, r_0, r_1, chunk,
                                       width=3 * T(M),
                                       center=HoleCenter(T, center, velocity)),
                    γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
-                   refinement=nothing) where {T}
+                   refinement=nothing, horizon=nothing) where {T}
     return GHCase(T, background;
                   box=ntuple(_ -> (-T(halfwidth), T(halfwidth)), Val(3)),
                   periodic=(false, false, false), ε_KO=ε_KO, γ0=γ0, γ2=γ2,
                   center=center, velocity=velocity, interior=interior,
                   r_0=r_0, r_1=r_1, margin=margin, w_ramp=w_ramp,
-                  ρ_ramp=ρ_ramp, refinement=refinement, chunk=chunk)
+                  ρ_ramp=ρ_ramp, refinement=refinement, horizon=horizon,
+                  chunk=chunk)
 end
 
 hole_case(background; kwargs...) = hole_case(Float64, background; kwargs...)

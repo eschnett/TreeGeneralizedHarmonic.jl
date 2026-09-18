@@ -1,6 +1,8 @@
 [deps]
+ApparentHorizonFinder = "2326d305-03d0-4260-ba27-fc7d1edfc55d"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+KorzynskiSpin = "dddeb715-7fc8-4947-8935-98683755b697"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MultiFloats = "bdf0d083-296b-4888-a5b6-7498122e68a5"
 OrdinaryDiffEqLowOrderRK = "1344f307-1e59-4825-a18e-ace9aa3fa4c6"

@@ -51,8 +51,11 @@ module TreeGeneralizedHarmonic
 using TreeAMR
 
 import SpacetimeMetrics
+using ApparentHorizonFinder: ADMVars, find_horizon, horizon_grid,
+                             horizon_points
 using KernelAbstractions: @Const, @index, @kernel
 using KernelAbstractions: Backend, CPU, allocate, get_backend
+using KorzynskiSpin: horizon_spin
 using LinearAlgebra: det, dot, tr
 using OrdinaryDiffEqLowOrderRK: RK4
 using SciMLBase: ODEProblem, solve
@@ -77,7 +80,8 @@ export apply_stencil, apply_mixed_stencil
 export isharmonic, isstatic, sample_gauge_source!
 
 # Cases, backgrounds and initial data
-export GHCase, with_interior, with_refinement, gh_forest, hole_forest
+export GHCase, with_interior, with_refinement, with_horizon
+export gh_forest, hole_forest
 export minkowski_case, gauge_wave_case, shifted_minkowski_case
 export hole_case, kerr_schild_case, harmonic_kerr_case
 export background_state, state_tuple, case_state_tuple, state_callback
@@ -111,6 +115,10 @@ export gh_tau!, tau_max, gh_indicator!, indicator_flags, refine_flags
 export LevelBounds, level_bounds, block_level_bounds, horizon_floor_level
 export refinement_buffer, refinement_centroid
 
+# The horizon: the stopgap interpolator, the ADM provider, the find
+export Horizon, locate_block, interpolate, interpolate_grad
+export GHADMProvider, gh_adm_provider, find_gh_horizon, horizon_radii
+
 # The driver
 export evolve!, check_cfl, forest_levels, horizon_shell
 export discrete_gradient_momentum!
@@ -129,6 +137,9 @@ include("constraints.jl")
 # `GHCase` and `GHProblem` and reuses the monitors' scatter-and-fill
 # preamble, and the driver is what calls it.
 include("refinement.jl")
+# After `evolution.jl` (it reads a `GHProblem`'s field set, `q` and
+# interior) and before `driver.jl`, which calls it once every `k`-th chunk.
+include("horizon.jl")
 include("driver.jl")
 
 end

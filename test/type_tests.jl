@@ -269,3 +269,47 @@ end
     # recorded rather than tied down.
     @test f32.gauge_l2 ≈ f64.gauge_l2 rtol = 0.25
 end
+
+# The horizon finder is `Float64` host-side code over a field set that may
+# not be: the interpolation runs in the field set's own `T` and is
+# converted once, at the provider's exit. A conversion done anywhere else
+# — or a `Float64` literal leaking into the window's weights — would show
+# up here as an answer that is not the `Float64` one (added in step 7).
+@testset "The horizon finder reads a field set of any type" begin
+    q = 2
+    rows = map((Float64, Float32)) do T
+        case = hole_fixture(T; q=q)
+        forest = hole_fixture_forest(T, case; N=8)
+        fs = FieldSet{T}(forest, 20; G=q ÷ 2 + 1,
+                         centering=vertexcentered(3))
+        p = GHProblem(fs, GhostSchedule(fs, Operators(prolongation=q + 2,
+                                                      restriction=q + 2)),
+                      case; q=q)
+        fill_exact!(fs, case, zero(T))
+        u = statevector(fs)
+        gather!(u, fs)
+        o = find_gh_horizon(p, u, zero(T); N=12, r_seed=1.7)
+        # The shape coefficients are a hundred complex numbers and the
+        # claim is about five reals, so the row that is logged is the row
+        # that is read.
+        (T=T, success=o.success, iters=o.iters, r_mean=o.r_mean,
+         area=o.area, M_irr=o.M_irr, J=o.J, M_ch=o.M_ch,
+         center_offset=o.center_offset, origin=o.origin, H_norm=o.H_norm)
+    end
+    @info "the horizon of the static hole at Float64 and at Float32" rows
+    f64, f32 = rows
+    @test f32.success
+    # The record is `Float64` whatever the run computes in, here as in the
+    # driver: `ApparentHorizonFinder`'s grid and origin are `Float64`.
+    @test f32.area isa Float64
+    @test f32.origin isa SVector{3,Float64}
+    # And the answer is the `Float64` one to seven digits, which is more
+    # than `Float32` owes: the surface is where the *interpolated* metric
+    # says it is, and the interpolation is a weighted sum of twenty numbers
+    # of order one.
+    @test f32.r_mean ≈ f64.r_mean rtol = 1e-6
+    @test f32.area ≈ f64.area rtol = 1e-6
+    @test f32.M_irr ≈ f64.M_irr rtol = 1e-6
+    @test f32.M_ch ≈ f64.M_ch rtol = 1e-6
+    @test abs(f32.J) < 1e-4
+end

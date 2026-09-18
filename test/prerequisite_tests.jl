@@ -1,18 +1,24 @@
-# What the two pinned dependencies have to provide before any of the
+# What the pinned dependencies have to provide before any of the
 # physics can be written.
 #
-# `Project.toml` pins TreeAMR and SpacetimeMetrics to GitHub `main` through
+# `Project.toml` pins TreeAMR and SpacetimeMetrics — and, from step 7,
+# `ApparentHorizonFinder` and `KorzynskiSpin` — to GitHub `main` through
 # `[sources]` entries, so what these tests run against is a resolved commit
 # of each of those branches and *not* the checkouts at `~/src/jl/TreeAMR`
-# and `~/src/jl/SpacetimeMetrics`. Two claims are made here, and a `main`
-# that lost either would otherwise be found by a `MethodError` in the
+# and `~/src/jl/SpacetimeMetrics`. Three claims are made here, and a `main`
+# that lost any of them would otherwise be found by a `MethodError` in the
 # middle of a later step rather than at the top of the suite:
 #
 #   1. a `SpacetimeMetrics` background, with its `dmetric` forward-mode
 #      pass, compiles and runs *inside a KernelAbstractions kernel* and
 #      fills a field set with bit-for-bit what a host loop computes; and
 #   2. the pinned TreeAMR and SpacetimeMetrics still export the names this
-#      package is written against.
+#      package is written against; and
+#   3. the pinned `ApparentHorizonFinder` still finds Kerr's horizon from
+#      an *analytic* provider, and `KorzynskiSpin` still gets `J = M a`
+#      from it — which is what separates "the libraries work" from "this
+#      package's interpolation works", the claim `horizon_tests.jl` makes
+#      on top of it (added in step 7).
 #
 # The first is the dependency risk `CODE.md` names under "Initial data and
 # backgrounds": the background is evaluated inside kernels — the Dirichlet
@@ -27,8 +33,11 @@
 # The module itself as well as the names, because the last testset asks it
 # what it exports.
 import SpacetimeMetrics
-using SpacetimeMetrics: AbstractMetric, Harmonic, KerrSchild, boost, dmetric
-using StaticArrays: SMatrix, SVector
+using SpacetimeMetrics: AbstractMetric, ExtrinsicCurvature, Harmonic,
+                        KerrSchild, boost, dmetric
+using StaticArrays: SArray, SMatrix, SVector
+import ApparentHorizonFinder
+import KorzynskiSpin
 
 # The layout of the evolved state, exactly as `CODE.md`'s "Field sets and
 # layout" table gives it at `q = 4`: 20 variables (`h` is 1:10, `Π` is
@@ -233,6 +242,15 @@ const SPACETIMEMETRICS_INTERNAL = (
     :ShiftedMinkowskiMetric,
 )
 
+# The names `src/horizon.jl` calls, in the two libraries step 7 adds. Both
+# are pinned to a moving `main` like the other two, and both are reached
+# through a handful of functions whose *shape* matters as much as their
+# existence: `find_horizon` returns the NamedTuple `horizon_spin` consumes,
+# and `ADMVars` is the struct the interpolating provider fills.
+const AHF_NAMES = (:ADMVars, :find_horizon, :horizon_points, :horizon_grid,
+                   :horizon_area, :horizon_shape, :pointwise)
+const KORZYNSKI_NAMES = (:horizon_spin, :SpinResult, :shape_embedding)
+
 @testset "The pinned dependencies export the names this package calls" begin
     # A name list rather than a call: every one of these is reached for in
     # steps 1–10, and the cheapest place to find out that a `main` renamed
@@ -244,4 +262,37 @@ const SPACETIMEMETRICS_INTERNAL = (
     @test setdiff(SPACETIMEMETRICS_NAMES, names(SpacetimeMetrics)) == Symbol[]
     @test filter(n -> !isdefined(SpacetimeMetrics, n),
                  collect(SPACETIMEMETRICS_INTERNAL)) == Symbol[]
+    @test setdiff(AHF_NAMES, names(ApparentHorizonFinder)) == Symbol[]
+    @test setdiff(KORZYNSKI_NAMES, names(KorzynskiSpin)) == Symbol[]
+end
+
+# The two horizon libraries on *analytic* Cauchy data, which is the
+# baseline every number in `horizon_tests.jl` is measured against: what is
+# left there is this package's interpolation and nothing else. The
+# provider is the one from `ApparentHorizonFinder`'s own README, written
+# out here rather than reached for, because a README is not an interface.
+@testset "The pinned horizon libraries find Kerr's horizon analytically" begin
+    M, a = 1.0, 0.9
+    ks = KerrSchild(M, a)
+    function analytic_adm(p::SVector{3})
+        x = SVector{4}(0.0, p[1], p[2], p[3])
+        g, ∂g = dmetric(ks, x)
+        K = ExtrinsicCurvature(ks, x)
+        γ = SMatrix{3,3}(g[i, j] for i in 2:4, j in 2:4)
+        ∂γ = SArray{Tuple{3,3,3}}(∂g[i, j, k] for i in 2:4, j in 2:4,
+                                  k in 2:4)
+        return ApparentHorizonFinder.ADMVars(γ, ∂γ, K)
+    end
+    # A displaced guess, as every find in this package uses.
+    res = ApparentHorizonFinder.find_horizon(analytic_adm,
+                                             SVector{3}(0.1, -0.05, 0.05),
+                                             16, 1.6, 0.0, 200; verbosity=0)
+    @test res.success
+    rp = M + sqrt(M^2 - a^2)
+    @test isapprox(res.area, 4π * (rp^2 + a^2); rtol=1e-8)
+    @test isapprox(sqrt(sum(abs2, res.origin)), 0; atol=1e-8)
+    spin = KorzynskiSpin.horizon_spin(res, x::SVector{3} -> analytic_adm(x).γ,
+                                      x::SVector{3} -> analytic_adm(x).K)
+    @test isapprox(spin.J, M * a; rtol=1e-6)
+    @test isapprox(abs(spin.axis_embedding[3]), 1; atol=1e-6)
 end
