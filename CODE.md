@@ -1791,11 +1791,18 @@ fail at the top of the suite). **`KorzynskiSpin` is pinned over `ssh`,
 because its GitHub repository is private** — an anonymous `https` clone
 gets a 404, so `git@github.com:eschnett/KorzynskiSpin.jl.git` is the only
 URL that resolves it. That works on a machine with Erik's key, here and
-on Symmetry, and **not** in GitHub Actions or in an anonymous clean
-checkout: **(blocked in step 7: the repository is private; the pin
-becomes the `https` URL of the other three the day it is made public, and
-nothing else changes.)** Vendoring the package or adding a local-path
-source would hide the gap instead of stating it. Tests add
+on Symmetry, and — from 2026-09-18 — in GitHub Actions, which loads a
+read-only deploy key on `eschnett/KorzynskiSpin.jl` from the
+`KORZYNSKI_DEPLOY_KEY` secret; `JULIA_PKG_USE_CLI_GIT` is set on the job
+because Pkg's libgit2 does not find the agent and reports the failure as a
+bare `Code:EUSER` credential error that names neither ssh nor the
+repository. It does **not** work in an anonymous clean checkout, nor in a
+pull request from a fork, which gets no secrets: **(blocked in step 7,
+partly unblocked 2026-09-18: the repository is still private; the pin
+becomes the `https` URL of the other three the day it is made public, the
+workflow's ssh step goes away with it, and nothing else changes.)**
+Vendoring the package or adding a local-path source would hide the gap
+instead of stating it. Tests add
 `MultiFloats` and `ForwardDiff` — the latter because the checks on the
 expanded form differentiate the analytic solution one layer above the one
 `SpacetimeMetrics` takes internally (added in step 1). `bin/` adds
@@ -2665,13 +2672,46 @@ standard as the first two — including a find of Kerr's horizon on
 and `J = M a` to `1e−6` with the axis along `ẑ`, and is the baseline
 everything below is measured against.
 
-**One acceptance item is blocked**, and is recorded under [File
+**One acceptance item is partly blocked**, and is recorded under [File
 layout](#file-layout): `KorzynskiSpin`'s GitHub repository is private, so
 its `[sources]` pin is an `ssh` URL. The clean-checkout check — a
 `git archive` of the tree with no `Manifest.toml`, instantiated and tested
 — resolves all four pins and passes here, **3444 assertions in
-12m26**, and it **cannot** pass in GitHub Actions or in an anonymous
-clone until the repository is made public.
+12m26**. GitHub Actions resolves it from **2026-09-18** through a
+read-only deploy key (`KORZYNSKI_DEPLOY_KEY`), so CI builds again; the
+check still **cannot** pass in an *anonymous* clone, nor in a pull request
+from a fork, until the repository is made public.
+
+That first green build also measured the suite in CI for the first time —
+no job had reached `julia-runtest` before, every run having died in
+`julia-buildpkg` at the clone — and it found **four pre-existing failures
+that the clone failure had been masking**. They are not regressions and
+are unfixed as of this writing:
+
+- On the **floor version, 1.11**, on both operating systems, the
+  zero-allocation claims fail: `@allocated` is **176** bytes for all four
+  of `gh_node_rhs_expanded`, `gh_node_rhs`, `metric_derivatives` and
+  `adm_vars_from_state` at both `Float64` and `Float32`
+  (`pointwise_tests.jl:480`), and **48** bytes for the weights
+  (`stencils_tests.jl:347`). Both are zero on 1.13. So the claim holds on
+  the version the suite usually runs and not on the version `[sources]`
+  makes the floor; one of the two is wrong.
+- On **1.13 at four threads on Linux**, four exact-equality assertions
+  fail: `first_r.err_l2 == 0`, `err_linf == 0` and `residual == 0`
+  evaluate to `3.2e−17`, `1.4e−15` and `1.2e−13`
+  (`driver_tests.jl:93`–`95`), and `inside_exact` — a `===` comparison of
+  the `:pasted` state against the exact reference — fails
+  (`interior_tests.jl:552`). These are this document's own rule about
+  bit-identity across call sites, met in the tests rather than in the
+  code: the initial data and the error reference both reach the analytic
+  solution through `core_position`, by different call sites, so exact
+  equality was never an invariant. **Which variable causes it is not yet
+  isolated**, because the matrix has no serial Linux job at `version: "1"`
+  — the `include:` entry merges `threads: 4` into that combination rather
+  than adding a job — so the passing and failing jobs differ in both Julia
+  version and thread count. If it is the thread count, it is a violation
+  of the bit-identity invariant `threading_tests.jl` exists to guard, and
+  a more serious finding than a loose test.
 
 **`Float32`.** The same find on a `Float32` field set gives the `Float64`
 answer to **seven digits** — `r_mean` `2.0005742` against `2.0005741`, area

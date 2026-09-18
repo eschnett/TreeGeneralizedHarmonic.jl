@@ -41,12 +41,17 @@ julia = "1.11"
 # **KorzynskiSpin is pinned over ssh because its GitHub repository is
 # private** (added in step 7). An anonymous https clone gets a 404, so
 # `git@github.com:…` is the only URL that resolves it — which it does on
-# a machine with Erik's key, here and on Symmetry, and **not** in GitHub
-# Actions or in an anonymous clean checkout. That is a known, recorded
-# gap (`CODE.md`, "Measured results", step 7): the line becomes the https
-# URL of the other three the day the repository is made public, and
-# nothing else changes. Vendoring the package or adding a local-path
-# source would hide the gap instead of stating it.
+# a machine with Erik's key, here and on Symmetry.
+#
+# GitHub Actions resolves it too, from 2026-09-18: `.github/workflows/CI.yml`
+# loads a read-only deploy key from the `KORZYNSKI_DEPLOY_KEY` secret. An
+# **anonymous** clean checkout still cannot resolve it, and neither can a
+# pull request from a fork, which gets no secrets — so the clean-checkout
+# check in `CLAUDE.md` still proves less than it looks like it does. Both
+# end when the repository is made public: the line becomes the https URL
+# of the other three, and the workflow's ssh step goes away. Vendoring the
+# package or adding a local-path source would hide the gap instead of
+# stating it.
 [sources]
 ApparentHorizonFinder = {url = "https://github.com/eschnett/ApparentHorizonFinder.jl", rev = "main"}
 KorzynskiSpin = {url = "git@github.com:eschnett/KorzynskiSpin.jl.git", rev = "main"}

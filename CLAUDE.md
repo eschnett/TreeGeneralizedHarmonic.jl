@@ -291,10 +291,17 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   a name. From step 7 the same holds for `ApparentHorizonFinder` and
   `KorzynskiSpin` — and **`KorzynskiSpin`'s pin is an `ssh` URL because
   its GitHub repository is private**. It resolves on a machine with
-  Erik's key (here and on Symmetry) and **not** in GitHub Actions or in an
-  anonymous clean checkout; that is recorded as blocked in `CODE.md`, and
-  it becomes an `https` URL the day the repository is public. Do not
-  vendor the package and do not add a local-path source.
+  Erik's key (here and on Symmetry), and in GitHub Actions from
+  2026-09-18, where `CI.yml` loads a read-only deploy key from the
+  `KORZYNSKI_DEPLOY_KEY` secret and sets `JULIA_PKG_USE_CLI_GIT` so that
+  Pkg sees the agent — without it libgit2 fails with a bare `Code:EUSER`
+  credential error naming neither ssh nor the repository. It still does
+  **not** resolve in an anonymous clean checkout or in a fork's pull
+  request, which gets no secrets, so the clean-checkout check below
+  proves less than it looks like it does; `CODE.md` records what is left.
+  The pin becomes an `https` URL and the workflow's ssh step goes away the
+  day the repository is public. Do not vendor the package and do not add a
+  local-path source.
 - **`notes/` is read-only.** The copies carry their provenance; when
   `CODE.md` departs from them, `CODE.md` says so. Do not "fix" a copy.
 - **Two derivative index conventions.** `SpacetimeMetrics.dmetric`
