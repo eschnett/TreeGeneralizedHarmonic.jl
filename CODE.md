@@ -2757,8 +2757,12 @@ are unfixed as of this writing:
   patched `driver_tests.jl` passes 243 of 243 and `interior_tests.jl` with
   it, against values 2 to 4 orders of magnitude inside the new bounds.
 
-  *Note for `Pkg.test`*: it passes `--code-coverage=@<pkgdir>` together
-  with `--check-bounds=yes`, not the `user` scope one might assume.
+  *Note for `Pkg.test`*: its coverage scope is `@<pkgdir>`, not the `user`
+  one might assume. It also passes `--check-bounds=yes` — **but only up to
+  Julia 1.12**; 1.13's `Pkg` dropped it from `gen_subprocess_flags`
+  (checked in all three). So the 1.11 cells test with bounds checking
+  forced on and the 1.13 cells do not, which is part of why 1.11 is slower
+  and is a difference in the harness rather than in the compiler.
 
 **`Float32`.** The same find on a `Float32` field set gives the `Float64`
 answer to **seven digits** — `r_mean` `2.0005742` against `2.0005741`, area
@@ -2937,6 +2941,32 @@ So the levers, in order of what they return and with what they cost:
    even at four threads.
 
 None of 2–4 drops a physics claim; they change how finely it is measured.
+
+**Four threads on four cores is not oversubscribed in any way that costs**
+(measured 2026-09-19, and the obvious hypothesis was wrong). Julia 1.13
+gives `-t4` **four** GC threads, so a four-thread suite has eight runnable
+threads, and a GitHub Linux runner for a public repository has four vCPUs
+— which looks like 2× oversubscription and is not. Under a four-CPU
+`cpus-per-task` allocation on Symmetry, at four threads:
+
+| GC threads | suite | real | user |
+|---|---|---|---|
+| 4 (default) | `21m30` | `21m44` | `39m09` |
+| 1 (`JULIA_NUM_GC_THREADS=1`) | `22m31` | `22m49` | `37m55` |
+
+Restricting the collector is **5 % slower**, not faster, so the flag is a
+dead end and is recorded here so it is not tried again. The number that
+explains it is `user/real = 1.80`: with four cores available the suite
+keeps **1.8 of them busy**, because so much of it is single-threaded
+compilation. There is no contention to relieve — the cores are idle.
+
+The same table calibrates GitHub. Symmetry at eight CPUs and four threads
+is `16m41`, at four CPUs `21m30`, so the narrow allocation costs 29 %; and
+GitHub's four-thread cell measures `22.7` and `23.2` min, which is the
+four-CPU figure. Its runners behave exactly as four-core machines should.
+One run of three took `61.6` min against a `43.6` min serial sibling —
+that is a bad runner, not a property of the matrix, and three samples with
+a 2.7× spread are not enough to act on.
 
 ## Possible extensions
 
