@@ -2942,6 +2942,56 @@ So the levers, in order of what they return and with what they cost:
 
 None of 2–4 drops a physics claim; they change how finely it is measured.
 
+**Where the time actually goes** (profiled 2026-09-19, one thread on
+Symmetry: the whole suite under `@time`, and one `N = 8`, `q = 2` hole run
+sampled at 1 ms and by allocation). Three findings, and none of them is
+the physics.
+
+**Compilation is 52.4 % of the suite**: `1877 s, 7.04 G allocations:
+242.670 GiB, 6.00 % gc time, 52.43 % compilation time`. That bounds every
+other optimisation — making the numerics twice as fast buys 24 % of the
+suite, not 50 % — and it is the same statement as the threading and
+coverage split above, arrived at independently.
+
+**About a fifth of the run is ghost-exchange bookkeeping, and it is
+upstream.** Of 28 889 samples, the hottest leaves are `rem` (11.5 %), `==`
+(9.6 %) and `div` (1.3 %), and resolving their callers puts almost all of
+them in one place: **3263 of 3310 `rem` samples and 358 of 365 `div`
+samples are `TreeAMR/src/ghosts.jl:27`**,
+
+    off = ntuple(d -> (r ÷ boxstride[d]) % boxlen[d], Val(D))
+
+— an integer division and a remainder per dimension, per ghost point, per
+variable, in `cpu_transfer_kernel!`. A further 1930 `==` samples are
+`CartesianIndices` iteration in the same kernel's tensor-product stencil
+loop. Actual floating-point work — `+`, `*`, `muladd`, `-` — is about
+22 %. So the transfer kernel's *addressing* costs nearly as much as the
+arithmetic of the whole run, and by this package's rules that is TreeAMR's
+to fix, not ours.
+
+**One hole run allocates 3.66 GiB**, which it should not:
+
+| est. per run | what | where |
+|---|---|---|
+| 2390 MiB | boxed `Float64` | `ntuple.jl:68` (caller not resolved) |
+| 779 MiB | `SVector{10,Float64}` | **`evolution.jl:378`** |
+| 132 MiB | `Core.Box` | a closure capturing a mutated local |
+| 25 MiB | `BigInt` / `MPQ._MPQ` | `Rational` arithmetic at run time |
+
+`evolution.jl:378` is `∂ₜh, ∂ₜΠ = gh_rhs_at_point(…)`, whose two
+`SVector{10}` returns are supposed to stay in registers — "Never build an
+`SVector` of all derivatives" under [Precision, threads,
+devices](#precision-threads-devices) is about exactly this, and
+`pointwise_tests.jl` asserts the node-local algebra allocates nothing. The
+algebra keeps that promise; the *kernel around it* does not, so the return
+is escaping rather than being inlined away. `Core.Box` is the classic
+closure-capture instability, and `BigInt` at run time should not exist at
+all — the stencil weights are built in `Rational` and rounded once into `T`
+at compile time by design.
+
+None of this is measured on a device, and none of it is the deferred GPU
+question: these are host costs, in host code, at `q = 2`.
+
 **Four threads on four cores is not oversubscribed in any way that costs**
 (measured 2026-09-19, and the obvious hypothesis was wrong). Julia 1.13
 gives `-t4` **four** GC threads, so a four-thread suite has eight runnable
