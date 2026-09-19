@@ -87,12 +87,27 @@ using KernelAbstractions: CPU
                 @test getfield(r, k) === nothing
             end
         end
-        # The initial data is exact, so the error starts at zero and grows;
-        # the constraints do not start at zero, because a finite-difference
-        # solution of an exact metric has a truncation-order violation.
-        @test first_r.err_l2 == 0
-        @test first_r.err_linf == 0
-        @test first_r.residual == 0
+        # The initial data is exact, so the error starts at roundoff and
+        # grows; the constraints do not start at zero, because a
+        # finite-difference solution of an exact metric has a
+        # truncation-order violation.
+        #
+        # Roundoff and not `== 0`: `gh_error_kernel!` samples the reference
+        # through `case_state_tuple` at a *different call site* than the
+        # initial data used, and two call sites of one function are not
+        # bit-identical (`CODE.md`, "Testing"). The equality held on aarch64
+        # and on x86-64 uninstrumented, and failed on x86-64 at 1.13 under
+        # code coverage, which perturbs the inlining that decides whether a
+        # multiply and an add are fused -- measured 3.2e-17, 1.4e-15 and
+        # 1.2e-13 there. A claim that turns on the CPU target and the
+        # compiler's flags is not a claim about this package.
+        #
+        # The residual gets the looser bound because it is the only one of
+        # the three read *inside* `r_1`, where the solution is steepest and
+        # its roundoff largest; the other two are masked to `r ≥ r_1`.
+        @test first_r.err_l2 ≤ 100 * eps(T)
+        @test first_r.err_linf ≤ 100 * eps(T)
+        @test first_r.residual ≤ 10_000 * eps(T)
         @test last_r.err_l2 > 0
         @test issorted([r.err_l2 for r in out.records])
         @test first_r.gauge_l2 > 0

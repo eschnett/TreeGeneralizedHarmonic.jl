@@ -2718,22 +2718,33 @@ are unfixed as of this writing:
   it differs in two ways worth trying here — the measurement goes through
   a top-level named function that takes the arguments, and the functions
   return plain `NTuple{M,T}` rather than `SVector`/`SMatrix`.
-- On **1.13 at four threads on Linux**, four exact-equality assertions
-  fail: `first_r.err_l2 == 0`, `err_linf == 0` and `residual == 0`
-  evaluate to `3.2e−17`, `1.4e−15` and `1.2e−13`
+- On **Linux at 1.13 under code coverage**, four exact-equality
+  assertions fail: `first_r.err_l2 == 0`, `err_linf == 0` and
+  `residual == 0` evaluate to `3.2e−17`, `1.4e−15` and `1.2e−13`
   (`driver_tests.jl:93`–`95`), and `inside_exact` — a `===` comparison of
   the `:pasted` state against the exact reference — fails
   (`interior_tests.jl:552`). These are this document's own rule about
   bit-identity across call sites, met in the tests rather than in the
   code: the initial data and the error reference both reach the analytic
-  solution through `core_position`, by different call sites, so exact
-  equality was never an invariant. **Which variable causes it is not yet
-  isolated**, because the matrix has no serial Linux job at `version: "1"`
-  — the `include:` entry merges `threads: 4` into that combination rather
-  than adding a job — so the passing and failing jobs differ in both Julia
-  version and thread count. If it is the thread count, it is a violation
-  of the bit-identity invariant `threading_tests.jl` exists to guard, and
-  a more serious finding than a loose test.
+  solution through `case_state_tuple`, by different call sites, so exact
+  equality was never an invariant. **Fixed** by comparing to roundoff —
+  `100 eps(T)`, and `10⁴ eps(T)` for the residual, which is the only one of
+  the three read inside `r_1` where the solution is steepest.
+
+  It takes **three** things at once, which is what makes it worth
+  recording rather than merely fixing. Coverage is the variable that
+  flips it — the same Linux cell at 1.13 fails instrumented and passes
+  uninstrumented, nothing else changed — but instrumentation alone is not
+  enough: macOS at 1.13 passes *with* coverage, and Linux at 1.11 passes
+  with it too. It reproduces on no combination of flags on aarch64:
+  `--code-coverage` scoped to this package, scoped to `user`, and with
+  `--check-bounds=yes` (which `Pkg.test` always passes, and which
+  `Pkg` pairs with `--code-coverage=@<pkgdir>` rather than the `user`
+  scope one might assume) all give exactly `0.0` here. So the equality
+  turns on the CPU target, the Julia version and the compiler's flags,
+  which is the same lesson TreeHydro records for Base's `@simd`
+  reductions: bit-identity across *thread counts* is an invariant and is
+  asserted; bit-identity across *microarchitectures* was never on offer.
 
 **`Float32`.** The same find on a `Float32` field set gives the `Float64`
 answer to **seven digits** — `r_mean` `2.0005742` against `2.0005741`, area

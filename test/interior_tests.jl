@@ -549,8 +549,16 @@ end
             x = coordinates(fs, b, (i + G, j + G, k + G))
             r = sqrt(sum(abs2, x))
             if r < int.r_1
-                inside_exact &= all(v -> A_p[i, j, k, v, b] ===
-                                         A_e[i, j, k, v, b], 1:20)
+                # To roundoff, not `===`: `A_e` and `A_p` reach the
+                # analytic solution by two different call sites, whose
+                # results are bit-identical only by luck of inlining. See
+                # the same claim in `driver_tests.jl`. `outside_same`
+                # below stays exact, because there the claim *is* that
+                # nothing was written.
+                inside_exact &= all(v -> isapprox(A_p[i, j, k, v, b],
+                                                  A_e[i, j, k, v, b];
+                                                  rtol=100 * eps(T),
+                                                  atol=100 * eps(T)), 1:20)
             else
                 outside_same &= all(v -> A_p[i, j, k, v, b] ===
                                          A_before[i, j, k, v, b], 1:20)
