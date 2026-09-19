@@ -2731,20 +2731,34 @@ are unfixed as of this writing:
   `100 eps(T)`, and `10⁴ eps(T)` for the residual, which is the only one of
   the three read inside `r_1` where the solution is steepest.
 
-  It takes **three** things at once, which is what makes it worth
-  recording rather than merely fixing. Coverage is the variable that
-  flips it — the same Linux cell at 1.13 fails instrumented and passes
-  uninstrumented, nothing else changed — but instrumentation alone is not
-  enough: macOS at 1.13 passes *with* coverage, and Linux at 1.11 passes
-  with it too. It reproduces on no combination of flags on aarch64:
-  `--code-coverage` scoped to this package, scoped to `user`, and with
-  `--check-bounds=yes` (which `Pkg.test` always passes, and which
-  `Pkg` pairs with `--code-coverage=@<pkgdir>` rather than the `user`
-  scope one might assume) all give exactly `0.0` here. So the equality
-  turns on the CPU target, the Julia version and the compiler's flags,
-  which is the same lesson TreeHydro records for Base's `@simd`
-  reductions: bit-identity across *thread counts* is an invariant and is
-  asserted; bit-identity across *microarchitectures* was never on offer.
+  **It is the machine, not the flags** (measured 2026-09-18 on three).
+  The first reading — that code coverage flips it — was wrong, and is
+  recorded here because the CI evidence for it looked clean: the same
+  Linux cell failed instrumented and passed uninstrumented. Symmetry
+  settles it. On an EPYC 7543 the three values are
+
+      err_l2 = 3.241779465395761e-17, err_linf = 1.3653937842860002e-15,
+      residual = 1.2253080414080616e-13
+
+  **with coverage and without it alike, and bit-identical to what CI
+  reports**. So three machines give three behaviours: aarch64 returns an
+  exact `0.0` however it is compiled (no combination of `--code-coverage`
+  scope and `--check-bounds=yes` perturbs it there), GitHub's Linux runner
+  returns `0.0` uninstrumented and these values instrumented, and EPYC
+  returns these values always. The quantity is not reproducible across
+  microarchitectures, which is the same lesson TreeHydro records for
+  Base's `@simd` reductions: bit-identity across *thread counts* is an
+  invariant and is asserted; bit-identity across *microarchitectures* was
+  never on offer. That the instrumented Intel runner and the EPYC agree to
+  the last bit says the alternative is a *determinate* second value — one
+  fused multiply-add taken or not — and not noise.
+
+  The fix is verified where the failure lives: on Symmetry at 1.13 the
+  patched `driver_tests.jl` passes 243 of 243 and `interior_tests.jl` with
+  it, against values 2 to 4 orders of magnitude inside the new bounds.
+
+  *Note for `Pkg.test`*: it passes `--code-coverage=@<pkgdir>` together
+  with `--check-bounds=yes`, not the `user` scope one might assume.
 
 **`Float32`.** The same find on a `Float32` field set gives the `Float64`
 answer to **seven digits** — `r_mean` `2.0005742` against `2.0005741`, area
