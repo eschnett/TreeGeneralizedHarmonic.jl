@@ -2855,6 +2855,89 @@ interpolated data is **`2.2e−5`** at `h = 5/64`, which is what the
 `unif_tol` decision under [Analysis quantities](#analysis-quantities) is
 about.
 
+### What the suite costs, and where (measured 2026-09-19 on Symmetry)
+
+Measured on one `amddebugq` node, Julia 1.13.0, `Float64`, no coverage —
+the configuration the suite is normally run in. **3444 assertions pass in
+`31m12` at one thread and `16m41` at four**, a speed-up of **1.87×**. Read
+these against the development machine's `12m31 / 8m38`: a Symmetry core is
+about 2.5× slower, so the cluster buys throughput and not wall clock, as
+step 6 found.
+
+**97 % of the wall clock is inside testsets** — 0.8 min of 31.2 sits
+outside them, so there is nothing to win in loading or in the harness. The
+distribution is a long tail with one fat head: the top 5 testsets are
+35 % of the run, the top 10 are 52 %, the top 20 are 74 %, over 124
+top-level testsets.
+
+| testset | 1 thread | 4 threads | speed-up |
+|---|---|---|---|
+| The driver and the static hole | 5.50 | 1.68 | 3.28× |
+| The dissipation does not change what the interface costs | 1.41 | 0.33 | 4.22× |
+| A ghost filled at order `p` … an order | 1.40 | 0.34 | 4.18× |
+| The horizon | 1.30 | 0.45 | 2.90× |
+| The pointwise algebra … `T=Float32x2` | 1.28 | 0.88 | 1.46× |
+| A run computes in the type it is given: `T=Float32` | 1.13 | 0.77 | 1.46× |
+| The ADM constraints vanish on an exact vacuum solution | 1.08 | 0.77 | 1.40× |
+
+(minutes). `driver_tests.jl` alone is **17.6 %** of the serial run, and
+inside it the convergence sweep *the masked error converges at order `q` on
+the frozen hierarchy* is **2.22 min — 7 % of the whole suite**.
+
+**The speed-up separates the two kinds of cost, and so does code
+coverage.** Testsets that evolve something parallelise at 2.9–4.2× and cost
+2.2–2.8× more when instrumented; testsets that compile a specialisation
+parallelise at 1.26–1.5× and cost 1.00–1.05× more instrumented. Four
+testsets over 20 s gain less than 1.3× from threads, 13 % of the
+four-thread run, and every one of them is a `Val`-parameter specialisation
+— the type-generic `pointwise` rows and the right-hand-side kernel rows.
+So the arithmetic half shrinks by doing less work and the compilation half
+only by *specialising less*; a new `q`, a new element type or a new
+interior variant is priced in the second column and nowhere else.
+
+**The physics tests are per-step bound, not overhead bound** — which was
+worth measuring, because the opposite was the plausible guess: the ADM
+monitor is a hundred second derivatives and runs once per chunk, and a
+short run has few steps per chunk. It is not what they cost. Running each
+resolution of the sweep to `t_end` and to `2 t_end` and taking the slope
+and the intercept:
+
+| `N` | points | per step | fixed per run | fixed share |
+|---|---|---|---|---|
+| 6 | 25 920 | 1.06 s | 1.43 s | 10.9 % |
+| 8 | 61 440 | 2.01 s | 1.32 s | 4.5 % |
+| 10 | 120 000 | 3.40 s | 1.41 s | 2.4 % |
+
+Setup, the per-chunk analysis and the horizon find together are **1.3–1.4 s
+per run whatever the resolution**, and the rest is the integrator. Per
+point per RK4 stage that is **11.5, 8.6 and 7.2 µs** at `N = 6, 8, 10` —
+falling with `N` because the per-block costs amortise — and the sweep's
+total cost grows as `N^2.95`, not `N⁴`, for the same reason. The constant
+is the right-hand side's own, and [Possible
+extensions](#possible-extensions) already books kernel efficiency as a
+research project rather than a milestone; until that is taken up, a
+physics test costs what its points and its steps cost.
+
+So the levers, in order of what they return and with what they cost:
+
+1. **Four threads.** Already 1.87× on the whole suite and 3.28× on
+   `driver_tests.jl`, for nothing. CI runs three of its five cells serial.
+2. **The sweep's resolutions.** `Ns = (6, 8, 10)` costs `13.1 + 29.5 +
+   59.3 s`, and `N = 10` alone is 58 % of it. At `N^2.95`, `(6, 7, 8)`
+   costs 62 % of `(6, 8, 10)` and saves about **38 s**; `N ≥ 2G + 2 = 6` is
+   TreeAMR's vertex invariant, so 6 is the floor and there is nothing
+   below it. The price is lever arm: `h` spans 1.33× instead of 1.67×, so
+   the fitted rate is noisier and the slack in `rate_l2 > q − 1/4` has to
+   absorb it.
+3. **`t_end`.** 97 % of a run is per-step, so halving `t_end = 3/20`
+   nearly halves the sweep — but at 11–17 steps it is already short, and
+   the error has to stay clear of roundoff for a rate to mean anything.
+4. **Fewer specialisations**, for the 13 % that threads do not touch.
+   `T=Float32x2` in the `pointwise` rows is the single largest at 0.88 min
+   even at four threads.
+
+None of 2–4 drops a physics claim; they change how finely it is measured.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
