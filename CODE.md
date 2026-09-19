@@ -2992,6 +2992,63 @@ at compile time by design.
 None of this is measured on a device, and none of it is the deferred GPU
 question: these are host costs, in host code, at `q = 2`.
 
+**The right-hand-side kernel boxes its own results, and unboxing them
+collides with an invariant.** `∂ₜh, ∂ₜΠ = gh_rhs_at_point(…)` is assigned
+*inside a conditional branch* and then captured by the
+`ntuple(Val(NC)) do v … end` write-back closures — the idiom
+KernelAbstractions forces, since it refuses a `return` in a kernel body.
+Julia lowers a branch-assigned captured variable into a `Core.Box`, after
+which `∂ₜh[v]` infers as `Any`, and every component write becomes a
+dynamic dispatch allocating a boxed `Float64`. One cause, all three of the
+allocation rows above. Wrapping each closure in `let ∂ₜh = ∂ₜh, … end`
+(and the layer branch's `w`, `ρ`, `he`, `Πe` with it) measures, on the
+same node:
+
+| | allocations | time |
+|---|---|---|
+| as written | 3662.8 MiB | 29.54 s |
+| with `let` | **365.2 MiB** | **25.51 s** |
+
+Ten times fewer allocations and 14 % faster — and it is not only a speed
+question: `pointwise_tests.jl` proves the *node-local algebra* allocates
+nothing, which is true and stayed true, while the *kernel around it*
+allocated ~65 MiB per evaluation. Nothing asserts that, and on a device it
+is not expressible at all, so this blocks G6 rather than merely slowing
+G0–G5.
+
+**The fix is not applied**, because it fails one assertion:
+`interior_tests.jl`'s `out_identical`, which requires the `:damped`
+kernel outside `r_1` to be **bit-identical** to `:none` — "the same
+numbers … not merely close ones", as [The interior: a pointwise damping
+layer](#the-interior-a-pointwise-damping-layer) puts it. Its two siblings
+(`core_zero`, `worst ≤ 1e-12·scale`) still pass, so the disagreement is in
+the last bits, and the mechanism is this document's own: the two are
+separate `Val`-specialised kernels, and once the write-back is statically
+typed each fuses its multiply-adds in its own inlining context. **The
+invariant was being met by the bug** — both paths were equally dynamic
+before. Three ways out, and the choice is a design decision: keep the
+identity and the allocations; keep the fix and weaken `out_identical` to
+roundoff (amending the claim here); or find a spelling that gives both.
+
+**What allocation remains is TreeAMR's, and so is the `BigInt`.** With the
+`let` patch in place `evolution.jl` leaves the allocation profile
+entirely, and the named sites are all upstream:
+
+| est. | site |
+|---|---|
+| ~22 MiB | `lagrange_weights@TreeAMR/src/operators.jl:377`–`380` — `BigInt`/`MPQ` rationals, thousands of allocations, **at run time** |
+| ~10 MiB | `run_group!@TreeAMR/src/ghosts.jl:70` — KernelAbstractions launch-argument tuples, per launch |
+| 1.5 MiB | `prolong_stencil@schedule.jl:480` — `BigFloat` |
+
+So the run-time `BigInt` is not this package's stencil weights, which are
+rounded into `T` once at compile time as designed: it is TreeAMR
+recomputing exact-rational Lagrange interpolation weights per ghost fill.
+That is the same file region as the `rem`/`div` hot spot, so TreeAMR's
+ghost machinery now owns both the time and the allocations. (Two caveats
+on those estimates: the profiler's own buffer appears as a single sample
+scaled to 468 MiB and is discarded, and the attributed rows sum to about
+30 MiB of the 365, so a fragmented tail is unaccounted for.)
+
 **Four threads on four cores is not oversubscribed in any way that costs**
 (measured 2026-09-19, and the obvious hypothesis was wrong). Julia 1.13
 gives `-t4` **four** GC threads, so a four-thread suite has eight runnable
