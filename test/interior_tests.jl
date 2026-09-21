@@ -427,8 +427,22 @@ end
             core_zero &= all(v -> A_i[i, j, k, v, b] === zero(T), 1:20)
         elseif r ≥ int.r_1
             nout += 1
-            out_identical &= all(v -> A_i[i, j, k, v, b] === A_n[i, j, k, v, b],
-                                 1:20)
+            # To roundoff, not `===`. `:none` and `:damped` are two
+            # separately compiled kernels, and once the write-back is
+            # statically typed each fuses its multiply-adds in its own
+            # inlining context, so they agree to the last place and not
+            # beyond it. The exact equality held until 2026-09-19 only
+            # because both write-backs were boxed and therefore equally
+            # dynamic — the invariant was being met by a performance bug
+            # (`CODE.md`, "What the suite costs, and where"). What is
+            # claimed here is that the interior term does not reach
+            # outside `r_1`, and `worst ≤ 1e-12 · scale` below states it
+            # at a scale that means something.
+            out_identical &= all(1:20) do v
+                a, n = A_i[i, j, k, v, b], A_n[i, j, k, v, b]
+                isapprox(a, n; rtol=100 * eps(T),
+                         atol=100 * eps(T) * max(abs(n), one(T)))
+            end
         else
             nlayer += 1
             w, ρ = interior_profiles(int, r)

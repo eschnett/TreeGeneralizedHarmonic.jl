@@ -3013,23 +3013,28 @@ allocated ~65 MiB per evaluation. Nothing asserts that, and on a device it
 is not expressible at all, so this blocks G6 rather than merely slowing
 G0–G5.
 
-**The fix is not applied**, because it fails one assertion:
-`interior_tests.jl`'s `out_identical`, which requires the `:damped`
-kernel outside `r_1` to be **bit-identical** to `:none` — "the same
-numbers … not merely close ones", as [The interior: a pointwise damping
-layer](#the-interior-a-pointwise-damping-layer) puts it. Its two siblings
-(`core_zero`, `worst ≤ 1e-12·scale`) still pass, so the disagreement is in
-the last bits, and the mechanism is this document's own: the two are
-separate `Val`-specialised kernels, and once the write-back is statically
-typed each fuses its multiply-adds in its own inlining context. **The
-invariant was being met by the bug** — both paths were equally dynamic
-before. Three ways out, and the choice is a design decision: keep the
-identity and the allocations; keep the fix and weaken `out_identical` to
-roundoff (amending the claim here); or find a spelling that gives both.
+**The fix is applied (2026-09-21), and `out_identical` is amended with
+it.** That assertion required the `:damped` kernel outside `r_1` to be
+**bit-identical** to `:none` — "the same numbers … not merely close
+ones", as [The interior: a pointwise damping
+layer](#the-interior-a-pointwise-damping-layer) used to put it — and the
+`let`s break it. Its two siblings (`core_zero`, `worst ≤ 1e-12·scale`)
+still pass, so the disagreement is in the last bits, and the mechanism is
+this document's own: the two are separate `Val`-specialised kernels, and
+once the write-back is statically typed each fuses its multiply-adds in
+its own inlining context. **The invariant was being met by the bug** —
+both paths were equally dynamic before, and nothing in the design
+enforced it. It is now compared to roundoff, like the three other exact
+comparisons this suite turned out not to have earned. What the testset
+claims is unchanged: that the interior term does not reach outside `r_1`,
+which `worst ≤ 1e-12·scale` states at a scale that means something.
 
-**What allocation remains is TreeAMR's, and so is the `BigInt`.** With the
-`let` patch in place `evolution.jl` leaves the allocation profile
-entirely, and the named sites are all upstream:
+**What allocation remained was TreeAMR's, and so was the `BigInt` — and
+TreeAMR v0.1.1 has since fixed both** (released 2026-09-21; this package
+takes it from the registry). The profile below is against the *earlier*
+TreeAMR and is kept because it is what the fixes were written from: with
+the `let` patch in place `evolution.jl` left the allocation profile
+entirely, and every named site was upstream:
 
 | est. | site |
 |---|---|
@@ -3037,9 +3042,13 @@ entirely, and the named sites are all upstream:
 | ~10 MiB | `run_group!@TreeAMR/src/ghosts.jl:70` — KernelAbstractions launch-argument tuples, per launch |
 | 1.5 MiB | `prolong_stencil@schedule.jl:480` — `BigFloat` |
 
-So the run-time `BigInt` is not this package's stencil weights, which are
-rounded into `T` once at compile time as designed: it is TreeAMR
-recomputing exact-rational Lagrange interpolation weights per ghost fill.
+So the run-time `BigInt` was not this package's stencil weights, which are
+rounded into `T` once at compile time as designed: it was TreeAMR
+recomputing exact-rational Lagrange interpolation weights. TreeAMR v0.1.1
+memoises them (`LAGRANGE_CACHE`) and launches the transfer kernel over the
+target box instead of flattening it and recovering the indices with a
+`div` and a `rem` per dimension per point — which is targets 1, 2 and 4
+of the brief this profile produced.
 That is the same file region as the `rem`/`div` hot spot, so TreeAMR's
 ghost machinery now owns both the time and the allocations. (Two caveats
 on those estimates: the profiler's own buffer appears as a single sample

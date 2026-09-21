@@ -356,14 +356,26 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
     x = point_position(origins, spacings, b, I)
     γ0 = damping_rate(damping, t, x)
 
+    # **Every `ntuple … do v` below is wrapped in a `let`, and that is not
+    # decoration.** KernelAbstractions refuses a `return` in a kernel, so
+    # the write-back has to be a closure; Julia boxes a variable that is
+    # assigned in a *branch* and captured by one, and `∂ₜh` is exactly
+    # that. Boxed, `∂ₜh[v]` infers as `Any`, every component write becomes
+    # a dynamic dispatch, and each one allocates a boxed `Float64` — 3.66
+    # GiB and 29.5 s a run against 365 MiB and 25.5 s with the `let`s
+    # (measured 2026-09-19, `CODE.md`). A heap allocation here is also not
+    # expressible on a device at all. Re-binding with `let` gives the
+    # closure a binding that is never reassigned, which is what stops it.
     if INT === :none
         ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
                                    inv_h, γ0, γ2, εh, Val(q), Val(HASH),
                                    Val(DISS))
-        ntuple(Val(NC)) do v
-            du[inner..., v, b] = ∂ₜh[v]
-            du[inner..., NC + v, b] = ∂ₜΠ[v]
-            nothing
+        let ∂ₜh = ∂ₜh, ∂ₜΠ = ∂ₜΠ
+            ntuple(Val(NC)) do v
+                du[inner..., v, b] = ∂ₜh[v]
+                du[inner..., NC + v, b] = ∂ₜΠ[v]
+                nothing
+            end
         end
     else
         r = interior_radius(interior, t, x)
@@ -379,20 +391,26 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
                                        inv_h, γ0, γ2, εh, Val(q), Val(HASH),
                                        Val(DISS))
             if r ≥ interior.r_1
-                ntuple(Val(NC)) do v
-                    du[inner..., v, b] = ∂ₜh[v]
-                    du[inner..., NC + v, b] = ∂ₜΠ[v]
-                    nothing
+                let ∂ₜh = ∂ₜh, ∂ₜΠ = ∂ₜΠ
+                    ntuple(Val(NC)) do v
+                        du[inner..., v, b] = ∂ₜh[v]
+                        du[inner..., NC + v, b] = ∂ₜΠ[v]
+                        nothing
+                    end
                 end
             else
                 w, ρ = interior_profiles(interior, r)
                 he, Πe, _ = background_state(bg, t, x)
-                ntuple(Val(NC)) do v
-                    du[inner..., v, b] =
-                        w * ∂ₜh[v] - ρ * (work[var + (v - 1) * sv] - he[v])
-                    du[inner..., NC + v, b] =
-                        w * ∂ₜΠ[v] - ρ * (work[var + (NC + v - 1) * sv] - Πe[v])
-                    nothing
+                let ∂ₜh = ∂ₜh, ∂ₜΠ = ∂ₜΠ, w = w, ρ = ρ, he = he, Πe = Πe
+                    ntuple(Val(NC)) do v
+                        du[inner..., v, b] =
+                            w * ∂ₜh[v] -
+                            ρ * (work[var + (v - 1) * sv] - he[v])
+                        du[inner..., NC + v, b] =
+                            w * ∂ₜΠ[v] -
+                            ρ * (work[var + (NC + v - 1) * sv] - Πe[v])
+                        nothing
+                    end
                 end
             end
         end
