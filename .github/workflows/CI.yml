@@ -15,16 +15,6 @@ jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.threads || 1 }} thread(s)
     runs-on: ${{ matrix.os }}
-    env:
-      # Pkg clones through libgit2, whose ssh-agent support is unreliable
-      # across platforms: it does not find the agent below and reports the
-      # failure as `GitError(Code:EUSER, ..., user cancelled credential
-      # request)`, which names neither ssh nor the repository. This makes
-      # Pkg shell out to the `git` binary instead, which uses the agent the
-      # way every other tool does. It is set on the *job* rather than on
-      # `julia-buildpkg`, because `Pkg.test` resolves the test environment
-      # a second time and so clones a second time.
-      JULIA_PKG_USE_CLI_GIT: true
     strategy:
       fail-fast: false
       matrix:
@@ -70,24 +60,6 @@ jobs:
           # above, and wanted. Restore it with the steps below.
     steps:
       - uses: actions/checkout@v7
-      # `KorzynskiSpin` is a private repository, so its `[sources]` entry is
-      # an ssh URL and an anonymous runner cannot clone it. The secret is
-      # the private half of a read-only deploy key on
-      # `eschnett/KorzynskiSpin.jl`; the key is scoped to that one
-      # repository and grants nothing else, which a personal access token
-      # would not manage. The other three dependencies are public and clone
-      # over https as before, untouched by this.
-      #
-      # This whole step goes away, along with the env var above, the day
-      # `KorzynskiSpin.jl` is made public and its `[sources]` entry becomes
-      # the https URL of the other three. See `CODE.md`.
-      #
-      # Note that secrets are not available to `pull_request` runs from
-      # forks, so a pull request from outside this account cannot pass
-      # until then.
-      - uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: ${{ secrets.KORZYNSKI_DEPLOY_KEY }}
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}

@@ -168,9 +168,16 @@ charts, the indicator's calibration and — from step 7 — the horizon
 section (Kerr's numbers at `a = 9/10` and in the harmonic chart, on meshes
 of a thousand blocks) are minutes rather than seconds, and its numbers are
 in `CODE.md` with the command that produced them.
-`Project.toml` carries the `[sources]` pins and CI is in place. There is
+`Project.toml` carries the `[sources]` pins and CI is in place — but
+**the CI matrix is temporarily reduced** (2026-09-19): Julia 1.11 and code
+coverage are both dropped, each with the removed lines and the reason in a
+comment at its site in `CI.yml`. 1.11 fails only
+`pointwise_tests.jl:480` (176 bytes where zero is claimed); coverage
+computes *wrong numbers* on GitHub's runners while the identical
+instrumented suite passes on Symmetry. Both are owed back. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
-clean-checkout check below mean something), no `bin/`, and no remote.
+clean-checkout check below mean something), no `bin/`, and there is now a
+remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
 The suite is **3444 assertions in 12m31** at one thread and **8m38** at
 four on the development machine (step 6 measured 2968 in 13m35 / 10m45
@@ -210,10 +217,10 @@ has to be passed explicitly:
 julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])'
 ```
 
-The clean-checkout check, which is what the `[sources]` pins exist for:
-a tree with no `Manifest.toml` resolves TreeAMR and SpacetimeMetrics from
-GitHub and passes. This is what CI does, and a local run that passes
-proves nothing about it:
+The clean-checkout check, which is what the `[sources]` pins exist for: a
+tree with no `Manifest.toml` resolves TreeAMR from the registry and the
+other three from GitHub, and passes. From 2026-09-21 it is a real check —
+every source is public, so it works anonymously, which is what CI does:
 
 ```bash
 d=$(mktemp -d) && git archive HEAD | tar -x -C "$d" && \
@@ -279,29 +286,31 @@ the cluster mechanics (modules, SLURM, NUMA, precompilation).
 Carried over from TreeAMR, TreeWave and TreeHydro where they apply, plus
 what is specific to a GR code. Each is in `CODE.md` with its reason.
 
-- **TreeAMR and SpacetimeMetrics are pinned to GitHub `main`, not to the
-  local checkouts.** `Project.toml`'s `[sources]` entries are what the
-  tests resolve, so `~/src/jl/TreeAMR` and `~/src/jl/SpacetimeMetrics`
-  are *not* what they see; an unpushed change there is invisible here,
-  and the local SpacetimeMetrics checkout has been behind `main` before.
-  Read what Pkg installed under `~/.julia/packages/` when in doubt about
-  an API. Say so rather than editing a checkout and assuming the tests
-  see it. The entries are also why the Julia floor is 1.11, and
-  `test/prerequisite_tests.jl` is what notices when a moving branch drops
-  a name. From step 7 the same holds for `ApparentHorizonFinder` and
-  `KorzynskiSpin` — and **`KorzynskiSpin`'s pin is an `ssh` URL because
-  its GitHub repository is private**. It resolves on a machine with
-  Erik's key (here and on Symmetry), and in GitHub Actions from
-  2026-09-18, where `CI.yml` loads a read-only deploy key from the
-  `KORZYNSKI_DEPLOY_KEY` secret and sets `JULIA_PKG_USE_CLI_GIT` so that
-  Pkg sees the agent — without it libgit2 fails with a bare `Code:EUSER`
-  credential error naming neither ssh nor the repository. It still does
-  **not** resolve in an anonymous clean checkout or in a fork's pull
-  request, which gets no secrets, so the clean-checkout check below
-  proves less than it looks like it does; `CODE.md` records what is left.
-  The pin becomes an `https` URL and the workflow's ssh step goes away the
-  day the repository is public. Do not vendor the package and do not add a
-  local-path source.
+- **Three dependencies are pinned to GitHub `main`, not to the local
+  checkouts; TreeAMR is not one of them any more** (2026-09-21).
+  `SpacetimeMetrics`, `ApparentHorizonFinder` and `KorzynskiSpin` are what
+  `Project.toml`'s `[sources]` entries resolve, so `~/src/jl/…` is *not*
+  what the tests see; an unpushed change there is invisible here, and the
+  local SpacetimeMetrics checkout has been behind `main` before. Read what
+  Pkg installed under `~/.julia/packages/` when in doubt about an API. Say
+  so rather than editing a checkout and assuming the tests see it.
+  **TreeAMR now comes from the General registry at `0.1.1`**, so an
+  unreleased change there is invisible too — releasing is what publishes
+  it. `test/prerequisite_tests.jl` is what notices when a moving branch
+  drops a name.
+  **`KorzynskiSpin`'s repository became public on 2026-09-21**, so its URL
+  is plain `https`, the read-only deploy key and the `ssh-agent` step and
+  `JULIA_PKG_USE_CLI_GIT` are all gone from `CI.yml`, and an anonymous
+  clean checkout and a fork's pull request both resolve it — the
+  clean-checkout check below finally proves what it claims. Do not vendor
+  a package and do not add a local-path source.
+- **`[sources]` is why the Julia floor is 1.11**, and it cannot be lowered
+  yet. The section was introduced in 1.11, so the floor drops only when
+  every entry goes: that needs `KorzynskiSpin` registered in General (it
+  is not registered at all) and `ApparentHorizonFinder` **2.1** released
+  (General carries `2.0.0`, and `[compat]` here asks for `2.1`).
+  `SpacetimeMetrics` is registered at the bound this package asks for, so
+  its pin is a choice rather than a necessity.
 - **`notes/` is read-only.** The copies carry their provenance; when
   `CODE.md` departs from them, `CODE.md` says so. Do not "fix" a copy.
 - **Two derivative index conventions.** `SpacetimeMetrics.dmetric`
@@ -600,10 +609,10 @@ Match TreeAMR's, since the four packages are read together:
 
 ## Repository facts
 
-- **No remote yet.** When there is one, the rule from the siblings
-  applies: work on a branch, and do not push, open a pull request, or
-  merge to `main` without being asked. Each step lands on `main` only
-  after review.
+- **The remote is `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`**,
+  and the rule from the siblings applies: work on a branch, and do not
+  push, open a pull request, or merge to `main` without being asked. Each
+  step lands on `main` only after review.
 - `TODO.md`, when it appears, is Erik's personal to-do list. **Do not
   modify it.** It is gitignored.
 - `CODE.md`, `PLAN.md`, `README.md`, `notes/`, `src/`, `test/`,

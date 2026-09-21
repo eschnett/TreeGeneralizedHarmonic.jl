@@ -1790,19 +1790,17 @@ holds them to the same standard: a moving `main` that dropped a name must
 fail at the top of the suite). **`KorzynskiSpin` is pinned over `ssh`,
 because its GitHub repository is private** — an anonymous `https` clone
 gets a 404, so `git@github.com:eschnett/KorzynskiSpin.jl.git` is the only
-URL that resolves it. That works on a machine with Erik's key, here and
-on Symmetry, and — from 2026-09-18 — in GitHub Actions, which loads a
-read-only deploy key on `eschnett/KorzynskiSpin.jl` from the
-`KORZYNSKI_DEPLOY_KEY` secret; `JULIA_PKG_USE_CLI_GIT` is set on the job
-because Pkg's libgit2 does not find the agent and reports the failure as a
-bare `Code:EUSER` credential error that names neither ssh nor the
-repository. It does **not** work in an anonymous clean checkout, nor in a
-pull request from a fork, which gets no secrets: **(blocked in step 7,
-partly unblocked 2026-09-18: the repository is still private; the pin
-becomes the `https` URL of the other three the day it is made public, the
-workflow's ssh step goes away with it, and nothing else changes.)**
-Vendoring the package or adding a local-path source would hide the gap
-instead of stating it. Tests add
+URL that resolves it: **(resolved 2026-09-21 — the repository is public.
+The pin is the plain `https` URL of the others, the deploy key, the
+`ssh-agent` step and `JULIA_PKG_USE_CLI_GIT` are gone from `CI.yml`, and
+an anonymous clean checkout and a fork's pull request both resolve it, so
+the clean-checkout check proves what it claims for the first time.)**
+`TreeAMR` left `[sources]` the same day: it is registered, and `[compat]`
+selects **0.1.1**. The remaining three entries are what keeps the Julia
+floor at 1.11, and two of them are necessary rather than chosen —
+`KorzynskiSpin` is not in General at all, and `ApparentHorizonFinder`
+`2.1` is not released there (General has `2.0.0`). Vendoring a package or
+adding a local-path source would hide that instead of stating it. Tests add
 `MultiFloats` and `ForwardDiff` — the latter because the checks on the
 expanded form differentiate the analytic solution one layer above the one
 `SpacetimeMetrics` takes internally (added in step 1). `bin/` adds
@@ -2672,15 +2670,14 @@ standard as the first two — including a find of Kerr's horizon on
 and `J = M a` to `1e−6` with the axis along `ẑ`, and is the baseline
 everything below is measured against.
 
-**One acceptance item is partly blocked**, and is recorded under [File
-layout](#file-layout): `KorzynskiSpin`'s GitHub repository is private, so
-its `[sources]` pin is an `ssh` URL. The clean-checkout check — a
-`git archive` of the tree with no `Manifest.toml`, instantiated and tested
-— resolves all four pins and passes here, **3444 assertions in
-12m26**. GitHub Actions resolves it from **2026-09-18** through a
-read-only deploy key (`KORZYNSKI_DEPLOY_KEY`), so CI builds again; the
-check still **cannot** pass in an *anonymous* clone, nor in a pull request
-from a fork, until the repository is made public.
+**That acceptance item is no longer blocked** (2026-09-21), and is
+recorded under [File layout](#file-layout): `KorzynskiSpin`'s repository
+is public, so every dependency resolves anonymously. The clean-checkout
+check — a `git archive` of the tree with no `Manifest.toml`, instantiated
+and tested — resolves `TreeAMR` from the registry at `0.1.1` and the other
+three from GitHub, and passes here, **3444 assertions in 12m26**. It now
+means what it says in an anonymous clone and in a fork's pull request as
+well.
 
 That first green build also measured the suite in CI for the first time —
 no job had reached `julia-runtest` before, every run having died in
