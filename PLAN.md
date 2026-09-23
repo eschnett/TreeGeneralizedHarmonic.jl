@@ -469,11 +469,12 @@ would assume, and because each is a *prediction* the steps measure:
    horizon nothing escapes, discontinuities included. Discretely, every
    centered first-derivative stencil annihilates the Nyquist mode, so the
    shift advection that makes everything ingoing does not act on it: in
-   the frozen-coefficient model `(∂_t + b ∂_x)² u = a² ∂_x² u` the Nyquist
-   mode's group velocity is `+b s′(π)` — outward at the shift speed for
+   the frozen-coefficient model `(∂_t − b ∂_x)² u = a² ∂_x² u` (the code's
+   sign: `∂_t h = +β ∂h`, speeds `−b ± a`) the Nyquist mode's group
+   velocity is `−b s′(π)` — outward at the shift speed for
    `q = 2`, `5b/3` for `q = 4` — and intermediate wavelengths turn outgoing
-   once `b cos θ > a cos(θ/2)`, where Kreiss–Oliger damping is weak.
-   Grid-scale content generated inside the horizon *can* cross it,
+   once `a cos(θ/2) > b cos θ` (at `q = 2`), where Kreiss–Oliger damping
+   is weak. Grid-scale content generated inside the horizon *can* cross it,
    attenuated by `e^{−d/ℓ(θ)}` with `ℓ = v_g/σ_KO` cells per e-fold. This
    is GHSO2's "grid-scale layer cured by `ε_KO ≈ 0.5`" and the reason the
    margin `m` exists; every interior treatment is a *source* of these
@@ -525,8 +526,9 @@ interior" (the margin `m`), `notes/methods-ghso2.md` lines 210–233 and
 
 Changes: `test/dispersion.jl`, a standalone analysis script in the manner
 of `hole_runs.jl` — for the frozen-coefficient model
-`(∂_t + b ∂_x)² u = a² ∂_x² u` (`b = β^r`, `a = α√γ^{rr}`, both
-characteristic speeds `−b ± a` negative inside the horizon),
+`(∂_t − b ∂_x)² u = a² ∂_x² u` (`b = β^r`, `a = α√γ^{rr}`; the code's
+sign is `∂_t h = +β ∂h`, so both characteristic speeds `−b ± a` are
+negative inside the horizon),
 semi-discretised with the package's own weights (`derivative_weights` of
 order `q` for the advection, the compact second derivative,
 `dissipation_weights` of order `q + 2` scaled by `ε_KO`), the two branches
@@ -538,7 +540,7 @@ at Kerr-Schild `r = 1.0, 1.2, 1.5, 1.8, 2.0 M`, with the attenuation across
 the default margin `e^{−8/ℓ_max}`; a fully discrete column (RK4 at
 `cfl = 1/4`) if the semi-discrete numbers are marginal. One testset in
 `stencils_tests.jl`: the Nyquist mode's group velocity under the order-`q`
-advection stencil is `b s′(π)` (`+b` at `q = 2`, `+5b/3` at `q = 4`), a
+advection stencil is `−b s′(π)` (`+b` at `q = 2`, `+5b/3` at `q = 4`), a
 `Rational` claim about the weights beside the existing damping-sign claim.
 One section `leakage` in `hole_runs.jl`: on `hole_fixture` at `q = 2` and
 `q = 4`, add to the initial data a radial ripple of wavelength `2h`, `4h`,
