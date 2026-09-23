@@ -1490,6 +1490,18 @@ function cal_screens()
                             ref="e0ref-p$(ε)"))
     end
     specs["e0p"] = e0p
+    # The exact target on the scan's layers (added after the first 50 M
+    # runs): whether what a thick ramp at a physical rate buys is the rate's
+    # or needs a wrong target to show — step 5's layer is the grid rate on
+    # the exact solution, and the long runs of the inexact targets ended
+    # with a smaller error than it.
+    specs["exact"] = Any[
+        cal_spec("ex-nd-r4-c"; exp=:exact, rho=4),
+        cal_spec("ex-n8-r4-c"; exp=:exact, nL=8, rho=4),
+        cal_spec("ex-n12-r4-c"; exp=:exact, nL=12, rho=4),
+        cal_spec("ex-n12-r10-c"; exp=:exact, nL=12, rho=10),
+        cal_spec("ex-n8-rgrid-c"; exp=:exact, nL=8),
+        cal_spec("ex-n12-rgrid-c"; exp=:exact, nL=12)]
     return specs
 end
 
@@ -1518,7 +1530,9 @@ const CAL_LONG = Dict{String,Vector{String}}(
                 "e2h-n8-rgrid-c", "e2h-n8-r10-c", "e2h-n8-r4-c", "e2h-n8-r1-c"],
     "long7" => ["e2h-n12-rgrid-c", "e2h-n12-r10-c", "e2h-n12-r4-c",
                 "e2h-n12-r1-c", "e2h4-n6-r10-c", "e2h4-n6-r4-c", "e2h4-n8-r10-c",
-                "e2h4-n8-r4-c"])
+                "e2h4-n8-r4-c"],
+    "long8" => ["ex-nd-r4-c", "ex-n8-r4-c", "ex-n12-r4-c", "ex-n12-r10-c",
+                "ex-n8-rgrid-c", "ex-n12-rgrid-c"])
 
 cal_long(spec) = merge(spec, (t_end=50 // 1, chunk=1 // 1, every=2))
 
@@ -1864,7 +1878,7 @@ function cal_report(results, all)
 end
 
 const CAL_ALL_SCREENS = ["sweep", "controls", "scan", "profile", "targets", "e0",
-                         "e0p"]
+                         "e0p", "exact"]
 
 if "calibration" in SECTIONS || haskey(OPTIONS, "calibration")
     t_end_opt = haskey(OPTIONS, "t_end") ? only(leak_option("t_end", [5 // 1])) :
