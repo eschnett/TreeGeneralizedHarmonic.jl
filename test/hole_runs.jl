@@ -958,6 +958,16 @@ end
 # several `M` before the crash". The kernel's cost is measured first, on the
 # suite's `N = 8` mesh (prediction: 0.4 % of a step).
 #
+# **At the grid rate, asked for by name (amended in step 8c′).** Both rows
+# are replays of step 5's table, which ran at `ρ_max · dt = 1` — the default
+# until 2026-09-23 — and the autopsy below rebuilds the fatal chunk's
+# interior at that rate explicitly, so every `evolve!` here passes
+# `ρ_max_factor = 1`: at the default `4/M` the section would evolve a
+# different layer from the one its autopsy steps through, and `damped6`
+# would no longer be the run that ends at `21 M` **(proposed in step 8c′)**.
+# `pasted8` does not read the rate at all — the paste freezes the whole
+# ball `r < r_1`.
+#
 # Rows: `cost`, `damped6`, `pasted8`; all by default, or a subset as
 # `bounds=damped6,pasted8`, which is how the section is split across batch
 # jobs.
@@ -1217,7 +1227,8 @@ function bounds_section(rows)
             local failure = nothing
             out = try
                 evolve!(T, case; forest=forest, q=q, ops=ops,
-                        t_end=BOUNDS_TEND, cfl=T(1 // 5), observer=watch)
+                        t_end=BOUNDS_TEND, cfl=T(1 // 5), observer=watch,
+                        ρ_max_factor=one(T))
             catch e
                 e isa InterruptException && rethrow()
                 failure = describe_failure(e, catch_backtrace())
@@ -1293,7 +1304,7 @@ function bounds_section(rows)
                     "without the projection:")
             forest = shells(case0, N, radii)
             out = evolve!(T, case0; forest=forest, q=q, ops=ops, t_end=T(c_a),
-                          cfl=T(1 // 5))
+                          cfl=T(1 // 5), ρ_max_factor=one(T))
             p = out.problem
             u = copy(out.u)
             tc = T(c_a)
@@ -1579,7 +1590,10 @@ function cal_setup(sp)
     case = with_bounds(case, default_bounds(T; M=1,
                                             r_gate=default_gate(case.interior,
                                                                 forest, q)))
-    kw = sp.rho === :grid ? (;) : (ρ_max_fixed=T(sp.rho),)
+    # `:grid` is asked for by name (amended in step 8c′): the driver's
+    # default became `4/M` on 2026-09-23, so the grid rate is the option
+    # `ρ_max_factor = 1` and no longer what an empty keyword list gets.
+    kw = sp.rho === :grid ? (ρ_max_factor=one(T),) : (ρ_max_fixed=T(sp.rho),)
     return case, forest, kw
 end
 

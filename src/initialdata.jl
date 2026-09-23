@@ -58,9 +58,11 @@ which is every case up to step 4 — or one of `CODE.md`'s three variants
 `:damped`, `:pasted`, `:frozen`, in which case `r_0` and `r_1` are the
 frozen core's and the layer's radii and an [`Interior`](@ref) is built
 around this case's `center` and `velocity`. The layer's `ρ_max` is left at
-zero here and set by the driver to `1/dt` once per chunk, which is where
-it belongs: it is a statement about RK4's stability and not about the
-hole.
+zero here and set by the driver once per chunk — by default to `4/M`, read
+from the background's mass (`CODE.md`, "The profiles and their
+parameters"; decided 2026-09-23, step 8c′), or to the grid rate `1/dt` or a
+fixed rate when [`evolve!`](@ref) is asked for one — because which rate a
+run relaxes at is a choice about the run, and the case is the hole.
 
 `center` and `velocity` are the hole's analytic trajectory `c(t) = c₀ + v
 t` — the thing the interior, the damping profile and the refinement
@@ -239,9 +241,9 @@ GHCase(background; kwargs...) = GHCase(Float64, background; kwargs...)
     with_interior(case::GHCase, interior) -> GHCase
 
 The same case carrying a different [`Interior`](@ref) — what the driver
-builds once per chunk when it replaces the layer's `ρ_max` with `1/dt`,
-and what a test that compares `CODE.md`'s three variants changes between
-runs.
+builds once per chunk when it replaces the layer's `ρ_max` with that
+chunk's rate, and what a test that compares `CODE.md`'s three variants
+changes between runs.
 
 A reconstruction and not a mutation, for the reason
 [`with_ρ_max`](@ref) is: the case is a kernel argument at every ghost fill

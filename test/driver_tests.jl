@@ -81,6 +81,39 @@ using KernelAbstractions: CPU
                                            ρ_max_fixed=zero(T))
     end
 
+    # Step 8c′: the default is the physical `4/M` (asserted on the record
+    # below) and the grid rate `1/dt` — the default until 2026-09-23 — is
+    # the option `ρ_max_factor`. A driver that ignored the factor, or still
+    # derived the default from `dt`, would run a different layer from the
+    # one its record names, and step 5's numbers, which `CODE.md` keeps as
+    # history, would no longer be reproducible by asking for them. The
+    # default's refusal is the mesh's and says so; a case with no hole has
+    # no mass to read and no rate to set, and is run as it always was.
+    @testset "ρ_max_factor is the grid rate, and a case with no hole is untouched" begin
+        case = hole_fixture(T; q=q, chunk=T(1 // 40))
+        out = gh_hole_run(T, case; N=8, q=q, t_end=T(1 // 20),
+                          ρ_max_factor=one(T))
+        @test length(out.records) == 3
+        # The `t = 0` row has taken no step (its `dt` is zero), so the rate
+        # it reports is `1/dt` of the step the first chunk was sized from.
+        @test out.records[1].ρ_max > 4 / hole_mass(case.background)
+        for r in out.records[2:end]
+            @test r.ρ_max * r.dt ≈ 1
+            @test r.finite
+        end
+        @test out.interior.ρ_max * T(out.records[end].dt) ≈ 1
+        @test_throws "default relaxation rate" TreeGeneralizedHarmonic.chunk_interior(
+            case, T(1 // 2), nothing, default_relaxation_rate(case); default=true)
+        flat = minkowski_case(T; L=one(T), ε_KO=T(1 // 2), γ0=one(T),
+                              γ2=T(-1 // 2))
+        @test_throws "no hole mass" hole_mass(flat.background)
+        ops = Operators(prolongation=q + 2, restriction=q + 2)
+        fout = evolve!(T, flat; forest=gh_forest(T, flat; N=8, roots=2), q=q,
+                       ops=ops, t_end=T(1 // 20), chunk=T(1 // 20))
+        @test fout.interior === nothing
+        @test all(r -> r.ρ_max == 0 && r.finite, fout.records)
+    end
+
     # A run that finishes without the analysis quantities is not a result
     # (`CODE.md`, "Analysis quantities"), so the first claim about the
     # driver is about its record and not about its state.
@@ -140,10 +173,16 @@ using KernelAbstractions: CPU
         @test last_r.err_l2 > 0
         @test issorted([r.err_l2 for r in out.records])
         @test first_r.gauge_l2 > 0
-        # `CODE.md`: ρ_max · dt = 1 per chunk, which the driver derives and
-        # the record reports.
+        # `CODE.md`: the layer relaxes at `4/M` in every chunk, read from
+        # the hole's mass, and the record reports it on every row, `t = 0`
+        # included. **Amended in step 8c′, not loosened**: until 2026-09-23
+        # the default was the grid rate and this claim was
+        # `r.ρ_max * r.dt ≈ 1`; Erik's decision made `4/M` the default, and
+        # the grid rate's own claim is the testset above.
+        for r in out.records
+            @test r.ρ_max == 4 / hole_mass(case.background)
+        end
         for r in out.records[2:end]
-            @test r.ρ_max * r.dt ≈ 1
             @test r.cfl ≤ T(1 // 4) * (1 + 1e-12)
             @test r.dt ≈ (T(1 // 20)) / r.steps
         end
@@ -212,20 +251,40 @@ using KernelAbstractions: CPU
     # for their constraint norms in the `G` points outside `r_1` — the only
     # points at which they can differ before the difference propagates —
     # and for the default to be confirmed or changed from them.
+    #
+    # **Two times, since step 8c′.** The shell is read at `t = 1/10 M`, as
+    # step 5 read it, and the residual after two relaxation times of the
+    # default rate, `2/ρ_max = 1/2 M`. At the grid rate the sink relaxed in
+    # one step and `:damped`'s residual had saturated by the first chunk, so
+    # one short run showed both; at the default `4/M` it relaxes in `M/4`,
+    # and at `1/10 M` it has not — `:frozen`'s residual is then only 1.2
+    # times `:damped`'s, the sticky wall and the sink not yet told apart. By
+    # `1/2 M` `:damped` has saturated and `:frozen` is still growing
+    # linearly (`CODE.md`, "Measured results", step 8c′). The shell is not read there as well because `:pasted`'s
+    # kink has by then grown it past the other two at *either* rate — the
+    # surface failure step 5 measured at `17 M`, starting — which is a claim
+    # about the paste and not the one this testset makes. `:pasted`'s
+    # residual is zero at every time, so it stops at the shell's time.
     @testset "the three interior variants, in the G points outside r_1" begin
+        t_shell = T(1 // 10)
+        t_res = 2 / default_relaxation_rate(hole_fixture(T; q=q))
         rows = NamedTuple[]
         for variant in (:damped, :pasted, :frozen)
             case = hole_fixture(T; q=q, variant=variant, chunk=T(1 // 20))
-            out = gh_hole_run(T, case; N=8, q=q, t_end=T(1 // 10))
-            shell = gh_outside_shell_norms(out)
+            at_shell = Ref{Any}(nothing)
+            watch(p, t, u) = isapprox(t, t_shell) &&
+                             (at_shell[] = gh_outside_shell_norms(p, u, t))
+            out = gh_hole_run(T, case; N=8, q=q, observer=watch,
+                              t_end=variant === :pasted ? t_shell : t_res)
+            shell = at_shell[]
             r = out.records[end]
             push!(rows,
                   (variant=variant, shell_gauge_l2=shell.gauge_l2,
                    shell_gauge_linf=shell.gauge_linf,
                    shell_err_l2=shell.err_l2, shell_err_linf=shell.err_linf,
-                   npoints=shell.npoints, residual=r.residual,
+                   npoints=shell.npoints, t=r.t, residual=r.residual,
                    err_l2=r.err_l2, gauge_l2=r.gauge_l2, finite=r.finite))
-            @test r.finite
+            @test all(row -> row.finite, out.records)
             @test shell.npoints > 0
         end
         @info "the three interior variants on the static hole" rows
@@ -238,8 +297,10 @@ using KernelAbstractions: CPU
         @test damped.residual > 0
         # `CODE.md`'s prediction: `:frozen` piles perturbations up against
         # the freezing radius instead of draining them, so its residual
-        # grows where `:damped`'s saturates. Over this short run that is
-        # already visible, and it is the reason `:damped` is the default.
+        # grows where `:damped`'s saturates, and it is the reason `:damped`
+        # is the default. **Re-measured in step 8c′ at `t = 1/2 M` rather
+        # than `1/10 M`**, for the reason above: the claim is unchanged.
+        @test damped.t ≈ t_res && frozen.t ≈ t_res
         @test frozen.residual > 2 * damped.residual
         # All three keep the evolved region at the same level: the interior
         # treatment is invisible outside `r_1` to truncation order.

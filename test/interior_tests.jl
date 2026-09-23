@@ -231,6 +231,40 @@ import SpacetimeMetrics as SM
         @test horizon_max_radius(bst) ≈ horizon_max_radius(base)
     end
 
+    # The layer's default relaxation rate is `4/M` read from the hole
+    # (decided 2026-09-23, step 8c′), so the mass has to come through every
+    # wrapper a case is built from: a boost that reported the energy `γM`, or
+    # a wrapper that lost the parameter, would relax the layer at a rate that
+    # is a statement about the chart and not about the hole — and a
+    # background with no hole must say so, rather than relax at a rate
+    # nobody chose.
+    @testset "the hole's mass comes through every wrapper and sets the default rate" begin
+        for M in (one(T), T(5 // 2)), a in (zero(T), T(9 // 10))
+            for bg in (SM.KerrSchild(M, a), SM.Harmonic(M, a))
+                @test hole_mass(bg) === M
+                @test hole_mass(SM.translate(bg, SVector{4,T}(0, 1, 2, 3))) === M
+                @test hole_mass(SM.rotate(bg, T(1 // 5), T(2 // 5),
+                                          T(3 // 5))) === M
+                # The rest mass: a boost changes the energy, not `M`.
+                @test hole_mass(SM.boost(bg, SVector{3,T}(T(3 // 10), 0, 0))) ===
+                      M
+                @test hole_mass(SM.boost(SM.translate(bg, SVector{4,T}(0, 1, 0, 0)),
+                                         SVector{3,T}(0, T(1 // 5), 0))) === M
+            end
+        end
+        @test hole_mass(SM.KerrSchild(2.0f0, 0.0f0)) === 2.0f0
+        @test_throws "no hole mass" hole_mass(SM.Minkowski())
+        # The default is `4/M` of the case's own background, in the case's
+        # own type — the one place the `4` is written.
+        @test default_relaxation_rate(hole_fixture(T)) === T(4)
+        @test default_relaxation_rate(hole_fixture(T; M=T(2))) === T(2)
+        @test default_relaxation_rate(hole_fixture(Float32)) === 4.0f0
+        @test default_relaxation_rate(
+            harmonic_kerr_case(T; M=T(1 // 2), halfwidth=T(5 // 2),
+                               r_0=T(1 // 10), r_1=T(3 // 10),
+                               chunk=T(1 // 10))) === T(8)
+    end
+
     # The frozen hierarchy is what the convergence protocol is stated on:
     # if the block layout moved with `N`, a rate measured on it would be a
     # rate of two different meshes.

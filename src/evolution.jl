@@ -482,8 +482,9 @@ stale core looks like once it has been interpolated by a regrid — gives a
 `NaN` or an enormous `λ`, which would then set the time step for the whole
 hierarchy. A branch and not a multiplication, because `0 · NaN = NaN`.
 The layer's own speeds go with it; they are bounded by the evolved
-region's, since `w ≤ 1` scales the characteristics down and `ρ_max·dt = 1`
-bounds the relaxation separately.
+region's, since `w ≤ 1` scales the characteristics down and the driver
+bounds the relaxation separately (`ρ_max · dt ≤ 1` at every rate it runs:
+the default `4/M` is checked against it, and the grid rate is it).
 """
 @kernel function gh_speed_kernel!(speed, @Const(work), @Const(origins),
                                   @Const(spacings), mask, ::Val{G}) where {G}
@@ -634,7 +635,9 @@ end
 
 The same problem carrying a different [`Interior`](@ref) — what the driver
 builds at the start of every chunk once it knows that chunk's `dt`, since
-`CODE.md` sets `ρ_max · dt = 1`.
+the rate is chosen per chunk — the default `4/M` checked against `1/dt`, or
+the grid rate `ρ_max_factor/dt` itself (`CODE.md`, "The profiles and their
+parameters"; amended in step 8c′).
 
 It shares the field sets, the schedule, the sampled gauge source and the
 uploaded geometry: rebuilding a whole [`GHProblem`](@ref) would re-sample

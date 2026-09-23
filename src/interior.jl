@@ -110,11 +110,14 @@ three variants is running.
 `center` is a [`HoleCenter`](@ref) (or the `c₀` of one); `r_0` and `r_1`
 are the frozen core's radius and the layer's outer radius, both in the
 case's coordinates; `ρ_max` is the relaxation rate at the core's edge,
-which **the driver overrides once per chunk** with `1/dt` — `CODE.md`
-bounds it by RK4's stability on the negative real axis (about `2.8/dt`)
-and `ρ_max · dt = 1` relaxes by a factor `e` per step, which is as strong
-as it needs to be. A value carried in a case is therefore a placeholder,
-and [`with_ρ_max`](@ref) is how the driver replaces it.
+which **the driver sets once per chunk** — by default to the physical rate
+`4/M` of [`default_relaxation_rate`](@ref), or to the grid rate
+`ρ_max_factor/dt` or a fixed `ρ_max_fixed` when [`evolve!`](@ref) is given
+one (`CODE.md`, "The profiles and their parameters": `ρ_max = 4/M`,
+decided 2026-09-23 in step 8c′; `1/dt` was the default until then). RK4
+bounds any of them at about `2.8/dt` on the negative real axis. A value
+carried in a case is therefore a placeholder, and [`with_ρ_max`](@ref) is
+how the driver replaces it.
 
 `w_ramp` and `ρ_ramp` are the fractions of the layer's width over which
 the two profiles turn over, measured from the *inner* edge for `w` and
@@ -243,9 +246,9 @@ was before step 8c.
     with_ρ_max(int::Interior, ρ_max) -> Interior
 
 The same layer with a different relaxation rate — what the driver builds
-once per chunk from that chunk's `dt`, since `ρ_max · dt = 1` is a
-statement about the integrator and not about the hole (`CODE.md`, "The
-profiles and their parameters").
+once per chunk: at the default `4/M` the rate is the same in every chunk,
+and at the grid rate `ρ_max_factor/dt` it follows that chunk's `dt`
+(`CODE.md`, "The profiles and their parameters"; amended in step 8c′).
 
 It is a reconstruction rather than a mutation because the interior is a
 kernel argument: an `isbits` value that a kernel closed over must not
@@ -493,6 +496,34 @@ horizon_max_radius(m::SpacetimeMetrics.BoostedMetric) =
     horizon_max_radius(m.metric)
 
 """
+    hole_mass(background) -> T
+
+The hole's **mass parameter** `M`, for the backgrounds that have one — the
+unit every physical rate of the interior is stated in.
+
+`KerrSchild` and `Harmonic` carry it as `.mass`; `translate`, `rotate` and
+`boost` pass it through unchanged, exactly as they pass the horizon radii
+above. For the boost that is a statement about what `M` *is* rather than a
+convenience: the mass parameter is the hole's rest mass, which a boost does
+not change (the boosted hole's energy is `M/√(1 − v²)`, and nothing here
+asks for it).
+
+It is what the driver's default relaxation rate is read from
+([`default_relaxation_rate`](@ref), added in step 8c′), so that the default
+is a statement about the hole and not a number in the driver: `CODE.md`,
+"The profiles and their parameters".
+"""
+function hole_mass end
+
+hole_mass(ks::KerrSchild) = ks.mass
+hole_mass(ha::Harmonic) = ha.mass
+hole_mass(m::SpacetimeMetrics.TranslatedMetric) = hole_mass(m.metric)
+hole_mass(m::SpacetimeMetrics.RotatedMetric) = hole_mass(m.metric)
+# The rest mass: a boost changes the hole's energy and its coordinate shape,
+# not the parameter the solution is written in.
+hole_mass(m::SpacetimeMetrics.BoostedMetric) = hole_mass(m.metric)
+
+"""
     singular_radius(background) -> T
 
 The largest **coordinate** radius, measured from the hole's center, at
@@ -540,6 +571,15 @@ horizon_min_radius(bg::AbstractMetric) = throw(ArgumentError(
     "rotate and boost of either); a background outside that list needs the " *
     "radius stated there before a layer is put in it."))
 horizon_max_radius(bg::AbstractMetric) = horizon_min_radius(bg)
+
+hole_mass(bg::AbstractMetric) = throw(ArgumentError(
+    "$(typeof(bg)) has no hole mass this package knows how to read, so " *
+    "there is no physical time scale to state the interior's relaxation " *
+    "rate in: the default rate is 4/M (CODE.md, \"The profiles and their " *
+    "parameters\"), and M is read as .mass of KerrSchild and Harmonic, " *
+    "through translate, rotate and boost. A background outside that list " *
+    "needs a hole_mass method, or the run an explicit ρ_max_fixed or " *
+    "ρ_max_factor."))
 
 # The distance from `c` to the nearest and the farthest point of an
 # axis-aligned box, which is what decides whether a block's extent meets

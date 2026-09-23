@@ -96,7 +96,7 @@ export HorizonDissipation, dissipation_rate, has_dissipation, dissipation_bounds
 export HoleCenter, center_at, Interior, with_ρ_max, interior_variant, layer_target
 export interior_profiles, is_frozen, in_layer, core_position, smoothstep
 export InteriorMask, ShellMask, interior_mask
-export horizon_min_radius, horizon_max_radius, singular_radius
+export horizon_min_radius, horizon_max_radius, singular_radius, hole_mass
 export layer_spacing, check_interior_radii
 
 # The range projection (step 8b): the third and last writer of the state,
@@ -129,7 +129,7 @@ export Horizon, locate_block, interpolate, interpolate_grad
 export GHADMProvider, gh_adm_provider, find_gh_horizon, horizon_radii
 
 # The driver
-export evolve!, check_cfl, forest_levels, horizon_shell
+export evolve!, check_cfl, forest_levels, horizon_shell, default_relaxation_rate
 export discrete_gradient_momentum!
 
 include("precision.jl")

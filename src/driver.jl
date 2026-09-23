@@ -12,12 +12,15 @@
 # Three things in the loop are easy to get wrong and are each written out
 # where they happen:
 #
-#   * **`ρ_max` is per chunk.** `CODE.md` bounds the relaxation rate by
-#     RK4's stability on the negative real axis and sets `ρ_max · dt = 1`,
-#     so the interior the kernel sees is rebuilt from *this* chunk's `dt`
-#     ([`with_interior`](@ref)) — not from the case, which carries a
-#     placeholder. A run that blows up in the layer after raising `ρ_max`
-#     has found the integrator, not the physics.
+#   * **`ρ_max` is per chunk.** The interior the kernel sees is rebuilt at
+#     every chunk ([`with_interior`](@ref)) — not taken from the case, which
+#     carries a placeholder. By default it relaxes at the physical rate
+#     `4/M` of [`default_relaxation_rate`](@ref), the same in every chunk
+#     (decided 2026-09-23, step 8c′); `ρ_max_factor` selects the grid rate
+#     `factor/dt` instead, which follows *this* chunk's `dt` and was the
+#     default until then. RK4 bounds either at about `2.8/dt` on the
+#     negative real axis, and a run that blows up in the layer after
+#     raising `ρ_max` has found the integrator, not the physics.
 #   * **The boundary hook goes to three places** — `fill_ghosts!` (inside
 #     the right-hand side), `regrid!`, and `adapt_to_initial_data!` — each
 #     with that call's `t`. All three are here from step 6; forgetting the
@@ -119,7 +122,8 @@ end
     evolve!([T], case::GHCase; forest, q, ops, t_end, chunk = case's,
             cfl = 1//4, regrid = false, adapt = false, buffer = nothing,
             maxpasses = 8, adm_every = 0, backend = CPU(),
-            observer = nothing, ρ_max_factor = 1, ρ_max_fixed = nothing)
+            observer = nothing, ρ_max_factor = nothing,
+            ρ_max_fixed = nothing)
 
 **The** time-stepping loop: fill the initial data on `forest`, then evolve
 in chunks of `chunk`, writing `CODE.md`'s analysis record at every chunk
@@ -142,24 +146,33 @@ is the same rebuild.
 ## The step, the relaxation rate, and the recheck
 
 One global step for the whole hierarchy, `dt = cfl · h_min / λ` with `λ`
-from [`max_speed`](@ref) at the chunk's start, and `ρ_max = ρ_max_factor /
-dt` for the interior — `CODE.md`'s `ρ_max · dt = 1`, which relaxes by a
-factor `e` per step and stays well inside RK4's stability limit of about
-`2.8/dt` on the negative real axis. At the chunk's end the speed is
-measured again and [`check_cfl`](@ref) **throws** if the step actually
+from [`max_speed`](@ref) at the chunk's start. At the chunk's end the speed
+is measured again and [`check_cfl`](@ref) **throws** if the step actually
 taken violated the bound.
 
-**A fixed rate instead (added in step 8c).** `ρ_max_fixed` is a relaxation
-rate in the case's units — `4/M`, say — used as `ρ_max` in every chunk
-instead of `ρ_max_factor/dt`. `CODE.md`'s `1/dt` is a *grid* rate (about
-`107/M` on the suite's fixture), which is a paste two cells deep; a target
-that is not an exact solution needs a physical one, and step 8c's
-calibration is where the two are compared. The two keywords are exclusive
-and refused together, and a fixed rate above `1/dt` is refused at the
-chunk that would take it — it would be stronger than the grid rate the
-default already is, and RK4's real-axis limit is `2.79/dt`
-**(proposed in step 8c)**. The record's `ρ_max` row is the rate the chunk
-ran at either way.
+**The layer relaxes at `4/M` by default (decided 2026-09-23, step 8c′).**
+With neither rate keyword given, `ρ_max` is
+[`default_relaxation_rate`](@ref) of the case — `4/M`, `M` the hole's mass
+parameter — in every chunk. Two keywords choose otherwise, and are refused
+together, because they are two answers to one question:
+
+  * `ρ_max_factor` selects the **grid rate** `ρ_max_factor/dt`, per chunk —
+    `CODE.md`'s former `ρ_max · dt = 1`, which relaxes by a factor `e` per
+    step and was the default until step 8c′. It is about `107/M` on the
+    suite's fixture at `cfl = 1/5`, a paste two cells deep, and on the exact target it
+    ends a `50 M` run with six times the error `4/M` does (step 8c); it
+    stays as the option a study of the rate, or a replay of step 5's
+    numbers, asks for.
+  * `ρ_max_fixed` selects a fixed rate in the case's units (added in step
+    8c).
+
+A fixed rate — the default's included — above `1/dt` is refused at the
+chunk that would take it: it would relax harder than the grid rate, and
+RK4's real-axis limit is `2.79/dt` **(proposed in step 8c)**. The default
+is far below it on every mesh that resolves a hole (`0.04/dt` to `0.05/dt`
+on the suite's fixture). The record's `ρ_max` row is the rate the chunk ran at,
+whichever rule chose it. A case with no interior has no rate, and none of
+this touches it.
 
 ## What is recorded, and when
 
@@ -273,18 +286,27 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
             "evolve! was given both ρ_max_factor = $ρ_max_factor and " *
             "ρ_max_fixed = $ρ_max_fixed, but they are two answers to one " *
             "question: the layer's relaxation rate is either the grid rate " *
-            "factor/dt (CODE.md's ρ_max · dt = 1, the default) or a fixed " *
-            "physical rate (step 8c). Pass one of them."))
-    ρ_max_factor = ρ_max_factor === nothing ? one(T) : T(ρ_max_factor)
-    ρ_max_factor > 0 || throw(ArgumentError(
-        "ρ_max_factor scales CODE.md's ρ_max · dt = 1 and must be positive, " *
-        "got $ρ_max_factor; it exists so that a test may measure what the " *
-        "bound is worth, not so that a run may switch the layer off."))
+            "factor/dt (CODE.md's former ρ_max · dt = 1) or a fixed physical " *
+            "rate (step 8c), and with neither it is the default 4/M " *
+            "(step 8c′). Pass one of them, or none."))
+    ρ_max_factor === nothing || T(ρ_max_factor) > 0 || throw(ArgumentError(
+        "ρ_max_factor scales the grid rate 1/dt and must be positive, got " *
+        "$ρ_max_factor; it exists so that a study may measure what the grid " *
+        "rate is worth against the default 4/M, not so that a run may " *
+        "switch the layer off."))
     ρ_max_fixed === nothing || T(ρ_max_fixed) > 0 || throw(ArgumentError(
         "ρ_max_fixed is the layer's relaxation rate and must be positive, " *
         "got $ρ_max_fixed; a rate of zero is the :frozen variant, which is " *
         "selected by name."))
-    ρ_max_fixed = ρ_max_fixed === nothing ? nothing : T(ρ_max_fixed)
+    # The rule, resolved once for the whole run: the grid rate if a factor
+    # was given, a fixed rate if one was, and otherwise the default — read
+    # from the hole's mass, and only where there is a hole, since a case
+    # without an interior has neither a mass nor a layer to relax.
+    ρ_max_default = ρ_max_factor === nothing && ρ_max_fixed === nothing &&
+                    case.interior !== nothing
+    ρ_max_factor = ρ_max_factor === nothing ? nothing : T(ρ_max_factor)
+    ρ_max_fixed = ρ_max_fixed !== nothing ? T(ρ_max_fixed) :
+                  ρ_max_default ? default_relaxation_rate(case) : nothing
 
     G = q ÷ 2 + 1
     U = FieldSet{T}(forest, 2NC; G=G, centering=vertexcentered(3),
@@ -444,7 +466,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     λ_initial = max_speed_of(p0, u, zero(T))
     dt0 = cfl * minimum_spacing(T, forest) / λ_initial
     p0 = with_interior(p0, chunk_interior(case, dt0, ρ_max_factor,
-                                          ρ_max_fixed))
+                                          ρ_max_fixed; default=ρ_max_default))
     # The initial data has not been through a stage, so neither limiter
     # has seen it: the range projection first, in the order RK4 applies
     # the two (stage, then step), and the paste after it **(proposed in
@@ -467,7 +489,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         steps = max(1, ceilint((stop - tstart) / dt))
         dt_used = (stop - tstart) / steps
         p = with_interior(p, chunk_interior(case, dt_used, ρ_max_factor,
-                                            ρ_max_fixed))
+                                            ρ_max_fixed;
+                                            default=ρ_max_default))
 
         # `step_limiter` on `solve` and not `RK4(; step_limiter! = …)`:
         # the constructor form is deprecated in the resolved
@@ -618,22 +641,68 @@ function horizon_row(p::GHProblem{T}, u, t, seed, index) where {T}
             M_ch=out.M_ch, hlm=out.hlm, note=nothing)
 end
 
+"""
+    default_relaxation_rate(case::GHCase) -> T
+
+The layer's relaxation rate when [`evolve!`](@ref) is given no rate keyword:
+**`ρ_max = 4/M`**, `M` the hole's mass parameter ([`hole_mass`](@ref) of the
+case's background), in the case's own units and type. This is the one place
+the `4` is written.
+
+**Why a physical rate and not the grid rate `1/dt` (decided 2026-09-23, step
+8c′, on step 8c's measurement).** `ρ_max · dt = 1` — step 5's default —
+relaxes by a factor `e` per step, which on the suite's fixture at
+`cfl = 1/5` is about `107/M` against the hole's surface gravity
+`κ = 1/(4M)`: with the quintic ramp it is `37/M` two cells inside `r_1`, so
+the layer is a **paste two cells deep** with a two-cell transition. A
+target that is not an exact solution, pinned that hard that close to the
+evolved stencils, is a kink the compact second derivative turns into an
+`O(1)` right-hand-side error, and every inexact target step 8c tried ended
+its run at the grid rate on every ramp up to 8 cells; at `4/M` on a ramp of
+at least `4G` cells the same targets leave the exterior where the exact one
+leaves it. Even on the **exact** target, where the paste survives, it ends
+a `50 M` run with six times the error: the shell's `C_a` L2 `0.181`
+against `0.029` on the fixture's own layer (`CODE.md`, "The layer for an
+inexact target"). `4/M` is `16 κ`, and it is fast: the layer forgets a
+perturbation in `M/4`. The grid rate stays available as `ρ_max_factor`.
+
+It asks the background for its mass and nothing else, so a case whose
+background has none is refused by `hole_mass`, by name.
+"""
+default_relaxation_rate(case::GHCase{T}) where {T} =
+    T(4) / T(hole_mass(case.background))
+
 # The interior the kernel sees this chunk: the case's radii and variant at
-# `ρ_max = factor/dt`, or at the fixed rate where one is given (step 8c).
-# `nothing` stays `nothing`.
+# `ρ_max = factor/dt`, or at the fixed rate where one is given — the
+# default `4/M` is one (step 8c′). `nothing` stays `nothing`.
+#
+# **The guard `fixed · dt ≤ 1` at the default (checked in step 8c′).** On
+# every hole the suite evolves the default is a twenty-fifth to a tenth of
+# the grid rate — `4/M · dt`, over the chunks and the `t = 0` row, is
+# `0.040–0.047` on the fixture at `h = 5/64`, `cfl = 1/4` (`dt ≈ 0.01 M`),
+# `0.036–0.037` at `N = 10`, `0.057–0.062` at its coarsest `N = 6`, and
+# `0.067–0.092` on the refinement's fixture at `h = 5/32`, both of its runs —
+# so the guard never fires on a mesh that resolves a hole, and when it does,
+# the step is longer than `M/4` and the refusal says the mesh, not the rate,
+# is what is wrong.
 chunk_interior(case::GHCase, dt, factor) = chunk_interior(case, dt, factor,
                                                           nothing)
 
-function chunk_interior(case::GHCase, dt, factor, fixed)
+function chunk_interior(case::GHCase, dt, factor, fixed; default::Bool=false)
     case.interior === nothing && return nothing
     fixed === nothing && return with_ρ_max(case.interior, factor / dt)
-    fixed * dt ≤ 1 || throw(ArgumentError(
+    fixed * dt ≤ 1 || throw(ArgumentError(default ?
+        "the default relaxation rate ρ_max = 4/M = $fixed is above this " *
+        "chunk's grid rate 1/dt = $(1 / dt): the step is longer than a " *
+        "quarter of the hole's mass, so the mesh does not resolve the time " *
+        "scale the default is stated in. Refine the mesh around the hole, or " *
+        "pass ρ_max_factor for a grid rate or a lower ρ_max_fixed." :
         "the fixed relaxation rate ρ_max = $fixed is above this chunk's grid " *
         "rate 1/dt = $(1 / dt): a fixed rate is the physical alternative to " *
-        "CODE.md's ρ_max · dt = 1, and one above it relaxes harder than the " *
-        "paste the default already is, up to RK4's real-axis limit of " *
-        "2.79/dt — which a run then finds as a blow-up in the layer. Lower " *
-        "ρ_max_fixed, or pass ρ_max_factor for a grid rate."))
+        "the grid rate ρ_max · dt = 1, and one above it relaxes harder than " *
+        "a paste, up to RK4's real-axis limit of 2.79/dt — which a run then " *
+        "finds as a blow-up in the layer. Lower ρ_max_fixed, or pass " *
+        "ρ_max_factor for a grid rate."))
     return with_ρ_max(case.interior, fixed)
 end
 
