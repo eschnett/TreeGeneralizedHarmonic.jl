@@ -44,7 +44,15 @@ right-hand side branch once, on a `Bool` it stores, instead of handing
 function dirichlet(case::GHCase{T}, t) where {T}
     all(case.periodic) && return nothing
     bg = case.background
-    int = case.interior
+    int = boundary_interior(case.interior)
     tt = T(t)
     return CellBoundary(AllVariables((x, δ) -> case_state_tuple(bg, int, tt, x)))
 end
+
+# The interior whose core rule the hook applies: the case's own, where it is
+# the identity (the core is nowhere near the boundary) — and `nothing` for a
+# tracked case, whose `FittedSpec` is a rule and not a geometry, and whose
+# core is just as far from the boundary (added in step 8d). The identity is
+# then written as the identity rather than computed.
+boundary_interior(int) = int
+boundary_interior(::FittedSpec) = nothing

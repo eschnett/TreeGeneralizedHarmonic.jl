@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Erik Schnetter <schnetter@gmail.com>"]
 
 [deps]
+AbstractSphericalHarmonics = "ee470b23-2871-4f3a-b920-8523874a9e46"
 ApparentHorizonFinder = "2326d305-03d0-4260-ba27-fc7d1edfc55d"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 KorzynskiSpin = "dddeb715-7fc8-4947-8935-98683755b697"
@@ -21,6 +22,7 @@ SpacetimeMetrics = {rev = "main", url = "https://github.com/eschnett/SpacetimeMe
 TreeAMR = {rev = "main", url = "https://github.com/eschnett/TreeAMR.jl"}
 
 [compat]
+AbstractSphericalHarmonics = "1.2"
 ApparentHorizonFinder = "2.1"
 KernelAbstractions = "0.9.42, 1"
 KorzynskiSpin = "1.1"

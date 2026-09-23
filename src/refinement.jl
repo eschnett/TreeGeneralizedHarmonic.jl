@@ -448,15 +448,34 @@ statement that no floor is needed at all.
 """
 function horizon_floor_level(forest::Forest{3}, int::Interior{T}, background,
                              G::Integer) where {T}
-    r_h = T(horizon_min_radius(background))
-    r_h > int.r_1 || throw(ArgumentError(
-        "the layer's outer radius r_1 = $(int.r_1) is not inside the " *
+    r_h, _ = geometry_radii(int, background)
+    r_0, r_1 = layer_radii(int)
+    r_h > r_1 || throw(ArgumentError(
+        "the layer's outer radius r_1 = $r_1 is not inside the " *
         "horizon's smallest coordinate radius r_h,min = $r_h, so no " *
         "refinement level can satisfy CODE.md's r_1 ≤ r_h,min − m·h: the " *
         "layer has to be moved inward before a mesh can be built around it."))
-    h_horizon = (r_h - int.r_1) / int.margin
-    h_layer = (int.r_1 - int.r_0) / (2 * (G + 1))
-    h_needed = min(h_horizon, h_layer)
+    h_horizon = (r_h - r_1) / int.margin
+    h_layer = (r_1 - r_0) / (2 * (G + 1))
+    return _floor_level(forest, T, min(h_horizon, h_layer))
+end
+
+# The tracked geometry's floor (added in step 8d): the level of the spacing
+# its offset and ramp were built at. They are *stated* in spacings —
+# `offset = m h`, `thickness = n_L h` — so `offset/m` is exactly the `h` the
+# sphere's formula derives from its radii, and the floor keeps the blocks
+# the layer lives in from coarsening past it, which is what would make
+# `check_interior_radii` fire at the next chunk. A finer mesh is not asked
+# for: the next geometry is rebuilt on whatever the indicator chose.
+function horizon_floor_level(forest::Forest{3}, int::FittedInterior{T},
+                             background, G::Integer) where {T}
+    h_needed = min(int.offset / int.margin, int.thickness / (2 * (G + 1)))
+    # `offset/m` is `h` to the last bit when `m h` is exact, which it is for
+    # a power-of-two multiple of the root spacing; the slack is for the rest.
+    return _floor_level(forest, T, h_needed * (1 + 8 * eps(T)))
+end
+
+function _floor_level(forest::Forest{3}, ::Type{T}, h_needed) where {T}
     ℓ = 0
     h = spacing(T, forest, 0)
     while h > h_needed && ℓ < MAX_LEVEL
@@ -484,7 +503,7 @@ capped at `ceiling_level`, which is 0: `CODE.md`'s "blocks within a few
 coarse cells of the domain boundary are capped at the coarsest level".
 """
 function level_bounds(case::GHCase{T}, forest::Forest{3}, t,
-                      G::Integer) where {T}
+                      G::Integer; interior=case.interior) where {T}
     ref = case.refinement
     ref === nothing && throw(ArgumentError(
         "this case carries no refinement parameters, so it has no thresholds " *
@@ -492,13 +511,21 @@ function level_bounds(case::GHCase{T}, forest::Forest{3}, t,
         "`refinement = Refinement(T; refine_tol, coarsen_tol, maxlevel_cap, " *
         "…)`. CODE.md's driver flags with the masked Löhner verdict and with " *
         "nothing else."))
-    int = case.interior
+    int = interior
+    int isa FittedSpec && throw(ArgumentError(
+        "the level bounds of a tracked case are stated about its geometry, " *
+        "which is built from the track once per chunk: pass `interior = " *
+        "fitted_interior(…)` (the driver does)."))
     c = int === nothing ? SVector{3,T}(zero(T), zero(T), zero(T)) :
         center_at(int.center, T(t))
+    # Through the two accessors (amended in step 8d), so that the floor's
+    # shell and level are the tracked horizon's for a tracked geometry and the
+    # analytic ones — value for value what they were — for the sphere.
     lo, hi, L = if int === nothing
         (zero(T), -one(T), 0)
     else
-        (int.r_1, T(horizon_max_radius(case.background)) + ref.floor_margin,
+        (layer_radii(int)[2],
+         geometry_radii(int, case.background)[2] + ref.floor_margin,
          horizon_floor_level(forest, int, case.background, G))
     end
     L ≤ ref.maxlevel_cap || throw(ArgumentError(
@@ -848,7 +875,7 @@ passes it here passes `buffer = 0` to `regrid!` and to
 """
 function indicator_flags(U::FieldSet{T,3}, case::GHCase{T}, t;
                          scratch=nothing, G::Integer=first(U.G),
-                         buffer::Integer=0) where {T}
+                         buffer::Integer=0, interior=case.interior) where {T}
     ref = case.refinement
     ref === nothing && throw(ArgumentError(
         "this case carries no refinement parameters: build it with " *
@@ -858,13 +885,16 @@ function indicator_flags(U::FieldSet{T,3}, case::GHCase{T}, t;
     backend = get_backend(U.work)
     origins = to_backend(backend, block_origins(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))
-    mask = interior_mask(case.interior, T(t))
+    # The interior is the one the run holds (amended in step 8d): a tracked
+    # case's geometry is the chunk's, not the case's rule.
+    mask = interior_mask(interior, T(t))
     scale = field_scale(U, mask, origins, spacings)
     τfs = scratch === nothing ?
           FieldSet{T}(U.forest, NDIAG; G=0, centering=U.centering,
                       backend=backend) : scratch
     gh_tau!(τfs, U, origins, spacings, mask; scale=scale, ε=ref.ε)
-    out = refine_flags(τfs, level_bounds(case, U.forest, t, G), ref;
+    out = refine_flags(τfs, level_bounds(case, U.forest, t, G;
+                                         interior=interior), ref;
                        buffer=buffer)
     return (flags=out.flags, τ_max=out.τ_max, centroid=out.centroid,
             nfiring=out.nfiring, scale=scale)
@@ -886,5 +916,5 @@ and a stale ghost corrupts the verdict silently.
 function gh_indicator!(p::GHProblem{T}, u, t; buffer::Integer=0) where {T}
     _prepare_monitor!(p, u, t)
     return indicator_flags(p.U, p.case, T(t); scratch=p.diag, G=first(p.U.G),
-                           buffer=buffer)
+                           buffer=buffer, interior=p.interior)
 end

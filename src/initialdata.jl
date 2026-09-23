@@ -177,9 +177,23 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
         "this case has a layer target but no interior: the target is what " *
         "the damping layer relaxes toward, and a case with no hole has no " *
         "layer. Give the case an interior, or leave `target = nothing`."))
-    int = interior === nothing ? nothing :
-          Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
-                   margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp, target=target)
+    int = if interior === nothing
+        nothing
+    elseif interior isa FittedSpec
+        # The tracked geometry (step 8d): the case holds the rule, and the
+        # layer is built from the found horizon once per chunk. Its target
+        # travels in the spec, and it has no radii of its own.
+        interior isa FittedSpec{T} || throw(ArgumentError(
+            "a case's FittedSpec is stated in the case's own type $T, got a " *
+            "$(typeof(interior))."))
+        target === nothing || throw(ArgumentError(
+            "a tracked case's layer target is the FittedSpec's own `target`; " *
+            "the case's `target` keyword is for step 5's sphere."))
+        interior
+    else
+        Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
+                 margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp, target=target)
+    end
     check_case_bounds(bounds, int, T)
     ε = case_dissipation(ε_KO, c, T)
     return GHCase{T,typeof(background),typeof(damping),typeof(int),
@@ -214,6 +228,17 @@ end
 # — deeper than every point an evolved stencil reads — depends on the
 # spacing, and is `check_bounds_gate`'s, at every regrid.
 check_case_bounds(::Nothing, int, ::Type) = nothing
+
+# A tracked case has no radius to hold the gate against until its geometry is
+# built; `check_bounds_gate` asserts it against each one (step 8d).
+check_case_bounds(::Nothing, ::FittedSpec, ::Type) = nothing
+
+function check_case_bounds(bd, ::FittedSpec, ::Type{T}) where {T}
+    bd isa StateBounds{T} || throw(ArgumentError(
+        "a case's bounds are a StateBounds{$T} or `nothing`, got a " *
+        "$(typeof(bd))."))
+    return nothing
+end
 
 function check_case_bounds(bd, int, ::Type{T}) where {T}
     bd isa StateBounds{T} || throw(ArgumentError(
@@ -348,6 +373,11 @@ function horizon_dissipation(case::GHCase{T}; ε_in, ε_out=case.ε_KO) where {T
     case.interior === nothing && throw(ArgumentError(
         "the dissipation profile rises from the horizon to the layer's outer " *
         "radius r_1, and this case has no interior, so no r_1."))
+    case.interior isa FittedSpec && throw(ArgumentError(
+        "the dissipation profile is a function of the radius about the " *
+        "analytic center, and a tracked case's layer follows a surface: step " *
+        "8c measured the profile off for a smooth target, and a tracked one " *
+        "would have to be stated in the depth (not built in step 8d)."))
     ε_out isa Real || throw(ArgumentError(
         "the profile's exterior amplitude is a number, got a " *
         "$(typeof(ε_out)): pass `ε_out` explicitly for a case whose ε_KO is " *
@@ -464,7 +494,8 @@ means "off" (added in step 8b): a [`StateBounds`](@ref) has no default for
 any of its ranges, and [`default_bounds`](@ref) is the named proposal a
 caller asks for explicitly.
 """
-function hole_case(::Type{T}, background; halfwidth, r_0, r_1, chunk,
+function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
+                   chunk,
                    M=one(T), center=(zero(T), zero(T), zero(T)),
                    velocity=(zero(T), zero(T), zero(T)), interior=:damped,
                    margin::Integer=8, ε_KO=T(1 // 2),
@@ -474,11 +505,28 @@ function hole_case(::Type{T}, background; halfwidth, r_0, r_1, chunk,
                    γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
                    target=nothing, refinement=nothing, horizon=nothing,
                    bounds=nothing) where {T}
+    # `r_0` and `r_1` have no default for step 5's sphere — they are what
+    # `check_interior_radii` measures — and no meaning for the tracked
+    # geometry, whose radii come from the horizon that was found (step 8d).
+    if interior isa FittedSpec
+        (r_0 === nothing && r_1 === nothing) || throw(ArgumentError(
+            "a tracked case derives its layer's radii from the found horizon " *
+            "(offset = m h and thickness = n_L h below it), so it takes no " *
+            "r_0 or r_1; got r_0 = $r_0, r_1 = $r_1."))
+    elseif interior !== nothing
+        (r_0 === nothing || r_1 === nothing) && throw(ArgumentError(
+            "a :$interior layer needs its two radii, r_0 (the frozen core) and " *
+            "r_1 (the layer's outer radius), and they have no default: they " *
+            "are what check_interior_radii measures against the mesh and the " *
+            "horizon (CODE.md, \"The interior\")."))
+    end
     return GHCase(T, background;
                   box=ntuple(_ -> (-T(halfwidth), T(halfwidth)), Val(3)),
                   periodic=(false, false, false), ε_KO=ε_KO, γ0=γ0, γ2=γ2,
                   center=center, velocity=velocity, interior=interior,
-                  r_0=r_0, r_1=r_1, margin=margin, w_ramp=w_ramp,
+                  r_0=r_0 === nothing ? zero(T) : r_0,
+                  r_1=r_1 === nothing ? zero(T) : r_1, margin=margin,
+                  w_ramp=w_ramp,
                   ρ_ramp=ρ_ramp, target=target, refinement=refinement,
                   horizon=horizon, bounds=bounds, chunk=chunk)
 end
@@ -736,9 +784,14 @@ every hook in this package: the initial data at `t = 0`, the error
 reference at the end of a chunk, the Dirichlet data at every ghost fill
 (`CLAUDE.md`, "Hooks depend on time").
 """
-function state_callback(case::GHCase{T}, t) where {T}
+function state_callback(case::GHCase{T}, t; interior=case.interior) where {T}
     bg = case.background
-    int = case.interior
+    int = interior
+    int isa FittedSpec && throw(ArgumentError(
+        "this case's interior is a FittedSpec, the rule a tracked geometry is " *
+        "built by: the core rule needs the geometry itself — pass `interior " *
+        "= fitted_interior(…)`, which is what evolve! does for the initial " *
+        "data (step 8d)."))
     tt = T(t)
     return AllVariables(x -> case_state_tuple(bg, int, tt, x))
 end
@@ -754,5 +807,5 @@ call every study makes twice, and because a field set filled from a
 *different* layout than the state's would sample the solution at
 different points (TreeWave's note on the error field set).
 """
-fill_exact!(fs::FieldSet, case::GHCase, t) =
-    fill_by_coordinates!(state_callback(case, t), fs)
+fill_exact!(fs::FieldSet, case::GHCase, t; interior=case.interior) =
+    fill_by_coordinates!(state_callback(case, t; interior=interior), fs)

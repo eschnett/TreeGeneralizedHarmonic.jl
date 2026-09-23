@@ -47,10 +47,13 @@
 #     and grid are `Float64` whatever the run computes in, as the analysis
 #     record is (`driver.jl`). The interpolation runs in the field set's
 #     own `T` and the result is converted once, at the provider's exit.
-#   * **The finder is a diagnostic, not a tracker.** Nothing here feeds
-#     back into the layer, the mesh or the gauge; `CODE.md` says a run in
-#     which the found horizon and the analytic center disagree by more
-#     than a few finest spacings has found a bug.
+#   * **The finder is a diagnostic, not a tracker — in this file.** Nothing
+#     here feeds back into the layer, the mesh or the gauge; `CODE.md` says a
+#     run in which the found horizon and the analytic center disagree by
+#     more than a few finest spacings has found a bug. From step 8d a case
+#     may ask for its layer to follow the found horizon, and then the answer
+#     is fed back — by `tracking.jl`, from the named tuple this file returns,
+#     and nowhere here.
 
 """
     Horizon(T = Float64; every = 1, N = 16, r_seed = 0, spin = true,
@@ -268,9 +271,49 @@ end
     return r² ≥ m.r_1 * m.r_1
 end
 
+# On the tracked geometry (step 8d) the evolved region is `r ≥ r_1(n̂)`, and
+# the per-axis nearest lattice point is no longer the one that decides: the
+# surface is not a sphere. So the guard is exact **by enumeration** where the
+# shape can matter — the nearest point outside the offset surface's bounding
+# sphere `r_out − offset` passes the whole footprint, one inside `r_in −
+# offset` refuses it, and in between every one of the `n³` lattice points is
+# classified by the same `is_evolved` the norms use **(proposed in step 8d**,
+# over `PLAN.md`'s conservative "use the bounding sphere `r_in − offset`",
+# which would let a footprint read the layer's outer part wherever the
+# horizon is farther out than its smallest radius — on harmonic Kerr's
+# equator, by more than the whole margin**)**.
+@inline function footprint_evolved(m::ShapeMask{T}, x0, h::T,
+                                   ::Val{n}) where {T,n}
+    r² = zero(T)
+    for d in 1:3
+        k = clamp(floorint((m.center[d] - x0[d]) / h + T(1 // 2)), 0, n - 1)
+        δ = x0[d] + T(k) * h - m.center[d]
+        r² += δ * δ
+    end
+    lo = m.r_in - m.offset
+    hi = m.r_out - m.offset
+    r² ≥ hi * hi && return true
+    r² < lo * lo && return false
+    for k3 in 0:(n - 1), k2 in 0:(n - 1), k1 in 0:(n - 1)
+        p = (x0[1] + T(k1) * h, x0[2] + T(k2) * h, x0[3] + T(k3) * h)
+        is_evolved(m, p) || return false
+    end
+    return true
+end
+
 # The refusal, dispatched on the mask so that the trivial one carries no
 # message about a radius it does not have.
 footprint_error(::AllPoints, x, n) = ErrorException("unreachable")
+
+footprint_error(m::ShapeMask, x, n) = ArgumentError(
+    "the interpolation footprint of $(Tuple(x)) reaches below the tracked " *
+    "layer's offset surface r_h(n̂) − $(m.offset) around $(Tuple(m.center)) " *
+    "(its radius lies between $(m.r_in - m.offset) and " *
+    "$(m.r_out - m.offset)): the $(n)³ points this query would read are not " *
+    "all in the evolved region, and the layer and the frozen core are not a " *
+    "numerical solution (CODE.md, \"The interior\"). The horizon lies outside " *
+    "the layer by the margin m, and so must everything interpolated from " *
+    "the state.")
 
 footprint_error(m::InteriorMask, x, n) = ArgumentError(
     "the interpolation footprint of $(Tuple(x)) reaches inside r_1 = " *
@@ -577,13 +620,24 @@ end
 
 """
     find_gh_horizon(p::GHProblem, u, t; every keyword of `Horizon`,
-                    origin = the analytic center, hlm = nothing)
+                    center = the analytic center, origin = center,
+                    hlm = nothing)
 
 Find the apparent horizon of the state `u` at time `t` and return
 everything `CODE.md`'s analysis table asks of it:
 
     (; success, iters, origin, center, center_offset, r_min, r_mean, r_max,
-       area, M_irr, J, spin_axis, M_ch, hlm, grid, H_norm, spin_success)
+       origin_r_min, origin_r_mean, origin_r_max, area, M_irr, J, spin_axis,
+       M_ch, hlm, grid, H_norm, spin_success)
+
+`center` is the point `r_min`, `r_mean`, `r_max` and `center_offset` are
+measured from — the analytic center `c(t)` unless given, which is step 7's
+choice for a diagnostic of the analytic hole; a tracked run passes its
+tracked center predicted to `t`, so that `center_offset` is the track's
+prediction error (added in step 8d). `origin_r_min`, `origin_r_mean` and
+`origin_r_max` are the same radii about the surface's own recentred
+`origin`, which is what the shape `hlm` describes and what a tracked
+geometry is built from.
 
 GHSO2's `find_gh_horizon` (`notes/methods-ghso2.md`, "Apparent horizons and
 spin") composed out of this package's mesh: `ApparentHorizonFinder`'s fast
@@ -604,10 +658,12 @@ state itself is not modified — the scatter writes `p.U` from `u`, which is
 what every monitor in this package does before it reads a stencil.
 
 The seed is `CODE.md`'s: the sphere `(origin, r_seed)` on the first find,
-and on every later one the previous `hlm` **recentred on `c(t)`** — the
-analytic center, not the previous origin, because the layer and the mesh
-follow the analytic center and a shape that drifted with the surface would
-seed the next find from a worse place than the case's own answer.
+and on every later one the previous `hlm` **recentred on `origin`** — by
+default the analytic center, not the previous origin, because the layer and
+the mesh follow the analytic center and a shape that drifted with the
+surface would seed the next find from a worse place than the case's own
+answer; a tracked run's layer follows the track, and it passes the tracked
+center instead (step 8d).
 
 A failed *spin* leaves `J = NaN` and `spin_success = false` without failing
 the find, which is GHSO2's behaviour: the area and the location are still
@@ -616,8 +672,8 @@ own diagnostics are `iters` and `H_norm`.
 """
 function find_gh_horizon(p::GHProblem{T,G,q}, u, t; N::Integer=16,
                          r_seed=nothing, origin=nothing, hlm=nothing,
-                         spin::Bool=true, unif_tol=1.0e-8, atol=0.0,
-                         maxiters::Integer=1000,
+                         center=nothing, spin::Bool=true, unif_tol=1.0e-8,
+                         atol=0.0, maxiters::Integer=1000,
                          verbosity::Integer=0) where {T,G,q}
     case = p.case
     scatter!(p.U, u)
@@ -628,9 +684,12 @@ function find_gh_horizon(p::GHProblem{T,G,q}, u, t; N::Integer=16,
         fill_ghosts!(p.U, p.schedule; boundary=boundary)
     end
 
-    center = center_at(case.center, T(t))
-    c64 = SVector{3,Float64}(tofloat64(center[1]), tofloat64(center[2]),
-                             tofloat64(center[3]))
+    # The point the radii are measured from (step 8d): the analytic center
+    # unless the caller names another — the driver of a tracked run passes
+    # the tracked center, predicted to `t`.
+    c_at = center === nothing ? center_at(case.center, T(t)) : center
+    c64 = SVector{3,Float64}(tofloat64(c_at[1]), tofloat64(c_at[2]),
+                             tofloat64(c_at[3]))
     x0 = origin === nothing ? c64 : SVector{3,Float64}(Float64(origin[1]),
                                                        Float64(origin[2]),
                                                        Float64(origin[3]))
@@ -660,6 +719,10 @@ function find_gh_horizon(p::GHProblem{T,G,q}, u, t; N::Integer=16,
         "values $(length(θs)): horizon_radii weights the first axis by " *
         "sin θ, which assumes the (θ, φ) layout EquiangularGrid has."))
     r_min, r_mean, r_max = horizon_radii(points, θs, c64)
+    # And about the surface's own recentred origin (added in step 8d): the
+    # radii of the shape `hlm` describes, which is what a tracked geometry is
+    # an offset of.
+    o_min, o_mean, o_max = horizon_radii(points, θs, result.origin)
 
     area = result.area
     M_irr = sqrt(area / (16π))
@@ -672,7 +735,8 @@ function find_gh_horizon(p::GHProblem{T,G,q}, u, t; N::Integer=16,
 
     return (success=result.success, iters=result.iters, origin=result.origin,
             center=c64, center_offset=sqrt(sum(abs2, result.origin - c64)),
-            r_min=r_min, r_mean=r_mean, r_max=r_max, area=area, M_irr=M_irr,
+            r_min=r_min, r_mean=r_mean, r_max=r_max, origin_r_min=o_min,
+            origin_r_mean=o_mean, origin_r_max=o_max, area=area, M_irr=M_irr,
             J=J, spin_axis=axis, M_ch=M_ch, hlm=result.hlm, grid=result.grid,
             H_norm=result.H_norm, spin_success=spin_success)
 end

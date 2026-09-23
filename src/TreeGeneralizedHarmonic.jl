@@ -51,6 +51,8 @@ module TreeGeneralizedHarmonic
 using TreeAMR
 
 import SpacetimeMetrics
+using AbstractSphericalHarmonics: EquiangularGrid, SphereGrid, ash_grid_size,
+                                  ash_point_coord, ash_resample, ash_transform
 using ApparentHorizonFinder: ADMVars, find_horizon, horizon_grid,
                              horizon_points
 using KernelAbstractions: @Const, @index, @kernel
@@ -97,7 +99,19 @@ export HoleCenter, center_at, Interior, with_ρ_max, interior_variant, layer_tar
 export interior_profiles, is_frozen, in_layer, core_position, smoothstep
 export InteriorMask, ShellMask, interior_mask
 export horizon_min_radius, horizon_max_radius, singular_radius, hole_mass
-export layer_spacing, check_interior_radii
+export layer_spacing, check_interior_radii, layer_mask, shell_mask
+export geometry_radii, layer_radii
+
+# The tracked geometry (step 8d): the real harmonics, the kernel argument, its
+# masks and its checks — and, in `tracking.jl`, the track it is built from
+export real_harmonic_index, real_from_complex, complex_from_real
+export shape_series, shape_bounds, shape_sample_directions
+export analytic_horizon_radius, FittedSpec, layer_cells
+export FittedInterior, shape_radius, interior_point, fitted_geometry
+export ShapeMask, ShapeBand, geometry_spacing
+export HorizonTrack, TrackLostError, seed_track, update_track, track_center
+export real_shape, analytic_shape, fitted_interior, surface_shift
+export axis_dispersion, margin_efolds
 
 # The range projection (step 8b): the third and last writer of the state,
 # and the validity monitor
@@ -154,6 +168,10 @@ include("refinement.jl")
 # After `evolution.jl` (it reads a `GHProblem`'s field set, `q` and
 # interior) and before `driver.jl`, which calls it once every `k`-th chunk.
 include("horizon.jl")
+# After `horizon.jl` (the track is updated from a find, and its geometry's
+# leakage is read through `locate_block`) and before `driver.jl`, which
+# builds a geometry from it once per chunk (added in step 8d).
+include("tracking.jl")
 include("driver.jl")
 
 end

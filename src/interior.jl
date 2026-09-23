@@ -276,12 +276,6 @@ interior_variant(::Interior{T,V}) where {T,V} = V
 # same on a case with a hole and one without, without a branch of their own.
 @inline interior_radius(::Nothing, t, x) = -one(typeof(x[1]))
 
-# Whether the point is inside the damping layer proper: the region the
-# interior residual is measured over, and the only region where `u_exact`
-# is evaluated during an evaluation.
-@inline in_layer(::Nothing, r) = false
-@inline in_layer(int::Interior, r) = (int.r_0 ≤ r) & (r < int.r_1)
-
 @inline function interior_radius(int::Interior{T}, t, x) where {T}
     c = center_at(int.center, t)
     d1 = x[1] - c[1]
@@ -289,6 +283,40 @@ interior_variant(::Interior{T,V}) where {T,V} = V
     d3 = x[3] - c[3]
     return sqrt(d1 * d1 + d2 * d2 + d3 * d3)
 end
+
+"""
+    in_layer(interior, t, x) -> Bool
+
+Whether the point `x` at time `t` is inside the damping layer proper: the
+region the interior residual is measured over, and the only region where
+`u_exact` is evaluated during an evaluation — `r_0 ≤ r < r_1` for the
+sphere of an [`Interior`](@ref), and `r_0(n̂) ≤ r < r_1(n̂)` below the
+offset surface of a [`FittedInterior`](@ref).
+
+**A position and a time, not a radius (amended in step 8d).** It took `r`
+until the layer stopped being a sphere: once the layer's radii depend on the
+direction, a radius alone does not say whether a point is in it, and the
+protocol is the same for both types so that no caller has to know which one
+it holds. `nothing` — no hole — has no layer.
+"""
+@inline in_layer(::Nothing, t, x) = false
+
+@inline function in_layer(int::Interior, t, x)
+    r = interior_radius(int, t, x)
+    return (int.r_0 ≤ r) & (r < int.r_1)
+end
+
+# The kernel's view of an interior at one point (added in step 8d): what the
+# three predicates below and the profiles are evaluated on. For the sphere it
+# is the radius `r` itself, so the kernel's arithmetic on an `Interior` is
+# exactly what it was before a second geometry existed; for the fitted
+# geometry it is the radius together with the two surfaces' radii along the
+# ray ([`interior_point`](@ref) of a `FittedInterior`).
+@inline interior_point(int::Interior, t, x) = interior_radius(int, t, x)
+
+# Whether the point is evolved by the unmodified equations — `r ≥ r_1`, the
+# boundary included, as it always was.
+@inline is_outside(int::Interior, r) = r ≥ int.r_1
 
 """
     is_frozen(int::Interior, r) -> Bool
@@ -323,16 +351,29 @@ the outer one) of the layer's width.
 variant rather than from a zero `ρ_max`, so that `:frozen` and a badly
 configured `:damped` are not the same run.
 """
-@inline function interior_profiles(int::Interior{T}, r) where {T}
-    s = (r - int.r_0) / (int.r_1 - int.r_0)
-    w = smoothstep(s / int.w_ramp)
-    ρ = int.ρ_max * smoothstep((1 - s) / int.ρ_ramp)
+@inline interior_profiles(int::Interior{T}, r) where {T} =
+    _layer_profiles(r, int.r_0, int.r_1, int.ρ_max, int.w_ramp, int.ρ_ramp)
+
+@inline interior_profiles(int::Interior{T,:frozen}, r) where {T} =
+    (_layer_w(r, int.r_0, int.r_1, int.w_ramp), zero(T))
+
+# The two profiles between the core's radius `r_0` and the layer's `r_1`,
+# written **once** for both geometries (step 8d): the sphere passes its two
+# radii and the fitted geometry the two radii of its surfaces along the ray,
+# and the arithmetic is the same expression in the same order, which is what
+# makes a `FittedInterior` holding a sphere bit for bit an `Interior` —
+# `test/tracking_tests.jl` asserts it on a right-hand side. It is the
+# expression step 5 wrote, unchanged.
+@inline function _layer_profiles(r, r_0, r_1, ρ_max, w_ramp, ρ_ramp)
+    s = (r - r_0) / (r_1 - r_0)
+    w = smoothstep(s / w_ramp)
+    ρ = ρ_max * smoothstep((1 - s) / ρ_ramp)
     return w, ρ
 end
 
-@inline function interior_profiles(int::Interior{T,:frozen}, r) where {T}
-    s = (r - int.r_0) / (int.r_1 - int.r_0)
-    return smoothstep(s / int.w_ramp), zero(T)
+@inline function _layer_w(r, r_0, r_1, w_ramp)
+    s = (r - r_0) / (r_1 - r_0)
+    return smoothstep(s / w_ramp)
 end
 
 """
@@ -439,6 +480,27 @@ interior_mask(::Nothing, t) = AllPoints()
 interior_mask(int::Interior{T}, t) where {T} =
     InteriorMask{T}(center_at(int.center, t), int.r_1)
 
+"""
+    layer_mask(interior, t) -> mask
+    shell_mask(interior, t, width) -> mask
+
+The two bands the validity monitor and the variants' comparison read, as
+masks: **the layer** itself, `r_0 ≤ r < r_1`, and **the shell** of `width`
+just outside it, `r_1 ≤ r < r_1 + width` — a [`ShellMask`](@ref) about
+`c(t)` for the sphere, and the same two bands below and above the offset
+surface for a [`FittedInterior`](@ref) (a [`ShapeBand`](@ref)).
+
+Added in step 8d so that no caller builds a `ShellMask` from `r_0` and `r_1`
+itself: once the layer follows a surface, "the `G` points outside `r_1`" is
+a band about that surface, and the caller should not have to know which
+geometry it holds.
+"""
+layer_mask(int::Interior{T}, t) where {T} =
+    ShellMask{T}(center_at(int.center, t), int.r_0, int.r_1)
+
+shell_mask(int::Interior{T}, t, width) where {T} =
+    ShellMask{T}(center_at(int.center, t), int.r_1, int.r_1 + T(width))
+
 # --- where the horizon is, analytically -------------------------------------
 #
 # `CODE.md`: `r_h,min` is the smallest **coordinate** distance from the
@@ -494,6 +556,33 @@ horizon_min_radius(m::SpacetimeMetrics.BoostedMetric) =
     sqrt(1 - (m.velocity[1]^2 + m.velocity[2]^2 + m.velocity[3]^2))
 horizon_max_radius(m::SpacetimeMetrics.BoostedMetric) =
     horizon_max_radius(m.metric)
+
+"""
+    geometry_radii(interior, background) -> (r_min, r_max)
+
+The smallest and largest coordinate radius of the **horizon the layer is
+placed inside**, about the interior's own center: the background's analytic
+radii ([`horizon_min_radius`](@ref), [`horizon_max_radius`](@ref)) for step
+5's sphere, and the tracked shape's bounding radii `r_in`, `r_out` for a
+[`FittedInterior`](@ref), whose background is not consulted.
+
+**One accessor for both (added in step 8d)**, so that the refinement's level
+floor ([`horizon_floor_level`](@ref), [`level_bounds`](@ref)) reads the
+horizon the layer actually follows: a floor derived from the analytic radii
+around a tracked layer would be a statement about a surface nobody measured.
+"""
+geometry_radii(int::Interior{T}, background) where {T} =
+    (T(horizon_min_radius(background)), T(horizon_max_radius(background)))
+
+"""
+    layer_radii(interior) -> (r_0, r_1)
+
+The layer's innermost radii: the sphere's `r_0` and `r_1`, and for a
+[`FittedInterior`](@ref) the smallest radius of its core surface and of its
+offset surface, `r_in − offset − thickness` and `r_in − offset` — what the
+level floor's two requirements are stated in (added in step 8d).
+"""
+layer_radii(int::Interior) = (int.r_0, int.r_1)
 
 """
     hole_mass(background) -> T
@@ -657,7 +746,9 @@ do not remove the assertion, and do not lower `m`. The message names which
 of the two failed, by how much, and the three remedies.
 """
 function check_interior_radii(forest::Forest{3}, int::Interior{T}, background,
-                              G::Integer; t=zero(T)) where {T}
+                              G::Integer; t=zero(T), center=nothing) where {T}
+    # `center` is the tracked geometry's (step 8d): the sphere's own center
+    # is the analytic one, so there is no distance between the two to add.
     int.margin ≥ G + 1 || throw(ArgumentError(
         "the interior's margin is m = $(int.margin) but the ghost width is " *
         "G = $G, and CODE.md's floor is m ≥ G + 1 = $(G + 1): the margin has " *
@@ -703,4 +794,829 @@ function check_interior_radii(forest::Forest{3}, int::Interior{T}, background,
         "choice."))
     return (h=h, nblocks=nb, r_h_min=r_h, allowed=allowed, thickness=thickness,
             needed=needed)
+end
+
+# --- the tracked geometry (step 8d) -----------------------------------------
+#
+# `CODE.md`, "The interior" — "The tracked geometry" — and `PLAN.md`'s
+# finding 3. Step 5's layer is a sphere about the hole's *analytic* center;
+# from step 8d it can instead follow the **found** horizon: a surface
+# `r_h(n̂)` about the *tracked* center, held as real spherical-harmonic
+# coefficients, and the layer keyed on the **depth**
+#
+#     d = r_h(n̂) − offset − |x − c(t)|,        offset = m h,
+#
+# below the offset surface `r_1(n̂) = r_h(n̂) − m h`. The sphere is the `l = 0`
+# case of this geometry, and a `FittedInterior` holding a sphere is bit for
+# bit an `Interior` — the profiles are one function, `_layer_profiles`, and
+# the surfaces' radii along the ray are what it is handed.
+#
+# Everything here is still a function of position and time and of the
+# *track*; nothing knows about a block (the geometry's spacing `h` is a
+# number it was built with, and `check_interior_radii` is still the only
+# thing that looks at a mesh).
+
+# --- real spherical harmonics ------------------------------------------------
+
+"""
+    real_harmonic_index(l, m) -> Int
+
+Where the real coefficient of degree `l` and order `m` lives in a shape
+vector: **`l² + l + m + 1`, the same slot as the complex canonical layout of
+`AbstractSphericalHarmonics` (`ash_mode_index`)**, with `m ≥ 0` holding the
+`l0` and cosine coefficients and `m < 0` the sine coefficient of order `|m|`
+(proposed in step 8d). The real harmonics are
+
+    ỹ_l0 = Y_l0,    ỹ_lm^c = √2 Re Y_lm,    ỹ_lm^s = −√2 Im Y_lm   (m ≥ 1)
+
+with `Y_lm` the orthonormal, Condon–Shortley-phased harmonics of
+`AbstractSphericalHarmonics` (`sYlm(0, l, m, θ, φ)`), and a real function
+`f = Σ_lm c_lm Y_lm` — whose coefficients obey `c_{l,−m} = (−1)^m c̄_lm` —
+is `Σ a_l0 ỹ_l0 + Σ_{m ≥ 1} (a_lm^c ỹ_lm^c + a_lm^s ỹ_lm^s)` with
+
+    a_l0 = Re c_l0,    a_lm^c = √2 Re c_lm,    a_lm^s = √2 Im c_lm .
+
+[`real_from_complex`](@ref) and [`complex_from_real`](@ref) are the two
+directions, and `test/tracking_tests.jl` holds the conversion against
+`sYlm` and `ash_evaluate` to roundoff. **Step 8e's fit shares this ordering
+and this conversion**, so that a fitted target and the shape it is fitted on
+are read by the same recurrence ([`shape_series`](@ref)).
+"""
+@inline real_harmonic_index(l::Integer, m::Integer) = l * l + l + m + 1
+
+"""
+    real_from_complex(c, lmax) -> Vector{Float64}
+    complex_from_real(a, lmax) -> Vector{ComplexF64}
+
+The real coefficients of the real function whose complex coefficients (in
+the canonical layout) are `c`, and back — [`real_harmonic_index`](@ref)'s
+convention, truncated or zero-padded to `lmax` (the resampling of
+`AbstractSphericalHarmonics.ash_resample`, whose layout is the same).
+
+`real_from_complex` reads only `m ≥ 0`: the reality condition makes the
+negative orders a copy, and a vector that violated it would describe a
+complex function, which a horizon's radius is not.
+"""
+function real_from_complex(c::AbstractVector{<:Complex}, lmax::Integer)
+    L = isqrt(length(c)) - 1
+    (L + 1)^2 == length(c) || throw(ArgumentError(
+        "a complex coefficient vector in the canonical layout has (L+1)² " *
+        "entries, got $(length(c))"))
+    a = zeros(Float64, (lmax + 1)^2)
+    s2 = sqrt(2.0)
+    for l in 0:min(L, lmax), m in 0:l
+        z = c[real_harmonic_index(l, m)]
+        if m == 0
+            a[real_harmonic_index(l, 0)] = real(z)
+        else
+            a[real_harmonic_index(l, m)] = s2 * real(z)
+            a[real_harmonic_index(l, -m)] = s2 * imag(z)
+        end
+    end
+    return a
+end
+
+function complex_from_real(a::AbstractVector{<:Real}, lmax::Integer)
+    L = isqrt(length(a)) - 1
+    (L + 1)^2 == length(a) || throw(ArgumentError(
+        "a real coefficient vector has (L+1)² entries, got $(length(a))"))
+    c = zeros(ComplexF64, (lmax + 1)^2)
+    is2 = 1 / sqrt(2.0)
+    for l in 0:min(L, lmax)
+        c[real_harmonic_index(l, 0)] = a[real_harmonic_index(l, 0)]
+        for m in 1:l
+            z = is2 * complex(a[real_harmonic_index(l, m)],
+                              a[real_harmonic_index(l, -m)])
+            c[real_harmonic_index(l, m)] = z
+            c[real_harmonic_index(l, -m)] = (isodd(m) ? -1 : 1) * conj(z)
+        end
+    end
+    return c
+end
+
+# One term of the series, `a ỹ` for `m = 0` and `a^c ỹ^c + a^s ỹ^s` above it,
+# with `q` the reduced Legendre value and `C + iS = (n_x + i n_y)^m`.
+@inline function _shape_term(shape, l::Int, m::Int, q, C, S, s2)
+    if m == 0
+        return (@inbounds shape[l * l + l + 1]) * q
+    else
+        ac = @inbounds shape[l * l + l + m + 1]
+        as = @inbounds shape[l * l + l - m + 1]
+        return s2 * q * (ac * C - as * S)
+    end
+end
+
+"""
+    shape_series(shape::SVector, lmax, n̂) -> T
+
+`Σ_lm a_lm ỹ_lm(n̂)` for the real coefficients `shape` of
+[`real_harmonic_index`](@ref)'s layout, at the unit vector `n̂` — the
+kernel-side evaluation of a tracked horizon's radius.
+
+**No angle is formed.** `Y_lm = q_lm(cos θ) sin^m θ e^{imφ}` with `q_lm` the
+normalized associated Legendre function divided by `sin^m θ`, and
+`sin^m θ e^{imφ} = (n_x + i n_y)^m` for a unit vector — so the azimuthal
+factor is the Chebyshev recurrence for `cos mφ, sin mφ` *multiplied through
+by `sin^m θ`*, a complex power of `(n_x, n_y)`, and the polar one the fully
+normalized recurrences in `z = n_z`,
+
+    q_00 = 1/√(4π),   q_mm = −√((2m+1)/2m) q_{m−1,m−1},
+    q_{m+1,m} = √(2m+3) z q_mm,
+    q_lm = √((4l²−1)/(l²−m²)) (z q_{l−1,m} − √(((l−1)²−m²)/(4(l−1)²−1)) q_{l−2,m}),
+
+which is Condon–Shortley's phase. Both are polynomials in `n̂`, so there is
+no `atan`, no division by `sin θ`, and no special case on the axis — the
+guard the Chebyshev recurrence would need there is what multiplying it
+through by `sin^m θ` removes.
+
+The loop bound is the runtime `lmax`, and the coefficients are read by a
+runtime index, so a kernel is compiled per length of `shape` and not per
+degree of the terms it happens to hold. No allocation, no `return` inside a
+kernel body (it is an `@inline` function *called* from one), generic in `T`:
+the recurrence coefficients are square roots of exact integers in `T`.
+"""
+@inline function shape_series(shape::SVector{NM,T}, lmax::Int, n) where {NM,T}
+    x = T(n[1])
+    y = T(n[2])
+    z = T(n[3])
+    s2 = sqrt(T(2))
+    acc = zero(T)
+    qmm = inv(sqrt(4 * T(π)))
+    C = one(T)
+    S = zero(T)
+    m = 0
+    while m ≤ lmax
+        if m > 0
+            qmm = -sqrt(T(2m + 1) / T(2m)) * qmm
+            C, S = C * x - S * y, C * y + S * x
+        end
+        acc += _shape_term(shape, m, m, qmm, C, S, s2)
+        if m + 1 ≤ lmax
+            qa = qmm
+            qb = sqrt(T(2m + 3)) * z * qmm
+            acc += _shape_term(shape, m + 1, m, qb, C, S, s2)
+            l = m + 2
+            while l ≤ lmax
+                α = sqrt(T(4 * l * l - 1) / T(l * l - m * m))
+                β = sqrt(T((l - 1) * (l - 1) - m * m) /
+                         T(4 * (l - 1) * (l - 1) - 1))
+                qc = α * (z * qb - β * qa)
+                acc += _shape_term(shape, l, m, qc, C, S, s2)
+                qa = qb
+                qb = qc
+                l += 1
+            end
+        end
+        m += 1
+    end
+    return acc
+end
+
+# The directions a shape's bounding radii are sampled over: both poles, and
+# `n_θ` interior colatitudes `π t/(n_θ + 1)` (odd `n_θ`, so the equator is
+# one) by `2 n_θ` longitudes — four times the grid a degree-`lmax` series
+# needs, with the two directions an axisymmetric horizon has its extremes in
+# sampled exactly.
+function shape_sample_directions(lmax::Integer)
+    nθ = 4 * Int(lmax) + 3
+    nφ = 2 * nθ
+    dirs = SVector{3,Float64}[SVector(0.0, 0.0, 1.0), SVector(0.0, 0.0, -1.0)]
+    for t in 1:nθ, p in 0:(nφ - 1)
+        θ = π * t / (nθ + 1)
+        φ = 2π * p / nφ
+        push!(dirs, SVector(sin(θ) * cos(φ), sin(θ) * sin(φ), cos(θ)))
+    end
+    return dirs
+end
+
+"""
+    shape_bounds(shape::SVector, lmax) -> (r_in, r_out)
+
+The smallest and largest value of the series over
+[`shape_sample_directions`](@ref) — the bounding spheres of the surface, in
+the shape's own type.
+
+They are not a rigorous bound on the series between the samples, and they
+do not have to be: the geometry is **defined** as the series clamped into
+`[r_in, r_out]` ([`shape_radius`](@ref)), so the fast paths that skip the
+series outside `r_out − offset` and inside `r_in − offset − thickness` are
+exact shortcuts of the evaluation rather than approximations of it
+(proposed in step 8d). Where the true surface pokes past a sampled extreme
+it does so by the series' own variation between samples, a small fraction
+of the shape's `l ≥ 1` amplitude; the clamp flattens it there.
+"""
+function shape_bounds(shape::SVector{NM,T}, lmax::Integer) where {NM,T}
+    lo = floatmax(T)
+    hi = -floatmax(T)
+    for n in shape_sample_directions(lmax)
+        v = shape_series(shape, Int(lmax), SVector{3,T}(n))
+        lo = min(lo, v)
+        hi = max(hi, v)
+    end
+    return lo, hi
+end
+
+# --- the analytic horizon, for the seed ---------------------------------------
+
+"""
+    analytic_horizon_radius(background, n̂) -> T
+
+The coordinate distance from the hole's center to its horizon along the
+unit vector `n̂`, for the backgrounds this package knows — the surface the
+tracked geometry is **seeded** with before the first find (step 8d).
+
+Both Kerr charts put the horizon on the oblate spheroid
+`(x² + y²)/(R² + a²) + z²/R² = 1` of their own radial coordinate — `R = r₊ =
+M + √(M² − a²)` for `KerrSchild`, `R = r₊ − M = √(M² − a²)` for `Harmonic` —
+so along `n̂`
+
+    r_h(θ) = R √((R² + a²)/(R² + a² cos²θ)),    cos θ = n̂_z,
+
+which is `R` on the axis and `√(R² + a²)` on the equator:
+[`horizon_min_radius`](@ref) and [`horizon_max_radius`](@ref).
+`SpacetimeMetrics` exposes no horizon of its own, so `test/tracking_tests.jl`
+checks this against the charts' quartic for the radial coordinate instead.
+`translate` leaves the shape alone (it moves the center, which is the case's
+[`HoleCenter`](@ref)); `rotate` turns it, `r_h(Rᵀ n̂)`; `boost` contracts it
+along `v` by `√(1 − v²)` — the lab-frame point `ρ n̂` sits at `ρ n̂′`,
+`n̂′ = n̂ + (γ − 1)(v̂·n̂)v̂`, in the hole's rest frame, where the horizon is
+static, so `ρ = r_h(n̂′/|n̂′|)/|n̂′|`.
+"""
+function analytic_horizon_radius end
+
+@inline function _spheroid_radius(R, a, cz)
+    R² = R * R
+    a² = a * a
+    return R * sqrt((R² + a²) / (R² + a² * cz * cz))
+end
+
+analytic_horizon_radius(ks::KerrSchild, n) =
+    _spheroid_radius(horizon_min_radius(ks), ks.spin, n[3])
+analytic_horizon_radius(ha::Harmonic, n) =
+    _spheroid_radius(horizon_min_radius(ha), ha.spin, n[3])
+analytic_horizon_radius(m::SpacetimeMetrics.TranslatedMetric, n) =
+    analytic_horizon_radius(m.metric, n)
+
+function analytic_horizon_radius(m::SpacetimeMetrics.RotatedMetric, n)
+    R = m.R
+    # `x_old = Rᵀ x`, spatial block only.
+    n_old = SVector(R[2, 2] * n[1] + R[3, 2] * n[2] + R[4, 2] * n[3],
+                    R[2, 3] * n[1] + R[3, 3] * n[2] + R[4, 3] * n[3],
+                    R[2, 4] * n[1] + R[3, 4] * n[2] + R[4, 4] * n[3])
+    return analytic_horizon_radius(m.metric, n_old)
+end
+
+function analytic_horizon_radius(m::SpacetimeMetrics.BoostedMetric, n)
+    v = m.velocity
+    β² = v[1] * v[1] + v[2] * v[2] + v[3] * v[3]
+    iszero(β²) && return analytic_horizon_radius(m.metric, n)
+    γ = 1 / sqrt(1 - β²)
+    vn = (v[1] * n[1] + v[2] * n[2] + v[3] * n[3]) / β²
+    n′ = SVector(n[1] + (γ - 1) * vn * v[1], n[2] + (γ - 1) * vn * v[2],
+                 n[3] + (γ - 1) * vn * v[3])
+    s = sqrt(n′[1] * n′[1] + n′[2] * n′[2] + n′[3] * n′[3])
+    return analytic_horizon_radius(m.metric, n′ / s) / s
+end
+
+analytic_horizon_radius(bg::AbstractMetric, n) = horizon_min_radius(bg)
+
+# --- what a case holds for the tracked geometry -------------------------------
+
+"""
+    FittedSpec(T = Float64; variant = :damped, margin = 8, n_L = 0,
+               core_min = 2, lmax_shape = 4, ρ_max = 0, w_ramp = 1//2,
+               ρ_ramp = 1, max_misses = 3, α_trigger = 1//10,
+               target = nothing)
+
+What a [`GHCase`](@ref) holds as its `interior` for the **tracked**
+geometry (step 8d): not a layer, but the rule a layer is built by, once per
+chunk, from the tracked horizon ([`fitted_interior`](@ref)). The case is
+the hole; the geometry is a function of the run.
+
+- `variant` is `CODE.md`'s switch, as for [`Interior`](@ref); all three run
+  on the tracked geometry.
+- `margin` is `m`, the offset surface's depth below the found horizon in
+  spacings — `8`, step 8a's default (`PLAN.md`'s finding 3 uses `4` on
+  harmonic Kerr's equator and says the margin will want to depend on the
+  direction; one `m` for now).
+- `n_L` is the ramp in spacings; `0` means step 8c's rule,
+  `max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)` — `8` at `q = 2`, `12` at `q = 4` at
+  the default rate — which needs the scheme's `G` and is therefore resolved
+  by [`evolve!`](@ref), where `q` is known ([`layer_cells`](@ref)).
+- `core_min` is the smallest core the geometry may leave, in spacings:
+  `fitted_interior` refuses `r_in − (m + n_L + core_min) h ≤ 0` by name.
+- `lmax_shape` is the degree the found shape is truncated to.
+- `ρ_max = 0` means the driver's default rate `4/M` (step 8c′); a positive
+  number is this case's default rate instead. `w_ramp` and `ρ_ramp` are the
+  profiles' ramps; **`ρ_ramp = 1` and `w_ramp = 1/2` are step 8c's rule** —
+  `n_L` is the width over which `ρ` rises from `0` at the offset surface to
+  `ρ_max`, and `w` turns over in the inner half **(proposed in step 8d**:
+  step 5's `1/2`, `1/2` is the fixture's, and `n_L`'s calibration is for
+  the full ramp**)**.
+- `max_misses` is how many consecutive failed finds the track coasts
+  through before the run ends ([`update_track`](@ref)); `α_trigger` is the
+  lapse below which, over the evolved region, a find is forced at the next
+  chunk boundary whatever the cadence (the lapse-collapse trigger).
+- `target` is what the layer relaxes toward, as for [`Interior`](@ref).
+
+`isbits`: the numbers that have a "use the rule" value spell it `0`, since a
+`Union{Nothing, T}` field would not be.
+"""
+struct FittedSpec{T,V,X}
+    margin::Int
+    n_L::Int
+    core_min::Int
+    lmax_shape::Int
+    ρ_max::T
+    w_ramp::T
+    ρ_ramp::T
+    max_misses::Int
+    α_trigger::T
+    valvariant::Val{V}
+    target::X
+end
+
+function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
+                    margin::Integer=8, n_L::Integer=0, core_min::Integer=2,
+                    lmax_shape::Integer=4, ρ_max=zero(T), w_ramp=T(1 // 2),
+                    ρ_ramp=one(T), max_misses::Integer=3,
+                    α_trigger=T(1 // 10), target=nothing) where {T}
+    variant in INTERIOR_VARIANTS || throw(ArgumentError(
+        "the interior variant must be one of $(INTERIOR_VARIANTS), got " *
+        ":$variant; the tracked geometry runs CODE.md's three variants as " *
+        "the sphere does."))
+    margin ≥ 1 || throw(ArgumentError(
+        "the margin m is a number of spacings and must be at least 1, got " *
+        "$margin; CODE.md's default is 8 and its floor G + 1, which " *
+        "check_interior_radii asserts once the scheme's G is known."))
+    n_L ≥ 0 || throw(ArgumentError(
+        "the ramp n_L is a number of spacings, or 0 for step 8c's rule, got " *
+        "$n_L."))
+    core_min ≥ 1 || throw(ArgumentError(
+        "core_min is the smallest core the geometry may leave, in spacings, " *
+        "and must be at least 1, got $core_min: a core surface that reaches " *
+        "the center has no inside for the core rule to project onto."))
+    lmax_shape ≥ 0 || throw(ArgumentError(
+        "lmax_shape is a spherical-harmonic degree, got $lmax_shape."))
+    T(ρ_max) ≥ 0 || throw(ArgumentError(
+        "ρ_max is a relaxation rate, or 0 for the driver's default 4/M, got " *
+        "$ρ_max."))
+    wr, ρr = T(w_ramp), T(ρ_ramp)
+    (0 < wr ≤ 1 && 0 < ρr ≤ 1) || throw(ArgumentError(
+        "the ramp fractions must lie in (0, 1], got w_ramp = $wr and " *
+        "ρ_ramp = $ρr."))
+    max_misses ≥ 1 || throw(ArgumentError(
+        "max_misses counts failed finds the track may coast through and must " *
+        "be at least 1, got $max_misses."))
+    T(α_trigger) ≥ 0 || throw(ArgumentError(
+        "α_trigger is a lapse and must be non-negative (0 switches the " *
+        "trigger off), got $α_trigger."))
+    check_layer_target(target)
+    return FittedSpec{T,variant,typeof(target)}(
+        Int(margin), Int(n_L), Int(core_min), Int(lmax_shape), T(ρ_max), wr,
+        ρr, Int(max_misses), T(α_trigger), Val(variant), target)
+end
+
+interior_variant(::FittedSpec{T,V}) where {T,V} = V
+
+"""
+    layer_cells(G, ρ_max, M) -> Int
+
+Step 8c's rule for the ramp of a layer relaxing at `ρ_max` around a hole of
+mass `M`, in spacings: `n_L = max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)` — `8` at
+`q = 2` and `12` at `q = 4` at the default `4/M` (`CODE.md`, "The layer for
+an inexact target", measured at `q = 2` and **(proposed in step 8c)** for
+other orders).
+"""
+layer_cells(G::Integer, ρ_max, M) =
+    max(4 * Int(G), ceil(Int, G * cbrt(10 * Float64(ρ_max) * Float64(M))))
+
+# --- the kernel argument ------------------------------------------------------
+
+"""
+    FittedInterior(T = Float64; center, shape, lmax = √length − 1, offset,
+                   thickness, ρ_max = 0, variant = :damped, w_ramp = 1//2,
+                   ρ_ramp = 1//2, margin = 8, n_L = 0, h = 0,
+                   target = nothing, r_in = nothing, r_out = nothing)
+
+The damping layer on the **tracked** geometry (step 8d): the `isbits`
+kernel argument beside [`Interior`](@ref), sharing its variant `Val` — the
+right-hand-side kernel's `Val{INT}` is `:damped`, `:frozen` or `:pasted`
+for both — and its profiles.
+
+- `center` is a [`HoleCenter`](@ref): the **tracked** trajectory
+  ([`track_center`](@ref)), `c(t) = c_find + v_est (t − t_find)`, so every
+  consumer of a center — the masks, `interior_radius`, the range
+  projection's gate — works on it unchanged.
+- `shape` holds the real spherical-harmonic coefficients to `lmax` of the
+  horizon's radius `r_h(n̂)` about `center` ([`real_harmonic_index`](@ref)),
+  and `r_in`, `r_out` its bounding radii ([`shape_bounds`](@ref)): the
+  surface **is** the series clamped into `[r_in, r_out]`
+  ([`shape_radius`](@ref)).
+- `offset = m h` puts the offset surface `r_1(n̂) = r_h(n̂) − offset` the
+  margin inside the horizon, and `thickness = n_L h` the core surface
+  `r_0(n̂) = r_1(n̂) − thickness` the ramp inside that — the **depth**
+  `d = r_1(n̂) − r` is what the layer is keyed on.
+- `ρ_max`, `w_ramp`, `ρ_ramp` and `target` are [`Interior`](@ref)'s, with
+  the same meaning in the depth that they have in the radius there.
+- `margin`, `n_L` and `h` record the rule the geometry was built by — `m`,
+  the ramp in spacings, and the spacing — for the checks and the record;
+  no kernel reads them.
+
+The regions keep the sphere's conventions at their boundaries: a point on
+the offset surface is evolved, a point on the core surface is in the layer.
+"""
+struct FittedInterior{T,V,NM,X}
+    center::HoleCenter{T}
+    shape::SVector{NM,T}
+    lmax::Int
+    r_in::T
+    r_out::T
+    offset::T
+    thickness::T
+    ρ_max::T
+    w_ramp::T
+    ρ_ramp::T
+    margin::Int
+    n_L::Int
+    h::T
+    valvariant::Val{V}
+    target::X
+end
+
+function FittedInterior(::Type{T}=Float64; center, shape, lmax=nothing,
+                        offset, thickness, ρ_max=zero(T),
+                        variant::Symbol=:damped, w_ramp=T(1 // 2),
+                        ρ_ramp=T(1 // 2), margin::Integer=8, n_L::Integer=0,
+                        h=zero(T), target=nothing, r_in=nothing,
+                        r_out=nothing) where {T}
+    variant in INTERIOR_VARIANTS || throw(ArgumentError(
+        "the interior variant must be one of $(INTERIOR_VARIANTS), got " *
+        ":$variant."))
+    L = lmax === nothing ? isqrt(length(shape)) - 1 : Int(lmax)
+    (L + 1)^2 == length(shape) || throw(ArgumentError(
+        "a shape of degree lmax = $L has (lmax + 1)² = $((L + 1)^2) real " *
+        "coefficients, got $(length(shape)) (the layout is " *
+        "real_harmonic_index's)."))
+    c = center isa HoleCenter ? HoleCenter{T}(SVector{3,T}(center.c0),
+                                              SVector{3,T}(center.v)) :
+        HoleCenter(T, center)
+    sv = SVector{(L + 1)^2,T}(ntuple(i -> T(shape[i]), (L + 1)^2))
+    lo, hi = r_in === nothing || r_out === nothing ? shape_bounds(sv, L) :
+             (T(r_in), T(r_out))
+    off, th = T(offset), T(thickness)
+    wr, ρr = T(w_ramp), T(ρ_ramp)
+    0 < lo ≤ hi || throw(ArgumentError(
+        "the horizon's bounding radii must satisfy 0 < r_in ≤ r_out, got " *
+        "r_in = $lo, r_out = $hi: a shape that reaches the center is not " *
+        "the surface of a hole."))
+    (off > 0 && th > 0) || throw(ArgumentError(
+        "the offset m·h and the thickness n_L·h are lengths and must be " *
+        "positive, got offset = $off and thickness = $th."))
+    (lo - off) - th > 0 || throw(ArgumentError(
+        "the core surface r_h(n̂) − offset − thickness reaches the center: " *
+        "r_in = $lo, offset = $off, thickness = $th. The core rule projects " *
+        "the frozen core onto that surface along the ray, and a surface " *
+        "through the center has no inside — refine the mesh, so that the " *
+        "offset and the ramp, which are stated in spacings, shrink."))
+    (0 < wr ≤ 1 && 0 < ρr ≤ 1) || throw(ArgumentError(
+        "the ramp fractions must lie in (0, 1], got w_ramp = $wr and " *
+        "ρ_ramp = $ρr."))
+    T(ρ_max) ≥ 0 || throw(ArgumentError(
+        "the relaxation rate must satisfy ρ_max ≥ 0, got $ρ_max."))
+    margin ≥ 1 || throw(ArgumentError(
+        "the margin m is a number of grid points and must be at least 1, " *
+        "got $margin."))
+    check_layer_target(target)
+    return FittedInterior{T,variant,(L + 1)^2,typeof(target)}(
+        c, sv, L, lo, hi, off, th, T(ρ_max), wr, ρr, Int(margin), Int(n_L),
+        T(h), Val(variant), target)
+end
+
+with_ρ_max(int::FittedInterior{T,V,NM,X}, ρ_max) where {T,V,NM,X} =
+    FittedInterior{T,V,NM,X}(int.center, int.shape, int.lmax, int.r_in,
+                             int.r_out, int.offset, int.thickness, T(ρ_max),
+                             int.w_ramp, int.ρ_ramp, int.margin, int.n_L,
+                             int.h, int.valvariant, int.target)
+
+interior_variant(::FittedInterior{T,V}) where {T,V} = V
+
+@inline layer_target(::FittedInterior{T,V,NM,Nothing}, bg) where {T,V,NM} = bg
+@inline layer_target(int::FittedInterior, bg) = int.target
+
+geometry_radii(int::FittedInterior, background) = (int.r_in, int.r_out)
+
+layer_radii(int::FittedInterior) =
+    ((int.r_in - int.offset) - int.thickness, int.r_in - int.offset)
+
+# The surface: the series clamped into its bounding shell.
+@inline _surface_radius(shape, lmax, r_in, r_out, n) =
+    clamp(shape_series(shape, lmax, n), r_in, r_out)
+
+"""
+    shape_radius(int::FittedInterior, n̂) -> r_h
+
+The tracked horizon's coordinate radius along the unit vector `n̂` about the
+interior's center: [`shape_series`](@ref) clamped into `[r_in, r_out]`,
+which is what makes the geometry's fast paths exact.
+"""
+@inline shape_radius(int::FittedInterior, n) =
+    _surface_radius(int.shape, int.lmax, int.r_in, int.r_out, n)
+
+@inline function interior_radius(int::FittedInterior{T}, t, x) where {T}
+    c = center_at(int.center, t)
+    d1 = x[1] - c[1]
+    d2 = x[2] - c[2]
+    d3 = x[3] - c[3]
+    return sqrt(d1 * d1 + d2 * d2 + d3 * d3)
+end
+
+"""
+    interior_point(int::FittedInterior, t, x) -> (; r, r_1, r_0)
+
+The kernel's view of the tracked geometry at one point: the distance `r`
+from the tracked center and the radii of the offset surface and the core
+surface **along the ray through `x`**, `r_1 = r_h(n̂) − offset` and
+`r_0 = r_1 − thickness` — so that the depth is `d = r_1 − r` and the
+predicates and the profiles are the sphere's, in the ray's radii.
+
+**Two fast paths, both exact** (proposed in step 8d). Outside the offset
+surface's bounding sphere, `r ≥ r_out − offset`, the point is evolved
+whatever the direction; inside the core surface's, `r < r_in − offset −
+thickness`, it is frozen. Neither evaluates the series, and because the
+surface is *defined* as the series clamped into `[r_in, r_out]`, both give
+the classification the full evaluation would. On a fast path `r_1` and `r_0`
+are those bounding spheres' and not the ray's, which no caller of the
+classification reads; [`fitted_geometry`](@ref) is the full evaluation for a
+caller that wants the depth itself.
+"""
+@inline function interior_point(int::FittedInterior{T}, t, x) where {T}
+    c = center_at(int.center, t)
+    d1 = x[1] - c[1]
+    d2 = x[2] - c[2]
+    d3 = x[3] - c[3]
+    r = sqrt(d1 * d1 + d2 * d2 + d3 * d3)
+    r1_out = int.r_out - int.offset
+    if r ≥ r1_out
+        return (r=r, r_1=r1_out, r_0=r1_out - int.thickness)
+    end
+    r1_in = int.r_in - int.offset
+    r0_in = r1_in - int.thickness
+    if r < r0_in
+        return (r=r, r_1=r1_in, r_0=r0_in)
+    end
+    n = iszero(r) ? SVector{3,T}(zero(T), zero(T), one(T)) :
+        SVector{3,T}(d1 / r, d2 / r, d3 / r)
+    r_1 = shape_radius(int, n) - int.offset
+    return (r=r, r_1=r_1, r_0=r_1 - int.thickness)
+end
+
+"""
+    fitted_geometry(int::FittedInterior, t, x) -> (; r, n̂, d, r_1, r_0)
+
+The tracked geometry at one point, **evaluated in full**: the distance `r`
+from the tracked center `c(t)`, the unit vector `n̂` from it (`+ẑ` at the
+center, the core rule's tie-break), the depth `d = r_h(n̂) − offset − r`
+below the offset surface, and the two surfaces' radii along the ray. `d ≤ 0`
+is evolved, `0 < d ≤ thickness` is the layer and beyond it the core.
+"""
+@inline function fitted_geometry(int::FittedInterior{T}, t, x) where {T}
+    c = center_at(int.center, t)
+    d1 = x[1] - c[1]
+    d2 = x[2] - c[2]
+    d3 = x[3] - c[3]
+    r = sqrt(d1 * d1 + d2 * d2 + d3 * d3)
+    n = iszero(r) ? SVector{3,T}(zero(T), zero(T), one(T)) :
+        SVector{3,T}(d1 / r, d2 / r, d3 / r)
+    r_1 = shape_radius(int, n) - int.offset
+    return (r=r, n=n, d=r_1 - r, r_1=r_1, r_0=r_1 - int.thickness)
+end
+
+# The predicates and the profiles in the ray's radii — the sphere's, in the
+# sphere's order (`is_frozen` docstring above).
+@inline is_frozen(int::FittedInterior{T,:damped}, g) where {T} = g.r < g.r_0
+@inline is_frozen(int::FittedInterior{T,:frozen}, g) where {T} = g.r < g.r_0
+@inline is_frozen(int::FittedInterior{T,:pasted}, g) where {T} = g.r < g.r_1
+
+@inline is_outside(int::FittedInterior, g) = g.r ≥ g.r_1
+
+@inline interior_profiles(int::FittedInterior, g) =
+    _layer_profiles(g.r, g.r_0, g.r_1, int.ρ_max, int.w_ramp, int.ρ_ramp)
+
+@inline interior_profiles(int::FittedInterior{T,:frozen}, g) where {T} =
+    (_layer_w(g.r, g.r_0, g.r_1, int.w_ramp), zero(T))
+
+@inline function in_layer(int::FittedInterior, t, x)
+    g = interior_point(int, t, x)
+    return (g.r_0 ≤ g.r) & (g.r < g.r_1)
+end
+
+"""
+    core_position(int::FittedInterior, t, x) -> x
+
+The core rule on the tracked geometry: `x` itself outside the core surface,
+and inside it the core surface's own point on the ray, `c(t) + r_0(n̂) n̂`,
+with `+ẑ` at the center — the sphere's rule, with the ray's radius in place
+of `r_0`. Outside the core surface's bounding sphere the series is not
+evaluated.
+"""
+@inline function core_position(int::FittedInterior{T}, t, x) where {T}
+    c = center_at(int.center, t)
+    d = SVector{3}(x[1] - c[1], x[2] - c[2], x[3] - c[3])
+    r = sqrt(d[1] * d[1] + d[2] * d[2] + d[3] * d[3])
+    r ≥ (int.r_out - int.offset) - int.thickness && return (x[1], x[2], x[3])
+    ẑ = SVector{3}(zero(r), zero(r), one(r))
+    n = iszero(r) ? ẑ : d / r
+    r_0 = (shape_radius(int, n) - int.offset) - int.thickness
+    r ≥ r_0 && return (x[1], x[2], x[3])
+    return (c[1] + r_0 * n[1], c[2] + r_0 * n[2], c[3] + r_0 * n[3])
+end
+
+# --- the masks of the tracked geometry ----------------------------------------
+
+"""
+    ShapeMask(center, shape, lmax, r_in, r_out, offset)
+
+The mask of a [`FittedInterior`](@ref) at one time: [`is_evolved`](@ref)
+is `r ≥ r_1(n̂)`, depth `d ≤ 0`, with the classification's two fast paths —
+a snapshot of the tracked center, as [`InteriorMask`](@ref) is of the
+analytic one. Every masked norm, the indicator, the speed kernel and the
+horizon finder's footprint guard take it through
+[`interior_mask`](@ref), so they all exclude the same region the kernel
+modifies.
+"""
+struct ShapeMask{T,NM}
+    center::SVector{3,T}
+    shape::SVector{NM,T}
+    lmax::Int
+    r_in::T
+    r_out::T
+    offset::T
+end
+
+@inline function is_evolved(m::ShapeMask{T}, x) where {T}
+    d1 = x[1] - m.center[1]
+    d2 = x[2] - m.center[2]
+    d3 = x[3] - m.center[3]
+    r = sqrt(d1 * d1 + d2 * d2 + d3 * d3)
+    r ≥ m.r_out - m.offset && return true
+    r < m.r_in - m.offset && return false
+    n = iszero(r) ? SVector{3,T}(zero(T), zero(T), one(T)) :
+        SVector{3,T}(d1 / r, d2 / r, d3 / r)
+    return r ≥ _surface_radius(m.shape, m.lmax, m.r_in, m.r_out, n) - m.offset
+end
+
+"""
+    ShapeBand(center, shape, lmax, r_in, r_out, offset, lo, hi)
+
+The band `r_1(n̂) + lo ≤ r < r_1(n̂) + hi` about the offset surface of a
+tracked geometry — [`ShellMask`](@ref)'s job for a surface that is not a
+sphere: `lo = −thickness, hi = 0` is the layer ([`layer_mask`](@ref)) and
+`lo = 0, hi = width` the shell just outside it ([`shell_mask`](@ref)).
+"""
+struct ShapeBand{T,NM}
+    center::SVector{3,T}
+    shape::SVector{NM,T}
+    lmax::Int
+    r_in::T
+    r_out::T
+    offset::T
+    lo::T
+    hi::T
+end
+
+@inline function is_evolved(m::ShapeBand{T}, x) where {T}
+    d1 = x[1] - m.center[1]
+    d2 = x[2] - m.center[2]
+    d3 = x[3] - m.center[3]
+    r = sqrt(d1 * d1 + d2 * d2 + d3 * d3)
+    r ≥ (m.r_out - m.offset) + m.hi && return false
+    r < (m.r_in - m.offset) + m.lo && return false
+    n = iszero(r) ? SVector{3,T}(zero(T), zero(T), one(T)) :
+        SVector{3,T}(d1 / r, d2 / r, d3 / r)
+    r_1 = _surface_radius(m.shape, m.lmax, m.r_in, m.r_out, n) - m.offset
+    return (r_1 + m.lo ≤ r) & (r < r_1 + m.hi)
+end
+
+interior_mask(int::FittedInterior{T,V,NM}, t) where {T,V,NM} =
+    ShapeMask{T,NM}(center_at(int.center, t), int.shape, int.lmax, int.r_in,
+                    int.r_out, int.offset)
+
+layer_mask(int::FittedInterior{T,V,NM}, t) where {T,V,NM} =
+    ShapeBand{T,NM}(center_at(int.center, t), int.shape, int.lmax, int.r_in,
+                    int.r_out, int.offset, -int.thickness, zero(T))
+
+shell_mask(int::FittedInterior{T,V,NM}, t, width) where {T,V,NM} =
+    ShapeBand{T,NM}(center_at(int.center, t), int.shape, int.lmax, int.r_in,
+                    int.r_out, int.offset, zero(T), T(width))
+
+# --- where the tracked layer was put, against the mesh ------------------------
+
+_box_meets_annulus(ext, c, lo, hi) =
+    ((near, far) = _box_radii(ext, c); near ≤ hi && far ≥ lo)
+
+"""
+    geometry_spacing(forest, int::FittedInterior, t) -> (h, nblocks)
+
+The coarsest spacing among the blocks whose extent meets the layer's
+annulus `[r_in − offset − thickness, r_out − offset]` about the tracked
+center — the blocks the profiles live in, which is [`layer_spacing`](@ref)'s
+"the blocks containing `r_1`" for a surface that is not a sphere (added in
+step 8d).
+"""
+function geometry_spacing(forest::Forest{3}, int::FittedInterior{T}, t) where {T}
+    c = center_at(int.center, t)
+    lo = (int.r_in - int.offset) - int.thickness
+    hi = int.r_out - int.offset
+    h = zero(T)
+    n = 0
+    for k in forest.leaves
+        _box_meets_annulus(block_extent(T, forest, k), c, lo, hi) || continue
+        h = max(h, spacing(T, forest, k))
+        n += 1
+    end
+    return h, n
+end
+
+layer_spacing(forest::Forest{3}, int::FittedInterior, t) =
+    geometry_spacing(forest, int, t)
+
+"""
+    check_interior_radii(forest, int::FittedInterior, background, G;
+                         t = 0, center = nothing)
+
+`CODE.md`'s placement requirements on the **tracked** geometry, at the mesh
+`forest` currently is (step 8d): with `h` the coarsest spacing of the
+blocks the layer lives in ([`geometry_spacing`](@ref)),
+
+    offset ≥ m h            (r_1(n̂) ≤ r_h(n̂) − m h in every direction)
+    thickness ≥ 2(G + 1) h
+    r_in − offset − thickness > singular_radius(background) + |c(t) − c_analytic(t)|
+
+The first two are step 5's two requirements with the **track's** radii in
+place of `horizon_min_radius(background)`: the horizon the layer is put
+inside is the one that was found, in every direction, and the margin is
+counted in the direction's own radius rather than the smallest one. The
+third keeps step 5's `singular_radius` check for the analytic-target
+variants, which is every variant this geometry runs until step 8e's
+`:fitted`: the core rule still evaluates the analytic solution on the core
+surface, so that surface must still contain the chart's singular set — a
+ball of `singular_radius` about the **analytic** center, which is why the
+distance between the two centers (`center`, the case's analytic
+trajectory, where it is given) is added to it. For a tracked geometry it
+is the smallest core radius that has to clear the set, since the core
+surface is not a sphere.
+
+It throws, and it is meant to, with the remedies the sphere's check names.
+"""
+function check_interior_radii(forest::Forest{3}, int::FittedInterior{T},
+                              background, G::Integer; t=zero(T),
+                              center=nothing) where {T}
+    int.margin ≥ G + 1 || throw(ArgumentError(
+        "the interior's margin is m = $(int.margin) but the ghost width is " *
+        "G = $G, and CODE.md's floor is m ≥ G + 1 = $(G + 1): the margin has " *
+        "to cover a whole stencil, or a point outside the horizon reaches " *
+        "into the layer."))
+    h, nb = geometry_spacing(forest, int, t)
+    nb > 0 || throw(ArgumentError(
+        "no block of this forest meets the tracked layer's annulus around " *
+        "$(center_at(int.center, t)) at t = $t: the layer is outside the " *
+        "domain."))
+    r_core = (int.r_in - int.offset) - int.thickness
+    δ = if center === nothing
+        zero(T)
+    else
+        a = center_at(center, T(t))
+        b = center_at(int.center, T(t))
+        sqrt((a[1] - b[1])^2 + (a[2] - b[2])^2 + (a[3] - b[3])^2)
+    end
+    r_sing = T(singular_radius(background)) + δ
+    r_core > r_sing || throw(ArgumentError(
+        "the tracked core surface does not contain the chart's singular set: " *
+        "its smallest radius is r_in − offset − thickness = $r_core about the " *
+        "tracked center, and $(typeof(background)) is singular out to a " *
+        "coordinate radius of $(r_sing - δ) about the analytic one, $δ away " *
+        "— for Kerr the equatorial disk |x| ≤ |a|, z = 0. The core rule still " *
+        "evaluates the analytic solution on that surface, so a grid point on " *
+        "the disk would be NaN. Refine (the offset and the ramp are stated in " *
+        "spacings), or wait for step 8e's :fitted target, which needs no " *
+        "analytic interior (CODE.md, \"The interior\")."))
+    allowed = int.margin * h
+    int.offset ≥ allowed || throw(ArgumentError(
+        "the tracked layer is not far enough inside the found horizon: its " *
+        "offset is $(int.offset), but the blocks it lives in have h = $h and " *
+        "the margin m = $(int.margin) asks for m·h = $allowed — the geometry " *
+        "was built on a finer mesh than this one. The horizon and m grid " *
+        "points inside it must be evolved by the unmodified equations: " *
+        "rebuild the geometry on this mesh (fitted_interior), or keep the " *
+        "refinement's level floor around the horizon."))
+    needed = 2 * (G + 1) * h
+    int.thickness ≥ needed || throw(ArgumentError(
+        "the tracked layer is too thin: its thickness is $(int.thickness) at " *
+        "a spacing of h = $h, and CODE.md asks for at least 2(G+1)h = " *
+        "$needed so that the profiles are resolved and no stencil of an " *
+        "evolved point reaches the core."))
+    return (h=h, nblocks=nb, r_h_min=int.r_in, allowed=int.r_in - allowed,
+            thickness=int.thickness, needed=needed, r_core=r_core,
+            singular=r_sing)
 end

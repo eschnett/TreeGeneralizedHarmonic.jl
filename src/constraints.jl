@@ -304,8 +304,8 @@ written zero, which is what a case without an interior should report.
     keep = is_evolved(mask, x)
     diag[inner..., DIAG_MASK, b] = keep ? one(T) : zero(T)
     diag[inner..., DIAG_ERR, b] = keep ? e : zero(T)
+    diag[inner..., DIAG_RES, b] = in_layer(interior, t, x) ? e : zero(T)
     r = interior_radius(interior, t, x)
-    diag[inner..., DIAG_RES, b] = in_layer(interior, r) ? e : zero(T)
     inshell = (r_shell_lo ≤ r) & (r ≤ r_shell_hi)
     diag[inner..., DIAG_DRIFT, b] =
         inshell ? abs(work[c..., 1, b] - vals[1]) : zero(T)

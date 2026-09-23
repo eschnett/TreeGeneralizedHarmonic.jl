@@ -385,8 +385,13 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
             nothing
         end
     else
-        r = interior_radius(interior, t, x)
-        if is_frozen(interior, r)
+        # The interior's view of the point (step 8d): the radius for step
+        # 5's sphere, and for the tracked geometry the radius with the two
+        # surfaces' radii along the ray — `interior_point`, which evaluates
+        # the shape's series only between its bounding spheres. The three
+        # branches below are the same for both.
+        g = interior_point(interior, t, x)
+        if is_frozen(interior, g)
             # `du = 0`, and `F` is not evaluated: this is the branch
             # `CLAUDE.md` says must come before the stencils.
             ntuple(Val(2 * NC)) do v
@@ -397,14 +402,14 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
             ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
                                        inv_h, γ0, γ2, εh, Val(q), Val(HASH),
                                        Val(DISS))
-            if r ≥ interior.r_1
+            if is_outside(interior, g)
                 ntuple(Val(NC)) do v
                     du[inner..., v, b] = ∂ₜh[v]
                     du[inner..., NC + v, b] = ∂ₜΠ[v]
                     nothing
                 end
             else
-                w, ρ = interior_profiles(interior, r)
+                w, ρ = interior_profiles(interior, g)
                 # `u_exact` is the layer's *target* (step 8c): the case's
                 # background unless the interior names another metric.
                 he, Πe, _ = background_state(layer_target(interior, bg), t, x)
@@ -451,8 +456,9 @@ which is how step 8c's E0 puts a hard step of a wrong solution at `r_1`.
     T = eltype(u)
 
     x = point_position(origins, spacings, b, I)
-    r = interior_radius(interior, t, x)
-    if r < interior.r_1
+    # Inside the layer's outer surface: `r < r_1` for the sphere, and below
+    # the offset surface for the tracked geometry (step 8d).
+    if !is_outside(interior, interior_point(interior, t, x))
         vals = case_state_tuple(layer_target(interior, bg), interior, t, x)
         ntuple(Val(2 * NC)) do v
             u[inner..., v, b] = vals[v]
@@ -554,7 +560,7 @@ struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A}
     origins::O
     spacings::V
     case::C
-    interior::I                  # an `Interior` at this chunk's ρ_max, or `nothing`
+    interior::I                  # an `Interior` or a `FittedInterior` at this chunk's ρ_max, or `nothing`
     accounting::A                # the run's `BoundsAccounting`, or `nothing`
     hasdirichlet::Bool
     valG::Val{G}
@@ -590,6 +596,12 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         "index into a position assuming it (`point_position`), so a " *
         "staggered set would be evaluated half a cell from where its " *
         "values sit."))
+    interior isa FittedSpec && throw(ArgumentError(
+        "this case's interior is a FittedSpec — the rule a tracked geometry " *
+        "is built by, once per chunk, from the horizon that was found — and a " *
+        "problem needs the geometry itself: pass `interior = " *
+        "fitted_interior(spec, track, forest, G; t, n_L)`, which is what " *
+        "evolve! does at every chunk (CODE.md, \"The tracked geometry\")."))
     backend = get_backend(U.work)
 
     HASH = !isharmonic(case.background)
@@ -617,7 +629,7 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
     INT = interior_variant(interior)
     if interior !== nothing && margin_check
         check_interior_radii(U.forest, interior, case.background, q ÷ 2 + 1;
-                             t=t)
+                             t=t, center=case.center)
         check_bounds_gate(U.forest, interior, case.bounds, q; t=t)
     end
 

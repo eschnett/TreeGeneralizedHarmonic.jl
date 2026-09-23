@@ -172,6 +172,16 @@ function default_gate(int::Interior{T}, forest, q::Integer; t=zero(T)) where {T}
     return int.r_1 - 2 * (q ÷ 2 + 1) * h
 end
 
+# The tracked geometry's gate (added in step 8d): the same `2 G h` below the
+# offset surface's *smallest* radius, `r_in − offset`, since the gate stays a
+# sphere about the (tracked) center and has to lie inside the surface in every
+# direction.
+function default_gate(int::FittedInterior{T}, forest, q::Integer;
+                      t=zero(T)) where {T}
+    h, _ = geometry_spacing(forest, int, T(t))
+    return (int.r_in - int.offset) - 2 * (q ÷ 2 + 1) * h
+end
+
 # The Euclidean reach of the right-hand side's stencils, in spacings: the
 # Kreiss–Oliger operator's `G = q/2 + 1` along an axis, and the mixed
 # derivative's `√2 · q/2` along a diagonal — which is the larger of the two
@@ -213,6 +223,25 @@ function check_bounds_gate(forest::Forest{3}, int::Interior{T},
 end
 
 check_bounds_gate(forest, ::Nothing, bounds, q; t=0) = nothing
+check_bounds_gate(forest, ::Nothing, ::Nothing, q; t=0) = nothing
+
+# On the tracked geometry (step 8d): the innermost point an evolved stencil
+# reads is one reach inside the offset surface's smallest radius.
+function check_bounds_gate(forest::Forest{3}, int::FittedInterior{T},
+                           bounds::StateBounds{T}, q::Integer;
+                           t=zero(T)) where {T}
+    h, _ = geometry_spacing(forest, int, T(t))
+    R = _stencil_reach(q, T)
+    r_1 = int.r_in - int.offset
+    allowed = r_1 - R * h
+    bounds.r_gate ≤ allowed || throw(ArgumentError(
+        "the range projection's gate is too shallow for the tracked layer: " *
+        "r_gate = $(bounds.r_gate), but the offset surface's smallest radius " *
+        "is r_in − offset = $r_1 at a spacing h = $h, and the stencils reach " *
+        "$R spacings, so an evolved point reads points down to r = $allowed. " *
+        "Move r_gate inward — default_gate proposes (r_in − offset) − 2Gh."))
+    return (h=h, reach=R, allowed=allowed)
+end
 check_bounds_gate(forest, int, ::Nothing, q; t=0) = nothing
 
 # --- the pointwise map ------------------------------------------------------
@@ -705,7 +734,8 @@ _apply_bounds!(bd::StateBounds, ::Nothing, p, u, t) = throw(ArgumentError(
     "problem built with `interior = nothing` has no center to measure r " *
     "from. Build the problem with the case's own interior."))
 
-function _apply_bounds!(bd::StateBounds, int::Interior, p, u, t)
+function _apply_bounds!(bd::StateBounds, int::Union{Interior,FittedInterior}, p,
+                        u, t)
     T = eltype(p.U.work)
     map_blocks!(gh_bounds_kernel!, p.U, statearray(u, p.U), p.diag.work,
                 p.origins, p.spacings, bd, int, T(t))
@@ -829,7 +859,11 @@ over **the layer** `r_0 ≤ r < r_1` and over **the shell** `r_1 ≤ r < r_1 +
 G h` just outside it (`h` the finest spacing present — the `G` points
 `CODE.md` compares the interior variants over): `min_detγ_layer`,
 `min_α_layer`, `max_h_layer`, `max_Π_layer`, and the same four ending in
-`_shell`. All `nothing` for a case with no interior.
+`_shell`. All `nothing` for a case with no interior. **From step 8d** the two
+bands are the interior's own ([`layer_mask`](@ref), [`shell_mask`](@ref)) —
+the same `ShellMask`s for the sphere, the bands about the offset surface for
+a tracked geometry — and two more rows reduce over the whole evolved region,
+`min_detγ_evolved` and `min_α_evolved`, the lapse-collapse trigger's input.
 
 What it is for: the range projection says *that* a state left the range of
 metrics and where; these say how close the layer, and the evolved points
@@ -842,17 +876,24 @@ function validity_rows(p, u, t)
     int === nothing && return (min_detγ_layer=nothing, min_α_layer=nothing,
                                max_h_layer=nothing, max_Π_layer=nothing,
                                min_detγ_shell=nothing, min_α_shell=nothing,
-                               max_h_shell=nothing, max_Π_shell=nothing)
+                               max_h_shell=nothing, max_Π_shell=nothing,
+                               min_detγ_evolved=nothing, min_α_evolved=nothing)
     T = eltype(p.U.work)
-    c = center_at(int.center, T(t))
     h = minimum_spacing(T, p.U.forest)
     G = first(p.U.G)
-    layer = _validity(p, u, ShellMask{T}(c, int.r_0, int.r_1))
-    shell = _validity(p, u, ShellMask{T}(c, int.r_1, int.r_1 + G * h))
+    # The bands through the interior's own masks (amended in step 8d), so
+    # that the tracked geometry's layer and shell are its surface's bands and
+    # the sphere's are step 8b's `ShellMask`s, value for value.
+    layer = _validity(p, u, layer_mask(int, T(t)))
+    shell = _validity(p, u, shell_mask(int, T(t), G * h))
+    # The whole evolved region (added in step 8d): the minimum lapse over it
+    # is the lapse-collapse trigger's input, and `det γ` comes with the pass.
+    evolved = _validity(p, u, interior_mask(int, T(t)))
     return (min_detγ_layer=layer.detγ, min_α_layer=layer.α,
             max_h_layer=layer.h, max_Π_layer=layer.Π,
             min_detγ_shell=shell.detγ, min_α_shell=shell.α,
-            max_h_shell=shell.h, max_Π_shell=shell.Π)
+            max_h_shell=shell.h, max_Π_shell=shell.Π,
+            min_detγ_evolved=evolved.detγ, min_α_evolved=evolved.α)
 end
 
 # --- the evolved region's finiteness -----------------------------------------
