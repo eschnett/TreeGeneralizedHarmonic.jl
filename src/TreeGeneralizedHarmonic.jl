@@ -58,7 +58,7 @@ using ApparentHorizonFinder: ADMVars, find_horizon, horizon_grid,
 using KernelAbstractions: @Const, @index, @kernel
 using KernelAbstractions: Backend, CPU, allocate, get_backend
 using KorzynskiSpin: horizon_spin
-using LinearAlgebra: det, dot, tr
+using LinearAlgebra: UpperTriangular, cond, det, dot, qr, tr
 using OrdinaryDiffEqLowOrderRK: RK4
 using SciMLBase: ODEProblem, solve
 using SpacetimeMetrics: AbstractMetric, GaugeWave, Harmonic, KerrSchild,
@@ -113,6 +113,13 @@ export ShapeMask, ShapeBand, geometry_spacing
 export HorizonTrack, TrackLostError, seed_track, update_track, track_center
 export real_shape, analytic_shape, fitted_interior, surface_shift
 export axis_dispersion, margin_efolds
+
+# The fitted target (step 8e): the fit's variables, the solid harmonics, the
+# samplers, the fit, its sweep and its evaluator
+export fit_variables, state_from_fit, real_solid_harmonics, fit_directions
+export state_sampler, analytic_sampler, StateSampler, AnalyticSampler
+export FitParams, InteriorFit, solve_fit, build_fit, fit_sweep, fit_row_weights
+export fit_variables_at, fit_state, fit_residual, fit_valid
 
 # The range projection (step 8b): the third and last writer of the state,
 # and the validity monitor
@@ -173,6 +180,10 @@ include("horizon.jl")
 # leakage is read through `locate_block`) and before `driver.jl`, which
 # builds a geometry from it once per chunk (added in step 8d).
 include("tracking.jl")
+# After `tracking.jl` (a fit is built on a tracked geometry) and before
+# `driver.jl`, which will build one per chunk in step 8e-ii (added in step
+# 8e): the fitted target, its samplers and its evaluator.
+include("fit.jl")
 include("driver.jl")
 
 end

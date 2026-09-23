@@ -1172,8 +1172,8 @@ analytic_horizon_radius(bg::AbstractMetric, n) = horizon_min_radius(bg)
 
 """
     FittedSpec(T = Float64; variant = :damped, margin = 8, n_L = 0,
-               core_min = 2, lmax_shape = 4, ρ_max = 0, w_ramp = 1//2,
-               ρ_ramp = 1, max_misses = 3, α_trigger = 1//10,
+               core_min = 2, lmax_shape = 4, lmax_fit = 8, ρ_max = 0,
+               w_ramp = 1//2, ρ_ramp = 1, max_misses = 3, α_trigger = 1//10,
                target = nothing)
 
 What a [`GHCase`](@ref) holds as its `interior` for the **tracked**
@@ -1193,7 +1193,10 @@ the hole; the geometry is a function of the run.
   by [`evolve!`](@ref), where `q` is known ([`layer_cells`](@ref)).
 - `core_min` is the smallest core the geometry may leave, in spacings:
   `fitted_interior` refuses `r_in − (m + n_L + core_min) h ≤ 0` by name.
-- `lmax_shape` is the degree the found shape is truncated to.
+- `lmax_shape` is the degree the found shape is truncated to, and
+  `lmax_fit` the degree of step 8e's fitted target ([`build_fit`](@ref)):
+  `L = 8` by default, the collocation grid `EquiangularGrid(L)` on the offset
+  surface (added in step 8e).
 - `ρ_max = 0` means the driver's default rate `4/M` (step 8c′); a positive
   number is this case's default rate instead. `w_ramp` and `ρ_ramp` are the
   profiles' ramps; **`ρ_ramp = 1` and `w_ramp = 1/2` are step 8c's rule** —
@@ -1215,6 +1218,7 @@ struct FittedSpec{T,V,X}
     n_L::Int
     core_min::Int
     lmax_shape::Int
+    lmax_fit::Int
     ρ_max::T
     w_ramp::T
     ρ_ramp::T
@@ -1226,7 +1230,8 @@ end
 
 function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
                     margin::Integer=8, n_L::Integer=0, core_min::Integer=2,
-                    lmax_shape::Integer=4, ρ_max=zero(T), w_ramp=T(1 // 2),
+                    lmax_shape::Integer=4, lmax_fit::Integer=8, ρ_max=zero(T),
+                    w_ramp=T(1 // 2),
                     ρ_ramp=one(T), max_misses::Integer=3,
                     α_trigger=T(1 // 10), target=nothing) where {T}
     variant in INTERIOR_VARIANTS || throw(ArgumentError(
@@ -1246,6 +1251,10 @@ function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
         "the center has no inside for the core rule to project onto."))
     lmax_shape ≥ 0 || throw(ArgumentError(
         "lmax_shape is a spherical-harmonic degree, got $lmax_shape."))
+    lmax_fit ≥ 1 || throw(ArgumentError(
+        "lmax_fit is the fitted target's spherical-harmonic degree and must " *
+        "be at least 1, got $lmax_fit: the shift has no constant term, so a " *
+        "degree-0 fit could not hold a radial shift at all."))
     T(ρ_max) ≥ 0 || throw(ArgumentError(
         "ρ_max is a relaxation rate, or 0 for the driver's default 4/M, got " *
         "$ρ_max."))
@@ -1261,7 +1270,8 @@ function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
         "trigger off), got $α_trigger."))
     check_layer_target(target)
     return FittedSpec{T,variant,typeof(target)}(
-        Int(margin), Int(n_L), Int(core_min), Int(lmax_shape), T(ρ_max), wr,
+        Int(margin), Int(n_L), Int(core_min), Int(lmax_shape), Int(lmax_fit),
+        T(ρ_max), wr,
         ρr, Int(max_misses), T(α_trigger), Val(variant), target)
 end
 

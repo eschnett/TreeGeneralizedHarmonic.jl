@@ -25,20 +25,9 @@ using StaticArrays: SVector
 import AbstractSphericalHarmonics as ASH
 import SpacetimeMetrics as SM
 
-# A tracked case on the step-5 fixture's box: Kerr-Schild `a = 0`, the finder
-# every chunk at `N_ah = 12` without the spin (the spin is what a find costs,
-# `CLAUDE.md`), the range projection on with a gate inside the offset
-# surface's `2 − 10h = 1.22`. `m = 10` puts that surface inside the fixture's
-# level-3 cube; `m = 8` does not, which is a claim below.
-function fitted_fixture(::Type{T}=Float64; margin=10, chunk=T(1 // 10),
-                        every=1, N_ah=12, kwargs...) where {T}
-    spec = FittedSpec(T; margin=margin, kwargs...)
-    return kerr_schild_case(T; halfwidth=T(5 // 2), chunk=chunk,
-                            interior=spec,
-                            horizon=Horizon(T; every=every, N=N_ah,
-                                            spin=false),
-                            bounds=default_bounds(T; M=1, r_gate=T(9 // 10)))
-end
+# The tracked case, `fitted_fixture`, and its one `3/20 M` run,
+# `tracked_fixture_run`, are in `evolution_cases.jl` (moved there in step
+# 8e, whose fit reads the same geometry and the same run).
 
 # Random real coefficients in the canonical complex layout: `c_l0` real and
 # `c_{l,−m} = (−1)^m c̄_lm`, the reality condition of a real function.
@@ -564,9 +553,9 @@ end
     # below it, step 8c's ramps — so the difference is the tracking and
     # nothing else.
     @testset "a tracked hole is the analytic one, to the tracking" begin
-        case = fitted_fixture(T)
-        forest = hole_fixture_forest(T, case; N=8)
-        out = evolve!(T, case; forest=forest, q=q, ops=ops, t_end=T(3 // 20))
+        # The run is shared with `fit_tests.jl` (step 8e), which fits the
+        # state it ends in; nothing below writes the state.
+        (; case, out) = tracked_fixture_run()
         h = T(5 // 64)
         sphere = kerr_schild_case(T; halfwidth=T(5 // 2), chunk=T(1 // 10),
                                   r_0=2 - 18h, r_1=2 - 10h, margin=10,

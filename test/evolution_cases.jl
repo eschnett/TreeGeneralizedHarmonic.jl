@@ -254,6 +254,47 @@ function gh_hole_run(::Type{T}, case::GHCase{T}; N, q, t_end, roots=1,
     return out
 end
 
+# --- the tracked hole (step 8d), shared with step 8e --------------------------
+
+"""
+A tracked case on the step-5 fixture's box: Kerr-Schild `a = 0`, the finder
+every chunk at `N_ah = 12` without the spin (the spin is what a find costs,
+`CLAUDE.md`), the range projection on with a gate inside the offset
+surface's `2 − 10h = 1.22`. `m = 10` puts that surface inside the fixture's
+level-3 cube; `m = 8` does not, which `tracking_tests.jl` claims. Moved here
+from `tracking_tests.jl` in step 8e, whose fit is built on the same
+geometry.
+"""
+function fitted_fixture(::Type{T}=Float64; margin=10, chunk=T(1 // 10),
+                        every=1, N_ah=12, kwargs...) where {T}
+    spec = FittedSpec(T; margin=margin, kwargs...)
+    return kerr_schild_case(T; halfwidth=T(5 // 2), chunk=chunk,
+                            interior=spec,
+                            horizon=Horizon(T; every=every, N=N_ah,
+                                            spin=false),
+                            bounds=default_bounds(T; M=1, r_gate=T(9 // 10)))
+end
+
+# The suite's one tracked run of [`fitted_fixture`](@ref) to `3/20 M`, made
+# once and shared (step 8e): `tracking_tests.jl` compares it with step 5's
+# sphere, and `fit_tests.jl` fits the state it ends in. Whichever file asks
+# first pays for it; a file run on its own still gets it.
+const TRACKED_RUN = Ref{Any}(nothing)
+
+function tracked_fixture_run()
+    if TRACKED_RUN[] === nothing
+        T = Float64
+        q = 2
+        case = fitted_fixture(T)
+        forest = hole_fixture_forest(T, case; N=8)
+        out = evolve!(T, case; forest=forest, q=q,
+                      ops=Operators(prolongation=q + 2, restriction=q + 2),
+                      t_end=T(3 // 20))
+        TRACKED_RUN[] = (case=case, q=q, out=out)
+    end
+    return TRACKED_RUN[]
+end
+
 # --- the indicator's hole (added in step 6) ---------------------------------
 #
 # A *second* hole fixture, because the refinement needs room the step-5 one
