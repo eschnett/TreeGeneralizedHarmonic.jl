@@ -273,15 +273,16 @@ takes about eight minutes at four threads.
 
 The `leakage` section (added in step 8a) is eighty-eight `2 M` evolutions
 on a 512-block mesh — a ripple inside the horizon against the same run
-without it — and is **not** run by default: it is one Symmetry job, which
-fans its groups out into sixteen subprocesses when it has a node's
-threads (45m47 on one `amddebugq` node, inside that queue's hour with a
-quarter to spare — a longer `t_end` or a third order would not fit), and a
+without it — and is **not** run by default: it is run as **one Symmetry
+job**, `julia --project=. --threads=64 test/hole_runs.jl leakage` on a
+64-core node, where it fans its groups out into sixteen subprocesses
+(45m47 on one `amddebugq` node, inside that queue's hour with a quarter to
+spare — a longer `t_end` or a third order would not fit). The
+`symmetry-hpc` skill has the cluster mechanics, as for the suite below. A
 subset of it runs locally through `key=value` options, one group after the
 other:
 
 ```bash
-.claude/orchestration/symmetry-run.sh <worktree> <name> hole:leakage
 julia --project=. --threads=4 test/hole_runs.jl leakage q=2 d=4 eps=0,1/2 lambda=2 t_end=1/4
 ```
 

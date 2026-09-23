@@ -34,12 +34,12 @@
 # calibrated thresholds this hole asks for 848 blocks.
 #
 # Step 8a adds the `leakage` section, which is **not** in the default list:
-# eighty evolutions on a 512-block mesh are a batch job on Symmetry
-# (`.claude/orchestration/symmetry-run.sh <worktree> <name> hole:leakage`),
-# and it runs its evolutions concurrently when it is given the threads for
-# it. It asks how much grid-scale content made inside the horizon crosses
-# it — `PLAN.md`'s finding 4 — against the predictions of
-# `test/dispersion.jl`.
+# eighty-eight evolutions on a 512-block mesh are one batch job on a 64-core
+# Symmetry node (`julia --project=. --threads=64 test/hole_runs.jl leakage`;
+# the `symmetry-hpc` skill has the cluster mechanics), and it runs its
+# evolutions concurrently when it is given the threads for it. It asks how
+# much grid-scale content made inside the horizon crosses it — `PLAN.md`'s
+# finding 4 — against the predictions of `test/dispersion.jl`.
 
 import Printf
 using Serialization: deserialize, serialize
@@ -760,10 +760,10 @@ to a log beside its result, and a worker that fails has its log's tail
 printed.
 """
 function leak_fanout(groups, threads; λs, ds, t_end)
-    # Beside the batch job's own log when there is one (the Symmetry helper
-    # runs from a directory with `out/`), so that a job cut off by its time
-    # limit leaves each worker's finished rows behind; a scratch directory
-    # otherwise.
+    # Beside the batch job's own log when there is one (a job run from a
+    # directory holding `out/`, where its log is), so that a job cut off by
+    # its time limit leaves each worker's finished rows behind; a scratch
+    # directory otherwise.
     dir = isdir("out") ? mkpath(joinpath("out", "leakage")) : mktempdir()
     println("   worker logs and results in ", abspath(dir))
     project = dirname(Base.active_project())
