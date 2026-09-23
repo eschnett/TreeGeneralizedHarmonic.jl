@@ -410,7 +410,11 @@ GHSO2's second finding under "sonic-surface instability"
 (`notes/methods-ghso2.md`): the grid-scale layer of that instability on
 a black hole whose horizon lies in the evolved domain is cured by
 dissipation at `ε ≈ 0.5`; smooth runs without a hole need little or
-none. `ε` is a case parameter.
+none. `ε` is a case parameter — a number, or from step 8c a profile of the
+distance to the hole that rises from the horizon inward
+(`HorizonDissipation`; measured under [The
+interior](#the-interior-a-pointwise-damping-layer), where it is off by
+default).
 
 **(Measured in step 3.)** Both halves hold on the mesh. The gauge wave at
 `q = 4` converges at **4.12** with `ε_KO = 0.5` against **3.95** without
@@ -1060,6 +1064,29 @@ at `cfl = 1/4` (`3 ε dt/h ≤ 2.8`); and, if `n_e` must exceed about 5 at this
 resolution, to widen the margin as well, since neither lever alone is
 enough.
 
+**A hard step inside the horizon does get out, at the rate 8a measured
+(measured in step 8c).** `:pasted` onto `KerrSchild(6/5, 0)` (E0) holds a 20 %
+step — `|δh| = 0.348` — at `r_1`, `10.9` cells below the horizon, on 8a's
+uniform 512-block mesh, and the first shell outside the horizon carries,
+against the same run with the exact target, **`4.2e−3` of it at `2 M` and
+`2.2e−2` at `5 M`, still rising** at `ε_KO = 1` everywhere; `0.35–0.39`
+e-folds per cell outside. That is 8a's *measured* attenuation — its ripple
+from depth 8 continued at its own per-cell rate puts `2.6–3.1e−3` at
+`10.9` cells at `2 M` and `ε_KO = 1/2`, where E0 has `2.5e−3` at `1.5 M` — and
+140× the frozen-coefficient `e^{−d/ℓ_max(r_1)} = 3e−5`. At `ε_KO ≤ 1/2`
+everywhere the step ends the run first (`1.0 M`, `1.75 M`), in the evolved
+shell next to it; with the `ε_KO(r)` profile rising from `1/2` at the horizon
+to `ε_in = 2` or `4` at `r_1` it survives, with a masked error L∞ of `8.1` and
+`6.3` against `244` at `ε_KO = 1` everywhere, and transmits **no less at
+`2 M`** (`2.6e−3`, `3.5e−3`) and 1.4–2.3× less by `5 M` (`1.6e−2`,
+`9.5e−3`) — not the 4–15× of 8a's one-dimensional model. So `m = 8` holds a
+discontinuity back to a percent or two over a few `M`, and nothing holds the
+exterior together against one for long: the answer to a discontinuous
+interior is a smooth one, rule 2 of [the layer for an inexact
+target](#the-interior-a-pointwise-damping-layer), whose smooth wrong targets
+leave the exterior indistinguishable from the exact one — and **the default
+`m = 8` stays (proposed in step 8c)**.
+
 **A ball cannot hide Kerr's singularity in the harmonic chart at
 `a = 9/10` (found in step 5, and this is the proof-of-concept case).**
 The frozen core is a *ball* of radius `r_0`, and what it has to contain is
@@ -1157,7 +1184,13 @@ the ramp widths, evaluated per point in the kernel. `ρ_max` is bounded
 by the explicit integrator: RK4 is stable on the negative real axis to
 about `2.8/dt`, and `ρ_max · dt = 1` **(proposed)** relaxes by a factor
 `e` per step, which is as strong as it needs to be; the driver derives
-`ρ_max` from `dt` each chunk.
+`ρ_max` from `dt` each chunk. **(Superseded in step 8c** for any target and
+proposed for the analytic one: `1/dt` is a *grid* rate, about `107/M` on
+the suite's fixture, and a paste two cells deep; the calibrated layer
+relaxes at the fixed physical rate `ρ_max = 4/M` — see [the layer for an
+inexact target](#the-interior-a-pointwise-damping-layer) below — and even
+on the exact solution that rate ends a `50 M` run with a sixth of the
+error**)**.
 
 **(Implemented in step 5**, `src/interior.jl`.**)** The smoothstep is the
 quintic `10s³ − 15s⁴ + 6s⁵`, whose value, first *and* second derivatives
@@ -1173,6 +1206,85 @@ order. The smoothstep **clamps its result as well as its argument
 its Horner form at `s = 1 − 2⁻⁵³` returns `1 + 1.3e−15`, so without the
 clamp `w` would exceed one just inside `r_1` and amplify `F` where this
 section says the equations are untouched.
+
+**The layer for an inexact target (added in step 8c).** Step 8e's target is
+a fit of the evolved state, not a solution, so step 8c calibrated the layer
+against targets that are wrong on purpose, with three knobs and no new
+`Val`: an `Interior` carries an optional `target` metric (`isbits`,
+default `nothing` = the case's background, resolved by `layer_target`)
+that the kernel reads where `(INTERIOR)` reads `u_exact` — the layer branch
+and the `:pasted` overwrite — and nowhere else, so the initial data, the
+Dirichlet hook, the gauge source and the error reference stay on the truth
+and the record's `residual` is the layer's distance *from the truth*;
+`evolve!(…; ρ_max_fixed)` relaxes at a rate in the case's units instead of
+`ρ_max_factor/dt` (the two are refused together, and a fixed rate above
+`1/dt` is refused at the chunk that would take it, **(proposed in step
+8c)**); and `HorizonDissipation`, the `ε_KO(r)` profile below. The targets:
+**E1** `KerrSchild(6/5, 0)`, a valid metric that is not a solution; **E2**
+`translate(KerrSchild(1, 0), (0, δ, 0, 0))`, `δ = h, 4h`, a tracking error;
+**E3** the solution with `h_tt` off by `−2(r − r_1)²χ(r)/M²`, value and slope
+right at `r_1` and curvature wrong by `4/M²` (the sign is **(proposed in
+step 8c)**: `+2/M²` drives the target's `α²` through zero in any layer of
+eight or more cells, which is finding 2's non-metric and not a curvature
+error). The ramp's width `n_L` is the width over which `ρ` rises from `0`
+at `r_1` to `ρ_max` — `ρ_ramp = 1`, `r_0 = r_1 − n_L h`, `w` turning over
+in the inner half **(proposed in step 8c**, since finding 1's prediction is
+a statement about that width**)**. On the suite's fixture (Kerr-Schild
+`a = 0`, `q = 2`, `h = 5/64`, `cfl = 1/5`, `ε_KO = 1/2`, the range projection
+on) to `50 M`, the numbers under [Measured
+results](#the-layer-against-an-inexact-target-step-8c) decide:
+
+1. **`ρ_max` is a physical rate, `4/M` (measured in step 8c).** At the grid
+   rate every inexact target ends its run on every ramp up to 8 cells — E1
+   in `2–4 M`, E2 at `δ = h` in `3–5 M`, E3 in `6–15 M` — degenerating in the
+   shell outside `r_1` as step 8b saw step 5's failures do; on 12 cells E1
+   still ends (`18 M`) and E2 and E3 live at five times the error; and the
+   shell's `C_a` loses the scheme's order (`0.65` over `N = 6, 8, 10` against
+   `2.38` at `4/M`). `10/M` needs a thicker ramp than `4/M`,
+   and `1/M` is too slow the other way: at `n_L = 12`, whose layer reaches
+   down to `r_0 = 0.21 M`, E1 ends at `15 M` and E2 at `6 M`, *from the
+   inside* — the shell healthy to the end, the projection firing at
+   `r = 0.55` — a deep layer that a weak relaxation does not hold against a
+   target that is not a solution.
+2. **The ramp is at least `4G = 8` cells at that rate (measured in step
+   8c).** At `n_L = 8` and `12`, `ρ_max = 4/M`, every target the layer can
+   contain — E1, E2 at `δ = h`, E3 — holds the hole to `50 M` with the
+   `G`-point shell's `C_a` L2 at `0.029–0.039` and the masked error L2 at
+   `0.027–0.032`, both flat from `10 M` on, `M_irr` within `0.3 %` of `M`,
+   and no projection hit: **the same numbers as the exact target on the same
+   layers** (`0.029`, `0.027`), so the exterior does not see what the layer
+   relaxes toward. At `n_L = 6` it costs 1.3–4× (`0.039–0.115`), at `4`
+   more. Step 5's layer on the exact solution at the grid rate ends at
+   `0.181` and `0.160`.
+3. **Finding 1's `n_L ≳ G (10 ρ_max M)^{1/3}` is confirmed for `ρ_max M ≥ 4`
+   and is not sufficient below it (measured in step 8c).** It asks for `6.8`
+   and `9.3` cells at `4/M` and `10/M`; the scan's thinnest ramp that holds
+   is `8` and `12`, and one row thinner costs 2–4× in the shell (`n_L = 6` at
+   `4/M`, `8` at `10/M`). At `1/M` it would allow `4.3` cells, and the
+   ramps of 4–6 cells are 2.5× the best while the 12-cell one fails from
+   the inside: the rule is the prediction **and** `ρ_max ≳ 4/M`. Stated for
+   other orders and spacings — `n_L = max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)` cells
+   at `ρ_max = 4/M`, `4/M` being `16 κ` — it is **(proposed in step 8c)**:
+   one fixture, one order, one spacing measured it.
+4. **`ε_KO` stays constant for a smooth target (measured in step 8c).** The
+   profile below, raised across the margin as step 8a recommended, makes the
+   shell *worse* in proportion to `ε_in` — at `n_L = 12`, `4/M`: `0.029`,
+   `0.032`, `0.045`, `0.065` for `ε_in = 1/2` (constant), `1, 2, 4` —
+   and changes no survival where the ramp is right; where it is wrong (the
+   grid rate at `n_L = 8`) it delays the end from `15 M` to `22 M`. It is
+   what keeps a *hard step* alive (E0, above), so it stays built, as the
+   remedy for a target that can jump, and off by default **(proposed in step
+   8c)**.
+5. **The tracking error the layer absorbs is about `h` (measured in step
+   8c).** E2 at `δ = h` is the exact target's `0.029` at both good ramps;
+   at `δ = 4h = 0.31 M` only `n_L = 8`, `4/M` holds near the rule's error
+   (`0.041`), `n_L = 6` at `4/M` and `8` at `10/M` reach `50 M` at 3–4× it
+   (`0.160`, `0.123`), the others end in `1–6 M`, and at `n_L = 12` the
+   displaced singular point
+   lies *on a grid point of the layer* and the run throws at `t = 0` — a
+   target's singular set must be inside `r_0` exactly as the background's
+   must, and nothing checks it. Step 8d's tracked center has to be good to
+   a cell for this layer to be the rule's **(proposed in step 8c)**.
 
 `r_0` is chosen where the analytic
 solution is still moderate — `|h| ≲ 10`, a fraction of the horizon
@@ -2164,7 +2276,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source` (all added in step 1), and `metric_derivatives_along` — the same chain rule along **one** direction, returning `∂√γ` and `∂γ^{jk}` rather than the assembled `∂(α√γγ^{jk})`, which is what the constraint monitors need along *time* (added in step 4) — and `_pairindex`, the packed slot of a symmetric index pair, so that the file has one packing convention used on two index pairs; `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
 | `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the **five** `Val`s and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. Step 5 split the streaming body out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and added `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
-| `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3) |
+| `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c) |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook |
 | `src/bounds.jl` | the range projection (added in step 8b): `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
 | `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii, and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes |
@@ -2175,7 +2287,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. Step 8c adds the E3 target `CurvatureTarget` to `evolution_cases.jl`, its claims to `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
@@ -3720,6 +3832,223 @@ thing to calibrate is the transition at `r_1`, and the numbers to watch are
 the validity monitor's shell rows and the shell error, not the projection's
 hit count.
 
+### The layer against an inexact target (step 8c)
+
+`src/interior.jl` (the `target`), `src/gauge.jl` (`HorizonDissipation`),
+`src/driver.jl` (`ρ_max_fixed`), `test/evolution_cases.jl`
+(`CurvatureTarget`) and `test/hole_runs.jl calibration`; the rule it
+decides is under [The interior](#the-interior-a-pointwise-damping-layer),
+"The layer for an inexact target".
+
+**The suite.** **3798 assertions in 13m25 at one thread and 10m12 at
+four** on the development machine (Apple silicon, Julia 1.13.0), up from
+step 8b's 3723. The 56 new ones cost **11.8 s / 7.2 s**: the profile's
+algebra and its refusals and the target's refusals (`0.5 s`), one
+right-hand side with the target equal to the background — `isequal` to
+the one without it — and one with `KerrSchild(6/5, 0)`, which moves `du` at
+every layer point and at no other (`1.7 s`), one with a constant profile
+equal to the number — `isequal` again — and one rising to `4`, which moves
+`du` exactly at `r_0 ≤ r < r_h` (`2.3 s`), and a `1/20 M` run whose record's
+`ρ_max` is the fixed rate, with the two refusals (`7.3 s`). The right-hand
+side of a case that uses none of the three is bit for bit the one before
+this step (checked once against the tree at `70bd96c`, not in the suite).
+
+**How the study ran.** Every configuration is `hole_fixture` — Kerr-Schild
+`a = 0`, `q = 2`, the 120-leaf hierarchy, `h = 5/64` at `N = 8`, `r_1 =
+23/20`, `m = 8`, `cfl = 1/5`, `ε_KO = 1/2` unless named — with the range
+projection on (`default_bounds`, `default_gate`) and the finder's `M_irr`
+every other chunk from the observer, which also writes the record's rows
+so that a run that throws keeps its approach. Screens are `5 M` at
+`chunk = 1/2 M`, the survivors `50 M` at `1 M` as step 5's table was.
+Thirteen `amddebugq` jobs, **5.6 node-hours**: four screen jobs (11–24
+minutes, 138 runs; a fixture screen is 149–357 s at four threads, sixteen
+to a node), eight `50 M` jobs (29–36 minutes, 62 runs; one that finishes is
+1403–1973 s at eight threads, eight to a node) and the E0 profile pairs (17
+minutes; an E0 run on the 512-block mesh is 390–440 s at sixteen threads).
+Of the 120 fixture screens, 99 reached `5 M`; which 56 of them went on to
+`50 M` is **(proposed in step 8c)** and is listed in the script
+(`CAL_LONG`): the whole constant-`ε` scan, the profile on the two thickest
+ramps at `4/M` and `1/M` and at the grid rate at `ε_in = 4`, E1 and E2 at
+`n_L = 6` (`4/M`), `8` and `12`, every `δ = 4h` survivor, the four
+controls, and — added after them — the exact target on the scan's layers.
+
+**The order in the shell, `3/20 M`** (the `G = 2` points outside `r_1`,
+`gh_outside_shell_norms`; the fixture's own layer, `r_0 = 2/5`,
+`ρ_ramp = 1/2`, and `N = 6, 8, 10`):
+
+| target | `ρ_max` | shell `C_a` L2, `N = 6, 8, 10` | rate L2 | rate L∞ | masked error rate |
+|---|---|---|---|---|---|
+| exact | `1/dt` | 1.970e−2, 1.118e−2, 6.271e−3 | **2.23** | 1.89 | 2.17 |
+| exact | `4/M` | 1.958e−2, 1.120e−2, 6.298e−3 | **2.21** | 1.87 | 2.16 |
+| E3 | `1/dt` | 4.238e−2, 3.790e−2, 3.027e−2 | **0.65** | 0.46 | 1.51 |
+| E3 | `4/M` | 2.278e−2, 1.235e−2, 6.724e−3 | **2.38** | 2.00 | 2.07 |
+
+Finding 1, measured: pinned at the grid rate, a target whose curvature is
+wrong makes a right-hand-side error at the innermost evolved points that
+does not converge — `0.65` where the scheme is `2` — and at a physical rate
+the same target costs the shell nothing it can measure.
+
+**The scan: the `G`-point shell's `C_a` L2 at `50 M`** (in parentheses the
+`5 M` screen of a configuration not run long; `†` the time a run ended —
+by `metric_quantities`' `DomainError` on a stage vector wherever the root
+cause was read (every `50 M` run, and the screens rerun locally), and in
+one screen, E2 at `δ = h` on 6 cells at the grid rate, by the CFL recheck;
+rows are the ramp width `n_L` in cells, `nd` the fixture's own layer —
+step 5's, a ramp of `4.8` cells in a layer of `9.6`; `ρ(Gh)/ρ_max`, the
+relaxation at the innermost evolved stencil's reach, is `0.35` for `nd`,
+`0.50, 0.21, 0.10, 0.036` for `n_L = 4, 6, 8, 12`):
+
+| target | `n_L` | `1/dt` (`107/M`) | `10/M` | `4/M` | `1/M` |
+|---|---|---|---|---|---|
+| exact | `nd` | 0.181 (step 5's layer) | | **0.029** | |
+| | 8 | 0.091 | | **0.029** | |
+| | 12 | 0.037 | 0.029 | **0.029** | |
+| E3 | `nd` | † 7 M | | | |
+| | 4 | † 6 M | 0.152 | 0.119 | 0.075 |
+| | 6 | † 7 M | 0.144 | 0.111 | 0.080 |
+| | 8 | † 15 M | 0.060 | **0.033** | 0.049 |
+| | 12 | 0.143 | 0.032 | **0.029** | 0.031 |
+| E1 | `nd` | † 2.5 M | | | |
+| | 4 | † 2.0 M | (0.598) | (0.275) | (0.264) |
+| | 6 | † 3.0 M | (0.258) | 0.115 | (0.291) |
+| | 8 | † 4.0 M | 0.106 | **0.038** | 0.087 |
+| | 12 | † 18 M | 0.032 | **0.029** | † 15 M |
+| E2, `δ = h` | `nd` | † 3.0 M | | | |
+| | 4 | † 3.0 M | (0.193) | (0.085) | (0.076) |
+| | 6 | † 3.5 M | (0.077) | 0.039 | (0.082) |
+| | 8 | † 5 M | 0.036 | **0.029** | 0.044 |
+| | 12 | 0.141 | 0.029 | **0.029** | † 6 M |
+| E2, `δ = 4h` | `nd` | † 1.0 M | | | |
+| | 4 | † 1.0 M | † 2.0 M | † 4.5 M | † 2.5 M |
+| | 6 | † 1.0 M | † 6 M | 0.160 | † 2.0 M |
+| | 8 | † 1.5 M | 0.123 | **0.041** | † 2.0 M |
+| | 12 | † 2.5 M | ‡ | ‡ | ‡ |
+
+`‡`: the target's singular point `(4h, 0, 0)` is a grid point of the
+layer (`r_0 = 0.21`), and the run throws at `t = 0` — a configuration, not
+a result. The masked error L2 at `50 M` follows the shell: `0.027` on every
+bold entry but E1 at `n_L = 8` (`0.032`) and E2 at `4h` (`0.037`); `0.160`
+for step 5's layer, `0.057` and `0.029` for the
+exact target at the grid rate on `n_L = 8` and `12`. Every run that lives
+is **flat from `10 M` on** — the shell's `C_a` and the masked error change in
+the third digit over the last forty `M` — so the survivors do not approach
+anything; the failures announce themselves, at the grid rate, by a shell
+error that grows from the first chunk (E3 at `n_L = 8`: its L∞ `1.4` at
+`3 M`, `2.7` at `9 M`, `4.4` at `12 M`, `20` at `15 M`, as step 8b saw step
+5's), and at `1/M` on `n_L = 12` not at all in the shell (`min α` there
+`0.607` to the end): for E2 the layer's `|Π|` climbs from `1022` to `1233` in
+the last three `M`, the projection fires at `t = 5.85 M`, `r = 0.55` (122
+hits), and the run ends inside.
+
+**Finding 1's prediction** `n_L ≳ G (10 ρ_max M)^{1/3}` — `6.8`, `9.3`, `4.3`
+and `20` cells at `4/M`, `10/M`, `1/M` and the grid rate — is **confirmed at
+`ρ_max M = 4` and `10`** (the thinnest ramp holding every target is `8` and
+`12`; `6` at `4/M` and `8` at `10/M` cost 1.3–4×), confirmed at the grid rate
+(no inexact target holds near the rule's error at `12` cells, where it asks
+for `20`), and **wrong at `1/M`**,
+where it allows `4.3` and the scan has the 4–6-cell ramps at 2.5× the best
+and the 12-cell one failing from inside — which is the lower bound
+`ρ_max ≳ 4/M` of the rule.
+
+**The `ε_KO(r)` profile** (`ε_out = 1/2` at and outside `r_h = 2 M`, rising
+`C²` to `ε_in` at `r_1` and held inside), the same shell at `50 M`:
+
+| E3, `n_L`, `ρ_max` | constant `1/2` | `ε_in = 1` | `2` | `4` |
+|---|---|---|---|---|
+| 12, `4/M` | **0.029** | 0.032 | 0.045 | 0.065 |
+| 12, `1/M` | 0.031 | 0.032 | 0.036 | 0.047 |
+| 8, `4/M` | **0.033** | 0.047 | 0.083 | 0.165 |
+| 8, `1/M` | 0.049 | 0.035 | 0.057 | 0.110 |
+| 12, `1/dt` | 0.143 | (0.146) | (0.214) | 0.238 |
+| 8, `1/dt` | † 15 M | (0.240) | (0.272) | † 22 M |
+
+and at `5 M` over the whole scan (48 screens) the profile is worse than the
+constant in 35 — on every ramp that holds, at every `ε_in`. The thirteen
+exceptions are transitions that are wrong already: eight at the grid rate
+(`n_L = 4, 6` at every `ε_in`, taking a shell error of `0.43–0.60` to
+`0.27–0.42`, and `8`, `12` at `ε_in = 1`, by 2–4 %), and five on the
+marginal ramps (`n_L = 6` at `ε_in = 1` at every physical rate and at
+`ε_in = 4` at `1/M`; `8` at `1/M`, `ε_in = 1`: `0.046 → 0.031`).
+Step 8a's one-dimensional model said the profile cuts what crosses the margin
+4–15×; what it measurably does in 3D to a smooth transition is add the
+Kreiss–Oliger term's own `O(ε h^{q+1} ∂^{q+2} u)` where the solution is at its
+steepest, and nothing a smooth target sends needs cutting. The masked
+error says the same (worse in 37 of the 48 screens), and no survival
+changes where the ramp is right; the drift of `h_tt` at the horizon falls at
+`ε_in = 4` (`3.0e−3 → 2.2e−3` at `n_L = 12`, `4/M`), which is the
+dissipation damping the solution and not a better one.
+
+**E0: the hard step** (`:pasted` onto `KerrSchild(6/5, 0)`, 8a's uniform
+512-block mesh at `h = 5/64`, each run against `:pasted` onto the exact
+target with the same `ε_KO`; `A_0/A` is the largest `|δh_ab|` in the first
+shell outside the horizon, `[r_h, r_h + h)`, over the step's `|δh| = 0.348`
+at `r_1`, `10.9` cells below it):
+
+| `ε_KO` | reached | `A_0/A` at `1 M` | `2 M` | `5 M` | e-folds/cell outside | masked error L∞ at the end | min `α` in the shell |
+|---|---|---|---|---|---|---|---|
+| 1/4 | † 1.0 M | 4.2e−4 | | | 1.70 | 1.1e3 | 0.354 |
+| 1/2 | † 1.75 M | 2.1e−4 | 2.5e−3 (`1.5 M`) | | 0.92 | 1.9e3 | 0.287 |
+| 1 | `5 M` | 3.0e−4 | 4.2e−3 | **2.2e−2** | 0.39 | 244 | 0.369 |
+| 1/2 → 2 | `5 M` | 3.5e−4 | 2.6e−3 | 1.6e−2 | 0.37 | 8.1 | 0.576 |
+| 1/2 → 4 | `5 M` | 5.1e−4 | 3.5e−3 | 9.5e−3 | 0.35 | 6.3 | 0.576 |
+
+The three references reach `5 M` with a masked error L2 of `0.009–0.017`; the
+e-folds of the two that end are of their last peaks, before the slow modes
+arrive. Against step 8a: its ripple at depth 8, `ε_KO = 1/2`, reached the
+first shell at `9.9e−3` by `2 M`, and its measured `0.40–0.47` e-folds per
+cell of depth continued to `10.9` give `2.6–3.1e−3` — E0 at `ε_KO = 1/2` has
+`2.5e−3` at `1.5 M`, the step behaving as a broadband source of the same
+content; the frozen-coefficient `e^{−d/ℓ_max(r_1)}` is `5e−3`, `3e−5` at
+`ε_KO = 1/2, 1`. The transmitted fraction is still rising at `5 M` —
+the source never stops — and has reached the level 8a's long-time
+one-dimensional rates give for `10.9` cells at `ε_KO = 1`, `1.4–2.7e−2`.
+
+**The controls, with the projection on**, against step 5's table:
+
+| run | step 5 | step 8c | at the end: masked error L2, shell `C_a` L2, drift, `M_irr` |
+|---|---|---|---|
+| `:damped`, `N = 8` | `50 M`, `1.604e−1` | **`50 M`** | 1.60e−1, 0.181, 4.08e−3, 0.9955 |
+| `:damped`, `N = 6` | `21 M` | `21 M` | in the same chunk, with step 8b's `DomainError` to nine digits (`−57.5936359…`): 8b's ran on an AVX-512 node and this on an AVX2 one |
+| `:pasted`, `N = 8` | `17 M` | `17 M` | step 8b's `DomainError`, `−0.19763566226561102`, to the last digit (both AVX2 nodes) |
+| `:frozen`, `N = 8` | `13 M` | `13 M` | |
+
+Zero projection hits in all four, and in every run of the study but two
+families: E2 at `δ = 4h` on the layers its singular point comes within a
+cell of (`1652` hits from `t = 0.046 M` at `r = 0.406` on the fixture's own
+layer, `26124` from `t = 0.005 M` at `r = 0.398` on `n_L = 12`, both at the
+grid rate and both ending in `1–2.5 M`), and E2 at `δ = h`, `n_L = 12`,
+`1/M` above. The projection is not what any surviving run leans on.
+
+**The horizon.** The finder's `M_irr` is `1.00029` at `t = 0` (its
+truncation at `N_ah = 12`, `h = 5/64`) and `0.9972 ± 0.0002` at `50 M` on
+every run at `4/M` or `10/M` with `n_L ≥ 8`, exact target or wrong — the
+horizon's area does not see the target either — against `0.9955` for step
+5's layer; the gauge drift of `h_tt` at the horizon is `2.7–3.3e−3` against
+step 5's `4.08e−3` (which this study reproduces to three digits).
+
+**The recommendation: proceed to steps 8d–8f, not to 8g (proposed in step
+8c).** Forty-two of the 52 runs with a wrong target that went to `50 M` got
+there: 39 of the 42 at a physical rate (the three that did not are `1/M` on
+12 cells and `δ = 4h` at `10/M` on 6), 3 of the 10 at the grid rate, all on
+12 cells and at five times the error. On the rule's layers (`ρ_max = 4/M`, `n_L ≥ 8`) a 20 % mass error, a
+curvature error of `4/M²` and a displacement of `h` each leave the exterior
+exactly where the exact target leaves it — the shell's `C_a` `0.029–0.039`,
+the masked error `0.027–0.032`, `M_irr` `0.9972`, flat for forty `M`, and no
+projection hit — which is what step 8e's fitted target needs: it will be
+wrong by less than any of these. The layer does not need the target to be a
+solution or to be close; it needs it smooth (E0's step gets out at a
+percent and ends the run at `ε_KO ≤ 1/2`), a metric (finding 2; E3's other
+sign is not one), regular on the layer (E2 at `4h`, `n_L = 12`), and centered
+to about a cell (E2 at `4h` holds near the rule's error on one layer
+only). Those are the three
+things for 8d and 8e to guarantee — the tracked center to `≲ h`, the fit
+valid at every swept point and smooth in time as well as in space, as 8e's
+linear interpolation between two fits already is — and nothing measured
+here says excision is needed. What this does *not* show: the rule at `q = 4`,
+at the finer `h` the spinning holes need (the proposed scaling of rule 3),
+or on a surface that is not a sphere; step 8f's matrix is where those are
+measured.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -3876,4 +4205,9 @@ first touch them:
    attenuates grid-scale content from `r_1` by `e^{−2.9}` to `e^{−4.6}` on
    the fixture, and left the default where it is until step 8c says what
    amplitude it has to hold back **(proposed in step 8a**; see [The
-   interior](#the-interior-a-pointwise-damping-layer)**)**.
+   interior](#the-interior-a-pointwise-damping-layer)**)**. Step 8c kept
+   `m = 8` — a smooth layer's wrong target leaves the exterior what the exact
+   one leaves — and replaced `ρ_max · dt = 1` by `ρ_max = 4/M` with a ramp of
+   `4G` cells, measured for an inexact target and **(proposed in step 8c)**
+   for the analytic one, where it cuts the `50 M` error sixfold; the code's
+   default is still `1/dt` until the reviewer takes it.

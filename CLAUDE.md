@@ -60,8 +60,10 @@ and `M_ch` at Kerr's values in both charts and at `a = 9/10`. Before the
 moving hole (G5) come PLAN.md's steps 8a–8g (added 2026-09-23), the
 generic interior: step 5's layer needs an analytic center and an analytic
 interior, and its spherical core cannot hold harmonic Kerr's singular
-disk at `a = 9/10`, which is G5's case. Steps 8a (the leakage margin) and
-8b (the range projection) are done; step 8c, the calibration, is next.**
+disk at `a = 9/10`, which is G5's case. Steps 8a (the leakage margin),
+8b (the range projection) and 8c (the calibration of the layer for an
+inexact target) are done; step 8d, the tracked horizon geometry, is
+next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -151,6 +153,26 @@ and the record's `finite` now read. `diag` has 22 slots; the record grew
 `min_detγ_layer` … `max_Π_shell` rows. `test/bounds_tests.jl` is its
 file, and `hole_runs.jl`'s `bounds` section its long runs.
 
+From step 8c the layer can be **calibrated against a wrong target**: an
+`Interior` carries an optional `target` metric (`isbits`, default `nothing`
+= the case's background, resolved by `layer_target`) that the kernel reads
+where `(INTERIOR)` reads `u_exact` — the layer branch and the `:pasted`
+paste — and nowhere else, so the record's `residual` is the layer's
+distance from the *truth*; `evolve!` takes `ρ_max_fixed`, a rate in the
+case's units, instead of `ρ_max_factor/dt` (the two are refused together,
+and a fixed rate above `1/dt` is refused); and `gauge.jl` has
+`HorizonDissipation`, the `ε_KO(r)` profile (`ε_out` at and outside
+`r_h,min`, rising `C²` to `ε_in ≤ 4` at `r_1`), which `GHCase` takes where
+it took a number — `ε_KO` is a type parameter now, `dissipation_rate` the
+identity on a number and `has_dissipation` the kernel's `Val{DISS}`;
+`with_dissipation` and `horizon_dissipation` build it from a case. The
+measured rule is in `CODE.md`, "The interior": **`ρ_max = 4/M` and a
+ramp of at least `4G = 8` cells, `ε_KO` constant** — a grid rate on an
+inexact target ends the run in 2–18 M, and on the exact one costs a factor
+six in the 50 M error. `test/evolution_cases.jl` has the E3 target
+(`CurvatureTarget`) and a `gh_outside_shell_norms(p, u, t)` method, and
+`hole_runs.jl` a `calibration` section.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -195,6 +217,8 @@ analysis of the package's own weights inside a horizon, the penetration
 length `ℓ` of grid-scale content, and a one-dimensional model run that
 predicts what the 3D runs measure — and a `leakage` section to
 `hole_runs.jl`, which is *not* in its default list (it is a batch job).
+Step 8c's `calibration` section is not in it either: about 150 runs of
+`5 M` and `50 M`, a dozen node-hours on Symmetry.
 `Project.toml` carries the `[sources]` pins and CI is in place — but
 **the CI matrix is temporarily reduced** (2026-09-19): Julia 1.11 and code
 coverage are both dropped, each with the removed lines and the reason in a
@@ -206,8 +230,11 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **3723 assertions in 13m00** at one thread and **9m33** at
-four on the development machine after step 8b, on a machine shared with a
+The suite is **3798 assertions in 13m25** at one thread and **10m12** at
+four on the development machine after step 8c (its 56 new claims are
+11.8 s / 7.2 s: one right-hand side each for the target and the profile,
+and one `1/20 M` run for `ρ_max_fixed`); step 8b measured 3723 in 13m00 /
+9m33 on a machine shared with a
 sibling agent (step 7 measured 3444 in 12m31 / 8m38; step 6 measured 2968
 in 13m35 / 10m45 here and 29m32 / 20m29 on Symmetry; the wall clock has
 gone *down* while the count went up before, so read each step's numbers as
@@ -274,7 +301,10 @@ the two harmonic charts, and from step 6 the indicator's calibration and
 its adaptive run — are a **script**, run by hand, with its numbers
 recorded in `CODE.md` under "Measured results" (added in step 5). It takes
 an optional list of sections (`order`, `long`, `charts`, `indicator`,
-`horizon`, `bounds`):
+`horizon`, `bounds`; and `leakage` and `calibration`, which are not in the
+default list). An option `key=value` whose key is a section's name selects
+that section's subset and so names the section — `bounds=damped6` runs
+the one row and nothing by default (amended in step 8c):
 
 ```bash
 julia --project=. --threads=4 test/hole_runs.jl
@@ -318,6 +348,24 @@ gate, the widest gate), with radial bins of the state's validity and a
 step-by-step replay of the fatal chunk. Those two took 14 and 26
 minutes on one Symmetry node; `TREEGH_BOUNDS_TEND` shortens them for a
 smoke test and `TREEGH_BOUNDS_AUTOPSY=1` forces the replay.
+
+The `calibration` section (added in step 8c) is step 8c's experiments on
+the step-5 fixture — the E3 sweep to `3/20 M`, the `n_L × ρ_max` scan with
+an inexact target, the `ε_KO(r)` profile, the E1 and E2 targets, E0's hard
+step on 8a's uniform mesh, the controls, and the survivors to `50 M` — in
+groups, `calibration=<group>+<group>` (`+` or `,`): `sweep`, `scan`,
+`profile`, `targets`, `controls`, `e0`, `e0p`, `exact`, and `long1` …
+`long8` for the lists of `50 M` runs written into the script. With sixteen
+or more threads it fans its runs out to subprocess workers (four threads a
+screen, eight a `50 M` run, sixteen an E0 pair), whose logs carry one row
+per chunk; each group was one `amddebugq` job — a screen group about 20
+minutes, a `50 M` group of eight about 30 (`symmetry-run.sh …
+"hole:calibration=long3"`). A single run, shortened, is how it is
+validated locally:
+
+```bash
+julia --project=. --threads=4 test/hole_runs.jl calibration runs=e3-n8-r4-c t_end=1/2
+```
 
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a
@@ -436,6 +484,20 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   where the runs without it do. Read the validity rows (`min_α_shell`,
   `max_Π_shell`) and the shell error, not `bounds_hits`, for a failure at
   `r_1`.
+- **`ρ_max = 1/dt` is a grid rate, and a wrong target cannot survive it**
+  (measured in step 8c). It is about `107/M` on the fixture — a paste two
+  cells deep — and every inexact target at it ends its run in 2–15 M on a
+  ramp of up to 8 cells, degenerating in the shell outside `r_1`; the calibrated layer is
+  `evolve!(…; ρ_max_fixed = 4/M)` with a ramp of at least 8 cells
+  (`ρ_ramp = 1`, `r_0 = r_1 − n_L h`). A rate of `1/M` is too slow the
+  other way: a deep layer is not held and fails from the inside.
+- **A layer target is evaluated wherever the layer is**, `r_0 ≤ r < r_1`,
+  and at the core's sphere for `:pasted` — so its own singular set has to
+  be inside `r_0` exactly as the background's does, and nothing checks it:
+  step 8c's E2 target translated by `4h` puts its singular point on a grid
+  point of a 12-cell layer and throws at `t = 0`. The `residual` row is the
+  layer's distance from the *background*, not from the target, and is
+  large by construction for a wrong one.
 - **`F` is never evaluated where `w = 0`.** The frozen core holds
   finite, stale data by design — the analytic solution is singular
   inside it — and `F` of that data may be `NaN`; `0 · NaN = NaN`. The

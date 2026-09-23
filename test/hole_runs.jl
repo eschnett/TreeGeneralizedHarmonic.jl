@@ -34,9 +34,9 @@
 # calibrated thresholds this hole asks for 848 blocks.
 #
 # Step 8c adds the `calibration` section, which is not in the default list
-# either: a hundred and twenty screens of `5 M` and their survivors to `50 M`
-# are several node-hours, run as batch jobs by group
-# (`hole_runs.jl calibration=scan,profile`); its own header says how.
+# either: 138 screens of `5 M` and 62 runs to `50 M` were thirteen batch jobs
+# and 5.6 node-hours on Symmetry, run by group
+# (`hole_runs.jl calibration=scan+profile`); its own header says how.
 #
 # Step 8a adds the `leakage` section, which is **not** in the default list:
 # eighty-eight evolutions on a 512-block mesh are one batch job on a 64-core
@@ -1372,7 +1372,9 @@ isempty(BOUNDS_ROWS) || bounds_section(BOUNDS_ROWS)
 #     outside the horizon, on step 8a's uniform 512-block mesh, against
 #     `:pasted` with the exact target, at `ε_KO = 1/4, 1/2, 1` (`e0`).
 #   * **Controls** — `:frozen`, `:pasted` and `:damped` at `N = 8` and the
-#     `:damped` at `N = 6` whose end step 8b replayed (`controls`).
+#     `:damped` at `N = 6` whose end step 8b replayed (`controls`), and the
+#     exact target on the scan's layers (`exact`, added after the first
+#     `50 M` runs). E0 again with the `ε_KO(r)` profile is `e0p`.
 #
 # **`n_L` is the width of the relaxation ramp in cells** (proposed in step
 # 8c): finding 1's prediction `n_L ≳ G (10 ρ_max M)^{1/3}` is the width over
@@ -1386,8 +1388,9 @@ isempty(BOUNDS_ROWS) || bounds_section(BOUNDS_ROWS)
 # `nd` is the fixture's own layer (`r_0 = 2/5`, `ρ_ramp = 1/2`: a ramp of
 # `4.8` cells), which is step 5's configuration.
 #
-# **How it runs.** Groups (`sweep`, `e0`, `scan`, `profile`, `targets`,
-# `controls`, and `long1` … for the survivors to `50 M`) are chosen with
+# **How it runs.** Groups (`sweep`, `e0`, `e0p`, `scan`, `profile`,
+# `targets`, `controls`, `exact`, and `long1` … `long8` for the survivors to
+# `50 M`) are chosen with
 # `calibration=<group>,…` (or `+` between them, which is what a batch job's
 # name can carry); the bare section name runs every screen group.
 # With a node's worth of threads the runs go to subprocesses of four threads
