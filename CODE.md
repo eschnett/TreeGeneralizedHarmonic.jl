@@ -2110,6 +2110,14 @@ toward it (step 8e-ii):
    at `L = 12`). **So the proof-of-concept chart does not run on this target
    at `h = 5/256`**; step 8f's row for it needs `Π̃` and `L ≥ 12` at the
    least, and the design's own fallbacks are `a = 7/10` and 8g's excision.
+   **And the evolved region on the equator is itself under-resolved there
+   (measured in step 8e)**: the analytic solution's own length scale at the
+   first evolved point on the equator, `√(|u|/|Δ²u|)`, is `0.008 M` at
+   `h = 5/256` — under half a cell — `0.019 M` (two cells) at `5/512` and
+   `0.024 M` (five cells) at `5/1024`, with `m = 4`: the ring sits `m h +
+   0.02 M` inside it, and the solution varies on the scale of that distance.
+   Whatever the interior does, the chart at `a = 9/10` wants `h ≲ 5/1024` on
+   its equator, or a margin that depends on the direction.
 
 **What the layer costs.** `u_exact` is evaluated at every point of the
 layer at every RHS evaluation — one forward-mode dual pass through the
