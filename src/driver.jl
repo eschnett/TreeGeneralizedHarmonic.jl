@@ -505,7 +505,17 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     # (`CODE.md`: "Each find is seeded with the previous result, recentred
     # on `c(t)`"). It is the *shape* that is carried and not the origin:
     # `find_gh_horizon` recentres on the analytic center at every call.
-    hlm_seed = nothing
+    #
+    # A tracked run's *first* find is seeded with the seed track's own shape
+    # — the analytic horizon, zero-padded onto the finder's grid — rather
+    # than with a sphere (proposed in step 8e): on harmonic Kerr at
+    # `a = 9/10` the sphere of the mean radius, `0.72`, lies inside the
+    # offset surface's equator at `0.92`, so its first iterates read the
+    # layer and the footprint guard refuses them, and a track whose first
+    # three finds fail is lost. On a spherical horizon the two seeds are the
+    # same surface.
+    hlm_seed = fitted && case.horizon !== nothing ?
+               complex_from_real(tr.shape, case.horizon.N - 1) : nothing
     # The lapse-collapse trigger (step 8d): set by a row whose evolved region
     # has `min α` below the spec's `α_trigger`, it forces a find at the next
     # chunk boundary whatever the cadence, and that row says so.

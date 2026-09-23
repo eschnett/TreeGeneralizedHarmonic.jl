@@ -44,6 +44,17 @@
 # (`hole_runs.jl tracked`, or `tracked=<t_end>`), four minutes at four
 # threads. Its table is in `CODE.md`, "The tracked geometry (step 8d)".
 #
+# Step 8e adds the `fitted` section, which is not in the default list either:
+# the `:fitted` variant's three trials, selected as `fitted=<row>,…` —
+# `fixture` (the suite's tracked hole to `1 M` under four choices of initial
+# data against `:damped`, two minutes at four threads), `boosted` (a moving
+# seed, `boost(Harmonic(1, 0), 0.3 x̂)`, to `0.1 M` on a 5/128 mesh — the
+# finder on a boosted hole and the cache's refill cadence) and `harmonic`
+# (the first construction of harmonic Kerr's `a = 9/10` initial data, `m =
+# 4`, `h = 5/256`, 2472 blocks: its validity, one right-hand side, and the
+# first chunk). `fitted=<row>` alone runs only that row. Its numbers are in
+# `CODE.md`, "The fitted target".
+#
 # Step 8a adds the `leakage` section, which is **not** in the default list:
 # eighty-eight evolutions on a 512-block mesh are one batch job on a 64-core
 # Symmetry node (`julia --project=. --threads=64 test/hole_runs.jl leakage`;
@@ -57,7 +68,7 @@ using Serialization: deserialize, serialize
 using TreeAMR
 using TreeGeneralizedHarmonic
 using KernelAbstractions: CPU
-using StaticArrays: SVector
+using StaticArrays: SMatrix, SVector
 import SpacetimeMetrics as SM
 
 include(joinpath(@__DIR__, "evolution_cases.jl"))
@@ -80,7 +91,7 @@ say(fmt, args...) = println(Printf.format(Printf.Format(fmt), args...))
 # `hole_runs.jl bounds=damped6` alone run every default section as well,
 # since no bare name was given).
 const SECTION_NAMES = ["order", "long", "charts", "indicator", "horizon",
-                       "bounds", "leakage", "calibration", "tracked"]
+                       "bounds", "leakage", "calibration", "tracked", "fitted"]
 const SECTIONS = let names = filter(a -> !occursin('=', a), ARGS)
     keyed = [first(split(a, '='; limit=2)) for a in ARGS if occursin('=', a)]
     isempty(names) && !any(in(SECTION_NAMES), keyed) ?
@@ -2028,6 +2039,157 @@ if "tracked" in SECTIONS || haskey(OPTIONS, "tracked")
             maximum(r -> something(r.track_prediction, 0.0), f.records),
             f.nresamples, f.records[end].layer_r_in, f.records[end].layer_r_out,
             f.records[end].margin_efolds)
+    end
+end
+
+# --- (10) the fitted variant (step 8e) --------------------------------------
+#
+# `CODE.md`, "The fitted target": the kernel half's three trials. Each row
+# says what it is; a run that ends says when and why, as a row.
+function fitted_rows()
+    rows = String.(split(get(OPTIONS, "fitted", "fixture,boosted,harmonic"), ','))
+    return rows
+end
+
+if "fitted" in SECTIONS || haskey(OPTIONS, "fitted")
+    let
+    frows = fitted_rows()
+    q, G = 2, 2
+    ops = Operators(prolongation=q + 2, restriction=q + 2)
+    if "fixture" in frows
+        println("\n=== (10a) the fitted fixture against :damped, and its initial data ===")
+        t_end = T(parse(Float64, get(OPTIONS, "t_end", "1")))
+        variants = (("damped", :damped, (;)),
+                          ("fitted (decided: cont 1, r_1)", :fitted, (;)),
+                          ("fitted cont 2", :fitted, (fit_initial_cont=2,)),
+                          ("fitted, fit below the core surface", :fitted,
+                           (fit_initial_depth=8 * T(5 // 64),)),
+                          ("fitted, fit below 3h", :fitted,
+                           (fit_initial_depth=3 * T(5 // 64),)))
+        println("| run | t/M | masked L2 | L∞ | C_a L2 | layer residual | fit_residual | hits |")
+        for (label, variant, kw) in variants
+            case = fitted_fixture(T; variant=variant)
+            t0 = time()
+            out = evolve!(T, case; forest=hole_fixture_forest(T, case; N=8), q=q,
+                                ops=ops, t_end=t_end, kw...)
+            for r in out.records
+                (r.t == 0 || isapprox(r.t, 0.1) || isapprox(r.t, 0.5) ||
+                 r === out.records[end]) || continue
+                say("| %s | %.2f | %.3e | %.3e | %.3e | %.3g | %s | %d |", label, r.t,
+                    r.err_l2, r.err_linf, r.gauge_l2, r.residual,
+                    r.fit_residual === nothing ? "—" : Printf.format(Printf.Format("%.3g"), r.fit_residual),
+                    r.bounds_hits)
+            end
+            sh = gh_outside_shell_norms(out)
+            say("|   shell at the end | | %.3e | %.3e | C_a %.3e | | | (%.0f s) |", sh.err_l2,
+                sh.err_linf, sh.gauge_l2, time() - t0)
+        end
+    end
+    if "boosted" in frows
+        println("\n=== (10b) a moving seed: boost(Harmonic(1, 0), 0.3 x̂), h = 5/128, :fitted and :damped ===")
+        bg = SM.boost(SM.Harmonic(one(T), zero(T)), SVector{3,T}(T(3 // 10), 0, 0))
+        for variant in (:fitted, :damped)
+            case = hole_case(T, bg; halfwidth=T(5 // 2), chunk=T(1 // 20),
+                             interior=FittedSpec(T; variant=variant, margin=8),
+                             horizon=Horizon(T; every=1, N=12, spin=false))
+            forest = hole_forest(T, case; N=8, roots=1,
+                                 radii=(T(10), T(10), T(3 // 2), one(T)))
+            say(":%s — mesh: %d leaves, levels %s; the case's velocity %s (hole_velocity: −v)",
+                String(variant), nleaves(forest), string(forest_levels(forest)),
+                string(Tuple(case.center.v)))
+            t0 = time()
+            out = try
+                evolve!(T, case; forest=forest, q=q, ops=ops,
+                        t_end=T(parse(Float64, get(OPTIONS, "t_end_boosted", "0.1"))))
+            catch e
+                println("the run ended: ", first(split(sprint(showerror, e), '\n')))
+                nothing
+            end
+            out === nothing && continue
+            println("| t/M | masked L2 | L∞ | C_a L2 | find | track center | v_est | offset (cells) | prediction (cells) | fit_valid | fit_residual | refills | hits |")
+            for r in out.records
+                say("| %.3f | %.3e | %.3e | %.3e | %s | (%.5f, %.1e, %.1e) | (%.4f, %.1e, %.1e) | %.2e | %s | %s | %s | %s | %s |",
+                    r.t, r.err_l2, r.err_linf, r.gauge_l2, string(r.horizon_success),
+                    r.track_center..., r.track_velocity..., r.track_offset,
+                    string(r.track_prediction), string(r.fit_valid),
+                    string(r.fit_residual), string(r.fit_refills),
+                    string(r.bounds_hits))
+            end
+            say("%d steps in %.0f s; fits %s", out.nsteps, time() - t0,
+                string(out.fit_cost))
+        end
+    end
+    if "harmonic" in frows
+        println("\n=== (10c) harmonic Kerr a = 9/10: the first :fitted initial data, m = 4, h = 5/256 ===")
+        bg = SM.Harmonic(one(T), T(9 // 10))
+        spec = FittedSpec(T; variant=:fitted, margin=4, lmax_shape=12,
+                                lmax_fit=parse(Int, get(OPTIONS, "lmax_fit", "8")))
+        case = hole_case(T, bg; halfwidth=T(5 // 4), chunk=T(1 // 400),
+                               interior=spec,
+                               horizon=Horizon(T; every=1, N=16, spin=false))
+        forest = hole_forest(T, case; N=8, roots=1,
+                                   radii=(T(10), T(8 // 5), T(13 // 10), one(T)))
+        tr = seed_track(case, 0)
+        geom = with_ρ_max(fitted_interior(spec, tr, forest, G; t=0, n_L=8), T(4))
+        say("mesh: %d leaves, levels %s; h = %.5f, r_1 from %.4f (axis) to %.4f (equator), core from %.4f",
+            nleaves(forest), string(forest_levels(forest)), geom.h,
+            geom.r_in - geom.offset, geom.r_out - geom.offset,
+            geom.r_in - geom.offset - geom.thickness)
+        bd = derive_target_bounds(T, bg, geom; t=0, L=spec.lmax_fit)
+        t0 = time()
+        fit = build_fit(analytic_sampler(bg, 0.0; δ=geom.h / 8), geom, spec;
+                              cont=1, bounds=bd)
+        say("initial fit (cont = 1, L = %d): valid %s, value residual %.3g, sweep min λ(γ) %.3g, min α %.3g, %d hits; %.2f s",
+            spec.lmax_fit, string(fit.valid), fit.residual.value, fit.sweep.min_λ,
+            fit.sweep.min_α, fit.sweep.hits, time() - t0)
+        say("target bounds: α in [%.3g, %.3g], λ in [%.3g, %.4g], |β| ≤ %.3g, K ≤ %.4g",
+            bd.α_min, bd.α_max, bd.λ_min, bd.λ_max, bd.β_max, bd.K_max)
+        fs = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3), backend=CPU())
+        p = refill_target(GHProblem(fs, GhostSchedule(fs, ops), case; q=q, interior=geom,
+                                          target=target_cache(fs), fits=(fit, nothing)),
+                                zero(T))
+        u = statevector(fs)
+        map_blocks!(TreeGeneralizedHarmonic.fitted_state_kernel!, fs, statearray(u, fs),
+                    p.target.work, p.origins, p.spacings, bg, p.interior, zero(T), zero(T),
+                    zero(T))
+        A = statearray(u, fs)
+        worst = (detγ=Inf, α=Inf, λ=Inf)
+        nbad = 0
+        for b in 1:nblocks(fs), k in 1:8, j in 1:8, i in 1:8
+            hv = SVector{10}(ntuple(v -> A[i, j, k, v, b], 10))
+            Πv = SVector{10}(ntuple(v -> A[i, j, k, 10 + v, b], 10))
+            d, α, _, _ = state_validity(hv, Πv)
+            λ, _ = sym_eigen3(SMatrix{3,3}(1 + hv[5], hv[6], hv[7], hv[6], 1 + hv[8],
+                                                 hv[9], hv[7], hv[9], 1 + hv[10]))
+            worst = (detγ=min(worst.detγ, d), α=min(worst.α, α), λ=min(worst.λ, minimum(λ)))
+            nbad += !(d > 0 && α > 0 && minimum(λ) > 0 && all(isfinite, hv) && all(isfinite, Πv))
+        end
+        say("initial data: %d points, %d non-finite values, %d not a metric; min det γ %.3g, min α %.3g, min λ(γ) %.3g",
+            length(u) ÷ 20, count(!isfinite, u), nbad, worst.detγ, worst.α, worst.λ)
+        du = similar(u)
+        gh_rhs!(du, u, p, zero(T))
+        t1 = time()
+        gh_rhs!(du, u, p, zero(T))
+        say("one right-hand side: %.2f s, %d non-finite, max |du| = %.3g", time() - t1,
+            count(!isfinite, du), maximum(abs, du))
+        reached = Ref(zero(T))
+        out = try
+            evolve!(T, case; forest=forest, q=q, ops=ops,
+                    t_end=T(parse(Float64, get(OPTIONS, "t_end_harmonic", "0.05"))),
+                    observer=(p, t, u) -> (reached[] = T(t)))
+        catch e
+            say("the run ended after t = %.4f: %s", reached[],
+                first(split(sprint(showerror, TreeGeneralizedHarmonic.unwrap_task_failure(e)), '\n')))
+            nothing
+        end
+        if out !== nothing
+            for r in out.records
+                say("| %.4f | masked L2 %.3e | min α layer %.3g | min det γ layer %.3g | min α shell %.3g | fit_valid %s |",
+                    r.t, r.err_l2, r.min_α_layer, r.min_detγ_layer, r.min_α_shell,
+                    string(r.fit_valid))
+            end
+        end
+    end
     end
 end
 
