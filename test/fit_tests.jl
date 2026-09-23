@@ -142,15 +142,17 @@ end
         # collocation of the real harmonics.
         @test all(<(10), conds)
 
-        # The whole ansatz: random coefficients (the shift's constant zero)
-        # on a surface that is not a sphere, their values and radial
-        # derivatives written out, and `solve_fit` recovers them — the
-        # column order, the shift's leading block of the one QR, and the
-        # coefficient layout, to roundoff times the conditioning.
-        for (L, cont) in ((4, 1), (4, 2), (6, 2))
+        # The whole ansatz: random coefficients on a surface that is not a
+        # sphere, their values and radial derivatives written out, and
+        # `solve_fit` recovers them — the column order, the coefficient
+        # layout and, without the shift's constant (the shift's constants
+        # zero), the shift's leading block of the one QR; with it, the
+        # shift like the others. To roundoff times the conditioning.
+        for (L, cont, sc) in ((4, 1, false), (4, 2, false), (6, 2, false),
+                              (4, 1, true), (6, 2, true))
             nb = cont + 1
             C = randn(rng, (L + 1)^2, nb, 20)
-            C[1, 1, 2:4] .= 0
+            sc || (C[1, 1, 2:4] .= 0)
             dirs = fit_directions(L)
             ρs = [1 + (n[3]^2 - 1 / 3) / 5 + n[1] / 10 for n in dirs]
             ξs = [SVector{3,T}(ρ * n) for (ρ, n) in zip(ρs, dirs)]
@@ -158,18 +160,19 @@ end
             rbar = T(3 // 2)
             samples = ntuple(b -> [SVector{20,T}(rows[p][b] ./ (rbar^(b - 1) * ρs[p]^(b - 1)))
                                    for p in eachindex(ξs)], nb)
-            coeffs, res, cnd, model = solve_fit(ξs, samples, L, cont, rbar)
+            coeffs, res, cnd, model = solve_fit(ξs, samples, L, cont, rbar;
+                                                shift_constant=sc)
             # Measured: κ = 99, 1.5e3, 6.0e3 for the three rows, and the
             # coefficients back to 0.03–0.19 of `κ eps |C|`.
             κ = max(cnd.scalars, cnd.shift)
             @test maximum(abs, coeffs .- T.(C)) ≤ 64 * eps(T) * κ * maximum(abs, C)
-            @test all(iszero, coeffs[1, 1, 2:4])
+            sc || @test all(iszero, coeffs[1, 1, 2:4])
             @test res.overall ≤ 64 * eps(T) * κ
             @test all(p -> maximum(abs, model[p] - samples[1][p]) ≤
                            64 * eps(T) * κ * maximum(abs, C), eachindex(ξs))
             # The written-out derivative is the evaluator's, differenced along
             # the ray (checked once, at `Float64`).
-            if T === Float64 && L == 4 && cont == 2
+            if T === Float64 && L == 4 && cont == 2 && !sc
                 params = FitParams{T}(L, cont, rbar, HoleCenter(T, (0, 0, 0)),
                                       default_bounds(T; M=1, r_gate=1))
                 p = 7
@@ -454,8 +457,12 @@ end
             h0, Π0 = fit_state(fit, c, t)
             detγ, α, _, _ = state_validity(h0, Π0)
             @test detγ > 0 && α > 0
+            # With the constant (the default) the static hole's is zero to
+            # the least squares' roundoff, `κ eps` of the shift: measured
+            # 6.2e−14 and 6.9e−5 of `|β| = 0.62` at Float64 and Float32.
             βscale = maximum(m -> maximum(abs, m[2:4]), fit.model)
-            @test fit.sweep.max_β_center ≤ 64 * eps(T) * βscale
+            @test fit.sweep.max_β_center ≤
+                  16 * fit.conditioning.scalars * eps(T) * βscale
             nc = build_fit(analytic_sampler(case.background, zero(T); δ=geom.h / 8),
                            geom, case.interior; cont=cont, bounds=case.bounds,
                            shift_constant=false)
