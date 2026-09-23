@@ -423,6 +423,89 @@ The kernel compiles the dissipation away entirely when `ε_KO = 0`
 (1106 against 1409 ns per point at `q = 4`), and a run with
 `ε_KO = 1e−300` gives the same numbers as one with the term compiled out.
 
+**What the dissipation has to do inside a horizon (measured in step 8a,
+`test/dispersion.jl`).** The discrete scheme is not causal at the grid
+scale, and the dissipation is the only thing that stands in for causality
+there. Frozen at a point, with the lower-order terms dropped, the principal
+part of every component along a direction `x` is
+
+    (∂_t − b ∂_x)² u = a² ∂_x² u,      b = β^x,   a = α √γ^{xx},
+
+**with the advection's sign the code's**, `∂_t h = +β^i ∂_i h`, so that the
+characteristic speeds are `−b ± a` and both are negative inside the horizon
+— for `KerrSchild(1, 0)` along a radius `b = H/(1+H)` and `a = 1/(1+H)`
+with `H = 2M/r`, so `b = 0.571`, `a = 0.429` at `r = 1.5 M`, which the
+script reads from the metric through `metric_quantities` and checks
+**(amended in step 8a**: `PLAN.md`'s finding 4 writes the operator as
+`(∂_t + b ∂_x)²` with `b = β^r` and the speeds `−b ± a`, and the three are
+consistent only with the minus sign**)**. With the package's own weights on
+unit spacing, a mode `e^{i(kx − ωt)}`, `θ = kh`, has the two branches
+
+    ω = (−b s(θ) ∓ a √c(θ))/h − i ε sin^{2r}(θ/2)/h,
+    s(θ) = Σ_j w₁_j sin jθ,   c(θ) = −Σ_j w₂_j cos jθ,
+
+the symbols of `D₁` and of the compact `D₂`; the script forms them as the
+eigenvalues of the 2×2 symbol, differentiates in `θ` for the group velocity
+`v_g`, and checks both against the closed forms. Branch 1 is the fast
+ingoing one (`v_g → −b − a`); branch 2 (`v_g → a − b`) is the one the
+horizon is about. Two things the continuum does not have:
+
+- **The Nyquist mode moves outward.** Every centered `D₁` annihilates it
+  (`s(π) = 0`) with the slope `s′(π) = −1, −5/3, −11/5, −93/35` at
+  `q = 2, 4, 6, 8`, and `(√c)′(π) = 0`, so at `θ = π` *both* branches move
+  at `−b s′(π)`: `+b`, `+5b/3`, `+11b/5` — outward, faster the higher the
+  order. `test/stencils_tests.jl` asserts the slopes in `Rational`, beside
+  the damping-sign claim above.
+- **The intermediate wavelengths are the worst.** Branch 2 turns outgoing
+  at `θ_c`, where `a (√c)′ = b s′` (at `q = 2`, `a cos(θ/2) = b cos θ`),
+  far below Nyquist, where `sin^{2r}(θ/2)` is small; the penetration length
+  `ℓ(θ) = max(v_g, 0)/σ`, in cells per e-fold, peaks just above `θ_c`.
+
+`v_g` does not depend on `ε` and `σ` is proportional to it, so **`ℓ ∝ 1/ε`
+exactly** and the table is at `ε_KO = 1` — divide by `ε` for any other; at
+`ε_KO = 0` every outgoing mode has `ℓ = ∞`. `ℓ_max` in cells along a grid
+axis, with the `θ/π` and the `v_g` it is attained at, and `θ_c/π`:
+
+| `r/M` | `b/a` | `q = 2` | `q = 4` | `q = 6` | `θ_c/π` at `q = 2, 4, 6` |
+|---|---|---|---|---|---|
+| 1.0 | 2.000 | 0.96 (0.540, 0.304) | 1.32 (0.679, 0.594) | 1.64 (0.749, 0.864) | 0.362, 0.471, 0.534 |
+| 1.2 | 1.667 | 1.07 (0.478, 0.231) | 1.35 (0.628, 0.454) | 1.63 (0.704, 0.664) | 0.325, 0.443, 0.510 |
+| 1.5 | 1.333 | 1.45 (0.374, 0.136) | 1.51 (0.539, 0.267) | 1.70 (0.626, 0.394) | 0.258, 0.389, 0.464 |
+| 1.8 | 1.111 | 3.10 (0.234, 0.052) | 2.13 (0.411, 0.102) | 2.10 (0.511, 0.151) | 0.164, 0.304, 0.389 |
+| 2.0 | 1.000 | ∞ (`θ → 0`) | ∞ (`θ → 0`) | ∞ (`θ → 0`) | 0 |
+
+and the attenuation over the default margin at the default `ε_KO = 1/2`,
+`e^{−8/ℓ_max} = e^{−4/ℓ_max(1)}`, **if the whole margin had the
+coefficients of that radius**:
+
+| `r/M` | 1.0 | 1.2 | 1.5 | 1.8 | 2.0 |
+|---|---|---|---|---|---|
+| `q = 2` | 1.5e−2 | 2.4e−2 | 6.3e−2 | 0.28 | 1 |
+| `q = 4` | 4.8e−2 | 5.2e−2 | 7.1e−2 | 0.15 | 1 |
+| `q = 6` | 8.7e−2 | 8.6e−2 | 9.6e−2 | 0.15 | 1 |
+
+Four things read off it. **At the horizon the supremum is at `θ → 0`**:
+branch 2's continuum speed `a − b` vanishes there, the discrete one is
+`O(θ^q)` against a dissipation of `O(θ^{q+2})`, and near the sonic surface
+the smooth outgoing modes are not damped at all — the continuum's marginal
+trapping, which no dissipation of this form can touch; `ℓ` is finite only
+some depth below the horizon, and a margin measured in cells therefore
+buys less at finer `h`, where it lies closer to the horizon. **Higher order
+is no cure**: it moves `θ_c` and the peak toward Nyquist, where the
+dissipation is stronger, but raises `v_g` as much, and deep inside
+(`r = M`) `ℓ_max` grows with `q`. **The axis is the direction to design
+for**: along the grid diagonal, where the principal part reads `D₁ ⊗ D₁`
+and the dissipation acts on all three axes at a third of the phase each,
+`ℓ_max` is shorter at every entry (`0.63, 0.75, 1.14, 2.69` at `q = 2`,
+`0.74, 0.80, 0.97, 1.47` at `q = 4`, `0.88, 0.91, 1.02, 1.34` at `q = 6`, for
+`r = 1.0 … 1.8` at `ε_KO = 1`). And **the time integrator adds nothing**:
+the fully discrete scheme, RK4 at `cfl = 1/4` on the fixture's
+`λ_max = 1.671`, agrees with every semi-discrete entry to the digits
+printed, and at `ε_KO = 0` RK4's own damping, `O((ω dt)⁶)`, leaves
+`ℓ > 10⁶` cells. What this means for the margin `m` is under [The
+interior](#the-interior-a-pointwise-damping-layer), and what a 3D run does
+with it is under [Measured results](#measured-results), step 8a.
+
 ### The interface-order rule, and what it costs a second-order system
 
 TreeAMR's measured rule (its `CODE.md`, "Operators"): a ghost filled by

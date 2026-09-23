@@ -232,6 +232,44 @@ end
     end
 end
 
+@testset "The Nyquist mode moves outward under the advection stencil: q=$q" for q in
+                                                                              STENCIL_ORDERS
+    # Guards the premise of `CODE.md`'s leakage margin (added in step 8a,
+    # `test/dispersion.jl`): inside a horizon the shift advection makes every
+    # continuum mode ingoing, but every centered first derivative annihilates
+    # the grid-scale mode and has the opposite slope there, so the Nyquist
+    # mode is carried *outward*. A change to the first-derivative weights
+    # moves the number below, and with it the margin the interior needs.
+    #
+    # The sign convention is the code's: `∂_t h = +β^i ∂_i h + …` (`CODE.md`,
+    # "The equations"). On `u_j = e^{i(jθ − ωt)}`, `θ = kh`, the stencil's
+    # symbol is `i s(θ)/h` with `s(θ) = Σ_j w_j sin(jθ)`, so the advection
+    # term alone gives `ω = −β s(θ)/h` and the group velocity
+    # `v_g = dω/dk = −β s′(θ)`, `s′(θ) = Σ_j j w_j cos(jθ)`. In the continuum
+    # `s′ = 1` and `v_g = −β`: inward, for Kerr-Schild's outward-pointing
+    # shift. At Nyquist `v_g = −β s′(π)`, and `s′(π) = Σ_j j w_j (−1)^j` is
+    # an exact rational number.
+    w = rational_derivative_weights(q, 1)
+    r = q ÷ 2
+    js = (-r):r
+    sgn = [alternating(j) for j in js]
+    # The stencil annihilates the grid-scale mode `u_j = (−1)^j`: advection
+    # does not act on it at all.
+    @test sum(w .* sgn) == 0
+    # The continuum slope, `s′(0) = 1`: first-derivative consistency.
+    @test sum(j * w[j + r + 1] for j in js) == 1
+    # The Nyquist slope, exactly, and the group velocity it gives, `−β s′(π)`,
+    # in units of `β`: `+1` at `q = 2`, `+5/3` at `q = 4` — outward, and
+    # faster the higher the order.
+    slope = sum(j * w[j + r + 1] * alternating(j) for j in js)
+    @test slope == lookup((2 => -1 // 1, 4 => -5 // 3, 6 => -11 // 5,
+                           8 => -93 // 35), q)
+    @test -slope > 0
+    q > 2 && @test -slope >
+                   -sum(j * rational_derivative_weights(q - 2, 1)[j + r] *
+                        alternating(j) for j in (1 - r):(r - 1))
+end
+
 @testset "The mixed derivative is the product of two first-derivative vectors: q=$q" for q in
                                                                                         STENCIL_ORDERS
     # `CODE.md`, "Finite-difference stencils": `∂_i∂_j` for `i ≠ j` has no
