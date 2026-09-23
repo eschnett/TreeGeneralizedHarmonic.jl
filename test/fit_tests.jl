@@ -389,17 +389,19 @@ end
 
         # A moving hole's shift has an `l = 0` part on its offset surface — the
         # boost's — which a shift without a constant term matches in value
-        # through `ρ² ỹ_00` and cannot match in slope. `shift_constant =
-        # true` fits it; both are metrics, and on the static hole the two
-        # are the same fit to roundoff (above, the fixture's `β(0) = 0`).
+        # through `ρ² ỹ_00` and cannot match in slope. The default (decided in
+        # review, step 8e) fits the constant; `shift_constant = false` is the
+        # brief's ansatz. Both are metrics, and on the static hole the two
+        # are the same fit to roundoff (the evaluator's testset, below).
         bh = SM.boost(SM.Harmonic(one(T), zero(T)), SVector{3,T}(T(3 // 10), 0, 0))
         hb = T(5 // 128)
         intB = FittedInterior(T; center=HoleCenter(T, (0, 0, 0), hole_velocity(bh)),
                               shape=analytic_shape(bh, 8), lmax=8, offset=8hb,
                               thickness=8hb, h=hb, margin=8, n_L=8)
         sB = analytic_sampler(bh, zero(T); δ=hb / 8)
-        without = build_fit(sB, intB, specH; cont=1, bounds=bd)
-        with = build_fit(sB, intB, specH; cont=1, bounds=bd, shift_constant=true)
+        without = build_fit(sB, intB, specH; cont=1, bounds=bd,
+                            shift_constant=false)
+        with = build_fit(sB, intB, specH; cont=1, bounds=bd)
         @test without.valid && with.valid
         eB0 = surface_error(without, intB, bh, zero(T))
         eB1 = surface_error(with, intB, bh, zero(T))
@@ -415,12 +417,13 @@ end
         @info "the fits' validity and truncation (step 8e)" ks9_truncation = trunc harmonic_cont2 = bad.sweep harmonic_cont1 = good.sweep harmonic_residual = good.residual.value boosted = (eB0, eB1)
     end
 
-    # The evaluator is what step 8e-ii's kernel will call: if it is not the
+    # The evaluator is what step 8e-ii's kernel calls: if it is not the
     # least-squares model at the points the model was fitted at, the target
     # the layer relaxes toward is not the fit the record reports. At the
-    # center the ansatz makes the shift vanish, so the center is a metric
-    # whenever `α` and `γ` are (finding 2).
-    @testset "the evaluator is the model, and the center is a metric with β = 0 ($T)" for T in
+    # center the fit is a metric; without the shift's constant term
+    # (`shift_constant = false`) its shift vanishes there exactly, and with
+    # it — the default — to roundoff on a static hole.
+    @testset "the evaluator is the model, and the center is a metric ($T)" for T in
                                                                                          (Float64,
                                                                                           Float32)
         case = fitted_fixture(T)
@@ -448,13 +451,18 @@ end
             @test worst ≤ 64 * eps(T) * scale
             @test same
             c = center_at(geom.center, t)
-            v0 = fit_variables_at(fit.params, fit.host, c, t)
-            @test all(iszero, v0[2:4])
             h0, Π0 = fit_state(fit, c, t)
-            @test all(iszero, h0[2:4])
             detγ, α, _, _ = state_validity(h0, Π0)
             @test detγ > 0 && α > 0
-            @test fit.sweep.max_β_center == 0
+            βscale = maximum(m -> maximum(abs, m[2:4]), fit.model)
+            @test fit.sweep.max_β_center ≤ 64 * eps(T) * βscale
+            nc = build_fit(analytic_sampler(case.background, zero(T); δ=geom.h / 8),
+                           geom, case.interior; cont=cont, bounds=case.bounds,
+                           shift_constant=false)
+            v0 = fit_variables_at(nc.params, nc.host, c, t)
+            @test all(iszero, v0[2:4])
+            @test all(iszero, fit_state(nc, c, t)[1][2:4])
+            @test nc.sweep.max_β_center == 0
             # An `isbits` kernel argument beside a coefficient array, and no
             # allocation: a kernel can call it (`CLAUDE.md`).
             @test isbits(fit.params)
@@ -554,5 +562,175 @@ end
         @test isfinite(a1) && isfinite(a2)
         @test all(isfinite, values(ms))
         @info "what a fit costs (step 8e)" ms fit_state_ns = ns_point u_exact_ns = ns_exact
+    end
+end
+
+# --- the kernel half (step 8e-ii) --------------------------------------------------
+
+@testset verbose = true "The fitted variant" begin
+    T = Float64
+    q = 2
+    G = q ÷ 2 + 1
+    ops = Operators(prolongation=q + 2, restriction=q + 2)
+    TGH = TreeGeneralizedHarmonic
+
+    # `PLAN.md`: "one right-hand side with the :fitted layer equals :damped's
+    # outside r_1 bit-for-bit". It is the claim every comparison of the two
+    # variants rests on: a difference between a :fitted run and a :damped one
+    # outside the layer is then the target and not the arithmetic. Inside,
+    # the core is `−ρ_max (u − u_fit)` and the layer differs from :damped's
+    # by exactly `ρ (u_fit − u_exact)` — and the cache the kernel reads is the
+    # host evaluator's.
+    @testset "the :fitted layer is :damped's outside the offset surface, bit for bit" begin
+        cf = fitted_fixture(T; variant=:fitted)
+        cd = fitted_fixture(T; variant=:damped)
+        forest = hole_fixture_forest(T, cf; N=8)
+        tr = seed_track(cf, 0)
+        gd = with_ρ_max(fitted_interior(cd.interior, tr, forest, G; t=0, n_L=8), T(4))
+        gf = with_ρ_max(fitted_interior(cf.interior, tr, forest, G; t=0, n_L=8), T(4))
+        fs = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3), backend=CPU())
+        sched = GhostSchedule(fs, ops)
+        fill_exact!(fs, cd, zero(T); interior=gd)
+        u = statevector(fs)
+        gather!(u, fs)
+        for i in eachindex(u)
+            u[i] += T(1 // 1000) * sin(T(i))
+        end
+        bd = derive_target_bounds(T, cf.background, gf; t=0)
+        fit = build_fit(analytic_sampler(cf.background, 0.0; δ=gf.h / 8), gf,
+                        cf.interior; cont=1, bounds=bd)
+        pd = GHProblem(fs, sched, cd; q=q, interior=gd)
+        pf = refill_target(GHProblem(fs, sched, cf; q=q, interior=gf,
+                                     target=target_cache(fs), fits=(fit, nothing)),
+                           zero(T))
+        @test_throws "cache field set" GHProblem(fs, sched, cf; q=q, interior=gf)
+        dud = similar(u)
+        duf = similar(u)
+        gh_rhs!(dud, u, pd, zero(T))
+        gh_rhs!(duf, u, pf, zero(T))
+        A = statearray(dud, fs)
+        B = statearray(duf, fs)
+        U = statearray(u, fs)
+        C = pf.target.work
+        bg = cf.background
+        nout = nlay = ncore = 0
+        same = true
+        core_exact = true
+        lay_worst = 0.0
+        cache_worst = 0.0
+        scale = maximum(abs, B)
+        for b in 1:nblocks(fs), k in 1:8, j in 1:8, i in 1:8
+            x = coordinates(fs, b, (i + G, j + G, k + G))
+            g = interior_point(gf, zero(T), x)
+            if TGH.is_outside(gf, g)
+                nout += 1
+                same &= all(v -> isequal(A[i, j, k, v, b], B[i, j, k, v, b]), 1:20)
+            else
+                h, Π = fit_state(fit, x, zero(T))
+                ref = vcat(h, Π)
+                cache_worst = max(cache_worst,
+                                  maximum(v -> abs(C[i, j, k, v, b] - ref[v]), 1:20))
+                if is_frozen(gf, g)
+                    ncore += 1
+                    core_exact &= all(v -> isequal(B[i, j, k, v, b],
+                                                   -gf.ρ_max * (U[i, j, k, v, b] -
+                                                                C[i, j, k, v, b])),
+                                      1:20)
+                else
+                    nlay += 1
+                    _, ρ = interior_profiles(gf, g)
+                    he, Πe, _ = background_state(bg, zero(T), x)
+                    ue = vcat(he, Πe)
+                    lay_worst = max(lay_worst,
+                                    maximum(v -> abs(B[i, j, k, v, b] - A[i, j, k, v, b] -
+                                                     ρ * (C[i, j, k, v, b] - ue[v])),
+                                            1:20))
+                end
+            end
+        end
+        @test nout > 0 && nlay > 0 && ncore > 0
+        @test same
+        @test core_exact
+        # Measured: the layer's difference is `ρ (u_fit − u_exact)` to 1e−15
+        # of the right-hand side's scale, and the cache is the host evaluator
+        # to 0 — the same compiled function at two call sites.
+        @test lay_worst ≤ 1e-12 * scale
+        @test cache_worst ≤ 1e-12
+        # The prices (recorded, not asserted): one right-hand side with each
+        # layer, and a fill of the cache from one fit and from two. Measured:
+        # 111 and 107 ms (the cache read against the analytic dual pass it
+        # replaces), and 44 and 75 ms a fill — 0.4 and 0.7 of a right-hand
+        # side, once per chunk.
+        fit2 = build_fit(analytic_sampler(cf.background, 0.1; δ=gf.h / 8), gf,
+                         cf.interior; cont=1, bounds=bd)
+        gh_rhs!(duf, u, pf, zero(T))
+        t_fit = @elapsed for _ in 1:3
+            gh_rhs!(duf, u, pf, zero(T))
+        end
+        t_dmp = @elapsed for _ in 1:3
+            gh_rhs!(dud, u, pd, zero(T))
+        end
+        refill_target(pf, zero(T); fits=(fit2, fit))
+        t_one = @elapsed for _ in 1:3
+            refill_target(pf, zero(T); fits=(fit, nothing))
+        end
+        t_two = @elapsed for _ in 1:3
+            refill_target(pf, zero(T); fits=(fit2, fit))
+        end
+        @info "the fitted layer's prices on the fixture (step 8e)" rhs_fitted_ms = 1000t_fit / 3 rhs_damped_ms = 1000t_dmp / 3 fill_one_fit_ms = 1000t_one / 3 fill_two_fits_ms = 1000t_two / 3 points = (outside=nout, layer=nlay, core=ncore) lay_worst cache_worst
+    end
+
+    # `PLAN.md`'s run: `hole_fixture` `:fitted` on the tracked geometry to
+    # `0.15 M`, against the same run `:damped` (`tracked_fixture_run`). A
+    # fitted layer that ended the run, made the fit invalid or fired the
+    # projection would be a target that is not a metric; a masked error far
+    # above `:damped`'s would be one the exterior sees.
+    @testset "the fixture's :fitted hole is :damped's, but for its initial-data kink" begin
+        (; out) = tracked_fixture_run()
+        ref = out
+        case = fitted_fixture(T; variant=:fitted)
+        forest = hole_fixture_forest(T, case; N=8)
+        fo = evolve!(T, case; forest=forest, q=q, ops=ops, t_end=T(3 // 20))
+        @test length(fo.records) == length(ref.records) == 3
+        @test all(r -> r.fit_valid === true, fo.records)
+        @test all(r -> r.bounds_hits == 0, fo.records)
+        @test all(r -> r.track_offset < 1, fo.records)
+        @test all(r -> r.horizon_success === true, fo.records)
+        @test all(r -> r.finite, fo.records)
+        @test all(r -> r.fit_hits == 0 && r.fit_refills == 0, fo.records)
+        @test fo.fit_cost.nfailed == 0 && fo.fit_cost.nrefills == 0
+        @test fo.fit_initial.valid && fo.fit_initial.residual.value < 1e-12
+        # The target's ranges came from the seed's surface, and hold it.
+        @test fo.target_bounds.K_max > 0 && fo.target_bounds.α_min < 0.62 / 3
+        rf, rd = fo.records[end], ref.records[end]
+        # Measured at 0.15 M: the masked error 1.33e−2 against :damped's
+        # 3.11e−3, L∞ 0.177 against 0.035. The factor is the initial data's:
+        # below the offset surface it is the `cont = 1` fit of the analytic
+        # solution (decided in review, step 8e), value and slope right and
+        # the curvature off by `O(1/M²)` at `r_1`, which the compact second
+        # difference reads as an `O(1)` right-hand-side error at the
+        # innermost evolved points — the kink `PLAN.md`'s finding 1 names.
+        # Moved to the core surface (`fit_initial_depth = n_L h`) the same run
+        # is :damped's to 2 % at 0.1 M; left at `r_1` it decays to 1.24× by
+        # `1 M` (`hole_runs.jl fitted=fixture`, CODE.md). So the factor
+        # asserted is 6, the kink's with a margin, and not 1.
+        @test rf.err_l2 ≤ 6 * rd.err_l2
+        @test rf.err_linf ≤ 8 * rd.err_linf
+        @test rf.residual < 10       # the layer's distance from its target
+        @info "the fitted fixture against the damped one at 0.15 M (step 8e)" err_l2 = (rf.err_l2, rd.err_l2) err_linf = (rf.err_linf, rd.err_linf) gauge_l2 = (rf.gauge_l2, rd.gauge_l2) fit_residual = [r.fit_residual for r in fo.records] fit_min_α = [r.fit_min_α for r in fo.records] cost = fo.fit_cost bounds = fo.target_bounds
+
+        # Float32, with the initial fit's samples in Float64 (decided in
+        # review, step 8e): one chunk, against the Float64 row it is.
+        c32 = fitted_fixture(Float32; variant=:fitted)
+        f32 = evolve!(Float32, c32; forest=hole_fixture_forest(Float32, c32; N=8),
+                      q=q, ops=ops, t_end=1.0f-1)
+        r32 = f32.records[end]
+        r64 = fo.records[2]
+        @test r32.t ≈ r64.t
+        @test all(r -> r.fit_valid === true && r.bounds_hits == 0 && r.finite,
+                  f32.records)
+        # Measured: the masked error agrees with Float64's to 7e−6.
+        @test r32.err_l2 ≈ r64.err_l2 rtol = 0.05
+        @info "the fitted fixture at Float32, 0.1 M (step 8e)" err_l2 = (r32.err_l2, r64.err_l2) fit_residual = (r32.fit_residual, r64.fit_residual)
     end
 end
