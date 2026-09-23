@@ -205,11 +205,14 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **3444 assertions in 12m31** at one thread and **8m38** at
-four on the development machine (step 6 measured 2968 in 13m35 / 10m45
-here and 29m32 / 20m29 on Symmetry; the wall clock went *down* while the
-count went up, so read each step's numbers as that step's rather than as a
-regression). Most of it is **compilation**, and the things that pay for it
+The suite is **3723 assertions in 13m00** at one thread and **9m33** at
+four on the development machine after step 8b, on a machine shared with a
+sibling agent (step 7 measured 3444 in 12m31 / 8m38; step 6 measured 2968
+in 13m35 / 10m45 here and 29m32 / 20m29 on Symmetry; the wall clock has
+gone *down* while the count went up before, so read each step's numbers as
+that step's rather than as a regression). `bounds_tests.jl` is 22.6 s /
+10.1 s of it, most of which is its control: two short runs of the step-5
+fixture. Most of it is **compilation**, and the things that pay for it
 are, in order: `SpacetimeMetrics`' nested forward-mode passes for six
 backgrounds at two precisions (step 1's cost, unchanged); a
 right-hand-side kernel per `(q, has gauge source, has dissipation,
@@ -270,12 +273,13 @@ the two harmonic charts, and from step 6 the indicator's calibration and
 its adaptive run — are a **script**, run by hand, with its numbers
 recorded in `CODE.md` under "Measured results" (added in step 5). It takes
 an optional list of sections (`order`, `long`, `charts`, `indicator`,
-`horizon`):
+`horizon`, `bounds`):
 
 ```bash
 julia --project=. --threads=4 test/hole_runs.jl
 julia --project=. --threads=4 test/hole_runs.jl indicator
 julia --project=. --threads=4 test/hole_runs.jl horizon
+julia --project=. --threads=4 test/hole_runs.jl bounds=cost,damped6,pasted8
 ```
 
 The `horizon` section (added in step 7) is Kerr's `A`, `M_irr`, `J` and
@@ -304,6 +308,15 @@ Its predictions are a script of their own, a minute at one thread:
 ```bash
 julia --project=. test/dispersion.jl
 ```
+
+The `bounds` section (added in step 8b) has three rows, selectable as
+`bounds=<row>,…` so that they split across batch jobs: `cost` (the stage
+limiter against a right-hand side, seconds), and `damped6` and `pasted8` —
+step 5's two failing runs, each three times (no projection, the proposed
+gate, the widest gate), with radial bins of the state's validity and a
+step-by-step replay of the fatal chunk. Those two took 14 and 26
+minutes on one Symmetry node; `TREEGH_BOUNDS_TEND` shortens them for a
+smoke test and `TREEGH_BOUNDS_AUTOPSY=1` forces the replay.
 
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a
@@ -415,7 +428,13 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `r < r_gate ≤ r_1 − (stencil reach)·h`, asserted at every regrid; the
   outer part of the layer, `r_gate ≤ r < r_1`, is unguarded by design, and
   a degenerate metric there still ends a run through the `DomainError` of
-  `metric_quantities`' `sqrt`.
+  `metric_quantities`' `sqrt`. **Step 5's two failures are not deep**
+  (measured in step 8b): `N = 6` `:damped` and `N = 8` `:pasted` both
+  degenerate in the evolved shell just outside `r_1`, the projection never
+  fires on either at any legal gate, and the runs with it end bit for bit
+  where the runs without it do. Read the validity rows (`min_α_shell`,
+  `max_Π_shell`) and the shell error, not `bounds_hits`, for a failure at
+  `r_1`.
 - **`F` is never evaluated where `w = 0`.** The frozen core holds
   finite, stale data by design — the analytic solution is singular
   inside it — and `F` of that data may be `NaN`; `0 · NaN = NaN`. The

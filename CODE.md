@@ -1343,7 +1343,13 @@ not roundoff.
 
 **What it does on the two runs that end** is measured under [Measured
 results](#the-range-projection-step-8b): step 5's `N = 6` `:damped` and
-`N = 8` `:pasted`.
+`N = 8` `:pasted`. **It never fires on either (measured in step 8b)**: both
+degenerate in the evolved shell just outside `r_1`, where no projection
+gated below `r_1` reaches and none should, and the runs with it end bit for
+bit where the runs without it do. The prediction that hits would start
+"deep, several `M` before the crash" is wrong; the failures are surface
+failures at `r_1`, which is step 8c's hypothesis about the layer's
+transition, measured from the other side.
 
 **What the layer costs.** `u_exact` is evaluated at every point of the
 layer at every RHS evaluation — one forward-mode dual pass through the
@@ -2835,7 +2841,14 @@ hole to `t = 50 M` … `:frozen` holds the static hole only with
 matters is right (measured in step 5):** with `ε_KO = 1/2` and the
 Gaussian `γ0`, *only* `:damped` reaches `t = 50 M`. `:pasted` fails at
 `17 M` and `:frozen` at `13 M`, both by the same mechanism — `√(det γ)`
-of a state that is no longer a metric — and both inside the layer. That
+of a state that is no longer a metric — and both inside the layer
+**(corrected in step 8b** for `:pasted` and for the `N = 6` `:damped` row
+below: the failing square root is the lapse's `√(−g^{tt})`, reached by the
+right-hand side at a stage vector, and the state degenerates in the
+*evolved* shell just outside `r_1` — at `r = 1.18` and `1.27`, against
+`r_1 = 1.15` — while the layer inside the projection's gate never moves;
+see [the range projection's
+measurements](#the-range-projection-step-8b)**)**. That
 is the strongest evidence for the default there is: the hard paste's
 truncation-order mismatch at a *surface* is not a small perturbation of
 the smooth layer, it is a kink that the stencils straddling it feed back
@@ -3575,6 +3588,130 @@ four-CPU figure. Its runners behave exactly as four-core machines should.
 One run of three took `61.6` min against a `43.6` min serial sibling —
 that is a bad runner, not a property of the matrix, and three samples with
 a 2.7× spread are not enough to act on.
+
+
+### The range projection (step 8b)
+
+`src/bounds.jl`, `test/bounds_tests.jl` and `test/hole_runs.jl bounds`; the
+design is under [The interior](#the-interior-a-pointwise-damping-layer).
+
+**The suite.** **3723 assertions in 13m00 at one thread and 9m33 at
+four** on the development machine (Apple silicon, Julia 1.13.0), up from
+step 7's 3444 in 12m31 and 8m38 — on a machine a sibling agent's runs
+shared (load average 4–8), so the wall clock is an upper bound.
+`test/bounds_tests.jl` is **279** of them — 278 in the file and the slot
+map's one more in `constraints_tests.jl` — in **22.6 s / 10.1 s**: the
+pointwise claims `2.4 s`, the planted failures and the gate `≈ 6 s`, and
+the control, two `3/20 M` runs of the fixture, the rest. That control is
+the one short run the step adds, paid twice because the claim is a
+comparison.
+
+**The map, on synthetic states.** The six states `PLAN.md` names — one
+negative eigenvalue of `γ`; two negative eigenvalues with `det γ > 0` (which
+a determinant floor would pass); `−g^{tt} < 0` with `γ` healthy (on which
+`metric_quantities` throws a `DomainError`); a `NaN` in `γ_xy`; an `Inf` in
+`Π_tx`; and Kerr-Schild at the fixture's core edge `r_0 = 2/5` — and three
+more, one per remaining range (`|β| = 12`, a positive lapse of `10⁻³`,
+`(α/√γ)Π = 500`). On each, at `Float64` and `Float32`, the projection
+returns a state `metric_quantities` accepts with every ADM quantity in its
+range; the blocks it moves are exactly the offending ones, **bit for bit**
+(`===` on each of `h_tt`, `h_ti`, `γ_ij` and `Π`); a raised lapse keeps
+`αΠ` to `1e−12`; a second application returns the same bits and does not
+fire. It is the identity, bit for bit, on all six backgrounds of
+`pointwise_backgrounds.jl` at their test points and on Kerr-Schild at
+`r = 2/5, 1/2, 23/20` in three directions. On random states (20 000 per
+row, `|h_ab|` and `|Π_ab|` uniform in `[−s_h, s_h]`, `[−s_Π, s_Π]`):
+
+| `(s_h, s_Π)` | fired | re-fired before the re-test | after | `Float32`: outside a range |
+|---|---|---|---|---|
+| `(1/2, 1)` | 318 | 0 | 0 | 0 |
+| `(2, 10)` | 18 202 | 0 | 0 | 0 |
+| `(5, 100)` | 19 672 | **18** | 0 | 0 (but `metric_quantities` throws on 2 and is off by > 1 % in `α` on 14) |
+| `(50, 1000)` | 19 936 | **402** | 0 | 3456 (`metric_quantities` throws on 60) |
+
+The re-fires are the shift test on an ill-conditioned `γ`, and the
+self-verifying re-test is what removed them; the `Float32` column is what a
+24-bit mantissa can represent — `λ_min = 1/100` beside eigenvalues of `10³`
+is a condition number `Float32` cannot resolve — recorded and not fixed
+(`Float64` on the H200 is the requirement).
+
+**The mesh, and the control.** On the fixture's mesh (`N = 8`, 120 leaves)
+the kernel repairs exactly the points planted inside the gate — a `NaN` in
+the core and a `γ_xx = −1/2` at `r < r_gate` — counts them (`hits = 2`,
+`nonfinite = 1`, `r_max` the outer one's radius), leaves a `NaN` planted in
+the outer layer (`r_gate ≤ r < r_1`) and one at an evolved point alone, and
+changes no other bit of the state; `evolved_nonfinite` sees the evolved one
+and not the layer's. **The control holds bit for bit**: `:damped` to
+`3/20 M` with the projection on makes `4 · nsteps + 1` calls, fires on none,
+and ends `isequal` to the run without it, with every record row
+identical.
+
+**What it costs** (`hole_runs.jl bounds=cost`, the fixture's `N = 8` mesh,
+four threads on the development machine; prediction `0.4 %` of a step):
+
+| | time | per point | per gated point |
+|---|---|---|---|
+| right-hand side | 35.3 ms | 575 ns | |
+| stage limiter, nothing fires | 0.16 ms | 2.6 ns | 31 ns |
+| stage limiter, every gated point fires | 0.81 ms | | 158 ns |
+
+`5137` of the `61 440` points (`8.4 %`) are inside the gate `0.8375`. With
+four limiter calls against five right-hand sides per step (four stages and
+the FSAL refresh a non-trivial step limiter asks for) the projection is
+**0.36 % of a step (measured in step 8b; 0.41 % at two threads)** —
+the prediction, confirmed. Where it fires everywhere it costs `5.1×` its
+healthy call, still under 2 % of a step. It allocates nothing per point
+(7 KB per launch, the launch itself).
+
+**The two runs that end** (`hole_runs.jl bounds=damped6,pasted8`, on
+Symmetry, one `amddebugq` node at 64 threads; Kerr-Schild `a = 0`, `q = 2`,
+`cfl = 1/5`, `chunk = 1 M`, `ε_KO = 1/2`). Each is run three times —
+without the projection, at the proposed gate `r_1 − 2Gh`, and at the widest
+gate the assertion allows, `r_1 − Gh`:
+
+| row | `h` | gate (widest) | ends | projection hits | fatal square root | where the state degenerates |
+|---|---|---|---|---|---|---|
+| `N = 6` `:damped` | `0.1042` | `0.733` (`0.942`) | step 78 of 81 in the chunk to `22 M` (`t ≈ 21.96`), all three | **0** | the lapse's `√(1 − q_1)` of `−57.59` | `r = 1.27`, the `G` points outside `r_1 = 1.15` |
+| `N = 8` `:pasted` | `0.0781` | `0.838` (`0.994`) | step 106 of 107 in the chunk to `18 M` (`t ≈ 17.99`), all three | **0** | the lapse's `√(1 − q_1)` of `−0.1976` | `r = 1.18`–`1.31`, outside `r_1` |
+
+Both square roots are `metric_quantities`' `α = 1/√(−g^{tt})`, reached by
+the right-hand-side kernel's evolved-or-layer branch on a stage vector —
+for `:pasted` only points at `r ≥ r_1` take that branch at all.
+
+**The prediction was wrong, and in the direction that matters (measured in
+step 8b).** `PLAN.md` predicted hits "deep, several `M` before the crash".
+There are none, at either gate: the state inside `r_gate` never leaves its
+range — in the `N = 6` run the inner layer's error sits at `0.136` from the
+first chunk to the last, `min α` there at `0.415`, `max |Π|` at `55.3` —
+and all three runs of each row end in the same step with the **same**
+`DomainError` argument to the last digit, which is the suite's bitwise
+control at run length (`21 M` and `17 M`). What fails is the **evolved shell just outside `r_1`**: its error
+against the analytic solution grows from the first chunk — `0.28` at
+`1 M`, `1.6` at `10 M`, `3.6` at `19 M` and `22.5` at `21 M` for `N = 6`,
+`0.39`, `1.4`, `3.5` and `10.0` at `1, 10, 15, 17 M` for `N = 8` — while the
+record's shell rows (`min_α_shell` from `0.604` to `0.539`) move slowly, and
+then the metric degenerates within `0.1 M`: in the last eight steps of
+`N = 6` the shell's `min α` falls `0.28 → 0.20` at `r = 1.27`, `det γ`
+`1.8 → 0.33`, `max |Π|` `1.7e3 → 8.3e3`; the outer layer (`r_gate ≤ r < r_1`)
+follows it (`α` `0.35 → 0.27` at `r = 1.08`) rather than leading it.
+
+So both of step 5's failures are **surface failures at `r_1`**, not
+interior ones — the kink `PLAN.md`'s finding 1 describes (`ρ_max = 1/dt` is a
+paste two cells deep, and a paste is a surface the stencils straddle), and
+for `:pasted` literally so. No projection gated below `r_1` can reach them,
+by construction — the gate exists so that the clamp's own kink is not
+read by an evolved stencil — and none should: the failing points are
+evolved by the Einstein equations. The instrument's value here is the
+negative result and the validity rows, which show the approach from the
+first chunk. **Nothing reached the horizon from the clamp**, because there
+was no clamp: in all nine shells `[r_h + kh, r_h + (k+1)h]` the state
+difference between the runs with and without the projection is exactly
+`0` at every chunk, and the gauge constraint there grows the same in all
+three runs (`L∞` in the innermost shell `1.6e−2 → 9.3e−2` over `21 M` at
+`N = 6`, `1.0e−2 → 3.1e−2` over `17 M` at `N = 8`). For step 8c: the
+thing to calibrate is the transition at `r_1`, and the numbers to watch are
+the validity monitor's shell rows and the shell error, not the projection's
+hit count.
 
 ## Possible extensions
 
