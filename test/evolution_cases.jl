@@ -19,6 +19,8 @@ using KernelAbstractions: CPU
 using OrdinaryDiffEqLowOrderRK: RK4
 using Random: MersenneTwister
 using SciMLBase: ODEProblem, solve
+using StaticArrays: SMatrix, SVector
+import SpacetimeMetrics
 using TreeGeneralizedHarmonic: ceilint
 
 """
@@ -391,22 +393,107 @@ spacings just **outside** `r_1` — `CODE.md`'s "the `G` points outside
 before the difference has had time to propagate.
 
 The shell is a [`ShellMask`](@ref), so it is the same masked-norm
-machinery every other row of the record uses.
+machinery every other row of the record uses. The second method takes a
+problem, a state and a time rather than a finished run — what an observer
+has at every chunk (added in step 8c, whose calibration reads the shell at
+every chunk and not only at the end, so that a run that fails still has
+its approach on the record).
 """
 function gh_outside_shell_norms(out; width=nothing)
     p = out.problem
     T = eltype(p.U.work)
+    return gh_outside_shell_norms(p, out.u, T(out.records[end].t);
+                                  h=T(out.h), width=width)
+end
+
+function gh_outside_shell_norms(p, u, t; h=nothing, width=nothing)
+    T = eltype(p.U.work)
     int = p.interior
     G = first(p.U.G)
     w = width === nothing ? G : width
-    h = T(out.h)
-    c = center_at(int.center, T(out.records[end].t))
-    mask = ShellMask{T}(c, int.r_1, int.r_1 + w * h)
-    gh_constraint!(p, out.u, T(out.records[end].t); mask=mask)
+    hh = h === nothing ? minimum_spacing(T, p.U.forest) : T(h)
+    c = center_at(int.center, T(t))
+    mask = ShellMask{T}(c, int.r_1, int.r_1 + w * hh)
+    gh_constraint!(p, u, T(t); mask=mask)
     c1 = constraint_norms(p)
-    gh_error!(p, out.u, T(out.records[end].t); mask=mask)
+    gh_error!(p, u, T(t); mask=mask)
     e = error_norms(p)
     return (gauge_l2=maximum(c1.gauge_l2), gauge_linf=maximum(c1.gauge_linf),
             err_l2=e.err_l2, err_linf=e.err_linf,
             npoints=sum(masked_counts(p)))
 end
+
+# --- the layer's inexact targets (added in step 8c) -------------------------
+#
+# `PLAN.md`'s step 8c calibrates the damping layer against a target that is
+# *not* the solution, because a target fitted to evolved data (step 8e) will
+# not be. Three of its four targets are `SpacetimeMetrics` objects already —
+# `KerrSchild(6/5, 0)` (E1, a valid metric that is not a solution, and E0's
+# hard step) and `translate(KerrSchild(1, 0), (0, δ, 0, 0))` (E2, a tracking
+# error) — and need nothing here. The fourth is a wrapper, and it implements
+# exactly what the package calls on a layer target: `metric`, from which
+# `SpacetimeMetrics`' own `dmetric` takes the derivatives by forward-mode
+# duals, and `nameof`. It is never a case's background — `isharmonic`,
+# `isstatic` and `horizon_min_radius` are asked of the background only, so
+# a target needs none of them.
+
+"""
+    CurvatureTarget(background, T = Float64; A, r_0, r_1, center = (0, 0, 0),
+                    plateau = 1//2)
+
+Step 8c's **E3** target: `background` with `h_tt` changed by
+`A (r − r_1)² χ(r)`, `r = |x − center|` — value and slope right at `r_1`,
+curvature wrong by `2A` there. `χ` is `C²` (the package's quintic
+[`smoothstep`](@ref)): `1` over the outer `plateau` fraction of the layer,
+falling to `0` at `r_0`, so the target joins the frozen core — which holds
+the *true* solution — continuously.
+
+**The sign (proposed in step 8c).** `PLAN.md` writes `u_exact + A (r − r_1)²
+χ` with `A ≈ 2/M²`; step 8c uses **`A = −2/M²`**. On Kerr-Schild `a = 0`
+the layer's lapse is small — `α² = 1/(1 + 2M/r)` is `0.26` at `r = 0.7 M` —
+and a perturbation that raises `h_tt` lowers `α²` by the same amount, so
+`+2/M²` over a plateau of half the layer drives `α²` through zero at
+`n_L ≥ 8` cells (`−0.006` at `8`, `−0.41` at `12`, at `h = 5/64`): not a
+curvature error but a target that is not a metric, which `PLAN.md`'s finding
+2 says a target must never be. The other sign raises `α²` and is a metric
+everywhere; the curvature mismatch at `r_1` is `|2A| = 4/M²` either way.
+
+`isbits`, like every kernel argument; `metric` is generic in the element
+type of `x`, which is what lets `dmetric` differentiate it.
+"""
+struct CurvatureTarget{T,B} <: SpacetimeMetrics.AbstractMetric
+    background::B
+    A::T
+    r_0::T
+    r_χ::T
+    r_1::T
+    center::SVector{3,T}
+end
+
+function CurvatureTarget(background, ::Type{T}=Float64; A, r_0, r_1,
+                         center=(0, 0, 0), plateau=1 // 2) where {T}
+    T(r_1) > T(r_0) > 0 || throw(ArgumentError(
+        "the E3 target lives in the layer r_0 < r < r_1, got r_0 = $r_0, " *
+        "r_1 = $r_1"))
+    0 < plateau < 1 || throw(ArgumentError(
+        "χ's plateau is a fraction of the layer in (0, 1), got $plateau"))
+    r_χ = T(r_1) - T(plateau) * (T(r_1) - T(r_0))
+    return CurvatureTarget{T,typeof(background)}(
+        background, T(A), T(r_0), r_χ, T(r_1),
+        SVector{3,T}(T(center[1]), T(center[2]), T(center[3])))
+end
+
+function SpacetimeMetrics.metric(m::CurvatureTarget, x::AbstractVector)
+    g = SpacetimeMetrics.metric(m.background, x)
+    d1 = x[2] - m.center[1]
+    d2 = x[3] - m.center[2]
+    d3 = x[4] - m.center[3]
+    r = sqrt(d1 * d1 + d2 * d2 + d3 * d3)
+    χ = smoothstep((r - m.r_0) / (m.r_χ - m.r_0))
+    δ = m.A * (r - m.r_1) * (r - m.r_1) * χ
+    z = zero(δ)
+    return g + SMatrix{4,4}(δ, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z)
+end
+
+Base.nameof(m::CurvatureTarget) =
+    "E3 target: $(nameof(m.background)) with h_tt + $(m.A) (r − $(m.r_1))² χ(r)"

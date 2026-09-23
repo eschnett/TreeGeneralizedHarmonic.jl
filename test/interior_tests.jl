@@ -13,6 +13,7 @@ using TreeAMR
 using TreeGeneralizedHarmonic
 using KernelAbstractions: CPU
 using StaticArrays: SVector
+import ForwardDiff
 import SpacetimeMetrics as SM
 
 @testset verbose = true "The interior" begin
@@ -341,6 +342,94 @@ import SpacetimeMetrics as SM
                                           γ2=zero(T))
     end
 
+    # Step 8c's `ε_KO(r)`: a profile that is only `C¹` at either join puts a
+    # delta into the second difference of the dissipation, and one that is
+    # not *exactly* the exterior's number outside the horizon changes the
+    # exterior's arithmetic — which is what every earlier result was
+    # measured with. A number must stay the number, bit for bit.
+    @testset "the dissipation profile is C², exact outside r_h and inside r_1" begin
+        @test dissipation_rate(T(1 // 2), T(3), (T(7), T(-2), T(5))) === T(1 // 2)
+        @test dissipation_bounds(T(1 // 2)) == (T(1 // 2), T(1 // 2))
+        @test has_dissipation(T(1 // 2)) && !has_dissipation(zero(T))
+        d = HorizonDissipation(T; ε_out=T(1 // 2), ε_in=T(4), r_1=T(23 // 20),
+                               r_h=T(2), center=HoleCenter(T, (0, 0, 0)))
+        ε(r) = dissipation_rate(d, zero(T), (r, zero(r), zero(r)))
+        for r in (T(2), T(5 // 2), T(10))
+            @test ε(r) === T(1 // 2)
+        end
+        for r in (zero(T), T(1 // 2), T(23 // 20))
+            @test ε(r) === T(4)
+        end
+        @test issorted([ε(T(r)) for r in range(T(1), T(21 // 10); length=45)];
+                       rev=true)
+        @test dissipation_bounds(d) == (T(1 // 2), T(4))
+        @test has_dissipation(d)
+        # C² at both joins: the first and second derivatives along the ray
+        # are those of the quintic's triple root, `O(δ²)` and `O(δ)` with
+        # the constants `30|Δε|/L` and `60|Δε|/L²` (`L = r_h − r_1`), and
+        # exactly zero on the constant side.
+        L = T(2) - T(23 // 20)
+        Δ = T(7 // 2)
+        d1(r) = ForwardDiff.derivative(ε, r)
+        d2(r) = ForwardDiff.derivative(d1, r)
+        δ = L / 1000
+        for (r_j, side) in ((T(23 // 20), 1), (T(2), -1))
+            @test d1(r_j - side * δ) === zero(T)
+            @test d2(r_j - side * δ) === zero(T)
+            @test abs(d1(r_j + side * δ)) ≤ 1.01 * 30 * Δ * (δ / L)^2 / L
+            @test abs(d2(r_j + side * δ)) ≤ 1.01 * 60 * Δ * (δ / L) / L^2
+        end
+        # It follows a moving center, as the damping profile does.
+        dm = HorizonDissipation(T; ε_out=T(1 // 2), ε_in=T(2), r_1=one(T),
+                                r_h=T(2), center=HoleCenter(T, (0, 0, 0),
+                                                            (1, 0, 0)))
+        @test dissipation_rate(dm, T(5), (T(5), zero(T), zero(T))) === T(2)
+        # The refusals: RK4's real-axis limit, a sign, and the geometry.
+        hd(; kw...) = HorizonDissipation(T; ε_out=T(1 // 2), ε_in=T(2),
+                                         r_1=one(T), r_h=T(2),
+                                         center=(0, 0, 0), kw...)
+        @test_throws "capped at 4" hd(ε_in=T(5))
+        @test_throws ArgumentError hd(ε_out=-one(T))
+        @test_throws "0 < r_1 < r_h" hd(r_1=T(2))
+        # A case takes a number or a profile about its own hole, and
+        # `horizon_dissipation` builds that one from the case.
+        case = hole_fixture(T)
+        prof = horizon_dissipation(case; ε_in=T(4))
+        @test prof.r_1 === case.interior.r_1
+        @test prof.r_h === T(horizon_min_radius(case.background))
+        @test prof.ε_out === case.ε_KO
+        @test with_dissipation(case, prof).ε_KO === prof
+        @test isbitstype(typeof(with_dissipation(case, prof)))
+        @test_throws "centered on" with_dissipation(
+            case, HorizonDissipation(T; ε_out=T(1 // 2), ε_in=T(2), r_1=one(T),
+                                     r_h=T(2), center=(1, 0, 0)))
+        @test_throws ArgumentError with_dissipation(case, :loud)
+    end
+
+    # Step 8c's layer target: a metric the kernel evaluates in place of the
+    # background, so it has to be one and it has to be `isbits`; and a case
+    # with no layer has nowhere to put it.
+    @testset "the layer's target is a metric or nothing, and nothing is the background" begin
+        bg = SM.KerrSchild(one(T), zero(T))
+        int = Interior(T; center=(0, 0, 0), r_0=T(2 // 5), r_1=T(23 // 20))
+        @test int.target === nothing
+        @test layer_target(int, bg) === bg
+        wrong = SM.KerrSchild(T(6 // 5), zero(T))
+        intw = Interior(T; center=(0, 0, 0), r_0=T(2 // 5), r_1=T(23 // 20),
+                        target=wrong)
+        @test layer_target(intw, bg) === wrong
+        @test isbitstype(typeof(intw))
+        @test with_ρ_max(intw, T(3)).target === wrong
+        @test_throws "SpacetimeMetrics metric" Interior(
+            T; center=(0, 0, 0), r_0=T(2 // 5), r_1=T(23 // 20), target=one(T))
+        @test hole_fixture(T; target=wrong).interior.target === wrong
+        @test_throws "no interior" GHCase(T, SM.Minkowski();
+                                          box=ntuple(_ -> (zero(T), one(T)), 3),
+                                          periodic=(true, true, true),
+                                          ε_KO=zero(T), γ0=one(T), γ2=zero(T),
+                                          target=wrong)
+    end
+
     @testset "the interior's constructor refuses what it cannot place" begin
         @test_throws ArgumentError Interior(T; center=(0, 0, 0), r_0=zero(T),
                                             r_1=one(T))
@@ -586,6 +675,82 @@ end
             allzero &= all(v -> A_pd[i, j, k, v, b] === zero(T), 1:20)
         end
         @test allzero
+    end
+
+    # Step 8c's two claims on the kernel. A target equal to the case's own
+    # background must be *that* background to the last bit — or every
+    # comparison of a wrong target against it compares a recompilation — and
+    # a wrong target must move the right-hand side only where `(INTERIOR)`
+    # reads `u_exact`: the layer, and nowhere an evolved stencil sits.
+    @testset "the layer target reaches the layer and nothing else" begin
+        own = Interior(T; center=(0, 0, 0), r_0=int.r_0, r_1=int.r_1,
+                       ρ_max=ρ_max, target=case.background)
+        du_own = similar(u)
+        gh_rhs!(du_own, u, with_interior(p_damped, own), zero(T))
+        @test isequal(du_own, du_i)
+        wrong = Interior(T; center=(0, 0, 0), r_0=int.r_0, r_1=int.r_1,
+                         ρ_max=ρ_max, target=SM.KerrSchild(T(6 // 5), zero(T)))
+        du_w = similar(u)
+        gh_rhs!(du_w, u, with_interior(p_damped, wrong), zero(T))
+        A_w = statearray(du_w, fs)
+        same_outside = true
+        nmoved = 0
+        for b in 1:nblocks(fs), k in 1:forest.N, j in 1:forest.N,
+            i in 1:forest.N
+
+            x = coordinates(fs, b, (i + G, j + G, k + G))
+            r = sqrt(sum(abs2, x))
+            if in_layer(int, r)
+                nmoved += any(v -> A_w[i, j, k, v, b] != A_i[i, j, k, v, b],
+                              1:20)
+            else
+                same_outside &= all(v -> A_w[i, j, k, v, b] ===
+                                         A_i[i, j, k, v, b], 1:20)
+            end
+        end
+        @test same_outside
+        @test nmoved == nlayer
+    end
+
+    # And the `ε_KO(r)` profile: one whose two values are the case's number
+    # is that number at every point, so the kernel's arithmetic must be the
+    # number's bit for bit; one that rises from the horizon must move `du`
+    # only inside it.
+    @testset "the dissipation profile is the number where it equals it" begin
+        flat = HorizonDissipation(T; ε_out=case.ε_KO, ε_in=case.ε_KO,
+                                  r_1=int.r_1,
+                                  r_h=horizon_min_radius(case.background),
+                                  center=case.center)
+        p_flat = GHProblem(fs, sched, with_dissipation(case, flat); q=q,
+                           interior=with_ρ_max(case.interior, ρ_max))
+        du_f = similar(u)
+        gh_rhs!(du_f, u, p_flat, zero(T))
+        @test isequal(du_f, du_i)
+        rising = horizon_dissipation(case; ε_in=T(4))
+        p_rise = GHProblem(fs, sched, with_dissipation(case, rising); q=q,
+                           interior=with_ρ_max(case.interior, ρ_max))
+        du_r = similar(u)
+        gh_rhs!(du_r, u, p_rise, zero(T))
+        A_r = statearray(du_r, fs)
+        same_outside = true
+        nmoved = 0
+        ninside = 0
+        for b in 1:nblocks(fs), k in 1:forest.N, j in 1:forest.N,
+            i in 1:forest.N
+
+            x = coordinates(fs, b, (i + G, j + G, k + G))
+            r = sqrt(sum(abs2, x))
+            if r ≥ rising.r_h || r < int.r_0
+                same_outside &= all(v -> A_r[i, j, k, v, b] ===
+                                         A_i[i, j, k, v, b], 1:20)
+            else
+                ninside += 1
+                nmoved += any(v -> A_r[i, j, k, v, b] != A_i[i, j, k, v, b],
+                              1:20)
+            end
+        end
+        @test same_outside
+        @test nmoved == ninside > 0
     end
 
     # `CODE.md` prices the layer at "a few percent of an RHS" and asks G4

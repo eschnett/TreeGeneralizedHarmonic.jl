@@ -80,7 +80,8 @@ export apply_stencil, apply_mixed_stencil
 export isharmonic, isstatic, sample_gauge_source!
 
 # Cases, backgrounds and initial data
-export GHCase, with_interior, with_refinement, with_horizon
+export GHCase, with_interior, with_refinement, with_horizon, with_dissipation
+export horizon_dissipation
 export gh_forest, hole_forest
 export minkowski_case, gauge_wave_case, shifted_minkowski_case
 export hole_case, kerr_schild_case, harmonic_kerr_case
@@ -89,9 +90,10 @@ export fill_exact!
 
 # Gauge and constraint damping, as a function of position
 export ConstantDamping, GaussianDamping, damping_rate, damping_bounds
+export HorizonDissipation, dissipation_rate, has_dissipation, dissipation_bounds
 
 # The interior: the damping layer and the frozen core
-export HoleCenter, center_at, Interior, with_ρ_max, interior_variant
+export HoleCenter, center_at, Interior, with_ρ_max, interior_variant, layer_target
 export interior_profiles, is_frozen, in_layer, core_position, smoothstep
 export InteriorMask, ShellMask, interior_mask
 export horizon_min_radius, horizon_max_radius, singular_radius

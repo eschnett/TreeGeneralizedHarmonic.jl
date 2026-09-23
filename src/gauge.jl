@@ -299,3 +299,123 @@ checks `γ0 ≥ 0` on, since a profile has no single number to check.
 """
 damping_bounds(d::ConstantDamping) = (d.γ0, d.γ0)
 damping_bounds(d::GaussianDamping) = (min(d.near, d.far), max(d.near, d.far))
+
+# --- the Kreiss–Oliger amplitude, as a function of position (step 8c) --------
+#
+# `CODE.md`, "The interior" (the `ε_KO(r)` profile, added in step 8c) and
+# "Kreiss–Oliger dissipation". Step 8a measured that dissipation raised only
+# *inside* the layer buys nothing — the grid-scale content the margin is for
+# is made at or outside `r_1` and crosses `r_1 ≤ r < r_h`, where a profile
+# that rises only inside the layer still has the exterior's value — and that
+# dissipation raised *across the margin*, from the horizon inward, cuts what
+# reaches the horizon 4–15× at `ε_in = 4`. So the profile below rises from
+# the horizon, not from `r_1`. It is the `γ0` pattern: a number is the
+# identity ([`dissipation_rate`](@ref) returns it), a profile is `isbits`
+# and evaluated per point in the kernel, and the kernel's `Val{DISS}` asks
+# [`has_dissipation`](@ref), which is `!iszero` on a number.
+
+"""
+    dissipation_rate(ε_KO, t, x) -> ε
+
+The Kreiss–Oliger amplitude at `(t, x)`: `ε_KO` itself when it is a number
+— every case but step 8c's calibration, whose arithmetic is therefore what
+it was — and the profile's value when it is a [`HorizonDissipation`](@ref).
+The kernel multiplies the result by `1/h` once per point.
+"""
+@inline dissipation_rate(ε::Real, t, x) = ε
+
+"""
+    has_dissipation(ε_KO) -> Bool
+
+Whether the Kreiss–Oliger term is present at all — the right-hand-side
+kernel's `Val{DISS}`, built once per chunk in [`GHProblem`](@ref).
+`!iszero` on a number; for a profile, whether it is nonzero anywhere.
+"""
+has_dissipation(ε::Real) = !iszero(ε)
+
+"""
+    HorizonDissipation(T = Float64; ε_out, ε_in, r_1, r_h, center)
+
+A `C²` Kreiss–Oliger amplitude that is `ε_out` at and outside the
+horizon's smallest coordinate radius `r_h` and rises to `ε_in` at the
+layer's outer radius `r_1`, held at `ε_in` inside it — a quintic
+[`smoothstep`](@ref) of `r = |x − c(t)|` between the two radii, `c(t)` the
+hole's analytic trajectory (**added in step 8c**, `CODE.md`, "The
+interior").
+
+**It rises from the horizon, not from `r_1` (amended after step 8a).** The
+grid-scale content the interior makes is made at `r_1` and has to cross
+`r_1 ≤ r < r_h` to get out; in the continuum that region is causally
+disconnected from the exterior, and the dissipation is `O(h^{q+1})`
+whatever `ε` is, so raising it there costs the exterior nothing. `r_h` is
+[`horizon_min_radius`](@ref) of the case's background — boost-contracted,
+as that function is — and [`horizon_dissipation`](@ref) builds the profile
+from a case.
+
+Exactly `ε_out` for `r ≥ r_h` and exactly `ε_in` for `r ≤ r_1`, both
+through a branch rather than the blend, so that a profile whose two values
+agree is that number at every point, bit for bit.
+
+**`ε_in ≤ 4`, and `ε_out` too.** The Kreiss–Oliger operator damps the
+corner mode of the lattice at `3 ε/h`, and RK4 is stable on the negative
+real axis to `2.79`: at `cfl = 1/4` and the fixture's `λ ≈ 1.67` that is
+`ε ≲ 6`, and `4` is the margin step 8a recommended.
+
+`isbits`, and a kernel argument at every right-hand-side evaluation.
+"""
+struct HorizonDissipation{T}
+    ε_out::T
+    ε_in::T
+    r_1::T
+    r_h::T
+    center::HoleCenter{T}
+end
+
+function HorizonDissipation(::Type{T}=Float64; ε_out, ε_in, r_1, r_h,
+                            center) where {T}
+    eo, ei, r1, rh = T(ε_out), T(ε_in), T(r_1), T(r_h)
+    (eo ≥ 0 && ei ≥ 0) || throw(ArgumentError(
+        "both Kreiss–Oliger amplitudes must be non-negative, got ε_out = $eo " *
+        "and ε_in = $ei: the operator carries the damping sign in its " *
+        "weights, so a negative amplitude amplifies the grid-scale modes it " *
+        "is there to remove."))
+    (eo ≤ 4 && ei ≤ 4) || throw(ArgumentError(
+        "the Kreiss–Oliger amplitude is capped at 4, got ε_out = $eo and " *
+        "ε_in = $ei: the operator damps the lattice's corner mode at 3ε/h, " *
+        "and RK4 is stable on the negative real axis only to 2.79, so " *
+        "3ε·dt/h ≤ 2.79 is ε ≲ 6 at cfl = 1/4 on the fixture — and 4 is the " *
+        "margin step 8a recommended (CODE.md, \"The interior\")."))
+    0 < r1 < rh || throw(ArgumentError(
+        "the profile rises from the horizon inward, so it needs " *
+        "0 < r_1 < r_h, got r_1 = $r1 and r_h = $rh: r_h is the horizon's " *
+        "smallest coordinate radius and r_1 the layer's outer radius, which " *
+        "CODE.md's placement bound puts m spacings inside it."))
+    c = center isa HoleCenter ? HoleCenter{T}(SVector{3,T}(center.c0),
+                                              SVector{3,T}(center.v)) :
+        HoleCenter(T, center)
+    return HorizonDissipation{T}(eo, ei, r1, rh, c)
+end
+
+@inline function dissipation_rate(d::HorizonDissipation{T}, t, x) where {T}
+    c = center_at(d.center, t)
+    d1 = x[1] - c[1]
+    d2 = x[2] - c[2]
+    d3 = x[3] - c[3]
+    r = sqrt(d1 * d1 + d2 * d2 + d3 * d3)
+    r ≥ d.r_h && return d.ε_out
+    r ≤ d.r_1 && return d.ε_in
+    s = (d.r_h - r) / (d.r_h - d.r_1)
+    return d.ε_out + (d.ε_in - d.ε_out) * smoothstep(s)
+end
+
+has_dissipation(d::HorizonDissipation) = !(iszero(d.ε_out) && iszero(d.ε_in))
+
+"""
+    dissipation_bounds(ε_KO) -> (lo, hi)
+
+The smallest and largest amplitude the profile takes anywhere, as
+[`damping_bounds`](@ref) is for `γ0`.
+"""
+dissipation_bounds(ε::Real) = (ε, ε)
+dissipation_bounds(d::HorizonDissipation) =
+    (min(d.ε_out, d.ε_in), max(d.ε_out, d.ε_in))

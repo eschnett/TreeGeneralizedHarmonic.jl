@@ -33,6 +33,11 @@
 # same finest spacing. It is here rather than in the suite because at the
 # calibrated thresholds this hole asks for 848 blocks.
 #
+# Step 8c adds the `calibration` section, which is not in the default list
+# either: a hundred and twenty screens of `5 M` and their survivors to `50 M`
+# are several node-hours, run as batch jobs by group
+# (`hole_runs.jl calibration=scan,profile`); its own header says how.
+#
 # Step 8a adds the `leakage` section, which is **not** in the default list:
 # eighty-eight evolutions on a 512-block mesh are one batch job on a 64-core
 # Symmetry node (`julia --project=. --threads=64 test/hole_runs.jl leakage`;
@@ -62,10 +67,18 @@ say(fmt, args...) = println(Printf.format(Printf.Format(fmt), args...))
 # Which sections to run; all of them by default. An argument of the form
 # `key=value` is not a section but an option of one (added in step 8a, for
 # the `leakage` section's subsets: `q=2 d=4 eps=0,1/2`), so that a subset
-# can be validated locally with the same code the batch job runs.
+# can be validated locally with the same code the batch job runs. An option
+# whose *key* is a section's name — `bounds=damped6`, `calibration=scan` —
+# selects that section's subset and so names the section: then nothing runs
+# by default (amended in step 8c: the review merge of step 8b made
+# `hole_runs.jl bounds=damped6` alone run every default section as well,
+# since no bare name was given).
+const SECTION_NAMES = ["order", "long", "charts", "indicator", "horizon",
+                       "bounds", "leakage", "calibration"]
 const SECTIONS = let names = filter(a -> !occursin('=', a), ARGS)
-    isempty(names) ? ["order", "long", "charts", "indicator", "horizon", "bounds"] :
-    names
+    keyed = [first(split(a, '='; limit=2)) for a in ARGS if occursin('=', a)]
+    isempty(names) && !any(in(SECTION_NAMES), keyed) ?
+    ["order", "long", "charts", "indicator", "horizon", "bounds"] : names
 end
 const OPTIONS = Dict(String(first(split(a, '='; limit=2))) =>
                      String(last(split(a, '='; limit=2)))
@@ -1329,5 +1342,549 @@ function bounds_section(rows)
 end
 
 isempty(BOUNDS_ROWS) || bounds_section(BOUNDS_ROWS)
+
+# --- (8) calibration: the layer against an inexact target (step 8c) --------
+#
+# `PLAN.md`'s step 8c and its finding 1: `ρ_max = 1/dt` is a *grid* rate —
+# about `107/M` on this fixture against the surface gravity `1/(4M)` — so
+# step 5's `:damped` layer is a paste two cells deep, and it survives to
+# `50 M` because its target is the exact solution. A target that is not
+# (a fitted one, step 8e) pinned that hard that close to the evolved
+# stencils is a kink at `r_1`, and step 8b measured step 5's two failing
+# runs dying exactly there. This section measures what a layer needs for a
+# target that is wrong, on `hole_fixture` (Kerr-Schild `a = 0`, `q = 2`,
+# `N = 8`, `h = 5/64`, `r_1 = 23/20`, `m = 8`, `cfl = 1/5`), every run with
+# the range projection on (`default_bounds`, `default_gate`) as a passive
+# instrument and the finder's `M_irr` at every other chunk:
+#
+#   * **E3** — `h_tt` of the target off by `A (r − r_1)² χ(r)`, value and
+#     slope right at `r_1`, curvature wrong (`CurvatureTarget`,
+#     `A = −2/M²`: the sign is argued there). The `N = 6, 8, 10` sweep to
+#     `3/20 M` for the order of the `G`-point shell's `C_a` (group
+#     `sweep`), then the scan `n_L × ρ_max` at `ε_KO = 1/2` (`scan`) and with
+#     the `ε_KO(r)` profile at `ε_in = 1, 2, 4` (`profile`).
+#   * **E1** — `KerrSchild(6/5, 0)`, a valid metric that is not a solution,
+#     and **E2** — `translate(KerrSchild(1, 0), (0, δ, 0, 0))`, `δ = h, 4h`,
+#     the proxy for a tracking error, over the same scan at `ε_KO = 1/2`
+#     (`targets`).
+#   * **E0** — `:pasted` with `KerrSchild(6/5, 0)` as its target: a 20 % hard
+#     step at `r_1`, and the question whether it gets out — step 8a's shells
+#     outside the horizon, on step 8a's uniform 512-block mesh, against
+#     `:pasted` with the exact target, at `ε_KO = 1/4, 1/2, 1` (`e0`).
+#   * **Controls** — `:frozen`, `:pasted` and `:damped` at `N = 8` and the
+#     `:damped` at `N = 6` whose end step 8b replayed (`controls`).
+#
+# **`n_L` is the width of the relaxation ramp in cells** (proposed in step
+# 8c): finding 1's prediction `n_L ≳ G (10 ρ_max M)^{1/3}` is the width over
+# which `ρ` rises from `0` at `r_1` to `ρ_max` — that is where it takes the
+# quintic's `ρ(d) ≈ 10 ρ_max (d/n_L)³` at depth `d = G`. `PLAN.md` sets it
+# "through `r_0` with `r_1` fixed", which needs the ramp to span the layer:
+# `ρ_ramp = 1` and `r_0 = r_1 − n_L h`. `n_L = 2G = 4` is the one exception —
+# `check_interior_radii` asks for `r_1 − r_0 ≥ 2(G + 1) h = 6h`, and the
+# assertion stays — so it runs in a layer of `6` cells with `ρ_ramp = 2/3`.
+# `w` keeps its default ramp over the inner half of the layer. The label
+# `nd` is the fixture's own layer (`r_0 = 2/5`, `ρ_ramp = 1/2`: a ramp of
+# `4.8` cells), which is step 5's configuration.
+#
+# **How it runs.** Groups (`sweep`, `e0`, `scan`, `profile`, `targets`,
+# `controls`, and `long1` … for the survivors to `50 M`) are chosen with
+# `calibration=<group>,…` (or `+` between them, which is what a batch job's
+# name can carry); the bare section name runs every screen group.
+# With a node's worth of threads the runs go to subprocesses of four threads
+# each (E0's of sixteen), batched so that each worker compiles as few kernel
+# specialisations as it can; each worker prints one line per chunk, so a job
+# cut off by its time limit leaves every finished row in its log. A single
+# configuration is `runs=<label>,…`, and `t_end=1/2` shortens every run —
+# which is how the section is validated locally:
+#
+#     julia --project=. --threads=4 test/hole_runs.jl calibration \
+#         runs=e3-n8-r4-c t_end=1/2
+
+const CAL_Q = 2
+const CAL_G = CAL_Q ÷ 2 + 1
+const CAL_R1 = T(23 // 20)
+const CAL_R0 = T(2 // 5)
+const CAL_A = -T(2)                     # E3: 1/M²; the sign, see `CurvatureTarget`
+const CAL_NLS = (4, 6, 8, 12)           # 2G, 3G, 4G, 6G cells at q = 2
+const CAL_RHOS = (:grid, 10, 4, 1)      # 1/dt, or a fixed ρ_max M
+const CAL_EPS_INS = (1, 2, 4)           # the profile's ε_in; ε_out = 1/2
+const CAL_EPS0 = (1 // 4, 1 // 2, 1 // 1)
+const CAL_OUT_K = 0:8                   # step 8a's shells outside the horizon
+
+# The fixture's finest spacing: level 3 of a box `5 M` wide, `N` points a block.
+cal_h(N) = T(5) / (8 * N)
+
+cal_rho_label(ρ) = ρ === :grid ? "rgrid" : "r$(ρ)"
+cal_nl_label(nL) = nL === nothing ? "nd" : "n$(nL)"
+
+"""
+One configuration of the calibration: every number that distinguishes it,
+and a label that names it in the logs, the options and `CODE.md`.
+"""
+cal_spec(label; exp, variant=:damped, target=:exact, N=8, nL=nothing,
+         rho=:grid, eps=1 // 2, eps_in=nothing, mesh=:fixture, t_end=5 // 1,
+         chunk=1 // 2, every=2, ref=nothing) =
+    (label=label, exp=exp, variant=variant, target=target, N=N, nL=nL,
+     rho=rho, eps=eps, eps_in=eps_in, mesh=mesh, t_end=t_end, chunk=chunk,
+     every=every, ref=ref)
+
+"""
+Every screen configuration, by group, in a fixed order.
+"""
+function cal_screens()
+    specs = Dict{String,Vector{Any}}()
+    sw = Any[]
+    for tgt in (:exact, :e3), ρ in (:grid, 4), N in (6, 8, 10)
+        push!(sw, cal_spec("sw-$(tgt)-$(cal_rho_label(ρ))-N$(N)"; exp=:sweep,
+                           target=tgt, N=N, rho=ρ, t_end=3 // 20,
+                           chunk=1 // 20, every=0))
+    end
+    specs["sweep"] = sw
+    scan = Any[cal_spec("e3-nd-rgrid-c"; exp=:scan, target=:e3)]
+    for nL in CAL_NLS, ρ in CAL_RHOS
+        push!(scan, cal_spec("e3-$(cal_nl_label(nL))-$(cal_rho_label(ρ))-c";
+                             exp=:scan, target=:e3, nL=nL, rho=ρ))
+    end
+    specs["scan"] = scan
+    prof = Any[]
+    for ε in CAL_EPS_INS, nL in CAL_NLS, ρ in CAL_RHOS
+        push!(prof, cal_spec("e3-$(cal_nl_label(nL))-$(cal_rho_label(ρ))-p$(ε)";
+                             exp=:profile, target=:e3, nL=nL, rho=ρ, eps_in=ε))
+    end
+    specs["profile"] = prof
+    tg = Any[]
+    for tgt in (:e1, :e2h, :e2h4)
+        push!(tg, cal_spec("$(tgt)-nd-rgrid-c"; exp=:targets, target=tgt))
+        for nL in CAL_NLS, ρ in CAL_RHOS
+            push!(tg, cal_spec("$(tgt)-$(cal_nl_label(nL))-$(cal_rho_label(ρ))-c";
+                               exp=:targets, target=tgt, nL=nL, rho=ρ))
+        end
+    end
+    specs["targets"] = tg
+    specs["controls"] = Any[
+        cal_spec("ctl-damped8"; exp=:controls),
+        cal_spec("ctl-damped6"; exp=:controls, N=6),
+        cal_spec("ctl-pasted"; exp=:controls, variant=:pasted),
+        cal_spec("ctl-frozen"; exp=:controls, variant=:frozen)]
+    e0 = Any[]
+    for ε in CAL_EPS0
+        tag = "eps$(round(Int, 100 * ε))"
+        push!(e0, cal_spec("e0ref-$(tag)"; exp=:e0, variant=:pasted,
+                           eps=ε, mesh=:uniform, chunk=1 // 4, every=4))
+        push!(e0, cal_spec("e0-$(tag)"; exp=:e0, variant=:pasted, target=:e1,
+                           eps=ε, mesh=:uniform, chunk=1 // 4, every=4,
+                           ref="e0ref-$(tag)"))
+    end
+    specs["e0"] = e0
+    return specs
+end
+
+# The survivors of the screens, run to `50 M` at `chunk = 1 M` as step 5's
+# table was — one list per batch job, written in after the screens.
+const CAL_LONG = Dict{String,Vector{String}}()
+
+cal_long(spec) = merge(spec, (t_end=50 // 1, chunk=1 // 1, every=2))
+
+function cal_all_specs()
+    all = Dict{String,Any}()
+    for (_, v) in cal_screens(), sp in v
+        all[sp.label] = sp
+    end
+    return all
+end
+
+"""
+The case, the forest and the evolve! keywords of one configuration.
+"""
+function cal_setup(sp)
+    q = CAL_Q
+    G = CAL_G
+    h = cal_h(sp.N)
+    # The layer: the fixture's own, or a ramp of `n_L` cells through `r_0`.
+    r_0, ρ_ramp = if sp.nL === nothing
+        CAL_R0, T(1 // 2)
+    else
+        cells = max(sp.nL, 2 * (G + 1))
+        CAL_R1 - cells * h, T(sp.nL) / T(cells)
+    end
+    bg = SM.KerrSchild(one(T), zero(T))
+    target = sp.target === :exact ? nothing :
+             sp.target === :e3 ? CurvatureTarget(bg, T; A=CAL_A, r_0=r_0,
+                                                 r_1=CAL_R1) :
+             sp.target === :e1 ? SM.KerrSchild(T(6 // 5), zero(T)) :
+             sp.target === :e2h ? SM.translate(bg, SVector{4,T}(0, h, 0, 0)) :
+             sp.target === :e2h4 ? SM.translate(bg, SVector{4,T}(0, 4h, 0, 0)) :
+             error("unknown target $(sp.target)")
+    case = hole_fixture(T; q=q, variant=sp.variant, r_0=r_0, ρ_ramp=ρ_ramp,
+                        ε_KO=T(sp.eps), chunk=T(sp.chunk), target=target)
+    sp.eps_in === nothing ||
+        (case = with_dissipation(case, horizon_dissipation(case;
+                                                           ε_in=T(sp.eps_in))))
+    radii = sp.mesh === :uniform ? LEAK_RADII : (T(3), T(3), one(T))
+    forest = hole_fixture_forest(T, case; N=sp.N, radii=radii)
+    case = with_bounds(case, default_bounds(T; M=1,
+                                            r_gate=default_gate(case.interior,
+                                                                forest, q)))
+    kw = sp.rho === :grid ? (;) : (ρ_max_fixed=T(sp.rho),)
+    return case, forest, kw
+end
+
+cal_fmt(x) = x === nothing ? "      —  " : Printf.format(Printf.Format("%9.3e"), x)
+
+"""
+One run: `evolve!` with an observer that writes the record's rows it needs
+— and the `G`-point shell's constraint and error, the range projection's
+running totals and the finder's `M_irr` — at every chunk, into a vector
+that survives the run throwing, and prints each row as it is made.
+"""
+function cal_run(sp; t_end=nothing, reference=nothing, geometry=nothing)
+    case, forest, kw = cal_setup(sp)
+    q = CAL_Q
+    tend = t_end === nothing ? T(sp.t_end) : min(T(t_end), T(sp.t_end))
+    rows = NamedTuple[]
+    snaps = Matrix{T}[]
+    amax = Matrix{T}[]
+    seed = Ref{Any}(nothing)
+    calls = Ref(0)
+    shell = horizon_shell(case)
+    function watch(p, t, u)
+        calls[] += 1
+        tt = T(t)
+        gh_constraint!(p, u, tt)
+        cn = constraint_norms(p)
+        gh_error!(p, u, tt; shell=shell)
+        e = error_norms(p)
+        v = validity_rows(p, u, tt)
+        sh = gh_outside_shell_norms(p, u, tt)
+        acc = p.accounting
+        mirr = nothing
+        if sp.every > 0 && (calls[] - 1) % sp.every == 0
+            mirr = try
+                o = find_gh_horizon(p, u, tt; N=12, r_seed=T(9 // 5),
+                                    hlm=seed[], spin=false)
+                seed[] = o.hlm
+                o.M_irr
+            catch err
+                err isa InterruptException && rethrow()
+                nothing
+            end
+        end
+        row = (t=Float64(tt), err_l2=e.err_l2, err_linf=e.err_linf,
+               gauge_l2=Float64(maximum(cn.gauge_l2)),
+               gauge_linf=Float64(maximum(cn.gauge_linf)),
+               residual=e.residual, drift=e.drift, M_irr=mirr,
+               hits=acc.hits, r_hit=acc.r_max, first_t=acc.first_t,
+               first_r=acc.first_r, α_shell=v.min_α_shell,
+               detγ_shell=v.min_detγ_shell, Π_shell=v.max_Π_shell,
+               h_shell=v.max_h_shell, α_layer=v.min_α_layer,
+               Π_layer=v.max_Π_layer, sh_gauge_l2=sh.gauge_l2,
+               sh_gauge_linf=sh.gauge_linf, sh_err_l2=sh.err_l2,
+               sh_err_linf=sh.err_linf, ρ_max=Float64(p.interior.ρ_max))
+        push!(rows, row)
+        say("   [%s] t=%6.2f err=%s/%s C=%s shC=%s/%s shE=%s res=%s " *
+            "αsh=%s Πsh=%s hits=%d M_irr=%s", sp.label, row.t, cal_fmt(row.err_l2),
+            cal_fmt(row.err_linf), cal_fmt(row.gauge_l2), cal_fmt(row.sh_gauge_l2),
+            cal_fmt(row.sh_gauge_linf), cal_fmt(row.sh_err_l2),
+            cal_fmt(row.residual), cal_fmt(row.α_shell), cal_fmt(row.Π_shell),
+            row.hits, mirr === nothing ? "—" :
+                      Printf.format(Printf.Format("%.6f"), mirr))
+        flush(stdout)
+        # E0: the state at step 8a's shells outside the horizon, against
+        # the reference's at the same chunk.
+        if geometry !== nothing
+            ua = statearray(u, p.U)
+            if reference === nothing
+                snap = Matrix{T}(undef, 10, length(geometry.points))
+                for (n, (i, j, k, b)) in enumerate(geometry.points), c in 1:10
+                    snap[c, n] = ua[i, j, k, c, b]
+                end
+                push!(snaps, snap)
+            else
+                ref = reference.snaps[calls[]]
+                a = zeros(T, length(LEAK_SHELLS), 3)
+                for (n, (i, j, k, b)) in enumerate(geometry.points)
+                    δ = maximum(abs(ua[i, j, k, c, b] - ref[c, n]) for c in 1:10)
+                    m = geometry.shell[n]
+                    a[m, 1] = max(a[m, 1], δ)
+                    geometry.axis[n] && (a[m, 2] = max(a[m, 2], δ))
+                    geometry.diag[n] && (a[m, 3] = max(a[m, 3], δ))
+                end
+                push!(amax, a)
+            end
+        end
+        return nothing
+    end
+    t0 = time()
+    failure = nothing
+    out = try
+        evolve!(T, case; forest=forest, q=q,
+                ops=Operators(prolongation=q + 2, restriction=q + 2),
+                t_end=tend, cfl=T(1 // 5), observer=watch, kw...)
+    catch err
+        err isa InterruptException && rethrow()
+        failure = first(split(sprint(showerror, err), '\n'))
+        nothing
+    end
+    wall = time() - t0
+    reached = isempty(rows) ? 0.0 : rows[end].t
+    say("   done [%s] reached %.2f M of %.2f in %.0f s%s", sp.label, reached,
+        tend, wall, failure === nothing ? "" : ", then threw: " * failure)
+    flush(stdout)
+    return (label=sp.label, spec=sp, reached=reached, t_end=Float64(tend),
+            failure=failure, wall=wall,
+            nsteps=out === nothing ? nothing : out.nsteps,
+            h=Float64(cal_h(sp.N)), rows=rows, snaps=snaps, amax=amax)
+end
+
+# The size of E0's step at `r_1`: the largest `|δh_ab|` between the target
+# and the truth on the sphere, over a few directions — what the shells'
+# `A_k` are divided by, as step 8a divided by its ripple's amplitude.
+function cal_step_amplitude()
+    tgt = SM.KerrSchild(T(6 // 5), zero(T))
+    bg = SM.KerrSchild(one(T), zero(T))
+    dirs = (SVector{3,T}(0, 0, 1), SVector{3,T}(1, 0, 0),
+            SVector{3,T}(1, 1, 1) / sqrt(T(3)), SVector{3,T}(3, 4, 12) / 13)
+    return maximum(dirs) do n
+        x = Tuple(CAL_R1 * n)
+        maximum(abs.(state_tuple(tgt, zero(T), x)[1:10] .-
+                     state_tuple(bg, zero(T), x)[1:10]))
+    end
+end
+
+"""
+The runs of one worker, in order: an E0 pair is its reference and then its
+run against it; everything else is one run.
+"""
+function cal_worker(labels; long=false, t_end=nothing)
+    all = cal_all_specs()
+    res = Any[]
+    geometry = nothing
+    refs = Dict{String,Any}()
+    for l in labels
+        sp = long ? cal_long(all[l]) : all[l]
+        if sp.exp === :e0
+            geometry === nothing && (geometry = leak_geometry(CAL_Q))
+            if sp.ref === nothing
+                r = cal_run(sp; t_end=t_end, geometry=geometry)
+                refs[sp.label] = r
+                push!(res, merge(r, (snaps=Matrix{T}[],)))
+            else
+                ref = get(refs, sp.ref, nothing)
+                ref === nothing && (ref = cal_run(all[sp.ref]; t_end=t_end,
+                                                  geometry=geometry))
+                push!(res, cal_run(sp; t_end=t_end, reference=ref,
+                                   geometry=geometry))
+            end
+        else
+            push!(res, cal_run(sp; t_end=t_end))
+        end
+    end
+    return res
+end
+
+"""
+The workers of a batch job, each a subprocess with `threads` threads, all at
+once; their logs and results beside the job's own log when there is one.
+"""
+function cal_fanout(batches; tag, long, t_end)
+    base = isdir("out") ? joinpath("out", "calibration") : mktempdir()
+    dir = mkpath(joinpath(base, tag))
+    println("   worker logs and results in ", abspath(dir))
+    project = dirname(Base.active_project())
+    procs = map(enumerate(batches)) do (n, (labels, nt))
+        out = joinpath(dir, "worker-$n.jls")
+        log = joinpath(dir, "worker-$n.log")
+        te = t_end === nothing ? "" : "t_end=$(leak_spell(t_end))"
+        cmd = `$(Base.julia_cmd()) --project=$project --threads=$nt
+               $(abspath(@__FILE__)) calibration worker=1
+               runs=$(join(labels, ',')) long=$(Int(long)) out=$out $te`
+        io = open(log, "w")
+        (run(pipeline(cmd; stdout=io, stderr=io); wait=false), out, log, io)
+    end
+    return map(procs) do (proc, out, log, io)
+        wait(proc)
+        close(io)
+        if !success(proc) || !isfile(out)
+            println("   a worker failed; the end of its log ($log):")
+            foreach(l -> println("     ", l), last(readlines(log), 30))
+            return Any[]
+        end
+        foreach(l -> startswith(l, "   done") && println(l), readlines(log))
+        return deserialize(out)
+    end
+end
+
+# The summary of one run: the last row, and the extremes over the run.
+function cal_summary(r)
+    isempty(r.rows) && return nothing
+    last_ = r.rows[end]
+    first_ = r.rows[1]
+    mirr = [x.M_irr for x in r.rows if x.M_irr !== nothing]
+    ext(f, key) = (vals = [getfield(x, key) for x in r.rows
+                           if getfield(x, key) !== nothing];
+                   isempty(vals) ? nothing : f(vals))
+    return (last=last_, first=first_,
+            α_shell=ext(minimum, :α_shell), detγ_shell=ext(minimum, :detγ_shell),
+            Π_shell=ext(maximum, :Π_shell), α_layer=ext(minimum, :α_layer),
+            sh_err_max=ext(maximum, :sh_err_linf),
+            M_irr0=isempty(mirr) ? nothing : first(mirr),
+            M_irr=isempty(mirr) ? nothing : last(mirr),
+            M_irr_drift=isempty(mirr) ? nothing : maximum(abs.(mirr .- 1)))
+end
+
+function cal_table(results)
+    println("| label | reached | end | err L2 | err L∞ | shell C L2 | shell C L∞ " *
+            "| shell err L∞ (max) | residual | drift | M_irr − 1 (max) | hits " *
+            "| min α shell | min det γ shell | max |Π| shell |")
+    for r in results
+        s = cal_summary(r)
+        s === nothing && (say("| %s | 0 | %s | | | | | | | | | | | | |", r.label,
+                              r.failure === nothing ? "?" : "threw");
+                          continue)
+        l = s.last
+        say("| %s | %.2f | %s | %s | %s | %s | %s | %s (%s) | %s | %s | %s | %d " *
+            "| %s | %s | %s |", r.label, r.reached,
+            r.failure === nothing ? "ok" : "threw", cal_fmt(l.err_l2),
+            cal_fmt(l.err_linf), cal_fmt(l.sh_gauge_l2), cal_fmt(l.sh_gauge_linf),
+            cal_fmt(l.sh_err_linf), cal_fmt(s.sh_err_max), cal_fmt(l.residual),
+            cal_fmt(l.drift), cal_fmt(s.M_irr_drift), l.hits,
+            cal_fmt(s.α_shell), cal_fmt(s.detγ_shell), cal_fmt(s.Π_shell))
+    end
+end
+
+function cal_report(results, all)
+    byl = Dict(r.label => r for r in results)
+    println("\n-- every run: the last chunk, and the extremes over the run --")
+    cal_table(sort(results; by=r -> r.label))
+    for r in results
+        r.failure === nothing || say("   %s threw at %.2f M: %s", r.label,
+                                     r.reached, r.failure)
+    end
+    # The E3 sweep: the order of the G-point shell's C_a at 3/20 M.
+    sw = [r for r in results if r.spec.exp === :sweep]
+    if !isempty(sw)
+        println("\n-- E3 sweep to 3/20 M: the G-point shell outside r_1, and " *
+                "the masked error --")
+        println("| target | ρ_max | N | h | shell C L2 | shell C L∞ | shell err L2 " *
+                "| masked err L2 | residual |")
+        for tgt in (:exact, :e3), ρ in (:grid, 4)
+            rs = sort([r for r in sw if r.spec.target === tgt && r.spec.rho == ρ
+                       && !isempty(r.rows)]; by=r -> r.spec.N)
+            isempty(rs) && continue
+            for r in rs
+                l = r.rows[end]
+                say("| %s | %s | %d | %.5f | %s | %s | %s | %s | %s |", tgt, ρ,
+                    r.spec.N, r.h, cal_fmt(l.sh_gauge_l2), cal_fmt(l.sh_gauge_linf),
+                    cal_fmt(l.sh_err_l2), cal_fmt(l.err_l2), cal_fmt(l.residual))
+            end
+            if length(rs) ≥ 2
+                hs = [r.h for r in rs]
+                rate(k) = convergence_rate(hs, [getfield(r.rows[end], k) for r in rs])
+                say("| %s | %s | **rate** | | %.2f | %.2f | %.2f | %.2f | %.2f |", tgt,
+                    ρ, rate(:sh_gauge_l2), rate(:sh_gauge_linf), rate(:sh_err_l2),
+                    rate(:err_l2), rate(:residual))
+            end
+        end
+    end
+    # E0: what reaches the shells outside the horizon.
+    e0 = [r for r in results if r.spec.exp === :e0 && r.spec.ref !== nothing]
+    if !isempty(e0)
+        Astep = cal_step_amplitude()
+        iout = [findfirst(==(k), LEAK_SHELLS) for k in CAL_OUT_K]
+        d = (T(2) - CAL_R1) / cal_h(8)
+        say("\n-- E0: :pasted onto KerrSchild(6/5, 0), the step at r_1 = %.3f " *
+            "(%.2f cells below the horizon) of |δh| = %.4f; A_k/A_step in the " *
+            "shells [r_h + k h, r_h + (k+1) h] --", CAL_R1, d, Astep)
+        for r in e0
+            isempty(r.amax) && continue
+            peak = reduce((a, b) -> max.(a, b), r.amax) ./ Astep
+            say("   %s (ε_KO = %.2f), reached %.2f M:", r.label, r.spec.eps,
+                r.reached)
+            println("     A_k/A, k = 0 … 8 (all)  : ", leak_row(peak[iout, 1]))
+            println("     A_k/A, k = 0 … 8 (axis) : ", leak_row(peak[iout, 2]))
+            println("     A_k/A, k = 0 … 8 (diag) : ", leak_row(peak[iout, 3]))
+            k0 = iout[1]
+            println("     A_0(t)/A every 1/2 M    : ",
+                    leak_row([a[k0, 1] / Astep for a in r.amax[1:2:end]]))
+            say("     e-folds per cell outside: %.3f (all), %.3f (axis)",
+                leak_fit(CAL_OUT_K, peak[iout, 1]), leak_fit(CAL_OUT_K, peak[iout, 2]))
+        end
+    end
+end
+
+const CAL_ALL_SCREENS = ["sweep", "controls", "scan", "profile", "targets", "e0"]
+
+if "calibration" in SECTIONS || haskey(OPTIONS, "calibration")
+    t_end_opt = haskey(OPTIONS, "t_end") ? only(leak_option("t_end", [5 // 1])) :
+                nothing
+    if haskey(OPTIONS, "worker")
+        labels = String.(split(OPTIONS["runs"], ','))
+        res = cal_worker(labels; long=get(OPTIONS, "long", "0") == "1",
+                         t_end=t_end_opt)
+        serialize(OPTIONS["out"], res)
+    else
+        screens = cal_screens()
+        all = cal_all_specs()
+        groups = haskey(OPTIONS, "calibration") ?
+                 String.(split(OPTIONS["calibration"], r"[,+]")) : CAL_ALL_SCREENS
+        # (label, long) pairs in the order the groups name them.
+        runs = Tuple{String,Bool}[]
+        if haskey(OPTIONS, "runs")
+            append!(runs, [(String(l), false) for l in split(OPTIONS["runs"], ',')])
+        else
+            for g in groups
+                if haskey(CAL_LONG, g)
+                    append!(runs, [(l, true) for l in CAL_LONG[g]])
+                else
+                    haskey(screens, g) || error("no calibration group $g")
+                    append!(runs, [(sp.label, false) for sp in screens[g]])
+                end
+            end
+        end
+        println("\n=== (8) calibration: the layer against an inexact target ===")
+        nt = Threads.nthreads()
+        say("%d runs (%s) at %d threads%s", length(runs),
+            join(unique(haskey(OPTIONS, "runs") ? ["runs"] : groups), ", "), nt,
+            t_end_opt === nothing ? "" : ", t_end ≤ $(Float64(t_end_opt)) M")
+        t0 = time()
+        results = if nt ≥ 16
+            # E0 pairs to workers of sixteen threads, one pair each; the rest
+            # to workers of four, in contiguous batches of the fixed order so
+            # that each worker compiles one or two kernel specialisations.
+            e0pairs = [[l for (l, _) in runs if all[l].exp === :e0 &&
+                        (l == lab || all[l].ref == lab)]
+                       for (lab, _) in runs if all[lab].exp === :e0 &&
+                       all[lab].ref === nothing]
+            rest = [(l, lg) for (l, lg) in runs if all[l].exp !== :e0]
+            # Four threads a screen; eight a run to `50 M`, whose hour on a
+            # node would not hold it at four.
+            wt = any(lg for (_, lg) in runs) ? 8 : 4
+            nfixed = max(0, (nt - 16 * length(e0pairs)) ÷ wt)
+            nw = max(1, min(nfixed, length(rest)))
+            per = cld(length(rest), nw)
+            longs = unique(lg for (_, lg) in rest)
+            length(longs) ≤ 1 || error("a batch is all screens or all long runs")
+            batches = [(pair, 16) for pair in e0pairs]
+            for i in 1:nw
+                chunk = rest[(i - 1) * per + 1:min(i * per, length(rest))]
+                isempty(chunk) || push!(batches, ([l for (l, _) in chunk], wt))
+            end
+            say("   %d workers: %d E0 pairs at 16 threads, %d batches of ≤ %d " *
+                "at %d", length(batches), length(e0pairs), length(batches) -
+                length(e0pairs), per, wt)
+            tag = haskey(OPTIONS, "runs") ? "runs" : join(groups, "+")
+            reduce(vcat, cal_fanout(batches; tag=tag,
+                                    long=!isempty(longs) && only(longs),
+                                    t_end=t_end_opt); init=Any[])
+        else
+            longs = unique(lg for (_, lg) in runs)
+            length(longs) ≤ 1 || error("a batch is all screens or all long runs")
+            cal_worker([l for (l, _) in runs]; long=!isempty(longs) && only(longs),
+                       t_end=t_end_opt)
+        end
+        say("%d runs in %.0f s", length(results), time() - t0)
+        cal_report(results, all)
+    end
+end
 
 println("\ndone")

@@ -102,7 +102,7 @@ end
 
 """
     Interior(T = Float64; center, r_0, r_1, ρ_max = 0, variant = :damped,
-             w_ramp = 1//2, ρ_ramp = 1//2, margin = 8)
+             w_ramp = 1//2, ρ_ramp = 1//2, margin = 8, target = nothing)
 
 The damping layer: where it is, how strong it is, and which of `CODE.md`'s
 three variants is running.
@@ -136,11 +136,24 @@ is both frozen and undamped.
 is a statement about where this layer was put; no kernel reads it, and
 [`check_interior_radii`](@ref) is what does.
 
+`target` is what the layer relaxes *to* **(added in step 8c)**: `nothing`,
+the default, meaning the case's own background — the analytic solution,
+step 5's design — or another `SpacetimeMetrics` metric, `isbits`, that the
+kernel evaluates in its place wherever `(INTERIOR)` reads `u_exact`: the
+layer branch of the right-hand side and the `:pasted` overwrite. Nothing
+else reads it. The initial data, the Dirichlet hook, the gauge source and
+the error reference stay on the case's *true* background, so the record's
+`residual` measures the layer's distance from the truth and not from its
+target. It exists so that step 8c can calibrate the layer against a target
+that is *wrong* — a different mass, a displaced center, a curvature error —
+which is what a target fitted to evolved data will be (`PLAN.md`, steps
+8c and 8e); [`layer_target`](@ref) is how the kernel resolves it.
+
 The struct is `isbits` — it is a kernel argument at every right-hand-side
 evaluation — and `variant` lives in a `Val` for that reason, a `Symbol`
 field not being `isbits`.
 """
-struct Interior{T,V}
+struct Interior{T,V,X}
     center::HoleCenter{T}
     r_0::T
     r_1::T
@@ -149,13 +162,14 @@ struct Interior{T,V}
     ρ_ramp::T
     margin::Int
     valvariant::Val{V}
+    target::X                    # the layer's target metric, or `nothing`
 end
 
 const INTERIOR_VARIANTS = (:damped, :pasted, :frozen)
 
 function Interior(::Type{T}=Float64; center, r_0, r_1, ρ_max=zero(T),
                   variant::Symbol=:damped, w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
-                  margin::Integer=8) where {T}
+                  margin::Integer=8, target=nothing) where {T}
     variant in INTERIOR_VARIANTS || throw(ArgumentError(
         "the interior variant must be one of $(INTERIOR_VARIANTS), got " *
         ":$variant. CODE.md names exactly three and measures all three on " *
@@ -189,9 +203,41 @@ function Interior(::Type{T}=Float64; center, r_0, r_1, ρ_max=zero(T),
     margin ≥ 1 || throw(ArgumentError(
         "the margin m is a number of grid points and must be at least 1, " *
         "got $margin; CODE.md's default is 8 and its floor is G + 1."))
-    return Interior{T,variant}(c, r0, r1, T(ρ_max), wr, ρr, Int(margin),
-                               Val(variant))
+    check_layer_target(target)
+    return Interior{T,variant,typeof(target)}(c, r0, r1, T(ρ_max), wr, ρr,
+                                              Int(margin), Val(variant), target)
 end
+
+# The one refusal a target needs (added in step 8c): it is evaluated inside
+# the kernel exactly as the background is — `dmetric` at a point — so it has
+# to be a `SpacetimeMetrics` metric, and it travels as a kernel argument, so
+# it has to be `isbits`.
+check_layer_target(::Nothing) = nothing
+
+function check_layer_target(target)
+    target isa AbstractMetric || throw(ArgumentError(
+        "the layer's target must be a SpacetimeMetrics metric or `nothing` " *
+        "(the case's own background), got a $(typeof(target)): the kernel " *
+        "evaluates it where (INTERIOR) reads u_exact, through `dmetric` at " *
+        "the point, exactly as it evaluates the background."))
+    isbits(target) || throw(ArgumentError(
+        "the layer's target $(typeof(target)) is not isbits, so it cannot be " *
+        "a kernel argument: it is evaluated at every layer point of every " *
+        "right-hand-side evaluation, on whatever backend the state lives on " *
+        "(CLAUDE.md, \"A callback must capture no Type and no host array\")."))
+    return nothing
+end
+
+"""
+    layer_target(interior, background) -> metric
+
+The metric the layer relaxes toward: the interior's `target` where it has
+one, and the case's `background` where it is `nothing` — resolved from the
+type, so that a case without a target compiles to exactly the kernel it
+was before step 8c.
+"""
+@inline layer_target(::Interior{T,V,Nothing}, bg) where {T,V} = bg
+@inline layer_target(int::Interior, bg) = int.target
 
 """
     with_ρ_max(int::Interior, ρ_max) -> Interior
@@ -205,9 +251,9 @@ It is a reconstruction rather than a mutation because the interior is a
 kernel argument: an `isbits` value that a kernel closed over must not
 change underneath it.
 """
-with_ρ_max(int::Interior{T,V}, ρ_max) where {T,V} =
-    Interior{T,V}(int.center, int.r_0, int.r_1, T(ρ_max), int.w_ramp,
-                  int.ρ_ramp, int.margin, int.valvariant)
+with_ρ_max(int::Interior{T,V,X}, ρ_max) where {T,V,X} =
+    Interior{T,V,X}(int.center, int.r_0, int.r_1, T(ρ_max), int.w_ramp,
+                    int.ρ_ramp, int.margin, int.valvariant, int.target)
 
 """
     interior_variant(int) -> Symbol

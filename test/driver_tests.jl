@@ -52,6 +52,35 @@ using KernelAbstractions: CPU
                                            t_end=-one(T))
     end
 
+    # Step 8c's fixed relaxation rate: the physical alternative to `1/dt`,
+    # which the record must report as the rate the chunk ran at — and the
+    # two ways of saying the rate are one question, so saying both is
+    # refused rather than silently resolved in favour of one; a fixed rate
+    # above the grid rate is refused at the chunk that would take it.
+    @testset "a fixed ρ_max is the rate the record reports" begin
+        case = hole_fixture(T; q=q, chunk=T(1 // 40))
+        out = gh_hole_run(T, case; N=8, q=q, t_end=T(1 // 20),
+                          ρ_max_fixed=T(4))
+        @test length(out.records) == 3
+        for r in out.records
+            @test r.ρ_max === 4.0
+            @test r.finite
+        end
+        @test out.interior.ρ_max === T(4)
+        forest = hole_fixture_forest(T, case; N=8)
+        ops = Operators(prolongation=q + 2, restriction=q + 2)
+        @test_throws "both ρ_max_factor" evolve!(T, case; forest=forest, q=q,
+                                                 ops=ops, t_end=T(1 // 20),
+                                                 ρ_max_factor=one(T),
+                                                 ρ_max_fixed=T(4))
+        @test_throws "above this chunk's grid rate" evolve!(
+            T, case; forest=forest, q=q, ops=ops, t_end=T(1 // 20),
+            ρ_max_fixed=T(1000))
+        @test_throws ArgumentError evolve!(T, case; forest=forest, q=q, ops=ops,
+                                           t_end=T(1 // 20),
+                                           ρ_max_fixed=zero(T))
+    end
+
     # A run that finishes without the analysis quantities is not a result
     # (`CODE.md`, "Analysis quantities"), so the first claim about the
     # driver is about its record and not about its state.

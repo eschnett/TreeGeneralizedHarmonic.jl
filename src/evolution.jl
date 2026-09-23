@@ -331,6 +331,12 @@ parameter, and the three variants differ in the kernel — `:frozen` has
 `ρ ≡ 0` and `:pasted` freezes the whole ball `r < r_1` — so a `Bool` would
 have needed a second parameter beside it.
 
+`ε_KO` is the case's Kreiss–Oliger amplitude, a number or — from step 8c —
+a [`HorizonDissipation`](@ref) evaluated per point by
+[`dissipation_rate`](@ref), which is the identity on a number; and the
+layer's `u_exact` is the interior's [`layer_target`](@ref), the background
+itself unless the interior names another metric (step 8c).
+
 **The three branches, in the order they must be in.** The core predicate
 is asked *before* any stencil is touched, because the frozen core holds
 finite but stale data on which `F` may be `NaN` and `0 · NaN = NaN`
@@ -349,7 +355,6 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
     T = eltype(du)
 
     inv_h = inv(spacings[b])
-    εh = ε_KO * inv_h
 
     # The point's linear index in the working array — the owned index plus
     # the ghost width along each axis — and the strides the stencils step
@@ -364,6 +369,11 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
     # neither asks (a constant `γ0` and `INT === :none`).
     x = point_position(origins, spacings, b, I)
     γ0 = damping_rate(damping, t, x)
+    # The Kreiss–Oliger amplitude over the cell, per point (step 8c): the
+    # identity on a number, which is what every case but a calibration
+    # passes, and a profile of the distance to the hole otherwise
+    # ([`dissipation_rate`](@ref), the `γ0` pattern).
+    εh = dissipation_rate(ε_KO, t, x) * inv_h
 
     if INT === :none
         ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
@@ -395,7 +405,9 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
                 end
             else
                 w, ρ = interior_profiles(interior, r)
-                he, Πe, _ = background_state(bg, t, x)
+                # `u_exact` is the layer's *target* (step 8c): the case's
+                # background unless the interior names another metric.
+                he, Πe, _ = background_state(layer_target(interior, bg), t, x)
                 ntuple(Val(NC)) do v
                     du[inner..., v, b] =
                         w * ∂ₜh[v] - ρ * (work[var + (v - 1) * sv] - he[v])
@@ -427,6 +439,9 @@ three writers, and do not add a fourth.
 The core rule applies here as everywhere the analytic solution is written
 into a grid: inside `r_0` the query goes to the sphere `r_0` along the ray
 ([`core_position`](@ref)), because the solution is singular at the center.
+What is written is the interior's *target* ([`layer_target`](@ref), added in
+step 8c) — the case's background unless the interior names another metric,
+which is how step 8c's E0 puts a hard step of a wrong solution at `r_1`.
 """
 @kernel function gh_paste_kernel!(u, @Const(origins), @Const(spacings), bg,
                                   interior, t, ::Val{G}) where {G}
@@ -438,7 +453,7 @@ into a grid: inside `r_0` the query goes to the sphere `r_0` along the ray
     x = point_position(origins, spacings, b, I)
     r = interior_radius(interior, t, x)
     if r < interior.r_1
-        vals = case_state_tuple(bg, interior, t, x)
+        vals = case_state_tuple(layer_target(interior, bg), interior, t, x)
         ntuple(Val(2 * NC)) do v
             u[inner..., v, b] = vals[v]
             nothing
@@ -590,7 +605,7 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
 
     origins = to_backend(backend, block_origins(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))
-    DISS = !iszero(case.ε_KO)
+    DISS = has_dissipation(case.ε_KO)
     hasdirichlet = !all(case.periodic)
 
     # CODE.md asks for the two radius requirements "at every regrid", and a

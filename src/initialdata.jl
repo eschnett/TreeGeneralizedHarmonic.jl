@@ -30,8 +30,8 @@
     GHCase(T = Float64, background; box, periodic, ε_KO, γ0, γ2,
            center = (0, 0, 0), velocity = (0, 0, 0), interior = nothing,
            r_0 = 0, r_1 = 0, margin = 8, w_ramp = 1//2, ρ_ramp = 1//2,
-           refinement = nothing, horizon = nothing, bounds = nothing,
-           chunk = 0)
+           target = nothing, refinement = nothing, horizon = nothing,
+           bounds = nothing, chunk = 0)
 
 A case: the background, the box it is evolved in, the hole's analytic
 trajectory and its damping layer, and the parameters of the scheme that
@@ -95,6 +95,15 @@ interior, because its gate is a radius about the hole's center, and the gate
 must lie inside `r_1`; both are refused here by name, and the mesh-dependent
 half of the gate's placement is asserted where the interior's radii are.
 
+**The layer's target and the dissipation profile (added in step 8c).**
+`target` is passed to the [`Interior`](@ref): `nothing`, the case's own
+background, or another metric the layer relaxes toward instead — and only
+the layer; every other path that evaluates the analytic solution stays on
+`background`. `ε_KO` is a number, as it always was, or a
+[`HorizonDissipation`](@ref) about this case's center; a number stays a
+number, and the kernel's arithmetic on it is what it was
+([`dissipation_rate`](@ref) is the identity on it).
+
 **A moving non-harmonic background is refused here**, with the message
 `CODE.md` asks for under "Gauge and constraint damping": such a background
 has a gauge source `H_a(x − vt)` that a per-chunk sample cannot represent,
@@ -114,11 +123,11 @@ right-hand side needs a case two steps before there is a driver, and a
 struct cannot be defined twice. `driver.jl` adds `evolve!` and the
 refinement fields step 6 needs.
 """
-struct GHCase{T,B,D,I,R,H,X}
+struct GHCase{T,B,D,I,R,H,X,E}
     background::B
     box::NTuple{3,Tuple{T,T}}
     periodic::NTuple{3,Bool}
-    ε_KO::T
+    ε_KO::E                      # a number, or a `HorizonDissipation` (step 8c)
     γ0::D                        # a damping profile, not a number
     γ2::T
     center::HoleCenter{T}
@@ -133,8 +142,9 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
                 center=(zero(T), zero(T), zero(T)),
                 velocity=(zero(T), zero(T), zero(T)), interior=nothing,
                 r_0=zero(T), r_1=zero(T), margin::Integer=8,
-                w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), refinement=nothing,
-                horizon=nothing, bounds=nothing, chunk=zero(T)) where {T}
+                w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), target=nothing,
+                refinement=nothing, horizon=nothing, bounds=nothing,
+                chunk=zero(T)) where {T}
     isharmonic(background) || isstatic(background) || throw(ArgumentError(
         "this background is neither harmonic nor static, so its prescribed " *
         "gauge source H_a(x − vt) depends on time, and CODE.md's Hsrc field " *
@@ -161,15 +171,39 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
         "the chunk length is a regrid cadence and cannot be negative, got " *
         "$chunk; zero means the case states none and evolve! must be told."))
     c = HoleCenter(T, center, velocity)
+    interior === nothing && target !== nothing && throw(ArgumentError(
+        "this case has a layer target but no interior: the target is what " *
+        "the damping layer relaxes toward, and a case with no hole has no " *
+        "layer. Give the case an interior, or leave `target = nothing`."))
     int = interior === nothing ? nothing :
           Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
-                   margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp)
+                   margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp, target=target)
     check_case_bounds(bounds, int, T)
+    ε = case_dissipation(ε_KO, c, T)
     return GHCase{T,typeof(background),typeof(damping),typeof(int),
-                  typeof(refinement),typeof(horizon),typeof(bounds)}(
+                  typeof(refinement),typeof(horizon),typeof(bounds),
+                  typeof(ε)}(
         background, ntuple(d -> (T(box[d][1]), T(box[d][2])), Val(3)),
-        ntuple(d -> Bool(periodic[d]), Val(3)), T(ε_KO), damping, T(γ2), c,
+        ntuple(d -> Bool(periodic[d]), Val(3)), ε, damping, T(γ2), c,
         int, refinement, horizon, bounds, T(chunk))
+end
+
+# The Kreiss–Oliger amplitude a case carries (added in step 8c): a number in
+# the case's type, as before, or a profile in it about the case's own hole.
+case_dissipation(ε::Real, c, ::Type{T}) where {T} = T(ε)
+
+function case_dissipation(ε, c, ::Type{T}) where {T}
+    ε isa HorizonDissipation{T} || throw(ArgumentError(
+        "a case's ε_KO is a number or a HorizonDissipation{$T}, got a " *
+        "$(typeof(ε)): it is a kernel argument in the case's own working " *
+        "type, like every other number the case carries."))
+    ε.center == c || throw(ArgumentError(
+        "the dissipation profile is centered on $(ε.center) but the case's " *
+        "hole is at $c: the profile rises from the horizon of *this* hole " *
+        "inward, and a profile about another point would raise the " *
+        "dissipation outside the horizon. horizon_dissipation(case; ε_in) " *
+        "builds it from the case."))
+    return ε
 end
 
 # The two refusals of a case's bounds that need no mesh (added in step 8b):
@@ -215,7 +249,8 @@ and every evaluation.
 """
 with_interior(case::GHCase{T}, interior) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(interior),
-           typeof(case.refinement),typeof(case.horizon),typeof(case.bounds)}(
+           typeof(case.refinement),typeof(case.horizon),typeof(case.bounds),
+           typeof(case.ε_KO)}(
         case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
         case.center, interior, case.refinement, case.horizon, case.bounds,
         case.chunk)
@@ -232,7 +267,8 @@ A reconstruction and not a mutation, for the reason
 """
 with_refinement(case::GHCase{T}, refinement) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
-           typeof(refinement),typeof(case.horizon),typeof(case.bounds)}(
+           typeof(refinement),typeof(case.horizon),typeof(case.bounds),
+           typeof(case.ε_KO)}(
         case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, refinement, case.horizon, case.bounds,
         case.chunk)
@@ -249,7 +285,8 @@ A reconstruction and not a mutation, for the reason
 """
 with_horizon(case::GHCase{T}, horizon) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
-           typeof(case.refinement),typeof(horizon),typeof(case.bounds)}(
+           typeof(case.refinement),typeof(horizon),typeof(case.bounds),
+           typeof(case.ε_KO)}(
         case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, horizon, case.bounds,
         case.chunk)
@@ -270,10 +307,53 @@ function with_bounds(case::GHCase{T}, bounds) where {T}
     check_case_bounds(bounds, case.interior, T)
     return GHCase{T,typeof(case.background),typeof(case.γ0),
                   typeof(case.interior),typeof(case.refinement),
-                  typeof(case.horizon),typeof(bounds)}(
+                  typeof(case.horizon),typeof(bounds),typeof(case.ε_KO)}(
         case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, case.horizon, bounds,
         case.chunk)
+end
+
+"""
+    with_dissipation(case::GHCase, ε_KO) -> GHCase
+
+The same case with a different Kreiss–Oliger amplitude — a number, or a
+[`HorizonDissipation`](@ref) about the case's hole — which is how step 8c's
+calibration puts the `ε_KO(r)` profile on a case built with the exterior's
+number. A reconstruction and not a mutation, for the reason
+[`with_interior`](@ref) is (added in step 8c); the constructor's refusals
+apply.
+"""
+function with_dissipation(case::GHCase{T}, ε_KO) where {T}
+    ε = case_dissipation(ε_KO, case.center, T)
+    return GHCase{T,typeof(case.background),typeof(case.γ0),
+                  typeof(case.interior),typeof(case.refinement),
+                  typeof(case.horizon),typeof(case.bounds),typeof(ε)}(
+        case.background, case.box, case.periodic, ε, case.γ0, case.γ2,
+        case.center, case.interior, case.refinement, case.horizon,
+        case.bounds, case.chunk)
+end
+
+"""
+    horizon_dissipation(case::GHCase; ε_in, ε_out = case.ε_KO) -> HorizonDissipation
+
+`CODE.md`'s `ε_KO(r)` profile for this case's hole (added in step 8c):
+`ε_out` — by default the case's own number — at and outside the horizon's
+smallest coordinate radius ([`horizon_min_radius`](@ref) of the background,
+boost-contracted), rising to `ε_in` at the layer's outer radius `r_1` and
+held inside it, about the case's own center.
+"""
+function horizon_dissipation(case::GHCase{T}; ε_in, ε_out=case.ε_KO) where {T}
+    case.interior === nothing && throw(ArgumentError(
+        "the dissipation profile rises from the horizon to the layer's outer " *
+        "radius r_1, and this case has no interior, so no r_1."))
+    ε_out isa Real || throw(ArgumentError(
+        "the profile's exterior amplitude is a number, got a " *
+        "$(typeof(ε_out)): pass `ε_out` explicitly for a case whose ε_KO is " *
+        "already a profile."))
+    return HorizonDissipation(T; ε_out=ε_out, ε_in=ε_in,
+                              r_1=case.interior.r_1,
+                              r_h=horizon_min_radius(case.background),
+                              center=case.center)
 end
 
 """
@@ -347,7 +427,7 @@ shifted_minkowski_case(::Type{T}=Float64; A=T(1//2), w=T(2), halfwidth=T(2),
     hole_case(T = Float64, background; halfwidth, r_0, r_1, chunk,
               M = 1, center = (0,0,0), velocity = (0,0,0),
               interior = :damped, margin = 8, ε_KO = 1//2,
-              γ0 = GHSO2's recipe, γ2 = 0, w_ramp, ρ_ramp,
+              γ0 = GHSO2's recipe, γ2 = 0, w_ramp, ρ_ramp, target = nothing,
               refinement = nothing, horizon = nothing, bounds = nothing)
 
 A black hole in a **Dirichlet** box, with the damping layer of
@@ -390,15 +470,15 @@ function hole_case(::Type{T}, background; halfwidth, r_0, r_1, chunk,
                                       width=3 * T(M),
                                       center=HoleCenter(T, center, velocity)),
                    γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
-                   refinement=nothing, horizon=nothing,
+                   target=nothing, refinement=nothing, horizon=nothing,
                    bounds=nothing) where {T}
     return GHCase(T, background;
                   box=ntuple(_ -> (-T(halfwidth), T(halfwidth)), Val(3)),
                   periodic=(false, false, false), ε_KO=ε_KO, γ0=γ0, γ2=γ2,
                   center=center, velocity=velocity, interior=interior,
                   r_0=r_0, r_1=r_1, margin=margin, w_ramp=w_ramp,
-                  ρ_ramp=ρ_ramp, refinement=refinement, horizon=horizon,
-                  bounds=bounds, chunk=chunk)
+                  ρ_ramp=ρ_ramp, target=target, refinement=refinement,
+                  horizon=horizon, bounds=bounds, chunk=chunk)
 end
 
 hole_case(background; kwargs...) = hole_case(Float64, background; kwargs...)
