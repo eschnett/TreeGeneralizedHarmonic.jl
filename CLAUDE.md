@@ -63,8 +63,10 @@ interior, and its spherical core cannot hold harmonic Kerr's singular
 disk at `a = 9/10`, which is G5's case. Steps 8a (the leakage margin),
 8b (the range projection), 8c (the calibration of the layer for an
 inexact target), 8c′ (`ρ_max = 4/M` the default, decided 2026-09-23) and
-8d (the tracked horizon geometry) are done; step 8e, the fitted target and
-the `:fitted` variant, is next.**
+8d (the tracked horizon geometry) are done, and so is step 8e's host half,
+8e-i (the fitted target, its samplers, its validity sweep and its evaluator,
+and the boost-sign fix); 8e-ii — the kernel, the driver's per-chunk fit and
+the `:fitted` variant — is next, after review of 8e-i's numbers.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -209,6 +211,19 @@ in from `test/dispersion.jl`; the record has the `track_*` and `layer_*`
 rows and `margin_efolds`; `evolve!` takes `find`. `AbstractSphericalHarmonics`
 is a direct dependency. `test/tracking_tests.jl` is its file.
 
+From step 8e-i there is a **fitted target** on the host: `fit.jl` —
+`fit_variables` (the packed state to `(log α, β^i, γ_ij − δ_ij, Π_ab)` and
+the radial derivatives by the chain rule) and `state_from_fit` (back,
+inverse-free), the real **solid** harmonics (`_solid_harmonic_fold`,
+`shape_series`'s recurrence with `ρ²`), `state_sampler` and
+`analytic_sampler` (called as `sampler(xs, ns)`), `solve_fit` (one QR for
+twenty right-hand sides, rows weighted by `fit_row_weights`), `build_fit`
+with its validity sweep `fit_sweep`, `FitParams` (`isbits`) and
+`InteriorFit`, and the kernel-callable `fit_variables_at`/`fit_state`.
+`FittedSpec` has `lmax_fit = 8`. `interior.jl` has `hole_velocity` beside
+`hole_mass`, and `GHCase` derives its velocity from it. Nothing evaluates
+the fit in a kernel yet; `test/fit_tests.jl` is its file.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -242,7 +257,11 @@ three new helpers in `evolution_cases.jl`; and step 7's
 `horizon_tests.jl` (the interpolator's exactness and its rate, the
 footprint guard, Kerr's horizon from a displaced guess on both the step-5
 fixture and the mesh the indicator chose, and the record's horizon rows at
-the case's cadence). **`test/hole_runs.jl` is a standalone script, not
+the case's cadence); and step 8e's `fit_tests.jl` (the fit's harmonics, its
+least squares, the static and spinning holes' fits and their validity, the
+`g_ab` control, the evaluator at two precisions, and the fit of the one
+tracked run's state, which `evolution_cases.jl`'s `tracked_fixture_run`
+shares with `tracking_tests.jl`). **`test/hole_runs.jl` is a standalone script, not
 part of the suite**: the `t = 50 M` runs, `q = 4`, the two harmonic
 charts, the indicator's calibration and — from step 7 — the horizon
 section (Kerr's numbers at `a = 9/10` and in the harmonic chart, on meshes
@@ -266,10 +285,18 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4410 assertions in 15m28** at one thread and **11m21** at
-four on the development machine after step 8d, on a machine shared with
-sibling agents (load 6–7): its 553 new claims are `tracking_tests.jl`,
-`54.7 s` / `32.4 s`, of which the two tracked runs are `40 s` / `18 s`.
+The suite is **4578 assertions in 14m59** at one thread on the
+development machine after step 8e-i (load 5–6); the four-thread run took
+**37m25** under a load of 13 from sibling agents — user time 18m29, the
+excess in `constraints_tests.jl`'s and `interface_tests.jl`'s compilation —
+and is not a number about the code (step 8d measured 11m21). Its 168 new
+claims are `fit_tests.jl`'s 146, `11.7 s` / `13.3 s`, which fits the state
+of the tracked run `tracking_tests.jl` already makes (`tracked_fixture_run`
+in `evolution_cases.jl` runs it once for both), and 22 in
+`interior_tests.jl` for the boost sign. Step 8d measured **4410 in 15m28**
+and **11m21** on a machine shared with sibling agents (load 6–7): its 553
+new claims were `tracking_tests.jl`, `54.7 s` / `32.4 s`, of which the two
+tracked runs are `40 s` / `18 s`.
 Step 8c′ measured **3857 in 14m33** and **10m30** (the tree before it
 measured 3798 in 13m45 at one thread the
 same afternoon): the default rate's price is `driver_tests.jl`'s variants
@@ -562,6 +589,37 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `center_offset` is the track's prediction error), and `origin_r_min` is
   about the found surface's own origin, which is what the track and its
   shape are.
+- **The fit is made in `(log α, β^i, γ_ij, Π_ab)`, never in `g_ab`**
+  (step 8e). The Lorentzian metrics are not convex in `g_ab` — the angular
+  mean of Kerr-Schild `g_ab` on `r = 1.15 M` has Euclidean signature, which
+  `fit_tests.jl` asserts — and a least-squares fit is a weighted mean.
+  `γ` is held as its offset `γ_ij − δ_ij` in slots 5–10, the contravariant
+  shift in 2–4. Convert only through `fit_variables`/`state_from_fit`.
+- **The fit's state sampler reads the layer, on purpose** (step 8e): the
+  collocation points are on the offset surface, so the interpolation window
+  reaches `G h` inside it, and `state_sampler` passes `mask = AllPoints()`
+  — the horizon finder's guard is exactly what it switches off. It is safe
+  because step 8c's `n_L ≥ 4G` holds `ρ ≤ 0.10 ρ_max` there; a thinner ramp
+  would make it read a relaxed state. Ghosts must be filled first, as for
+  every interpolation.
+- **The shift has no constant term by default, and a moving hole needs
+  one** (measured in step 8e). `PLAN.md`'s `β(0) = 0` fits a static hole to
+  roundoff and leaves a boosted hole's shift slope `2`–`22` times its own
+  scale off, because the boost gives `β^i` an `l = 0` part on the surface;
+  `build_fit(…; shift_constant = true)` fits it (`1.7e−5` against
+  `1.1e−3`). G5 wants it on.
+- **A fit to curvature (`cont = 2`) is not a metric on harmonic Kerr at
+  `a = 9/10`** at `h = 5/256`, `m = 4` — `min λ(γ) = −73` at `L = 8`, and
+  invalid at every `L` to 16 — while `cont = 1` is from `L = 8`. The sweep
+  catches it (`build_fit` throws with the numbers); 8e-ii's initial data for
+  that chart cannot be the `cont = 2` fit as planned. And that chart's data
+  on the offset surface exceeds `default_bounds`' `K_max = 100/M` (`366/M`),
+  so its fit needs bounds of its own before `fit_state` projects into them.
+- **The fit's evaluator costs `2.2 µs` a point at `L = 8`** (`cont = 1`;
+  `2.9 µs` at `cont = 2`), twenty-three analytic `u_exact`s: the
+  `20 × 81 × 2` contraction, not the recurrence (`85 ns`). Price a kernel
+  that evaluates it at every layer point before assuming `PLAN.md`'s
+  `+5–10 %`.
 - **The depth replaces the radius** (step 8d). On the tracked geometry the
   layer is `0 < d ≤ n_L h` below the offset surface `r_1(n̂) = r_h(n̂) − m h`,
   so no radius alone says whether a point is in it: `in_layer(int, t, x)`

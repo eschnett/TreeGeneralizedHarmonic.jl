@@ -21,6 +21,21 @@ import SpacetimeMetrics as SM
 
 unitvec(v) = v / sqrt(sum(abs2, v))
 
+# Nanoseconds per point of `f` over `pts`, behind a function barrier so that
+# what is timed is the call and not the test's own dispatch (the pattern of
+# `tracking_tests.jl`'s `ns_per_point`, which a file run on its own lacks).
+function fit_ns_per_point(f, pts, reps)
+    s = 0.0
+    for p in pts
+        s += f(p)
+    end
+    t0 = time_ns()
+    for _ in 1:reps, p in pts
+        s += f(p)
+    end
+    return (time_ns() - t0) / (reps * length(pts)), s
+end
+
 # The collocation points of a geometry at time `t`, and their rays.
 function surface_points(int::FittedInterior{T}, L, t) where {T}
     c = center_at(int.center, T(t))
@@ -531,21 +546,12 @@ end
         end
         fit = build_fit(analytic, geom, case.interior; cont=1, bounds=case.bounds)
         xs = [fit.points[i] * (T(j) / 8) for i in eachindex(fit.points) for j in 1:8]
-        acc = 0.0
-        for x in xs
-            acc += fit_state(fit.params, fit.host, x, zero(T))[1][1]
-        end
-        t0 = time_ns()
-        for _ in 1:5, x in xs
-            acc += fit_state(fit.params, fit.host, x, zero(T))[1][1]
-        end
-        ns_point = (time_ns() - t0) / (5 * length(xs))
-        t0 = time_ns()
-        for _ in 1:5, x in xs
-            acc += background_state(case.background, 0.0, Tuple(x))[1][1]
-        end
-        ns_exact = (time_ns() - t0) / (5 * length(xs))
-        @test isfinite(acc)
+        params, coeffs, bg = fit.params, fit.host, case.background
+        ns_point, a1 = fit_ns_per_point(x -> fit_state(params, coeffs, x, zero(T))[1][1],
+                                        xs, 5)
+        ns_exact, a2 = fit_ns_per_point(x -> background_state(bg, zero(T), Tuple(x))[1][1],
+                                        xs, 5)
+        @test isfinite(a1) && isfinite(a2)
         @test all(isfinite, values(ms))
         @info "what a fit costs (step 8e)" ms fit_state_ns = ns_point u_exact_ns = ns_exact
     end

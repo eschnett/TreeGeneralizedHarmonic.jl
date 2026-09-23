@@ -658,7 +658,8 @@ where the fit is the layer's and the core's target. A point is valid when
 its state is finite, `γ_ij` is positive definite (the smallest eigenvalue by
 [`sym_eigen3`](@ref)) and the signed lapse of [`state_validity`](@ref) is
 positive; `min_detγ`, `min_α` and `min_λ` are the worst over the sweep,
-`max_β_center` the shift's magnitude at the center (zero, by the ansatz),
+`max_β_center` the shift's magnitude at the center (zero by the ansatz,
+unless the fit was asked for the shift's constant),
 `hits` the number of points [`bounds_project`](@ref) would move, and
 `worst` the first invalid point's position.
 
@@ -734,7 +735,8 @@ end
 
 """
     build_fit(sampler, int::FittedInterior, spec::FittedSpec; cont = 1,
-              bounds, L = spec.lmax_fit, backend = CPU(), check = true)
+              bounds, L = spec.lmax_fit, backend = CPU(), check = true,
+              weights = fit_row_weights(L, cont), shift_constant = false)
         -> InteriorFit
 
 The fitted target of step 8e, on the tracked geometry `int` at the

@@ -1765,6 +1765,191 @@ projection hit on either, the track at most **`3.3e−4` cells** from the
 analytic center and its prediction error `1.2–1.8e−4` cells per find —
 the tracked hole is the analytic one to six digits.
 
+**The fitted target (added in step 8e**, `src/fit.jl`; this is its host
+half, 8e-i — the kernel, the driver's per-chunk fit and the `:fitted`
+variant are 8e-ii's**).** The tracked geometry still relaxes toward the
+analytic solution, so its core surface must still contain the chart's
+singular set, and harmonic Kerr at `a = 9/10` refuses that at every `h`.
+The fitted target needs no interior at all: a **polynomial in `x`** —
+regular everywhere, the center included — fitted by least squares to the
+state (for 8e-ii's layer) or to the analytic solution (for its initial data)
+on the offset surface `r_1(n̂) = r_h(n̂) − m h`, where the state is still the
+solution, and continued inward. Seven pieces, in the order `build_fit`
+meets them:
+
+1. **The variables are ADM variables, never `g_ab`** (`PLAN.md`'s finding
+   2): `(log α, β^i, γ_ij, Π_ab)`, 1 + 3 + 6 + 10 = 20 (`fit_variables`).
+   `α = exp(log α)` is positive by construction and `γ` is convex, where a
+   least-squares fit — a weighted mean — of `g_ab` is not a metric: **the
+   angular mean of Kerr-Schild `a = 0`'s `g_ab` on the sphere `r = 1.15 M`
+   has `g_tt = +0.739` and the eigenvalues `(0.739, 1.580, 1.580, 1.580)`,
+   Euclidean signature, a signed lapse of `−0.86`, while the same mean of
+   the fit's variables reassembles into a metric with `α = 0.60`,
+   `det γ = 3.94` (measured in step 8e**, the control the suite asserts).
+   **The shift is the contravariant `β^i` (proposed in step 8e)**: either is
+   valid, but `β^i` is the split's own shift and reassembles without an
+   inverse — `β_i = γ_ij β^j`, `h_tt = (1 − α²) + β^iβ_i` (`state_from_fit`)
+   — where `β_i` would need `γ^{ij}` at every layer point. `γ_ij` is held as
+   its offset `γ_ij − δ_ij` (the same fit, with near-flat digits kept) and
+   `Π_ab` as it is. **The samples' radial derivatives go through the chain
+   rule** (`β′ = γ⁻¹(b′ − γ′β)`, `(log α)′ = (α²)′/2α²` and their second
+   derivatives, `b_i = h_ti`) **for both samplers (proposed in step 8e)**,
+   checked against differencing the converted samples along the same rays:
+   they agree to `5.7e−10` in the slopes and `7.3e−11` in the curvatures on
+   the fixture's surface (measured in step 8e).
+2. **The ansatz** is `f_v(x) = Σ_{lm} S_lm(ξ) Σ_{k=0}^{cont} C_{lm,k,v}
+   ρ^{2k}`, `ξ = (x − c(t))/r̄`, `ρ = |ξ|`, `r̄` the mean of `r_1(n̂)` over the
+   collocation points, `S_lm = ρ^l ỹ_lm` the real **solid** harmonics in
+   8d's slots and normalisation — a polynomial of degree `L + 2 cont` in
+   `x`, `L = lmax_fit = 8` by default (a new `FittedSpec` field), `cont = 1`
+   (values and slopes, the evolved state's fit) or `2` (and curvatures, the
+   initial data's). The harmonics are `shape_series`'s recurrence with `ξ`
+   for the unit vector and `ρ²` multiplying the Legendre step's `q_{l−2}`
+   (`_solid_harmonic_fold`): no angle, no division, and at the center only
+   `S_00` survives; at unit vectors they are `shape_series`'s harmonics to
+   `16 eps`. **The shift has no `ρ⁰ ỹ_00` term by default**, so `β(0) = 0`,
+   as `PLAN.md` asks; its `ρ² ỹ_00` and `ρ⁴ ỹ_00` terms, which also vanish at
+   the center, stay, since `l ≥ 1` alone cannot hold a shift's `l = 0` part
+   on the surface at all **(proposed in step 8e)**. **That default is wrong
+   for a moving hole (measured in step 8e):** a boosted hole's shift has an
+   `l = 0` part on its offset surface — the angular mean of `β^x` is `0.17`
+   against a mean `|β|` of `0.63` for `boost(KerrSchild(1, 0), 0.3 x̂)` on
+   `r = 1.22`, `0.28` against `0.36` for the harmonic chart on `0.69` — which
+   `ρ² ỹ_00` matches in value and cannot in slope: the shift's slope rows
+   are left `2.0` (Kerr-Schild) and `22` (harmonic) times their own scale,
+   and the state on the surface `1.3e−2` and `1.1e−3` off. `shift_constant =
+   true` fits the shift's constant like every other variable's: `1.9e−5`
+   and `1.7e−5`, `|β(0)| = 0.19`, `0.29`, where the boost puts it — and on
+   the static hole the same fit to roundoff. Validity never needed
+   `β(0) = 0` (any shift with `α > 0`, `γ ≻ 0` is Lorentzian), so **G5 wants
+   `shift_constant = true`**; the default stays the brief's until the
+   reviewer flips it.
+3. **The samplers** are called as `sampler(xs, ns)` — the points *and* the
+   unit rays, since the radial derivative is along the ray from the tracked
+   center, which a sampler does not know **(proposed in step 8e**, over the
+   brief's `sampler(xs)`**)** — and return `(u, ∂_r u[, ∂_r² u])` as vectors
+   of packed `(h, Π)`. `state_sampler(fs, q; t)` interpolates through
+   `interpolate_grad` with **the footprint guard off, `mask = AllPoints()`
+   at the call**: the collocation points are on the evolved region's
+   boundary, so their windows read `G h` into the layer, where step 8c's
+   `n_L ≥ 4G` holds the relaxation to `ρ_max · smoothstep(1/4) = 0.10
+   ρ_max`, `0.41/M` at the default — the layer's outer quarter is the
+   equations plus a weak pull toward a fit of this same state **(proposed in
+   step 8e)**. It gives no second derivative, so it serves `cont = 1`, and
+   `cont = 2` with it is refused. `analytic_sampler(bg, t; δ)` evaluates
+   `state_tuple` at five points along the ray and differences them at
+   **fourth order, `δ = h/8` (proposed in step 8e**, the brief's central
+   differences at the order that puts the truncation at `δ⁴`**)**: its `∂_r
+   h` is the analytic gradient's to `1.6e−8` on the fixture (measured in
+   step 8e); the second difference's roundoff `5 eps |u|/δ²` is `10⁻¹¹` at
+   `Float64` and `1.7e−2` at `Float32`, so a `Float32` run's initial-data
+   fit wants its samples in `Float64`. Every sample is checked finite and a
+   metric: a singular point on the offset surface is a configuration error
+   and refused by name — which is what harmonic `a = 9/10` at `m = 8`,
+   `h = 5/256` is, its equatorial offset radius `0.843` inside the disk.
+4. **One least-squares solve** (`solve_fit`): rows for the values, the
+   slopes `r̄ ∂_r` and the curvatures `r̄² ∂_r²` at the `(L+1)(2L+1)` points of
+   `EquiangularGrid(L)`, columns `(L+1)²(cont+1)`, and **one Householder QR
+   for all twenty right-hand sides**: the constant column is ordered last,
+   so the shift's design — the others' without it — is the leading block of
+   the same factorization, and its solution is the least-squares one.
+   **Each block of rows is weighted `P^{−b}`, `P = L + 2 cont` (proposed in
+   step 8e)**, the growth of a degree-`P` polynomial under `∂_ρ`: it cuts the
+   condition number 4–20× (`85.6` and `1.4e3` at `L = 8`, `cont = 1, 2` on
+   the fixture, against `377` and `2.9e4` unweighted) and the value residual
+   2.5–8× on the spinning holes, and changes no consistent system's solution.
+   **The residual is block by block (proposed in step 8e)** — each block's
+   worst over the largest datum of *that block* in the variable's group
+   (`log α`, the shift, `γ`, `Π`), so a steep curvature cannot hide a poor
+   value; `fit_residual(fit).overall` is the worst. BLAS's threads are not
+   `julia -t`'s, so a fit is the same at every Julia thread count; nothing
+   sets either.
+5. **The validity sweep** (`fit_sweep`) evaluates the fit **raw** —
+   reassembled, not projected — along every collocation ray at `s r_1(n̂)`,
+   `s ∈ {1/8, …, 1}`, and at the center, `8N + 1` points (`1225` at
+   `L = 8`): **fractions of each ray's own `r_1` (proposed in step 8e)**, so
+   `s = 1` is the collocation surface and the sweep covers exactly the
+   region the fit is used in, oblate or not. A point is valid when finite,
+   `γ` positive definite (`sym_eigen3`) and the signed lapse positive; the
+   sweep records `fit_valid`, the worst `det γ`, `α` and `λ(γ)`, `|β(0)|`,
+   and how many points `bounds_project` would move, and `build_fit`
+   **throws** with those numbers and the remedies — lower `lmax_fit`,
+   `cont = 1`, a wider margin — unless `check = false` asks for the fit back
+   with `valid = false`.
+6. **The fit and its evaluator.** `InteriorFit` holds the coefficients
+   `((L+1)², cont+1, 20)` in `T` through `to_backend` (`Hsrc`'s precedent)
+   and on the host, the `isbits` `FitParams` (`L`, `cont`, `r̄`, the track's
+   `HoleCenter`, the `StateBounds`), the time and center it was built at,
+   the collocation points and the model's own values there, the residual,
+   the conditioning and the sweep. `fit_variables_at(params, coeffs, x, t)`
+   and `fit_state` — the first, `state_from_fit` and `bounds_project` into
+   the fit's bounds as the guarantee — are `@inline`, allocation-free
+   (asserted), generic in `T`, one `return`: 8e-ii's kernel calls them. At
+   the collocation points they are the least-squares model to `28 eps`
+   (`Float64`) and `25 eps` (`Float32`) of the largest variable, the
+   projection is the identity on them bit for bit, and at the center `β = 0`
+   and the metric is valid (measured in step 8e). `bounds` has no default:
+   the case's own, or `default_bounds`.
+7. **What it measures (measured in step 8e**, on analytic data unless
+   said**).**
+   - **Kerr-Schild `a = 0`** on the fixture's tracked geometry (`m = 10`,
+     `n_L = 8`, `h = 5/64`, the offset surface at `1.22`): the fit's
+     variables have `l ≤ 2` structure on a sphere, so **`L = 2` is what it
+     takes** — the state on the surface is `1.10` off at `L = 1` and within
+     `5.1e−15`–`3.1e−13` of the analytic one at `L = 2, 4, 8`, both orders.
+     From **the state sampler** on a field set holding the exact solution
+     it is off by the interpolation: **`2.2e−4` at `N = 8` and `8.3e−6` at
+     `N = 16`, a rate of `4.65`** (`3.9` from `16` to `32`, measured once),
+     below the samples' own `2.6e−4` and `9.2e−6` — the fit adds nothing to
+     the interpolant's error. Every sweep is valid: `min λ(γ) = 1`, `min α =
+     0.527` (`cont = 1`) and `0.480` (`cont = 2`), at the center, no
+     projection hit.
+   - **Kerr-Schild `a = 9/10`** on its own oblate offset surface (`h =
+     5/128`, `m = 8`, `n_L = 8`, `lmax_shape = 4`; `r_1` from `1.12` on the
+     axis to `1.38` on the equator): valid at every `L` and both orders
+     (`min λ(γ) ≥ 0.945`, no hit), the truncation of the state on the
+     surface `0.26`, `0.051`, `9.1e−3` at `L = 4, 8, 12` for `cont = 1`
+     (`0.32`, `0.075`, `1.4e−2` for `cont = 2`) of its largest component,
+     `Π_tx`, `Π_ty` the worst, and the value rows' residual `2.7e−4` at
+     `L = 16`: **at the default `L = 8` the target is 3–5 % off the state on
+     a spinning hole's surface** — inside what step 8c measured the layer to
+     absorb (a 20 % mass error), and the first knob if 8f says otherwise.
+   - **Harmonic Kerr `a = 9/10`** — finding 3's configuration, `h = 5/256`,
+     `m = 4`, `lmax_shape = 12`, the offset surface from `0.36` (axis) to
+     `0.92` (equator, `0.02` outside the ring): **`cont = 1` is valid for
+     `L ≥ 8`** (`min λ(γ) = 2.27`, value residual `1.9e−3` at `L = 8`,
+     `3.0e−5` at `12`) and not at `L = 4` (`min λ = −10`); **`cont = 2` is
+     invalid at every `L` from 4 to 16** (`min λ(γ) = −73` at `L = 8`, 953 of
+     1225 points), its curvature rows forcing the polynomial through
+     negative eigenvalues inside the surface. At `h = 5/512` (equator at
+     `0.96`) `cont = 1` is valid from `L = 4` and `cont = 2` first at
+     `L = 16`. **The data itself is outside `default_bounds`**: the samples'
+     `max |(α/√γ)Π| = 366/M` against step 8b's `K_max = 100/M` at 17 of 153
+     points, so `fit_state`'s projection would clamp the target's `Π` there
+     — the proposed bounds are Kerr-Schild's, and harmonic `a = 9/10` needs
+     its own before 8e-ii projects into them.
+   - **The evolved state's fit**, at the end of the suite's tracked `:damped`
+     run to `0.15 M`, against the analytic solution's fit on the same
+     geometry: **`0.031` apart on the surface, falling to `0.016` at the
+     center** (Euclidean over the twenty components), where the samples are
+     `0.034` from the truth and the run's masked error is `0.035` in L∞
+     (`3.1e−3` in L2): the least-squares projection passes the state's error
+     through at `0.92` and damps it inward; both fits valid, no hit.
+   - **What it costs** (Apple silicon, Julia 1.13, one thread, a shared
+     machine): **`build_fit` at `L = 8` is `3.6 ms` (analytic, `cont = 1`),
+     `5.2 ms` (`cont = 2`) and `7.0 ms` (state sampler)** — `0.4–0.6 ms` at
+     `L = 4`, `20–25 ms` at `12`; the prediction was milliseconds. **The
+     evaluator is not cheap: `fit_state` is `2.2 µs` a point at `L = 8`,
+     `cont = 1` (`2.9 µs` at `cont = 2`; `0.64` and `4.3 µs` at `L = 4`,
+     `12`), against `91–96 ns` for one `u_exact` on the same machine, 23
+     of them** — the recurrence is `85 ns` (8d's shape series, `79 ns`) and
+     the `20 × (L+1)² × (cont+1)` contraction the rest. `PLAN.md`'s `+5–10 %` per right-hand side assumed an evaluator
+     near `u_exact`'s cost; at `2.2 µs` on the fixture's layer (21 % of its
+     points) it predicts `+40–75 %` **(predicted in step 8e**, for 8e-ii to
+     measure**)**, and caching the two fits' values at the layer points once
+     per fit (40 numbers a point, interpolated linearly in time, which 8e-ii
+     does anyway) would make it a read.
+
 **What the layer costs.** `u_exact` is evaluated at every point of the
 layer at every RHS evaluation — one forward-mode dual pass through the
 background's metric per point, about a microsecond on a CPU by GHSO2's
@@ -2214,6 +2399,7 @@ the tests assert on them.
 | validity monitor | over the layer `r_0 ≤ r < r_1` and over the `G` points outside it: `min_detγ`, `min_α` (the *signed* lapse, negative where `g^{tt} > 0`), `max_h`, `max_Π` (the largest component magnitudes) — `min_detγ_layer` … `max_Π_shell` (added in step 8b); and over the whole evolved region, `min_detγ_evolved`, `min_α_evolved` — the lapse-collapse trigger's input (added in step 8d). On the tracked geometry the two bands are its own (`layer_mask`, `shell_mask`) | every chunk |
 | horizon track | for a case whose interior is a `FittedSpec` (added in step 8d; `nothing` otherwise): `track_source` (`:found`, `:coasting`), `track_center` and `track_velocity` (the tracked trajectory after this row's find), `track_r_min`, `track_r_max` (the found surface's radii about its own origin), **`track_offset`** (the tracked center's distance from the analytic one, in cells of the finest spacing — the number "good to about a cell" is read from), `track_misses`, `track_prediction` (the found origin's distance from where the track predicted it, in cells; `nothing` without a find), `track_trigger` (this row's find was forced by the lapse trigger) | every chunk, the find every `k`-th or when triggered |
 | tracked layer | the geometry the next chunk runs on: `layer_h` (the spacing its offset and ramp are stated in), `layer_offset = m h`, `layer_thickness = n_L h`, `layer_r_in`, `layer_r_out` (the shape's bounding radii), and `margin_efolds` — step 8a's leakage e-folds across the margin, the least of the six grid axes (added in step 8d) | every chunk |
+| fitted target | for a `:fitted` case (named in step 8e, written by 8e-ii; `nothing` otherwise): **`fit_valid`** (every point of the fit's validity sweep a Lorentzian metric — `fit_valid(fit)`), **`fit_residual`** (`fit_residual(fit).overall`, the fit's worst relative residual block by block against the data it was fitted to), and beside them the sweep's `fit_min_λ`, `fit_min_α` and `fit_hits` (points the fit's bounds would move) and the fit's `L`, `cont` and time **(proposed in step 8e)** | every fit |
 
 **Constraints.** Both kernels mask the interior `r < r_1` and write zero
 inside it; the modified region is not a numerical solution. Norms are
@@ -2629,10 +2815,11 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate step 5's interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` (added in step 4) |
 | `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
 | `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl` |
+| `src/fit.jl` | the fitted target's host half (added in step 8e, after `tracking.jl` and before `driver.jl`): the fit's variables (`fit_variables`, `state_from_fit`), the real solid harmonics (`_solid_harmonic_fold`, `real_solid_harmonics`, `fit_directions`), the two samplers (`state_sampler`, `analytic_sampler`), the least squares (`solve_fit`, `fit_row_weights`), the validity sweep (`fit_sweep`), `FitParams` and `InteriorFit` with `build_fit`, `fit_residual` and `fit_valid`, and the kernel-callable evaluator `fit_variables_at`/`fit_state` |
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written (added in step 8c′) — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. Step 8c adds the E3 target `CurvatureTarget` to `evolution_cases.jl`, its claims to `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. Step 8d adds `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and makes `evolution_cases.jl`'s shell norms the interior's own `shell_mask` |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. Step 8c adds the E3 target `CurvatureTarget` to `evolution_cases.jl`, its claims to `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. Step 8d adds `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and makes `evolution_cases.jl`'s shell norms the interior's own `shell_mask`. Step 8e adds `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state — and moves `fitted_fixture` into `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
@@ -4665,6 +4852,57 @@ better held without a velocity at all; a moving one's is G5's question,
 and a velocity smoothed over several finds is the first remedy to try
 **(proposed in step 8d)**.
 
+### The fitted target, host half (step 8e-i)
+
+`src/fit.jl`, `hole_velocity` in `src/interior.jl`, and `test/fit_tests.jl`;
+the design is under [The interior](#the-interior-a-pointwise-damping-layer),
+"The fitted target". No kernel evaluates the fit yet (8e-ii), and no long
+run is required; the explorations behind the harmonic and boosted rows are
+host-side and a few seconds each.
+
+**The suite.** **4578 assertions in 14m58.9 at one thread** on the
+development machine (load average 5–6, shared with sibling agents), against
+step 8d's 4410 in 15m28; the four-thread run measured **37m25.5** under a
+load average of 13 — its user time was 18m29, and the slow testsets were
+`constraints_tests.jl`'s and `interface_tests.jl`'s compilation-heavy ones
+(8m43, 6m53, 5m27, 4m00), none of which this step touches — so it is a
+statement about the machine, not the code (step 8d measured 11m21). The 168
+new assertions are `fit_tests.jl`'s 146 — **`11.7 s` at one thread and
+`13.3 s` at four**, the tracked run it fits shared with `tracking_tests.jl`
+(`tracked_fixture_run`), whose own `The tracked hole` testset is `38.0 s` /
+`19.1 s` with the run in it — and `interior_tests.jl`'s 22 for the boost
+sign (`0.6 s`).
+
+**The acceptance list, with its numbers** (all measured in step 8e on the
+development machine, Julia 1.13, `Float64` unless said):
+
+| claim | number |
+|---|---|
+| the fit's solid harmonics at unit vectors against `shape_series`, and `S(2ξ) = 2^l S(ξ)` | `1.8`, `14` eps at `L = 4, 8` (`Float64`); `1.3`, `16` eps (`Float32`) |
+| a real field from random coefficients through `ash_evaluate`, recovered by least squares on `EquiangularGrid(L)` | cond `2.2`, `2.9` at `L = 4, 8`; the coefficients to `2.9–4.6` eps, both precisions |
+| the whole ansatz from random coefficients on a non-spherical surface, recovered by `solve_fit` | cond `99`, `1.5e3`, `6.0e3` (`L, cont = 4,1; 4,2; 6,2`); coefficients to `0.03–0.19 κ eps` |
+| the analytic sampler's `∂_r h` against `background_state`'s gradient on the fixture's surface | `1.6e−8` |
+| the chain rule against the converted samples differenced along the rays | `5.7e−10` (slopes), `7.3e−11` (curvatures) |
+| Kerr-Schild `a = 0`, `cont = 1, 2`, the state on the fixture's offset surface (`r_1 = 1.22`) | `1.10` at `L = 1`; `5.1e−15`–`3.1e−13` at `L = 2, 4, 8` |
+| the same from the state sampler on the exact solution, `L = 8`, `cont = 1` | `2.2e−4` (`N = 8`), `8.3e−6` (`N = 16`): rate `4.65` (`3.9` from 16 to 32); samples `2.6e−4`, `9.2e−6` |
+| the angular mean of Kerr-Schild `g_ab` on `r = 1.15 M` | `g_tt = +0.739`, eigenvalues `(0.739, 1.580, 1.580, 1.580)`, signed `α = −0.86`: **not a metric** |
+| the same mean of `(log α, β^i, γ_ij, Π_ab)`, reassembled | `α = 0.60`, `det γ = 3.94`: a metric |
+| the sweep, Kerr-Schild `a = 0`, `L = 8` (`1225` points) | valid, `min λ(γ) = 1`, `min α = 0.527` / `0.480` (`cont = 1` / `2`), no hit |
+| the sweep, Kerr-Schild `a = 9/10` on its oblate surface (`h = 5/128`, `m = 8`) | valid at `L = 4, 8, 12, 16`, both orders, `min λ ≥ 0.945`, no hit |
+| its truncation, the state on the surface, `cont = 1` (`cont = 2`) | `0.26` (`0.32`), `0.051` (`0.075`), `9.1e−3` (`1.4e−2`) at `L = 4, 8, 12` |
+| harmonic `a = 9/10`, `h = 5/256`, `m = 4`: `cont = 1` | valid for `L ≥ 8` (`min λ = 2.27`, value residual `1.9e−3` at `L = 8`); invalid at `L = 4` |
+| the same, `cont = 2` | **invalid at every `L` from 4 to 16** (`min λ(γ) = −73`, 953 of 1225 points at `L = 8`); refused by `build_fit` |
+| the same at `h = 5/512` | `cont = 1` valid from `L = 4`; `cont = 2` first valid at `L = 16` |
+| harmonic `a = 9/10`, `m = 8`, `h = 5/256` | refused at the sample: the equatorial offset radius `0.843` is inside the disk |
+| harmonic `a = 9/10`'s samples against `default_bounds` | `max |(α/√γ)Π| = 366/M` against `K_max = 100/M`, at 17 of 153 points |
+| a boosted hole's shift, `boost(Harmonic(1, 0), 0.3 x̂)`, `L = 8`, `cont = 1`: without and with `shift_constant` | the state on the surface `1.1e−3` → `1.7e−5`; the shift's slope rows `22×` → `1.4e−4` of their scale |
+| the evaluator against the least-squares model at the collocation points | `28` eps (`Float64`), `25` eps (`Float32`) of the largest variable; the projection the identity bit for bit |
+| at the center | `β = 0` exactly, a valid metric; `FitParams` `isbits`; `fit_state` allocation-free |
+| the tracked `:damped` run's state at `0.15 M` fitted, against the analytic solution's fit | `0.031` on the surface to `0.016` at the center; samples `0.034` off, masked error `0.035` L∞ / `3.1e−3` L2 |
+| `build_fit` at `L = 8`: analytic `cont = 1`, `2`; state sampler | `3.6 ms`, `5.2 ms`; `7.0 ms` (`0.4–0.6 ms` at `L = 4`, `20–25 ms` at `12`) |
+| `fit_state` per point at `L = 4, 8, 12`, `cont = 1` (`cont = 2`) | `0.64` (`0.88`), `2.2` (`2.9`), `4.3` (`6.0`) µs, the recurrence `20`, `85`, `165 ns` of it; one `u_exact` `91–96 ns` |
+| `boost(KerrSchild(1, 0), 0.3 x̂)` at `t = 1` | `|g_tt| = 1.0e17` at `x = −0.3`, `4.9` at `+0.3`; `hole_velocity = −v` |
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -4800,6 +5038,20 @@ Kerr at `a = 9/10` refuses at every `h` — so the proof-of-concept case waits
 for step 8e's `:fitted` target, and its shape needs `lmax = 12` for a tenth
 of a cell at `h = 5/256` where Kerr-Schild's needs `4` (measured in step
 8d).
+
+**The fitted target's host half is built (step 8e-i).** `src/fit.jl` fits
+`(log α, β^i, γ_ij, Π_ab)` on the offset surface with a polynomial of degree
+`L + 2 cont`, one QR for all twenty variables, and sweeps the result for
+validity inward to the center — under [The
+interior](#the-interior-a-pointwise-damping-layer), "The fitted target". It
+reproduces the static hole to roundoff from `L = 2` and to the
+interpolation order from the state, is a metric on both Kerr-Schild holes,
+and on harmonic `a = 9/10` at `h = 5/256` is a metric fitted to value and
+slope (`cont = 1`, `L ≥ 8`) and **not** fitted to curvature (`cont = 2`, at
+every `L` to 16) — which is what 8e-ii's plan for that chart's initial data
+asks for (measured in step 8e). Two findings for 8e-ii and G5: a moving
+hole's shift needs its constant term (`shift_constant = true`), and the
+evaluator costs `2.2 µs` a point at `L = 8`, twenty-three `u_exact`s.
 
 Still proposed, to be confirmed or amended by the milestones that
 first touch them:
