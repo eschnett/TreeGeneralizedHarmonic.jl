@@ -7,7 +7,7 @@ changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
 last milestone is marked *(Done.)* in `CODE.md`.
 
-**Steps 0–7, 8a–8d and 8c′ are done. Step 8e is next** — the generic interior
+**Steps 0–7, 8a–8e and 8c′ are done. Step 8f is next, in a fresh session** — the generic interior
 (steps 8a–8g, added 2026-09-23), which step 8 needs before it can run
 its case.
 
@@ -937,6 +937,47 @@ bounds hits; the same at `Float32`; the kernel cost of the fit recorded
 
 `CODE.md`: "Measured results", "The interior", milestone G5's acceptance.
 A section `generic` in `hole_runs.jl`; the long rows are Symmetry jobs.
+
+**What step 8e hands over** (its two reports' section 6 and `CODE.md`, "The
+fitted target", pieces 8–12):
+
+- **`:fitted` works on the static hole**: bit-identical to `:damped` outside
+  the offset surface; the masked error is `4.3×` `:damped`'s at `0.15 M`
+  because the decided `cont = 1` initial data has a curvature kink at `r_1`,
+  decaying to `1.24×` by `1 M`; `evolve!(…; fit_initial_depth = n_L·h)`
+  (analytic data down to the core surface, the fit only inside it) removes
+  it and matches `:damped` to 2 % — use it on every chart whose layer lies
+  outside the singular set (Kerr-Schild at both spins, harmonic `a = 7/10`).
+  The cache read costs nothing measurable; a refill is `0.4–0.7` of one RHS,
+  once per chunk (twice on the moving seed).
+- **The moving seed works**: `boost(Harmonic(1, 0), 0.3 x̂)` on 848 blocks at
+  `h = 5/128` to `0.1 M`, every find succeeds, `track_offset ≤ 3.9e−3` cells;
+  runs past about `1 M` need `regrid = true` (refused for `:fitted` with
+  `adapt = true` today — 8f decides whether to build the regrid path for it
+  or to widen the fine region) or a wider fine region.
+- **Harmonic `a = 9/10` is blocked by resolution, not by the interior**: its
+  initial data now exists (1.27 million points, all a valid metric,
+  `min det γ = 0.648`, `min α = 0.208`), but at `m = 4`, `h = 5/256` the ring
+  is `0.02 M` inside the offset surface on the equator, the data there are
+  a thousand times the axis values, the fit is wrong away from its
+  collocation points, and the solution's own length scale at the first
+  evolved point is `0.008 M`, below half a cell; the run ends at `2.5e−3 M`.
+  It wants `h ≲ 5/1024` on the equator (a node-sized mesh), `Π̃ = (α/√γ)Π`
+  fitted in place of `Π`, and `L ≥ 12` at the least — or a
+  direction-dependent margin. **Erik's decision, as the plan foresaw: run
+  G5 at `a = 7/10` (the plan's fallback), or spend a node on `a = 9/10`.**
+  The matrix below runs the `a = 7/10` rows either way and the `a = 9/10`
+  row only if he says so.
+- **Rows and costs** (from 8e's estimates): Kerr-Schild `a = 0`, `50 M`,
+  120 blocks, `m = 10`, `n_L = 8`, `L = 8`: about 40 min per variant at four
+  threads; Kerr-Schild `a = 9/10`, `h = 5/128`, `m = 8`, about 1000 blocks:
+  about 1.5 h per variant at four threads for `50 M`, a Symmetry job;
+  harmonic `a = 7/10`: `m = 4` at `h = 5/128` or `5/256` with
+  `fit_initial_depth = n_L·h`; the target off the equator is still coarse
+  (at 45° its second difference is `18×` the analytic one, `5×` with `Π̃`) —
+  fit `Π̃` before running the spinning rows. The hand-over row (`:damped`
+  switching to `:fitted` mid-run) is not built; build it in 8f or drop it
+  with a reason. Coasting is testable through `evolve!(…; find)`.
 
 Changes: the section, and `CODE.md`. Every row records survival time,
 masked L2 and L∞, the shell `C_a` (8a's shells outside the horizon
