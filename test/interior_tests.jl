@@ -734,7 +734,7 @@ end
 
             x = coordinates(fs, b, (i + G, j + G, k + G))
             r = sqrt(sum(abs2, x))
-            if in_layer(int, r)
+            if in_layer(int, zero(T), x)
                 nmoved += any(v -> A_w[i, j, k, v, b] != A_i[i, j, k, v, b],
                               1:20)
             else

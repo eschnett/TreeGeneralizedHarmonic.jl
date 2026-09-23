@@ -392,7 +392,8 @@ spacings just **outside** `r_1` — `CODE.md`'s "the `G` points outside
 `r_1`", the only points at which the three interior variants can differ
 before the difference has had time to propagate.
 
-The shell is a [`ShellMask`](@ref), so it is the same masked-norm
+The shell is the interior's [`shell_mask`](@ref) — a [`ShellMask`](@ref)
+for the sphere, a [`ShapeBand`](@ref) for the tracked geometry — so it is the same masked-norm
 machinery every other row of the record uses. The second method takes a
 problem, a state and a time rather than a finished run — what an observer
 has at every chunk (added in step 8c, whose calibration reads the shell at
@@ -412,8 +413,9 @@ function gh_outside_shell_norms(p, u, t; h=nothing, width=nothing)
     G = first(p.U.G)
     w = width === nothing ? G : width
     hh = h === nothing ? minimum_spacing(T, p.U.forest) : T(h)
-    c = center_at(int.center, T(t))
-    mask = ShellMask{T}(c, int.r_1, int.r_1 + w * hh)
+    # The interior's own shell (amended in step 8d): a `ShellMask` about the
+    # sphere, and the band above the offset surface for a tracked geometry.
+    mask = shell_mask(int, T(t), w * hh)
     gh_constraint!(p, u, T(t); mask=mask)
     c1 = constraint_norms(p)
     gh_error!(p, u, T(t); mask=mask)
