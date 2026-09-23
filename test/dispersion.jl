@@ -82,6 +82,12 @@
 #      Kerr-Schild `r = 1.0, 1.2, 1.5, 1.8, 2.0 M`, along a grid axis.
 #      Beside it, `ℓ_max` of the fully discrete scheme (RK4 at `cfl = 1/4`
 #      on the fixture's `λ_max`), which is what `ε_KO = 0` actually gets.
+#      Then (1b) the same along the spin axis and the equator of
+#      `Harmonic(1, 9/10)` and `KerrSchild(1, 9/10)`, at depths `d = 2, 4, 8`
+#      cells of `h = 5/256` below each horizon, with `b/a` against depth and
+#      the sonic point checked against the horizon, and (1c) the e-folds a
+#      margin of `m = 1 … 8` cells buys there at `ε_KO = 1/2` — step 8d's
+#      question whether `m h < 0.1 M` on the harmonic equator is enough.
 #   2. The same along the grid **diagonal**, where the principal part reads
 #      the mixed `D₁ ⊗ D₁` and the dissipation acts on three axes at a
 #      third of the phase each: the 3D measurement of `test/hole_runs.jl`'s
@@ -139,25 +145,38 @@ const CHUNK = 1 / 20
 
 # --- the frozen coefficients, from the metric ------------------------------
 
+const KERR_SCHILD_0 = SM.KerrSchild(1.0, 0.0)
+
 """
-The frozen coefficients at `x = r n̂` on `KerrSchild(1, 0)`: `α`, `β^i`,
-`γ^{ij}`, read through `background_state` and `metric_quantities` — the
-package's own route from a background to the coefficients the kernel uses —
-and checked against the closed forms of the header.
+The frozen coefficients at `x = r n̂` on `background` (default
+`KerrSchild(1, 0)`): `α`, `β^i`, `γ^{ij}`, read through `background_state`
+and `metric_quantities` — the package's own route from a background to the
+coefficients the kernel uses — and `b = β^i n̂_i`, `a = α √(γ^{ij} n̂_i n̂_j)`,
+the advection and wave speeds of a mode whose wave vector is along `n̂`.
+
+On `KerrSchild(1, 0)` they are checked against the closed forms of the
+header, in every direction; on any other background there is nothing
+closed-form to check against here, and the sonic point is checked against
+the horizon instead (section 1b). A point on the chart's singular set —
+harmonic Kerr's equatorial disk — returns `nothing`.
 """
-function frozen_coefficients(r, n̂)
-    bg = SM.KerrSchild(1.0, 0.0)
+function frozen_coefficients(r, n̂; background=KERR_SCHILD_0)
+    bg = background
     x = (r * n̂[1], r * n̂[2], r * n̂[3])
     h, _, _ = background_state(bg, 0.0, x)
+    all(isfinite, h) || return nothing
     _, _, α, β, γu, sqrtγ = metric_quantities(_sym4(h))
-    H = 2 / r
     br = sum(β[i] * n̂[i] for i in 1:3)
     γrr = sum(γu[i, j] * n̂[i] * n̂[j] for i in 1:3, j in 1:3)
-    for (got, want, what) in ((α, 1 / sqrt(1 + H), "α"),
-                              (br, H / (1 + H), "β^r"),
-                              (γrr, 1 / (1 + H), "γ^rr"))
-        abs(got - want) ≤ 1e-12 ||
-            error("KerrSchild(1, 0) at r = $r: $what = $got, closed form $want")
+    (isfinite(α) && isfinite(br) && isfinite(γrr) && γrr > 0) || return nothing
+    if bg isa SM.KerrSchild && iszero(bg.spin) && isone(bg.mass)
+        H = 2 / r
+        for (got, want, what) in ((α, 1 / sqrt(1 + H), "α"),
+                                  (br, H / (1 + H), "β^r"),
+                                  (γrr, 1 / (1 + H), "γ^rr"))
+            abs(got - want) ≤ 1e-12 ||
+                error("KerrSchild(1, 0) at r = $r: $what = $got, closed form $want")
+        end
     end
     return (α=α, β=β, γu=γu, sqrtγ=sqrtγ, b=br, a=α * sqrt(γrr))
 end
@@ -361,6 +380,163 @@ let axis = SVector(1.0, 0.0, 0.0)
                     fmtatt(b, MARGIN), fd, θc / π)
             end
         end
+    end
+end
+
+# --- (1b) the spinning holes, a few cells inside their horizons ------------
+#
+# Step 8d keys the layer on the found horizon's offset surface
+# `r_1(n̂) = r_h(n̂) − m h`, and `PLAN.md`'s finding 3 puts the proof-of-concept
+# case, harmonic Kerr at `a = 9/10`, at `h = 5/256`, where its equator leaves
+# `0.1 M` — 5.1 cells — between the singular disk and the horizon. So the
+# same table, on the package's two spinning charts along the spin axis and
+# along the equator, both grid axes and both directions in which the
+# horizon's normal is radial by symmetry: at depths `d = 2, 4, 8` cells of
+# `h = 5/256` below the horizon, with the raw `b/a` against depth rather
+# than an assumed slope — on the harmonic equator the metric varies over the
+# `0.1 M` between the disk and the horizon.
+#
+# Along a grid axis the symbol is the one-dimensional model's exactly, with
+# `b = β^x` and `a = α√γ^{xx}`, so `ℓ` is closed-form in `θ` and is
+# evaluated so, on a grid that reaches `θ = 10⁻³` — the peak moves toward
+# `θ → 0` as the horizon is approached — and checked against the
+# eigenvalue route on the Kerr-Schild table above.
+
+const H_SPIN = 5 / 256
+const THETA_AXIS = sort(vcat([π * i / NTHETA for i in 1:NTHETA],
+                             exp.(range(log(1e-3), log(π / NTHETA); length=512))))
+
+"""
+`ℓ_max` at `ε_KO = 1` along a grid axis, closed-form: `max_θ max(−b s′(θ) +
+a (√c)′(θ), 0) / sin^{2r}(θ/2)` — branch 2, which is the larger of the two
+wherever `(√c)′ ≥ 0` — with the `θ` it is attained at and its `v_g`.
+"""
+function ellmax_axis(S, b, a; θs=THETA_AXIS)
+    best = (ℓ=0.0, θ=NaN, vg=NaN)
+    for θ in θs
+        sq′ = S.c′(θ) / (2 * sqrt(S.c(θ)))
+        vg = max(-b * S.s′(θ) + a * sq′, -b * S.s′(θ) - a * sq′)
+        vg > 0 || continue
+        ℓ = vg / -real(S.K(θ))
+        ℓ > best.ℓ && (best = (ℓ=ℓ, θ=θ, vg=vg))
+    end
+    return best
+end
+
+# The check on the closed form: along the axis it is the eigenvalue route's
+# number on the Kerr-Schild table, on the same uniform grid.
+let axis = SVector(1.0, 0.0, 0.0)
+    θu = [π * i / NTHETA for i in 1:NTHETA]
+    for q in ORDERS, r in RADII[1:(end - 1)]
+        S = stencil_symbols(q)
+        co = frozen_coefficients(r, axis)
+        want = ellmax(dispersion(S, co, axis, 1.0)).ℓ
+        got = ellmax_axis(S, co.b, co.a; θs=θu).ℓ
+        abs(got - want) ≤ 1e-6 * want ||
+            error("q = $q, r = $r: closed-form ℓ_max $got, eigenvalue route $want")
+    end
+end
+
+# The holes: label, background, direction, horizon radius along it.
+const SPIN_CASES = let ax = SVector(0.0, 0.0, 1.0), eq = SVector(1.0, 0.0, 0.0)
+    ha = SM.Harmonic(1.0, 0.9)
+    ks = SM.KerrSchild(1.0, 0.9)
+    (("Harmonic(1, 9/10), axis", ha, ax, horizon_min_radius(ha)),
+     ("Harmonic(1, 9/10), equator", ha, eq, horizon_max_radius(ha)),
+     ("KerrSchild(1, 9/10), axis", ks, ax, horizon_min_radius(ks)),
+     ("KerrSchild(1, 9/10), equator", ks, eq, horizon_max_radius(ks)),
+     ("KerrSchild(1, 0), reference", KERR_SCHILD_0, SVector(1.0, 0.0, 0.0),
+      2.0))
+end
+
+δ_at(bg, n̂, r) = (co = frozen_coefficients(r, n̂; background=bg);
+                  co === nothing ? NaN : co.b / co.a - 1)
+
+println("\n=== (1b) the spinning holes, d cells of h = 5/256 inside the " *
+        "horizon, along the spin axis and the equator ===")
+println("r_s: where b/a = 1 by bisection, against the analytic r_h; g_h: " *
+        "d(b/a)/d(depth) at the horizon, per M; ℓ_max at ε_KO = 1 (÷ ε for " *
+        "any other), with θ/π; e^{-8/ℓ}: at ε_KO = 1/2")
+for (label, bg, n̂, r_h) in SPIN_CASES
+    # The sonic point for a mode along `n̂` is where `b = a`, and along a
+    # direction in which the horizon's normal is radial that is the horizon
+    # itself (`g^{nn} = γ^{nn} − (β^n)²/α² = 0`, the null condition).
+    lo, hi = r_h - H_SPIN, r_h + H_SPIN
+    for _ in 1:200
+        mid = (lo + hi) / 2
+        δ_at(bg, n̂, mid) > 0 ? (lo = mid) : (hi = mid)
+    end
+    r_s = (lo + hi) / 2
+    abs(r_s - r_h) ≤ 1e-9 ||
+        error("$label: the sonic point is at $r_s, the horizon at $r_h")
+    g_h = δ_at(bg, n̂, r_h - 1e-6) / 1e-6
+    sing = bg isa SM.KerrSchild && iszero(bg.spin) ? 0.0 : singular_radius(bg)
+    say("\n-- %s: r_h = %.6f, r_s − r_h = %.1e, g_h = %.3f/M, singular " *
+        "disk to r = %.2f along this direction --", label, r_h, r_s - r_h, g_h,
+        n̂[3] == 1 ? 0.0 : sing)
+    println("| d | r | b | a | b/a | δ/(d h) | ℓ_max, q = 2 | q = 4 | q = 6 | " *
+            "e^{-8/ℓ}, q = 2, 4, 6 |")
+    for d in (2, 4, 8)
+        r = r_h - d * H_SPIN
+        co = frozen_coefficients(r, n̂; background=bg)
+        if co === nothing
+            say("| %d | %.4f | on the chart's singular disk |", d, r)
+            continue
+        end
+        bs = [ellmax_axis(stencil_symbols(q), co.b, co.a) for q in ORDERS]
+        say("| %d | %.4f | %.4f | %.4f | %.4f | %.3f | %.2f (%.3f) | %.2f " *
+            "(%.3f) | %.2f (%.3f) | %s |", d, r, co.b, co.a, co.b / co.a,
+            (co.b / co.a - 1) / (d * H_SPIN), bs[1].ℓ, bs[1].θ / π, bs[2].ℓ,
+            bs[2].θ / π, bs[3].ℓ, bs[3].θ / π,
+            join((Printf.format(Printf.Format("%.2e"), exp(-8 * 0.5 / b.ℓ))
+                  for b in bs), ", "))
+    end
+end
+
+# --- (1c) what a margin of m cells buys there ------------------------------
+#
+# The leakage margin under `CODE.md`'s "The interior" is the path integral
+# `n_e = ∫_{r_h − m h}^{r_h} dr / (h ℓ_max(r))` — e-folds of the
+# least-attenuated mode at each radius, a lower bound on what any packet
+# gets — at `ε_KO = 1/2`, `h = 5/256`, for `m = 1 … 8`, midpoint rule at 32
+# points per cell. A margin that reaches the singular disk has no number.
+
+"""
+The e-folds `ε ∫ dr/(h ℓ_max,1(r))` across margins of `1 … mmax` cells
+below `r_h` along `n̂`, cumulative; `NaN` from the first margin whose path
+meets the singular set.
+"""
+function margin_efolds(S, bg, n̂, r_h; h, ε, mmax=8, per=32)
+    out = fill(NaN, mmax)
+    acc = 0.0
+    for m in 1:mmax, j in 1:per
+        r = r_h - (m - 1 + (j - 1 // 2) / per) * h
+        co = frozen_coefficients(r, n̂; background=bg)
+        co === nothing && return out
+        ℓ = ellmax_axis(S, co.b, co.a).ℓ / ε
+        acc += 1 / (per * ℓ)
+        j == per && (out[m] = acc)
+    end
+    return out
+end
+
+println("\n=== (1c) e-folds across a margin of m cells below the horizon, " *
+        "ε_KO = 1/2, h = 5/256 (and the step-5 fixture's 5/64 for the " *
+        "reference) ===")
+println("n_e = ∫ dr/(h ℓ_max(r)) from r_h − m h to r_h, cumulative in m; " *
+        "'—' where the margin reaches the singular disk")
+for q in (2, 4)
+    S = stencil_symbols(q)
+    println("\n-- q = $q --")
+    println("| case | h | n_e at m = 1 … 8 | e^{-n_e} at m = 4, 8 |")
+    for (label, bg, n̂, r_h) in SPIN_CASES, h in (H_SPIN, H_FIXTURE)
+        h == H_FIXTURE && bg !== KERR_SCHILD_0 && continue
+        n = margin_efolds(S, bg, n̂, r_h; h=h, ε=0.5)
+        say("| %s | %s | %s | %s, %s |", label, h == H_SPIN ? "5/256" : "5/64",
+            join((isnan(x) ? "—" : Printf.format(Printf.Format("%.2f"), x)
+                  for x in n), " "),
+            isnan(n[4]) ? "—" : Printf.format(Printf.Format("%.2e"), exp(-n[4])),
+            isnan(n[8]) ? "—" : Printf.format(Printf.Format("%.2e"), exp(-n[8])))
     end
 end
 

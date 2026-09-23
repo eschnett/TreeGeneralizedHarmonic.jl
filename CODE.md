@@ -509,9 +509,80 @@ the fully discrete scheme, RK4 at `cfl = 1/4` on the fixture's
 `λ_max = 1.671`, agrees with every semi-discrete entry off the horizon to
 the digits printed (at `r = 2 M`, where both are unbounded as `θ → 0`, its
 supremum over the `θ` grid is over a thousand cells), and at `ε_KO = 0`
-RK4's own damping, `O((ω dt)⁶)`, leaves `ℓ > 10⁶` cells. What this means for the margin `m` is under [The
+RK4's own damping, `O((ω dt)⁶)`, leaves `ℓ > 10⁶` cells. What this means
+for the margin `m` is under [The
 interior](#the-interior-a-pointwise-damping-layer), and what a 3D run does
 with it is under [Measured results](#measured-results), step 8a.
+
+**The spinning holes (measured in step 8a, `test/dispersion.jl` sections 1b
+and 1c).** Step 8d keys the layer on the found horizon's offset surface
+`r_1(n̂) = r_h(n̂) − m h`, and `PLAN.md`'s finding 3 puts harmonic Kerr at
+`a = 9/10` at `h = 5/256`, where its equator leaves `0.1 M` — 5.1 cells —
+between the singular disk and the horizon. The same numbers along the spin
+axis and along the equator of both spinning charts — grid axes both, and
+the two directions in which the horizon's normal is radial by symmetry, so
+the sonic point `b = a` *is* the horizon (`g^{nn} = γ^{nn} − (β^n)²/α² = 0`;
+the script finds it by bisection within `5e−16` of the analytic radius in
+all four), at depths `d = 2, 4, 8` cells of `h = 5/256`. `g_h` is
+`d(b/a)/d(depth)` at the horizon, which Kerr-Schild at `a = 0` has at
+`1/(2M)`; `ℓ_max` is at `ε_KO = 1` with its `θ/π`:
+
+| case, `r_h`, `g_h` | `d` | `r/M` | `b` | `a` | `b/a` | `q = 2` | `q = 4` | `q = 6` |
+|---|---|---|---|---|---|---|---|---|
+| `Harmonic(1, 9/10)`, axis, `0.4359`, `1.00/M` | 2 | 0.3968 | 0.1499 | 0.1441 | 1.0401 | 2.23 (0.145) | 0.97 (0.316) | 0.82 (0.422) |
+| | 4 | 0.3578 | 0.1477 | 0.1364 | 1.0823 | 1.13 (0.204) | 0.68 (0.381) | 0.64 (0.483) |
+| | 8 | 0.2796 | 0.1423 | 0.1212 | 1.1734 | 0.58 (0.285) | 0.48 (0.460) | 0.50 (0.556) |
+| `Harmonic(1, 9/10)`, equator, `1.0000`, `2.20/M` | 2 | 0.9609 | 0.0535 | 0.0486 | 1.1008 | 0.34 (0.224) | 0.23 (0.401) | 0.22 (0.502) |
+| | 4 | 0.9219 | 0.0304 | 0.0241 | 1.2618 | 0.09 (0.339) | 0.09 (0.509) | 0.10 (0.600) |
+| | 8 | 0.8438 | — | — | — | on the singular disk | | |
+| `KerrSchild(1, 9/10)`, axis, `1.4359`, `0.30/M` | 2 | 1.3968 | 0.5029 | 0.4971 | 1.0118 | 24.42 (0.079) | 5.92 (0.230) | 4.10 (0.337) |
+| | 4 | 1.3578 | 0.5058 | 0.4942 | 1.0234 | 12.59 (0.111) | 4.25 (0.275) | 3.29 (0.382) |
+| | 8 | 1.2796 | 0.5112 | 0.4888 | 1.0457 | 6.71 (0.154) | 3.11 (0.327) | 2.68 (0.433) |
+| `KerrSchild(1, 9/10)`, equator, `1.6946`, `0.31/M` | 2 | 1.6556 | 0.4952 | 0.4894 | 1.0119 | 23.88 (0.080) | 5.81 (0.231) | 4.03 (0.337) |
+| | 4 | 1.6165 | 0.4970 | 0.4857 | 1.0234 | 12.38 (0.111) | 4.18 (0.275) | 3.23 (0.382) |
+| | 8 | 1.5384 | 0.4994 | 0.4781 | 1.0447 | 6.69 (0.152) | 3.07 (0.325) | 2.63 (0.431) |
+| `KerrSchild(1, 0)`, reference, `2.0000`, `0.50/M` | 2 | 1.9609 | 0.5049 | 0.4951 | 1.0199 | 14.67 (0.103) | 4.59 (0.264) | 3.46 (0.371) |
+| | 4 | 1.9219 | 0.5100 | 0.4900 | 1.0407 | 7.47 (0.146) | 3.28 (0.317) | 2.77 (0.423) |
+| | 8 | 1.8438 | 0.5203 | 0.4797 | 1.0847 | 3.88 (0.206) | 2.38 (0.384) | 2.25 (0.486) |
+
+and the e-folds `n_e = ∫_{r_h − m h}^{r_h} dr/(h ℓ_max(r))` that a margin of
+`m` cells buys at `ε_KO = 1/2` — the path form of the leakage margin under
+[The interior](#the-interior-a-pointwise-damping-layer), with the
+least-attenuated mode at each radius, so a lower bound on what any packet
+gets:
+
+| case, `h` | `q = 2`, `m = 4` | `m = 5` | `m = 8` | `q = 4`, `m = 4` | `m = 5` | `m = 8` |
+|---|---|---|---|---|---|---|
+| `Harmonic(1, 9/10)`, axis, `5/256` | 0.89 | 1.39 | 3.51 | 1.94 | 2.72 | 5.52 |
+| `Harmonic(1, 9/10)`, equator, `5/256` | 7.29 | 17.9 | — (disk at 5.12 cells) | 9.74 | 19.8 | — |
+| `KerrSchild(1, 9/10)`, axis, `5/256` | 0.08 | 0.13 | 0.31 | 0.32 | 0.44 | 0.88 |
+| `KerrSchild(1, 9/10)`, equator, `5/256` | 0.08 | 0.13 | 0.32 | 0.32 | 0.45 | 0.89 |
+| `KerrSchild(1, 0)`, `5/256` | 0.14 | 0.21 | 0.53 | 0.41 | 0.57 | 1.14 |
+| `KerrSchild(1, 0)`, `5/64` (the fixture's) | 0.50 | 0.77 | 1.81 | 0.78 | 1.08 | 2.07 |
+
+Four things read off them. **`b/a` is not Kerr-Schild's anywhere but in
+Kerr-Schild**: on the harmonic equator it leaves the horizon at `2.2/M`
+and averages `3.4/M` over the first four cells — nearly seven times
+Kerr-Schild's `1/(2M)` — while both speeds fall toward zero at the disk
+(`a = 0.069` at the horizon, `0.024` four cells in, `0.006` at five).
+**`ℓ` scales with `a`** at fixed `b/a`, so the slow harmonic chart is
+strongly damped per cell:
+`ℓ_max` is below a cell four cells inside the equatorial horizon, and even
+on the harmonic axis, where `a ≈ 0.15`, it is a third of Kerr-Schild's at
+the same `b/a`. **The frozen-coefficient model is at the edge of its
+validity on that equator**: `a` falls by a factor three across the first
+four cells below the horizon and by four across the fifth, on the scale of
+the grid-scale wavelengths themselves, so the `m = 4` number is an
+indication and the `m = 5` one is not to be trusted. And **Kerr-Schild at `a = 9/10`
+is the hard case**, not the harmonic chart: with `g_h = 0.30/M`, `b/a`
+takes three times as many cells as on the harmonic axis to move off the
+horizon's value, at `a ≈ 1/2` rather than `0.15` each of those cells damps
+a third as much, and a margin of eight cells at `h = 5/256` buys a third of
+an e-fold at `q = 2` and `0.9` at `q = 4`. Against the fixture's
+measurement the bound is conservative: at
+`h = 5/64` it gives `1.81` e-folds across eight cells at `q = 2` where the
+3D runs measured `4.6` at `2 M` and the one-dimensional model `2.9` in the
+long run.
 
 ### The interface-order rule, and what it costs a second-order system
 
@@ -936,9 +1007,22 @@ confirm:
    Kerr-Schild at `a = 0`) and `ℓ_max ≈ C_q/(ε δ^{2/q})`, the integral is
    `ε (g h)^{2/q} m^{1+2/q} / ((1 + 2/q) C_q)` e-folds — at `q = 2`,
    `m ≥ √(2 C_2 n_e / (ε g h))`, which is `m ≥ √(1.1 n_e M/(ε h))` in
-   Kerr-Schild. **The leakage margin in cells grows as the mesh is
-   refined**, as `h^{−1/2}` at `q = 2` and `h^{−1/3}` at `q = 4`, because a
-   margin of a fixed number of cells lies ever closer to the sonic surface.
+   Kerr-Schild. (`C_q` is Kerr-Schild's, where `a = 1/2` at the horizon;
+   `ℓ` scales with `a` at fixed `b/a`, so elsewhere `ℓ_max ≈ 2a C_q/(ε
+   δ^{2/q})`, and `g` is the background's own — `0.30/M` for Kerr-Schild at
+   `a = 9/10`, `1.0/M` and `2.2/M` on harmonic Kerr's axis and equator,
+   [Kreiss–Oliger dissipation](#kreissoliger-dissipation).) **The leakage
+   margin in cells grows as the mesh is refined**, as `h^{−1/2}` at
+   `q = 2` and `h^{−1/3}` at `q = 4`, because a margin of a fixed number of
+   cells lies ever closer to the sonic surface.
+
+**The `0.1 M` on harmonic Kerr's equator is not too thin; the spin axis is
+what binds (measured in step 8a, frozen-coefficient).** Toward the disk
+every characteristic speed falls to zero, so `ℓ_max` drops below a cell and
+a margin of `m = 4` at `h = 5/256` buys `7.3` e-folds at `q = 2` and `9.7`
+at `q = 4` at `ε_KO = 1/2`, while the same hole's axis gets `0.9` and `1.9`
+at `m = 4` and `3.5` and `5.5` at `m = 8` — so the offset surface wants a
+margin that depends on direction, not a thicker equator.
 
 **What the fixture measures against it** (`test/hole_runs.jl leakage`,
 under [Measured results](#measured-results), step 8a). On the step-5 hole at
