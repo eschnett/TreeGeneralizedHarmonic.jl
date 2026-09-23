@@ -61,9 +61,9 @@ moving hole (G5) come PLAN.md's steps 8a–8g (added 2026-09-23), the
 generic interior: step 5's layer needs an analytic center and an analytic
 interior, and its spherical core cannot hold harmonic Kerr's singular
 disk at `a = 9/10`, which is G5's case. Steps 8a (the leakage margin),
-8b (the range projection) and 8c (the calibration of the layer for an
-inexact target) are done; step 8d, the tracked horizon geometry, is
-next.**
+8b (the range projection), 8c (the calibration of the layer for an
+inexact target) and 8c′ (`ρ_max = 4/M` the default, decided 2026-09-23)
+are done; step 8d, the tracked horizon geometry, is next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -173,6 +173,17 @@ six in the 50 M error. `test/evolution_cases.jl` has the E3 target
 (`CurvatureTarget`) and a `gh_outside_shell_norms(p, u, t)` method, and
 `hole_runs.jl` a `calibration` section.
 
+From step 8c′ **`ρ_max = 4/M` is the default** (Erik's decision of
+2026-09-23, for every variant, the analytic `:damped` layer included):
+`interior.jl` has `hole_mass(background)` beside the horizon radii (`.mass`
+through `translate`, `rotate` and `boost`, an `ArgumentError` for a
+background without one), `driver.jl` has `default_relaxation_rate(case)`,
+the one place the `4` is written, and `evolve!` with no rate keyword relaxes
+at it in every chunk. The grid rate `ρ_max · dt = 1` is the option
+`ρ_max_factor = 1` — it is what reproduces step 5's tables, which `CODE.md`
+keeps as history — and `hole_runs.jl`'s `calibration` (`:grid`) and `bounds`
+sections ask for it by name.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -230,8 +241,13 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **3798 assertions in 13m25** at one thread and **10m12** at
-four on the development machine after step 8c (its 56 new claims are
+The suite is **3857 assertions in 14m33** at one thread and **10m30** at
+four on the development machine after step 8c′, on a machine shared with
+sibling agents (the tree before it measured 3798 in 13m45 at one thread the
+same afternoon): the default rate's price is `driver_tests.jl`'s variants
+testset, `26 s` → `82 s` at one thread, whose `:damped` and `:frozen` runs
+go to `1/2 M` because a residual relaxing at `4/M` saturates only there.
+Step 8c measured 3798 in 13m25 / 10m12 (its 56 new claims are
 11.8 s / 7.2 s: one right-hand side each for the target and the profile,
 and one `1/20 M` run for `ρ_max_fixed`); step 8b measured 3723 in 13m00 /
 9m33 on a machine shared with a
@@ -487,10 +503,10 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
 - **`ρ_max = 1/dt` is a grid rate, and a wrong target cannot survive it**
   (measured in step 8c). It is about `107/M` on the fixture — a paste two
   cells deep — and every inexact target at it ends its run in 2–15 M on a
-  ramp of up to 8 cells, degenerating in the shell outside `r_1`; the calibrated layer is
-  `evolve!(…; ρ_max_fixed = 4/M)` with a ramp of at least 8 cells
-  (`ρ_ramp = 1`, `r_0 = r_1 − n_L h`). A rate of `1/M` is too slow the
-  other way: a deep layer is not held and fails from the inside.
+  ramp of up to 8 cells, degenerating in the shell outside `r_1`; the
+  calibrated layer is `4/M` — the default from step 8c′ — with a ramp of at
+  least 8 cells (`ρ_ramp = 1`, `r_0 = r_1 − n_L h`). A rate of `1/M` is too
+  slow the other way: a deep layer is not held and fails from the inside.
 - **A layer target is evaluated wherever the layer is**, `r_0 ≤ r < r_1`,
   and at the core's sphere for `:pasted` — so its own singular set has to
   be inside `r_0` exactly as the background's does, and nothing checks it:
@@ -608,10 +624,22 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   A deep enough hierarchy in a small enough box pushes refinement out to
   the boundary through balance alone. If the boundary blocks are not at
   the coarsest level, count the levels before suspecting the ceiling.
-- **`ρ_max` is bounded by RK4's stability**, about `2.8/dt` on the
-  negative real axis; the driver sets `ρ_max · dt = 1` per chunk. A run
-  that blows up in the layer after raising `ρ_max` has found the
-  integrator, not the physics.
+- **`ρ_max` is `4/M` by default, read from the hole, and bounded by RK4's
+  stability** (amended in step 8c′). `evolve!` with no rate keyword relaxes
+  at `default_relaxation_rate(case) = 4/hole_mass(case.background)` in every
+  chunk; `ρ_max_factor = 1` is the grid rate `ρ_max · dt = 1`, the default
+  until 2026-09-23 and what step 5's numbers need; `ρ_max_fixed` is any
+  other rate, and the two are refused together. RK4 is stable to about
+  `2.8/dt` on the negative real axis and a fixed rate — the default's
+  included — above `1/dt` is refused, which on the suite's holes is eleven
+  to twenty-eight times away (`4/M · dt = 0.036–0.092`). A run that blows up in
+  the layer after raising `ρ_max` has found the integrator, not the
+  physics. **At `4/M` the layer is held to `τ/ρ_max`, not `τ · dt`**: the
+  `:damped` residual is twenty times the grid rate's (`1.42` against
+  `0.062` on the fixture) and saturates only after about `2/ρ_max = M/2`,
+  so a claim about the residual's saturation needs a run that long — which
+  is why `driver_tests.jl`'s variants read it at `1/2 M` and the shell at
+  `1/10 M`.
 - **The horizon finder reads only the evolved region, and it says so by
   throwing.** The interpolation window is `q + 2` points per axis, `G` of
   them on each side of the query's cell, so a query *outside* `r_1` can
@@ -676,8 +704,9 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   every RK stage. The price is paid at compile time instead: a test row
   at a new `q` is a new kernel, which is most of what
   `evolution_tests.jl`'s 56 s are, and each interior variant is another
-  one. The interior itself is rebuilt per chunk anyway, because
-  `ρ_max = 1/dt`; `with_interior` shares the field sets and the sampled
+  one. The interior itself is rebuilt per chunk anyway — the grid-rate
+  option `ρ_max_factor` follows `1/dt`, and the default `4/M` is checked
+  against it — and `with_interior` shares the field sets and the sampled
   gauge source rather than rebuilding the problem, which would re-sample
   `H_a`.
 - **KernelAbstractions refuses a `return` statement anywhere in a kernel

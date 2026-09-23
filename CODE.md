@@ -1180,17 +1180,50 @@ the right-hand side, where the integrator sees a pure function of
 
 **The profiles and their parameters.** `w` and `ρ` are `C²` smoothstep
 polynomials of `r`, `isbits` closures over `(c(t), r_0, r_1, ρ_max)` and
-the ramp widths, evaluated per point in the kernel. `ρ_max` is bounded
-by the explicit integrator: RK4 is stable on the negative real axis to
-about `2.8/dt`, and `ρ_max · dt = 1` **(proposed)** relaxes by a factor
-`e` per step, which is as strong as it needs to be; the driver derives
-`ρ_max` from `dt` each chunk. **(Superseded in step 8c** for any target and
-proposed for the analytic one: `1/dt` is a *grid* rate, about `107/M` on
-the suite's fixture, and a paste two cells deep; the calibrated layer
-relaxes at the fixed physical rate `ρ_max = 4/M` — see [the layer for an
-inexact target](#the-interior-a-pointwise-damping-layer) below — and even
-on the exact solution that rate ends a `50 M` run with a sixth of the
-error**)**.
+the ramp widths, evaluated per point in the kernel. **`ρ_max = 4/M`
+(decided 2026-09-23)**, `M` the hole's mass parameter: the layer's
+relaxation rate for every run and every target, the analytic `:damped`
+layer included (`:pasted` and `:frozen` do not read it). `evolve!` given no
+rate keyword relaxes at `default_relaxation_rate(case) =
+4/hole_mass(background)` in every chunk — `hole_mass` reads `.mass` of
+`KerrSchild` and `Harmonic` through `translate`, `rotate` and `boost`, the
+rest mass a boost does not change, and refuses a background with none — so
+the default is a statement about the hole and not a number in the driver.
+It is `16 κ`, and the layer forgets a perturbation in `M/4`. `ρ_max` is
+bounded by the explicit integrator — RK4 is stable on the negative real
+axis to about `2.8/dt` — and the driver refuses a fixed rate, the
+default's included, above `1/dt` at the chunk that would take it; on every
+hole the suite evolves the default is `0.036/dt` to `0.092/dt` **(measured
+in step 8c′)**, so the refusal is a statement that the mesh does not
+resolve `M/4`.
+
+**The grid rate `ρ_max · dt = 1` stays as the option `ρ_max_factor`**, and
+is no longer what a run gets by default (amended in step 8c′). It was the
+default from step 5, **(proposed)** there because it relaxes by a factor
+`e` per step and looked as strong as a layer needs to be; step 8c measured
+why it is not: `1/dt` is a *grid* rate, about `107/M` on the suite's
+fixture at `cfl = 1/5`, and a paste two cells deep, which every inexact
+target ends its run against on every ramp up to eight cells, and even on
+the exact solution it ends a `50 M` run with six times the error of `4/M` —
+the `G`-point shell's `C_a` L2 `0.181` against `0.029`, the masked error
+`0.160` against `0.027` ([the layer for an inexact
+target](#the-interior-a-pointwise-damping-layer) below). `ρ_max_factor = 1`
+reproduces step 5's numbers, which is what it is kept for; `ρ_max_fixed`
+is any other rate, and the two are refused together.
+
+**What the default costs the layer (measured in step 8c′).** A relaxation
+at a fixed rate holds the layer to the analytic solution to `τ/ρ_max`, `τ`
+the truncation error of `F` there, where the grid rate held it to `τ · dt`:
+on the suite's fixture the `:damped` residual — the layer's L∞ distance
+from the truth — saturates at `1.42` by `1/2 M` against the grid rate's
+`6.2e−2`, a few percent of the solution itself at the layer's inner edge,
+where `|Π|` is `60`, and it converges at order `q` (`2.03` over `N = 6, 8,
+10`) where the grid rate's extra `1/h` made it `2.81`. The exterior does not
+see it: the masked error outside `r_1` is `2.26e−3` against `2.27e−3` at
+`1/10 M` and `1.51e−2` against `1.61e−2` at `1 M`, and at `50 M` it is step
+8c's row, `0.027` against `0.160`. The residual is a statement about the
+layer's own health and not about the solution, and at `4/M` it is the
+larger one.
 
 **(Implemented in step 5**, `src/interior.jl`.**)** The smoothstep is the
 quintic `10s³ − 15s⁴ + 6s⁵`, whose value, first *and* second derivatives
@@ -1219,7 +1252,9 @@ and the record's `residual` is the layer's distance *from the truth*;
 `evolve!(…; ρ_max_fixed)` relaxes at a rate in the case's units instead of
 `ρ_max_factor/dt` (the two are refused together, and a fixed rate above
 `1/dt` is refused at the chunk that would take it, **(proposed in step
-8c)**); and `HorizonDissipation`, the `ε_KO(r)` profile below. The targets:
+8c)**; from step 8c′ a run with neither relaxes at the default `4/M`, and
+the grid rate is asked for as `ρ_max_factor = 1`); and `HorizonDissipation`,
+the `ε_KO(r)` profile below. The targets:
 **E1** `KerrSchild(6/5, 0)`, a valid metric that is not a solution; **E2**
 `translate(KerrSchild(1, 0), (0, δ, 0, 0))`, `δ = h, 4h`, a tracking error;
 **E3** the solution with `h_tt` off by `−2(r − r_1)²χ(r)/M²`, value and slope
@@ -1234,7 +1269,8 @@ a statement about that width**)**. On the suite's fixture (Kerr-Schild
 on) to `50 M`, the numbers under [Measured
 results](#the-layer-against-an-inexact-target-step-8c) decide:
 
-1. **`ρ_max` is a physical rate, `4/M` (measured in step 8c).** At the grid
+1. **`ρ_max` is a physical rate, `4/M` (measured in step 8c**, and the
+   default from step 8c′, decided 2026-09-23**).** At the grid
    rate every inexact target ends its run on every ramp up to 8 cells — E1
    in `2–4 M`, E2 at `δ = h` in `3–5 M`, E3 in `6–15 M` — degenerating in the
    shell outside `r_1` as step 8b saw step 5's failures do; on 12 cells E1
@@ -1773,12 +1809,15 @@ rather than building one: step 5's mesh is the frozen hierarchy of
 from the indicator. Three things the writing settled:
 
 - **`ρ_max` is what makes a chunk a restart even without a regrid.** It
-  is `1/dt` and `dt` is measured per chunk, so the interior the kernel
+  was `1/dt` and `dt` is measured per chunk, so the interior the kernel
   closes over is rebuilt at the top of every chunk (`with_interior`),
   which shares the field sets, the schedule and the **sampled gauge
   source** rather than rebuilding the problem — re-sampling `H_a` is the
   most expensive setup phase there is and nothing about a new `ρ_max`
-  invalidates it.
+  invalidates it. **(Amended in step 8c′:** the default is now `4/M`, the
+  same in every chunk, and the rebuild stays — it is what the grid-rate
+  option `ρ_max_factor` needs, it is where the default is checked against
+  that chunk's `1/dt`, and it costs nothing.**)**
 - **The record's first row is `t = 0`**, before anything has been
   integrated, so that "the error grew from zero" is a statement a test
   can check rather than assume; `nchunks` is the number of rows after it.
@@ -1850,7 +1889,10 @@ and a longer run at `q = 6` would need a smaller `cfl` or a higher-order
 tableau to keep it, which is worth knowing before G3 lengthens anything.
 
 The relaxation rate of the interior layer is bounded by RK4's stability
-on the negative real axis, and `ρ_max · dt = 1` keeps it well inside;
+on the negative real axis, and both rates the driver runs keep it well
+inside — the default `4/M` is `0.04/dt` to `0.09/dt` on the suite's holes,
+and the grid-rate option `ρ_max · dt = 1` is a factor `2.8` inside (amended
+in step 8c′);
 the `:pasted` variant uses RK4's `step_limiter!(u, integrator, p, t)`
 hook, and step 8b's range projection its `stage_limiter!` — the two places
 the state may be written outside the RHS, both passed as `solve` keywords
@@ -2279,12 +2321,12 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c) |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook |
 | `src/bounds.jl` | the range projection (added in step 8b): `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
-| `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii, and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes |
+| `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii and the hole's mass (`hole_mass`, added in step 8c′), and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes |
 | `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4), or `hole_forest`'s nested shells around a hole (added in step 5, **here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
 | `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate step 5's interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` (added in step 4) |
 | `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
-| `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
+| `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written (added in step 8c′) — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
 | `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. Step 8c adds the E3 target `CurvatureTarget` to `evolution_cases.jl`, its claims to `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section |
@@ -2856,7 +2898,10 @@ in a Dirichlet box of half-width `5/2 M`, on the frozen hierarchy of
 sphere `r_1` lies wholly inside the finest level and there is a
 coarse-fine face between it and the outer half of the box — with
 `r_0 = 2/5`, `r_1 = 23/20`, the default margin `m = 8`, `ε_KO = 1/2`,
-`γ0` the Gaussian profile and the `:damped` interior. `N` is raised with
+`γ0` the Gaussian profile and the `:damped` interior — **at the grid rate
+`1/dt`, the default until 2026-09-23**, as is every table of this step
+(`ρ_max_factor = 1` reproduces them; the suite's rows at the default `4/M`
+follow each, **(measured in step 8c′)**). `N` is raised with
 the block layout held fixed, so every spacing shrinks and nothing else
 moves. The error is the **masked** one: over `r ≥ r_1`, where the
 equations are the Einstein equations and nothing else.
@@ -2887,6 +2932,23 @@ the L2 from `5.052e−3` to `3.362e−3` and the L∞ from `6.210e−2` to
 `3.549e−2` — the worst point of the whole domain is inside the layer,
 every time, which is the arithmetic reason the mask is not optional.
 
+**The suite's `q = 2` row at the default `4/M` (measured in step 8c′)**,
+the same fixture, runs and time:
+
+| `q` | `t_end` | `N` | `h` | masked L2 | masked L∞ | `C_a` L2 | layer residual |
+|---|---|---|---|---|---|---|---|
+| 2 | `3/20 M` | 6 | 5/48 | 6.322e−3 | 7.770e−2 | 6.288e−3 | 1.433 |
+| 2 | | 8 | 5/64 | 3.336e−3 | 3.501e−2 | 3.530e−3 | 7.965e−1 |
+| 2 | | 10 | 1/16 | 2.103e−3 | 1.917e−2 | 2.257e−3 | 5.075e−1 |
+| | | **rate** | | **2.16** | **2.74** | **2.01** | **2.03** |
+
+The error is the grid rate's to 1.5 % at every `N`, and lower, the
+constraint to `0.1 %`, and their rates agree to the second digit. The residual is ten to fifteen times
+larger and one order slower, and both are the balance above with a fixed
+`ρ`: `residual ≈ w F/ρ_max` is `O(h^q)` when `ρ_max` does not grow as `1/h`.
+Masking now takes the L2 from `3.536e−2` to `3.336e−3` and the L∞ from
+`7.965e−1` — which is the residual — to `3.501e−2`.
+
 **What the layer costs: `CODE.md`'s "a few percent of an RHS",
 confirmed.** The cost is one forward-mode dual pass through the
 background per *layer* point per evaluation, and it is measured on the
@@ -2912,7 +2974,8 @@ truncation outside `r_1`, `:damped` with the smaller violation in the `G`
 points outside `r_1`, and that `:frozen` piles compressed features up
 against the freezing radius. On the fixture above (`q = 2`, `N = 8`,
 `t = 1/10 M`), with the shell of `G = 2` spacings just outside `r_1` —
-6104 points — read through a `ShellMask`:
+6104 points — read through a `ShellMask`, at the grid rate `1/dt`, the
+default until 2026-09-23:
 
 | variant | layer residual (L∞) | `C_a` L2 in the shell | `C_a` L∞ in the shell | masked error L2 |
 |---|---|---|---|---|
@@ -2936,10 +2999,44 @@ measured and recorded, and it is *not* what chooses the default — the
 residual is (amended in step 5). **`:damped` is confirmed as the
 default.**
 
+**The three variants at the default `4/M` (measured in step 8c′).**
+`:pasted` and `:frozen` do not read the rate — the paste freezes the ball
+`r < r_1`, and `:frozen` has `ρ ≡ 0` — so their rows above are unchanged to
+every digit. `:damped` at `t = 1/10 M`, the same fixture and shell:
+
+| variant | layer residual (L∞) | `C_a` L2 in the shell | `C_a` L∞ in the shell | masked error L2 |
+|---|---|---|---|---|
+| `:damped`, `4/M` | 5.513e−1 | 1.1062e−2 | 6.954e−2 | 2.2588e−3 |
+
+The shell is where it was — `:damped` and `:frozen` now agree there to
+`1e−4` relative and `:pasted` is 2.7 % above both — but **the residual claim
+is not true at `1/10 M` any more**: `:frozen`'s residual is 1.22 times
+`:damped`'s, not 11, because the sink relaxes in `M/4` rather than in one
+step and has not yet saturated. Against time, every `1/20 M` of the same
+run:
+
+| `t/M` | 0.05 | 0.1 | 0.15 | 0.2 | 0.25 | 0.3 | 0.35 | 0.4 | 0.45 | 0.5 | 1.0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `:damped`, `4/M` | 0.289 | 0.551 | 0.796 | 1.009 | 1.181 | 1.306 | 1.385 | 1.424 | 1.433 | 1.422 | 1.457 |
+| `:frozen` | 0.320 | 0.675 | 1.080 | 1.508 | 1.930 | 2.304 | 2.593 | 2.765 | 3.164 | 3.589 | 6.266 |
+| `:damped`, `1/dt` | 0.062 | 0.062 | 0.062 | 0.062 | 0.062 | 0.062 | 0.062 | 0.062 | 0.077 | 0.100 | 0.195 |
+
+`:damped` saturates by `0.4 M`, `1.6/ρ_max`, and `:frozen` grows linearly:
+the sticky wall against the sink is the same distinction it was, arriving
+a relaxation time later. So **the suite makes the residual claim at
+`t = 2/ρ_max = 1/2 M` (amended in step 8c′)**, where `:frozen`'s is 2.52
+times `:damped`'s, and keeps the shell claim at `1/10 M`, where step 5 made
+it: by `1/2 M` `:pasted`'s shell `C_a` L2 is `2.02e−2` against `:damped`'s
+`1.24e−2` (`1.21e−2` at the grid rate) and `:frozen`'s `1.25e−2` — the
+paste's kink growing toward its `17 M` failure at either rate, which is a
+claim about the paste and not the one the testset makes. The price is the
+two runs to `1/2 M`, 50 steps each instead of 10; the costs are under
+[the default rate](#the-default-rate-step-8c).
+
 **To `t = 50 M`, and the prediction that was wrong.** The same
 configuration at `q = 2`, `N = 8` (`h = 5/64`, 120 leaves, `cfl = 1/5`,
 `chunk = 1 M`, 5350 steps, 19 minutes at four threads), run to `t = 50 M`
-for each variant:
+for each variant, at the grid rate `1/dt`, the default until 2026-09-23:
 
 | variant | reaches | masked L2 at the end | `C_a` L2 | layer residual |
 |---|---|---|---|---|
@@ -2977,6 +3074,17 @@ where fifty crossings of accumulated truncation error is a large number.
 The claim the row supports is *stability*, and the order claims are the
 table above.
 
+**The default's `50 M` number is step 8c's**, and it is not re-run here
+(step 8c′): the exact target at `4/M` on this fixture's own layer, the same
+configuration with the range projection on, reaches `50 M` with the masked
+error L2 at **`0.027`** against this table's `0.160`, the `G`-point shell's
+`C_a` L2 at **`0.029`** against `0.181` (step 8c's control of this row; the
+table's `C_a` column is the whole evolved region's), and the finder's
+`M_irr` at **`0.9972`** against `0.9955` ([the layer against an inexact
+target](#the-layer-against-an-inexact-target-step-8c)). The `:pasted` and
+`:frozen` rows do not read the rate and stand; the `N = 6` `:damped` run that
+ends at `21 M` has not been run at `4/M`.
+
 **The other two charts.** The suite's hole is Kerr-Schild at `a = 0`
 because it is the cheapest; `test/hole_runs.jl` runs the two the
 resolution argument above says are expensive, at `q = 2` to `t = 1/5 M`:
@@ -3006,9 +3114,14 @@ it. Measured as the L∞ of `|h_tt − h_tt,exact|` over the shell from the
 horizon's smallest coordinate radius to its largest plus the layer's
 width — `[2 M, 2.75 M]` for Kerr-Schild `a = 0` with this layer — against
 time, with the initial data exact so the fit goes through the origin: at
-`q = 2`, `N = 8`, over `t = 0 … 1/4 M`, the rate is **1.95e−3 / M**.
+`q = 2`, `N = 8`, over `t = 0 … 1/4 M`, the rate is **1.95e−3 / M**
+(at the grid rate; the suite's run at the default `4/M` gives `1.9512407e−3`
+against `1.9512409e−3`, the same to seven digits — the shell starts at the
+horizon, `10.9` cells outside `r_1`, and the layer's rate does not reach it in
+a fifth of an `M` **(measured in step 8c′)**).
 Over the `t = 50 M` run (`:damped`, `q = 2`, `N = 8`) the drift reaches
-`4.077e−3` at the end, a rate of about **8e−5 / M** averaged over fifty
+`4.077e−3` at the end (at the grid rate; step 8c's runs at `4/M` end at
+`2.7–3.3e−3`), a rate of about **8e−5 / M** averaged over fifty
 crossings — two thousand times below GHSO2's `0.14/M` on the excised
 hole. **`CODE.md`'s prediction is confirmed in its strong form
 (measured in step 5):** exact interior *and* boundary data do not merely
@@ -3024,7 +3137,12 @@ end to end at `Float32` on `CPU()` and reaches the `Float64` answer to
 **five significant figures**: masked L2 `2.268762e−3` against
 `2.268849e−3`, masked L∞ `2.659585e−2` against `2.659472e−2`, the layer
 residual `6.204157e−2` against `6.204212e−2`, `λ_max` `1.6709520` against
-`1.6709517`, and the same step count. The gauge constraint — a difference
+`1.6709517`, and the same step count — at the grid rate. At the default
+`4/M` **(measured in step 8c′)** it is the same agreement on different
+numbers: masked L2 `2.258749e−3` against `2.258833e−3`, L∞ `2.637039e−2`
+against `2.636953e−2`, the layer residual `5.512611e−1` against
+`5.512648e−1`, the gauge constraint `3.481216e−3` against `3.481208e−3`,
+`λ_max` and the step count unchanged. The gauge constraint — a difference
 of large terms near a hole, which is where `Float32` has least to give —
 agrees to `3.5e−3` against `3.5e−3`. This is the sharpest `Float32`
 result in the package, and it is the offset identities of
@@ -3131,7 +3249,7 @@ boundary blocks *are* the refined region's neighbours.
 
 **The adaptive run against a frozen hierarchy**, both at `refine_tol = 0.4`
 to `t = 1/2 M` with `chunk = 1/20`, the same case, the same finest spacing
-`5/64`:
+`5/64`, at the grid rate `1/dt`, the default until 2026-09-23:
 
 | mesh | leaves | points | `err_l2` | `err_linf` | `gauge_l2` |
 |---|---|---|---|---|---|
@@ -3163,7 +3281,13 @@ problem (re-sampling the gauge source and re-asserting the interior's two
 radius requirements on the new mesh) and the state vector; the transferred
 state is still a metric and its masked error after two chunks is
 `1.36e−3`, against `1.93e−3` after three chunks on the mesh that did not
-move.
+move — at the grid rate; `1.34e−3` and `1.88e−3` at the default `4/M`
+**(measured in step 8c′)**, where the interior residual of the run that did
+not move is `6.0` against `0.80` at `t = 3/20 M`: this fixture's layer is
+six cells of `h = 5/32` down to `r_0 = 3/10`, where `|Π|` is `131`, and it
+saturates at `14.7` by `1 M` while the masked error stays below the grid
+rate's (`6.03e−3` against `7.13e−3` at `2 M`, measured once, not in the
+suite).
 
 **The refinement centroid is biased by one to two finest spacings**, and
 the bias is the mesh's indexing rather than the indicator's: `1.7`–`2.4`
@@ -3339,7 +3463,9 @@ direction.
 
 **The horizon of a run, and what it says about the solution.** Kerr-Schild
 `a = 0` on the step-5 fixture (`q = 2`, `N = 8`, `h = 5/64`, `cfl = 1/5`,
-the `:damped` layer) to `t = 10 M`, the horizon found at every chunk:
+the `:damped` layer at the grid rate `1/dt`, the default until 2026-09-23;
+step 8c's `4/M` runs end at `M_irr = 0.9972` at `50 M`) to `t = 10 M`, the
+horizon found at every chunk:
 
 | `t/M` | 0 | 2 | 4 | 6 | 8 | 10 |
 |---|---|---|---|---|---|---|
@@ -3393,7 +3519,10 @@ measurement they are held against (`test/hole_runs.jl leakage`, one
 *The experiment.* A radial ripple `A (1 − s²)³ cos(2π(r − r_c)/λ)`,
 `s = (r − r_c)/2h`, `A = 1e−3`, in `h_tt` with `Π` untouched, centered `d`
 cells inside the horizon (`r_c = r_h − d h`), on `hole_fixture` (`:damped`,
-`r_1 = 23/20`, the layer at `ρ_max = 1/dt`) at `h = 5/64`; `A_k` is the
+`r_1 = 23/20`, the layer at `ρ_max = 1/dt`, the default until 2026-09-23 —
+a rerun of the section after step 8c′ runs it at `4/M`, while
+`test/dispersion.jl`'s one-dimensional model below stays at the `1/dt` these
+numbers were measured at) at `h = 5/64`; `A_k` is the
 largest `|δh|` over the ten `h` components against the same run without
 the ripple, in the shell `r_h + k h ≤ r < r_h + (k+1) h` (`ShellMask`'s
 membership), over the chunk boundaries at every `1/20 M`. Four decisions
@@ -3784,7 +3913,10 @@ healthy call, still under 2 % of a step. It allocates nothing per point
 
 **The two runs that end** (`hole_runs.jl bounds=damped6,pasted8`, on
 Symmetry, one `amddebugq` node at 64 threads; Kerr-Schild `a = 0`, `q = 2`,
-`cfl = 1/5`, `chunk = 1 M`, `ε_KO = 1/2`). Each is run three times —
+`cfl = 1/5`, `chunk = 1 M`, `ε_KO = 1/2`, the layer at the grid rate `1/dt` —
+step 5's, which the section asks for by name from step 8c′ **(proposed in
+step 8c′)**, since both rows are replays of step 5's table and its autopsy
+rebuilds the fatal chunk at that rate). Each is run three times —
 without the projection, at the proposed gate `r_1 − 2Gh`, and at the widest
 gate the assertion allows, `r_1 − Gh`:
 
@@ -4051,6 +4183,104 @@ at the finer `h` the spinning holes need (the proposed scaling of rule 3),
 or on a surface that is not a sphere; step 8f's matrix is where those are
 measured.
 
+### The default rate (step 8c′)
+
+`src/interior.jl` (`hole_mass`), `src/driver.jl` (`default_relaxation_rate`
+and the rule in `evolve!`), `test/driver_tests.jl`, `test/interior_tests.jl`
+and `test/hole_runs.jl`; the decision — `ρ_max = 4/M` for every run,
+**decided 2026-09-23** — is under [The
+interior](#the-interior-a-pointwise-damping-layer), "The profiles and their
+parameters". No long run: the default's `50 M` number is step 8c's exact
+target at `4/M` on the fixture's own layer (masked error L2 `0.027`, shell
+`C_a` L2 `0.029`, `M_irr` `0.9972`), cited beside step 5's table.
+
+**The suite.** **3857 assertions in 14m33 at one thread and 10m30 at four**
+on the development machine (Apple silicon, Julia 1.13.0), shared with
+sibling agents (load average 5–9), against **3798 in 13m45** at one thread
+for the tree before this step, measured the same afternoon (step 8c
+recorded 13m25 and 10m12). The 59 new assertions are `interior_tests.jl`'s
+`hole_mass` through every wrapper and the default's value in the case's type
+(46, `0.4 s`), `driver_tests.jl`'s testset for the grid-rate option, the
+default's refusal and a Minkowski case through `evolve!` with no rate
+(11, `6.2 s` / `3.0 s`), and one more row each in the record's claim, which
+now covers `t = 0`, and in the variants'. What the time went on is the
+variants: **`26.4 s` → `82.3 s` at one thread** (`30.6 s` at four), the two
+runs to `1/2 M` the saturated residual needs — so `driver_tests.jl` is
+`3m00` / `1m08` against `1m56` before.
+
+**The claims that encoded the grid rate, amended and not loosened** (a
+decided change of the spec): the record's `r.ρ_max * r.dt ≈ 1` is now
+`r.ρ_max == 4/M` on every row, `t = 0` included, with `ρ_max_factor = 1`
+giving `ρ_max · dt ≈ 1` in a testset of its own; the variants' residual
+claim is made at `2/ρ_max = 1/2 M` and their shell claim at `1/10 M`, for
+the reason under step 5's table. No other assertion changed. **`ρ_max_factor
+= 1` reproduces step 5's `t = 1/10 M` row to every digit this document
+records** (measured once, not in the suite): `:damped`'s residual
+`6.2042e−2`, shell `C_a` L2 `1.1054e−2` and L∞ `6.956e−2`, masked error
+`2.2688e−3`; `:pasted` and `:frozen` do not read the rate and are
+bit-identical. The calibration's `:grid` rows, now asked for by name,
+reproduce step 8c's sweep (`1.118e−2` and `3.790e−2` in the shell at
+`N = 8`), and the `bounds` section's `damped6` replay step 8b's layer and
+shell errors (`0.136`, `0.28` at `1 M`).
+
+**Every suite number that moved**, before (the grid rate) and after (the
+default), from the two suites' logs:
+
+| claim (file) | grid rate `1/dt` | default `4/M` |
+|---|---|---|
+| order sweep, `3/20 M`, rates L2 / L∞ / `C_a` / residual (`driver`) | 2.165 / 2.740 / 2.008 / 2.806 | 2.157 / 2.741 / 2.006 / 2.032 |
+| layer residual at `N = 6, 8, 10` (`driver`) | 1.380e−1, 6.210e−2, 3.288e−2 | 1.433, 7.965e−1, 5.075e−1 |
+| unmasked L2 / L∞ at `N = 8` (`driver`) | 5.052e−3 / 6.210e−2 | 3.536e−2 / 7.965e−1 |
+| `:damped` at `1/10 M`: residual, shell `C_a` L2, masked L2 (`driver`) | 6.204e−2, 1.1054e−2, 2.2688e−3 | 5.513e−1, 1.1062e−2, 2.2588e−3 |
+| `:frozen`/`:damped` residual (`driver`) | 10.9 at `1/10 M` | 1.22 at `1/10 M`, **2.52 at `1/2 M`** |
+| gauge drift rate over `1/5 M` (`driver`) | 1.9512409e−3 | 1.9512407e−3 |
+| `Float32` / `Float64`, masked L2 (`type`) | 2.268762e−3 / 2.268849e−3 | 2.258749e−3 / 2.258833e−3 |
+| `Float32` / `Float64`, residual (`type`) | 6.204157e−2 / 6.204212e−2 | 5.512611e−1 / 5.512648e−1 |
+| adaptive static run at `3/20 M`: masked L2, `C_a` L2, residual, `τ_max` (`refinement`) | 1.929e−3, 1.719e−3, 0.799, 0.5295 | 1.881e−3, 1.711e−3, 6.001, 0.5301 |
+| the regrid that moves the mesh: masked L2, `τ_max` (`refinement`) | 1.360e−3, 0.5312 | 1.341e−3, 0.5314 |
+| bounds control at `3/20 M`: `max_Π_shell`, `min_α_layer` (`bounds`) | 2.6345, 0.410764 | 2.6339, 0.410764 |
+
+The `Π` post-pass is unchanged — its test sets `ρ_max = 10` on the problem
+itself, not through the driver — and the horizon claims pass as they did
+(they are asserted to `1e−3` against Kerr and not logged). Outside the
+layer the masked errors moved by at most 2.5 %, every one of them down, and
+the constraints by under 0.5 % either way; the residual, the layer's
+distance from the truth, grew seven to fifteen times at these times and
+twenty-three times once saturated, as `τ/ρ_max` against `τ · dt` says it
+must.
+
+**The guard `ρ_max · dt ≤ 1` at the default** (the refusal of a fixed rate
+above the grid rate, now the default's too): `4/M · dt`, over the chunks
+and the `t = 0` row, is `0.040–0.047` on the fixture at `N = 8`,
+`0.036–0.037` at `N = 10` and `0.057–0.062` at `N = 6`, and `0.067–0.092`
+on the refinement's fixture at `h = 5/32` — eleven to twenty-eight times
+inside it, on every hole the suite evolves.
+
+**What the adaptive fixture's layer does at `4/M` (measured in step 8c′,
+once, not in the suite).** It is six cells of `h = 5/32` from `r_1 = 5/4`
+down to `r_0 = 3/10`, where `|Π|` reaches `131`, and at the grid rate
+(`60/M` there) its residual saturates at `0.80` by `1/10 M`; at `4/M` it
+rises through `6.0` at `3/20 M` and saturates at **`14.7`** by `1 M`, while
+the layer stays a metric — `min α` there `0.3676` and `min det γ` `2.61` to
+`2 M` at both rates — and the evolved region is better at `4/M` than at the
+grid rate throughout (masked L2 `6.03e−3` against `7.13e−3`, `C_a` L2
+`1.99e−3` against `2.55e−3`, at `2 M`). Step 8c's rule asks for a ramp of
+at least `4G = 8` cells at `4/M`, and this layer is under it; the default
+holds it anyway over the suite's times. A case whose layer is both coarse
+and deep is where the default's larger residual is largest, and step 8d's
+tracked geometry is the next place it is read.
+
+**`hole_runs.jl` at the new default.** `order`, `long`, `charts`,
+`indicator`, `horizon` and `leakage` run at `4/M` without edits; their
+recorded tables are at the grid rate and are annotated as such where they
+stand, and none has been re-run. `calibration`'s `:grid` rows pass
+`ρ_max_factor = 1`, as `PLAN.md` asks, and so do the `bounds` section's two
+replays of step 5's failing rows, whose autopsy rebuilds the fatal chunk at
+the grid rate by construction **(proposed in step 8c′)**. `leakage` is the
+one section whose rerun no longer reproduces its table — step 8a's layer
+was at `1/dt` — and `test/dispersion.jl`'s one-dimensional model of it stays
+at `1/dt` too, as the model of the runs it was compared against.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -4161,7 +4391,8 @@ a moving and a newly found horizon. The review found three more things
 the steps rest on and measure: `ρ_max = 1/dt` is a *grid* rate (about
 `107/M` on the suite's fixture), which makes today's layer a paste two
 cells inside `r_1` that survives to `50 M` only because its target is
-exact — a generic target needs a thick ramp at a physical rate; the
+exact — a generic target needs a thick ramp at a physical rate (step 8c
+measured it, and from step 8c′ `4/M` is the default, decided 2026-09-23); the
 Lorentzian metrics are not convex in `g_ab` (the angular mean of
 Kerr-Schild `g_ab` inside the horizon has Euclidean signature), so every
 blend and clamp is made in ADM variables; and the discrete scheme's
@@ -4197,8 +4428,8 @@ first touch them:
    structure does not depend on it, the cost does.
 5. **The defaults** — `q = 4`, `N = 32`, `cfl = 1/4`, `ε_KO = 0.5`,
    `γ0 = 1/M` near the hole, `m = 8`, a layer of `2(G + 1)` spacings,
-   `ρ_max · dt = 1`, the indicator's thresholds — are starting values
-   for G4–G6 to confirm or move. Three of them survived G2 on flat space
+   `ρ_max = 4/M` (`ρ_max · dt = 1` until 2026-09-23), the indicator's
+   thresholds — are starting values for G4–G6 to confirm or move. Three of them survived G2 on flat space
    and on a gauge wave: `cfl = 1/4` (no run needed less), `ε_KO = 0.5`
    (the noise test, and no order lost) and `q = 4` as the development
    order (`q = 2, 6, 8` all run, at 0.5×, 1.3× and 1.9× the cost of
@@ -4211,5 +4442,10 @@ first touch them:
    `m = 8` — a smooth layer's wrong target leaves the exterior what the exact
    one leaves — and replaced `ρ_max · dt = 1` by `ρ_max = 4/M` with a ramp of
    `4G` cells, measured for an inexact target and **(proposed in step 8c)**
-   for the analytic one, where it cuts the `50 M` error sixfold; the code's
-   default is still `1/dt` until the reviewer takes it.
+   for the analytic one, where it cuts the `50 M` error sixfold. **Erik took
+   it on 2026-09-23** for every variant, the analytic `:damped` layer
+   included, and step 8c′ made `4/M` the code's default; the grid rate is
+   the option `ρ_max_factor` **(decided 2026-09-23)**. The ramp is not part
+   of that decision: it is the case's `r_0`, `r_1` and `ρ_ramp`, and the
+   suite's fixture keeps step 5's layer, a ramp of `4.8` cells, on which
+   step 8c measured the exact target at `4/M` to `50 M`.

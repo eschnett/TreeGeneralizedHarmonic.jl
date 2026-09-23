@@ -677,14 +677,14 @@ default_relaxation_rate(case::GHCase{T}) where {T} =
 # default `4/M` is one (step 8c′). `nothing` stays `nothing`.
 #
 # **The guard `fixed · dt ≤ 1` at the default (checked in step 8c′).** On
-# every hole the suite evolves the default is a twenty-fifth to a tenth of
-# the grid rate — `4/M · dt`, over the chunks and the `t = 0` row, is
-# `0.040–0.047` on the fixture at `h = 5/64`, `cfl = 1/4` (`dt ≈ 0.01 M`),
-# `0.036–0.037` at `N = 10`, `0.057–0.062` at its coarsest `N = 6`, and
-# `0.067–0.092` on the refinement's fixture at `h = 5/32`, both of its runs —
-# so the guard never fires on a mesh that resolves a hole, and when it does,
-# the step is longer than `M/4` and the refusal says the mesh, not the rate,
-# is what is wrong.
+# every hole the suite evolves the default is a twenty-eighth to an
+# eleventh of the grid rate — `4/M · dt`, over the chunks and the `t = 0`
+# row, is `0.040–0.047` on the fixture at `h = 5/64`, `cfl = 1/4`
+# (`dt ≈ 0.01 M`), `0.036–0.037` at `N = 10`, `0.057–0.062` at its coarsest
+# `N = 6`, and `0.067–0.092` on the refinement's fixture at `h = 5/32`, both
+# of its runs — so the guard never fires on a mesh that resolves a hole, and
+# when it does, the step is longer than `M/4` and the refusal says the mesh,
+# not the rate, is what is wrong.
 chunk_interior(case::GHCase, dt, factor) = chunk_interior(case, dt, factor,
                                                           nothing)
 
