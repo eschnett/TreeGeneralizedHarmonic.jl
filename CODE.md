@@ -4860,18 +4860,17 @@ the design is under [The interior](#the-interior-a-pointwise-damping-layer),
 run is required; the explorations behind the harmonic and boosted rows are
 host-side and a few seconds each.
 
-**The suite.** **4578 assertions in 14m58.9 at one thread** on the
-development machine (load average 5–6, shared with sibling agents), against
-step 8d's 4410 in 15m28; the four-thread run measured **37m25.5** under a
-load average of 13 — its user time was 18m29, and the slow testsets were
-`constraints_tests.jl`'s and `interface_tests.jl`'s compilation-heavy ones
-(8m43, 6m53, 5m27, 4m00), none of which this step touches — so it is a
-statement about the machine, not the code (step 8d measured 11m21). The 168
-new assertions are `fit_tests.jl`'s 146 — **`11.7 s` at one thread and
-`13.3 s` at four**, the tracked run it fits shared with `tracking_tests.jl`
-(`tracked_fixture_run`), whose own `The tracked hole` testset is `38.0 s` /
-`19.1 s` with the run in it — and `interior_tests.jl`'s 22 for the boost
-sign (`0.6 s`).
+**The suite.** **4578 assertions in 15m09 at one thread and 10m52 at
+four** on the development machine (load average 6–8, shared with sibling
+agents), against step 8d's 4410 in 15m28 and 11m21. (A first pair on the
+tree before the documentation commit measured 14m59 at one thread and
+37m25 at four — the latter under a load of 13, user time 18m29, its excess
+in `constraints_tests.jl`'s and `interface_tests.jl`'s compilation-heavy
+testsets, none of which this step touches.) The 168 new assertions are
+`fit_tests.jl`'s 146 — **`12.6 s` at one thread and `12.9 s` at four**, the
+tracked run it fits shared with `tracking_tests.jl` (`tracked_fixture_run`),
+whose `The tracked hole` testset is `40.2 s` / `18.0 s` with the run in it —
+and `interior_tests.jl`'s 22 for the boost sign (`0.4 s`).
 
 **The acceptance list, with its numbers** (all measured in step 8e on the
 development machine, Julia 1.13, `Float64` unless said):

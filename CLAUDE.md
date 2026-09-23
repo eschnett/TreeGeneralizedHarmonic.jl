@@ -285,12 +285,12 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4578 assertions in 14m59** at one thread on the
-development machine after step 8e-i (load 5–6); the four-thread run took
-**37m25** under a load of 13 from sibling agents — user time 18m29, the
-excess in `constraints_tests.jl`'s and `interface_tests.jl`'s compilation —
-and is not a number about the code (step 8d measured 11m21). Its 168 new
-claims are `fit_tests.jl`'s 146, `11.7 s` / `13.3 s`, which fits the state
+The suite is **4578 assertions in 15m09** at one thread and **10m52** at
+four on the development machine after step 8e-i (load 6–8; an earlier
+four-thread run under a load of 13 took 37m25, its excess all in
+`constraints_tests.jl`'s and `interface_tests.jl`'s compilation — a number
+about the machine). Its 168 new claims are `fit_tests.jl`'s 146,
+`12.6 s` / `12.9 s`, which fits the state
 of the tracked run `tracking_tests.jl` already makes (`tracked_fixture_run`
 in `evolution_cases.jl` runs it once for both), and 22 in
 `interior_tests.jl` for the boost sign. Step 8d measured **4410 in 15m28**
