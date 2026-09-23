@@ -30,14 +30,19 @@ Three rules follow from `CODE.md` and govern every change here:
   stopgap this package carries — point interpolation for the horizon
   finder — is marked as such in `CODE.md` and goes upstream when
   TreeAMR grows it.
-- **No singularity handling, and the interior is pointwise.** There is
-  no excision. Inside the horizon the right-hand side is modified by two
-  smooth profiles of the distance to the hole's analytic center: a
-  relaxation toward the analytic solution in a layer, and a switch-off
-  around the singularity. Those profiles depend on position and time
-  and on nothing about blocks, levels or ghost widths. Do not add an
-  excision mask or an extrapolation into the hole; `CODE.md` lists
-  excision under extensions with the design that was set aside.
+- **The interior is pointwise and generic, and there is no excision.**
+  Inside the horizon the right-hand side is modified by smooth profiles
+  of the *depth* below a surface `m` cells inside the horizon — the
+  analytic center's sphere for step 5's layer, the tracked apparent
+  horizon's offset surface for the generic one (PLAN.md steps 8a–8g,
+  added 2026-09-23) — relaxing toward a target that is the analytic
+  solution (`:damped`) or a regular fit of the evolved state
+  (`:fitted`), with a range projection deep inside as the insurance
+  that reports where either fails. Those profiles depend on position,
+  time and the tracked horizon, and on nothing about blocks, levels or
+  ghost widths. Do not add an excision mask or a one-sided stencil:
+  excision is `CODE.md`'s fallback, priced there and decided by step
+  8g's host-side test, not built.
 - **Inherit GHSO2's algebra, do not re-derive it.** `pointwise.jl` is a
   port of `notes/pointwise-ghso2.jl`; a change to the equations there is
   a change to a validated result and needs the corresponding test
@@ -51,8 +56,11 @@ with its per-chunk analysis record and its regrid branch, the masked
 Löhner indicator with its interior mask, its derived level floor and its
 boundary ceiling, the masked error converging at order `q` on a frozen
 hierarchy, and the apparent horizon with its area, `M_irr`, Korzyński `J`
-and `M_ch` at Kerr's values in both charts and at `a = 9/10`. The moving
-hole (G5) is next.**
+and `M_ch` at Kerr's values in both charts and at `a = 9/10`. Before the
+moving hole (G5) come PLAN.md's steps 8a–8g (added 2026-09-23), the
+generic interior: step 5's layer needs an analytic center and an analytic
+interior, and its spherical core cannot hold harmonic Kerr's singular
+disk at `a = 9/10`, which is G5's case. Steps 8a and 8b are next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the

@@ -7,7 +7,9 @@ changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
 last milestone is marked *(Done.)* in `CODE.md`.
 
-**Nothing is done yet; step 0 is next.**
+**Steps 0–7 are done. Steps 8a and 8b are next** — the generic interior
+(steps 8a–8g, added 2026-09-23), which step 8 needs before it can run
+its case.
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -414,11 +416,417 @@ and `M_ch = M` recovered to interpolation accuracy for `a = 0` and
 `0.9`, with the spin axis along `±ẑ`; the provider throws when a
 query's interpolation footprint reaches `r_1`. Mark G4 *(Done.)*.
 
+## Steps 8a–8g — The generic interior (added 2026-09-23)
+
+These come before step 8 because step 5's layer needs two things step 8's
+case does not have: an analytic center, and an analytic interior whose
+singular set a *ball* can contain. Harmonic Kerr at `a = 9/10` is singular
+on the equatorial disk of coordinate radius `0.9` while its horizon's
+smallest coordinate radius is `0.436`, so `check_interior_radii` refuses
+the proof-of-concept case. The seven steps below replace both analytic
+inputs by quantities from the tracked apparent horizon and the evolved
+state, add the instrument that reports where an interior treatment fails,
+and measure the result on every hole this package has. The design and the
+review that shaped it are in `CODE.md`, "The interior" (as these steps
+amend it) and "Open questions". Steps 8a and 8b are independent and may
+run as two agents at once; everything after is sequential, each from a
+green suite on the merged branch.
+
+Four findings of the design review that every step below rests on. They
+are stated here because they contradict what a reader of step 5's code
+would assume, and because each is a *prediction* the steps measure:
+
+1. **`ρ_max = 1/dt` is a grid rate, not a physical one.** On the suite's
+   fixture (`h = 5/64`, `cfl = 1/5`) it is about `107/M` against the
+   surface gravity `κ = 1/(4M)` and the transport rate `λ/h ≈ 21/M`; with
+   the quintic ramp `ρ ≈ 37/M` two cells inside `r_1`. Step 5's `:damped`
+   is therefore a paste two cells deep with a two-cell transition, and it
+   survives to `50 M` because its target is exact. An *inexact* target
+   pinned that hard, that close to the evolved stencils, is a kink: the
+   compact `∂²` stencil divides by `h²`, so a curvature mismatch
+   `[u''] = O(1)` at `r_1` is an `O(1)` right-hand-side error at the
+   innermost evolved points, independent of `h` and `q`. A generic target
+   needs a thick ramp at a physical `ρ_max` (a few `/M`) so that `ρ` at
+   depth `G` is below `1/M`; the prediction is `n_L ≳ G (10 ρ_max M)^{1/3}`
+   cells, and step 8c measures it.
+2. **The Lorentzian metrics are not convex in `g_ab`.** The angular mean of
+   Kerr-Schild `g_ab` on the sphere `r = 1.15 M` has `g_tt = +0.74`,
+   `g_ti = 0`: Euclidean signature. Every blend, mean, fit or clamp is
+   made in ADM variables `(α, β^i, γ_ij)`, where `α > 0` and `γ` positive
+   definite are convex, and reassembled into `g_ab`. A regular vector
+   field vanishes at the center, so `β → 0` there and the center is a
+   valid metric whenever `α` and `γ` are.
+3. **A sphere keyed on the *tracked* `r_h,min` still does not unblock
+   harmonic `a = 9/10`; the offset surface does.** The singular disk must
+   lie inside the surface on which the analytic solution is last used,
+   and `0.436 − m h` is far inside the disk. The layer is keyed on the
+   *depth* `d = r_h(n̂) − m h − |x − c(t)|` below the found horizon's
+   offset surface: on the equator `r_h = 1.0`, so the disk is inside when
+   `m h < 0.1 M` (`m = 4`, `h = 5/256` gives `r_1(eq) = 0.92`,
+   `r_1(axis) = 0.36`). The sphere is the `l = 0` case of this geometry.
+4. **The discrete scheme is not causal at the grid scale.** In the
+   continuum every GH mode lies inside the light cone, so inside the
+   horizon nothing escapes, discontinuities included. Discretely, every
+   centered first-derivative stencil annihilates the Nyquist mode, so the
+   shift advection that makes everything ingoing does not act on it: in
+   the frozen-coefficient model `(∂_t + b ∂_x)² u = a² ∂_x² u` the Nyquist
+   mode's group velocity is `+b s′(π)` — outward at the shift speed for
+   `q = 2`, `5b/3` for `q = 4` — and intermediate wavelengths turn outgoing
+   once `b cos θ > a cos(θ/2)`, where Kreiss–Oliger damping is weak.
+   Grid-scale content generated inside the horizon *can* cross it,
+   attenuated by `e^{−d/ℓ(θ)}` with `ℓ = v_g/σ_KO` cells per e-fold. This
+   is GHSO2's "grid-scale layer cured by `ε_KO ≈ 0.5`" and the reason the
+   margin `m` exists; every interior treatment is a *source* of these
+   modes, and `ℓ_max` for this package's stencils is computed in step 8a
+   before anything else is built.
+
+### Sharp edges for steps 8a–8g
+
+- **`diag` slots are appended, never inserted.** `DIAG_CGH` and `DIAG_MOM`
+  are contiguous ranges reduced as ranges; a slot in the middle of either
+  breaks `block_mapreduce`. New slots start at `NDIAG + 1 = 15`.
+- **Three state writers and no more**: the RHS never mutates `u`; the
+  `:pasted` limiter and step 8b's range projection write it, from RK4's
+  `step_limiter!`/`stage_limiter!` only, and write back **only where they
+  fired** — a run on which nothing fires must be bitwise the run without
+  them, and a test asserts it. Both limiters are `solve` keywords, not
+  `RK4(; …)` arguments (the constructor form is deprecated and silently
+  unread in newer OrdinaryDiffEq).
+- **Masked slots are written through a branch**, never as `keep * value`:
+  the masked region may hold a `NaN`.
+- **Kernels capture no `Type` and no host array**; a device array passed
+  as an argument is fine (`Hsrc` is the precedent, and step 8e's fit
+  coefficients follow it). No `return` anywhere in a kernel body.
+- **Everything generic in `T`**: `T(1//2)`, `oftype`, no decimal literal in
+  a `T` expression; `Float32` rows are recorded, pass or fail.
+- **Price every test**: the suite is 12m31 at one thread; a new `q` or
+  interior variant is a new kernel (about 20 s); a `50 M` run is 19 min at
+  four threads and belongs in `test/hole_runs.jl`, never in the suite.
+- **Long runs go to Symmetry** through `.claude/orchestration/
+  symmetry-run.sh` (the `symmetry-hpc` skill has the mechanics; do not
+  export `JULIA_EXCLUSIVE=1` for the one-thread suite). **Wait for a job
+  with a blocking command or a polling loop; never "arm a monitor" and
+  end the turn** — an agent that does so stalls.
+- **The fixtures**: `hole_fixture` in `test/evolution_cases.jl` (Kerr-Schild
+  `a = 0`, `q = 2`, `N = 8`, `h = 5/64`, `r_0 = 2/5`, `r_1 = 23/20`,
+  `m = 8`, box `5/2`, 120 leaves); `adaptive_hole_fixture` (box `5`,
+  `m = 4`); `gh_outside_shell_norms` reads the `G` points outside `r_1`
+  through a `ShellMask`. `hole_runs.jl` takes section names as arguments;
+  add a section, do not lengthen an existing one.
+- **Work in the worktree you were given**, on your step's branch, commit
+  in TreeAMR's style with measured numbers in the body, do not merge or
+  push, and do not touch `TODO.md` or `notes/`.
+
+## Step 8a — Expectations: anomalous group velocity and leakage
+
+`CODE.md`: "Finite-difference stencils", "Kreiss–Oliger dissipation", "The
+interior" (the margin `m`), `notes/methods-ghso2.md` lines 210–233 and
+`notes/sonic-surface.md` (GHSO2's grid-scale layer). **No `src` change.**
+
+Changes: `test/dispersion.jl`, a standalone analysis script in the manner
+of `hole_runs.jl` — for the frozen-coefficient model
+`(∂_t + b ∂_x)² u = a² ∂_x² u` (`b = β^r`, `a = α√γ^{rr}`, both
+characteristic speeds `−b ± a` negative inside the horizon),
+semi-discretised with the package's own weights (`derivative_weights` of
+order `q` for the advection, the compact second derivative,
+`dissipation_weights` of order `q + 2` scaled by `ε_KO`), the two branches
+`ω(θ)` for `θ = kh ∈ (0, π]`, the damping `σ(θ) = −Im ω`, the group
+velocity `v_g(θ) = Re dω/dk`, and the penetration length
+`ℓ(θ) = max(v_g, 0)/σ` in cells per e-fold; the table of `ℓ_max = max_θ ℓ`
+and its `θ` against `q ∈ {2, 4, 6}`, `ε_KO ∈ {0, 1/4, 1/2, 1}` and `b/a`
+at Kerr-Schild `r = 1.0, 1.2, 1.5, 1.8, 2.0 M`, with the attenuation across
+the default margin `e^{−8/ℓ_max}`; a fully discrete column (RK4 at
+`cfl = 1/4`) if the semi-discrete numbers are marginal. One testset in
+`stencils_tests.jl`: the Nyquist mode's group velocity under the order-`q`
+advection stencil is `b s′(π)` (`+b` at `q = 2`, `+5b/3` at `q = 4`), a
+`Rational` claim about the weights beside the existing damping-sign claim.
+One section `leakage` in `hole_runs.jl`: on `hole_fixture` at `q = 2` and
+`q = 4`, add to the initial data a radial ripple of wavelength `2h`, `4h`,
+`8h` and amplitude `1e−3` confined to a shell at depth `d = 2, 4, 8` cells
+inside the horizon and *outside* `r_1`; evolve to `1 M` at
+`ε_KO ∈ {0, 1/4, 1/2, 1}`; record the L∞ of the difference to the
+unperturbed run in shells `[r_h + k h, r_h + (k+1) h]`, `k = 0 … 8`,
+against time (a `ShellMask` per shell), and fit the attenuation per cell.
+Each run is about two minutes; the section is a Symmetry job.
+
+Accept: the table in `CODE.md` beside the stencil section, marked
+**(measured in step 8a)**; the measured attenuation against the predicted
+`e^{−(d+k)/ℓ_max}`, with the discrepancy recorded; two rules stated under
+"The interior": the stencil margin `m ≥ G + 1` and the *leakage* margin
+`m ≥ n_e ℓ_max` for a wanted attenuation `e^{−n_e}`, both marked
+**(proposed in step 8a)** for the reviewer to confirm; and a recommendation
+on whether `ε_KO` rising inside the layer is needed to make `m = 8` enough.
+The stencil testset in the suite; nothing else added to it.
+
+## Step 8b — The instrument: range projection and validity monitor
+
+`CODE.md`: "The interior" (the variants and the state writers), "Analysis
+quantities" (the record), "Time integration" (`step_limiter!`); TreeHydro's
+`src/floors.jl` and its `CODE.md` "Floors and the atmosphere" are the
+pattern — a pointwise map installed as a stage limiter, writing back only
+where it fired, idempotent on the state, counted, with a bitwise control.
+**Not a reset to a fixed state and not a projection onto flat space**: a
+minimal clamp of each ADM quantity into a range with a floor and a
+ceiling (finding 2 says why the ranges are stated in ADM variables and not
+per component of `h_ab`).
+
+Changes: `src/bounds.jl` — `StateBounds{T}` (`isbits`: `α_min, α_max,
+λ_min, λ_max, β_max, K_max` and the gating depth), a `GHCase` field like
+`horizon` with default `nothing` (`initialdata.jl`, `hole_case`);
+`bounds_project(h, Π, bounds) -> (h′, Π′, hit, nonfinite)` in
+`pointwise.jl`'s style over `metric_quantities`/`adm_from_metric` and the
+pack helpers — a non-finite component takes its Minkowski value and is
+flagged separately; the eigenvalues of `γ_ij` are clamped into
+`[λ_min, λ_max]`; `|β| ≤ β_max`; `α²` into its range; `Π` rescaled by `α`
+and `√γ` and capped at `K_max`; `g′ = (−α² + β·β, β_i, γ′)`; a healthy
+quantity is not touched, and the map is idempotent on the state with an
+`8 eps` relative slack on the eigenvalue test (TreeHydro measured that the
+*flag* is not idempotent without one); `gh_bounds_kernel!` over
+`statearray(u, U)`, gated on the interior's depth (deeper than step 8a's
+leakage margin, which the bounds carry as a radius), writing back only
+where `hit` and `1/0` into the appended `DIAG_BOUNDS = 15`; a validity
+monitor writing the extremes of `det γ`, `α`, `|h|` and `|Π|` over the
+layer and over `ShellMask(r_1, r_1 + G h)`; `gh_stage_limiter!` dispatching
+on `case.bounds` (a no-op for `nothing`), passed as `stage_limiter=` beside
+`step_limiter=gh_step_limiter!` in `evolve!`'s `solve`, and applied once
+after every regrid transfer as TreeHydro does; `BoundsAccounting` (host,
+mutable, one per `evolve!`, shared by every rebuilt `GHProblem`), and the
+record rows `bounds_hits`, `bounds_nonfinite`, `bounds_r_max` (the
+outermost radius that fired), `min_detγ`, `min_α`, `max_h`, `max_Π` for
+the layer and the shell. `max_speed_of`'s `all(isfinite, u)` and the
+record's `finite` become masked to the evolved region: a `NaN` in the core
+is a hit, not the end of the run. `test/bounds_tests.jl`. A section
+`bounds` in `hole_runs.jl`.
+
+Accept: on six synthetic states (one negative eigenvalue; two negative with
+`det γ > 0`; `−g^{tt} < 0`; a `NaN` in one component; an `Inf`; healthy)
+the projection returns a state `metric_quantities` accepts, moves only the
+offending quantity, and is bitwise idempotent; it is the identity on every
+background of `pointwise_backgrounds.jl` off its singular set;
+`hole_fixture` `:damped` to `0.15 M` has zero hits and a `u` bitwise
+identical with and without bounds (the control); the `bounds` section runs
+`N = 6` `:damped` (dies at `21 M` in step 5's table) and `:pasted` (`17 M`)
+with bounds on and records when and at what radius hits start — the
+prediction to confirm or correct is "deep, several `M` before the crash" —
+and whether the run then survives, with 8a's shells outside the horizon
+saying whether the clamp's discontinuity reached it. The kernel's cost
+recorded (prediction: `0.4 %` of a step). One short run added to the suite.
+
+## Step 8c — Calibrate the layer for an inexact target
+
+`CODE.md`: "The interior" (the profiles, `ρ_max`, the three variants and
+their measured table); finding 1 above is the hypothesis under test.
+
+Changes, the smallest that make the experiments possible: `Interior` gets
+an optional `target` background (`isbits`, default `nothing` meaning the
+case's own), read where the kernel evaluates `u_exact`
+(`background_state(bg, t, x)` in the layer branch of `gh_rhs_kernel!`) and
+in `gh_paste_kernel!`; the initial data, the Dirichlet hook, the gauge
+source and the error reference stay on the *true* background, so
+`DIAG_RES` measures the layer's distance from the truth. `chunk_interior`
+gains `ρ_max_fixed` (a rate) as the alternative to `factor/dt`, threaded
+through `evolve!`. A `C²` dissipation profile `ε_KO(r)` in `gauge.jl`
+beside `GaussianDamping` — the exterior's value at and outside `r_1`,
+rising to `ε_in` inside the layer — accepted by `GHCase` where a number is
+today. Test-side target wrappers in `test/evolution_cases.jl` implementing
+`SpacetimeMetrics`' `metric`/`dmetric` interface. A section `calibration`
+in `hole_runs.jl` with the experiments below, on `hole_fixture` (`q = 2`,
+`N = 8`, `h = 5/64`), screened at `5 M` and run to `50 M` where they
+survive, reading `gh_outside_shell_norms`, `residual`, `drift`, the
+finder's `M_irr`, step 8a's shells outside the horizon and step 8b's rows:
+
+- **E0** — `:pasted` with `KerrSchild(1.2, 0)` as target: a 20 % hard
+  step at `r_1`, the discontinuity of the question "can it get out"; the
+  shells outside the horizon to `5 M` at `ε_KO ∈ {1/4, 1/2, 1}` against
+  8a's predicted attenuation.
+- **E3** — `u_fit = u_exact + A (r − r_1)² χ(r)` in `h_tt`, `A ≈ 2/M²`,
+  `χ → 0` by `r_0`: value and slope right, curvature wrong. The
+  `N = 6, 8, 10` sweep to `0.15 M`: does the `G`-point-shell `C_a` still
+  converge at order `q`? Then the scan `n_L ∈ {2G, 3G, 4G, 6G}` cells
+  (through `r_0`) × `ρ_max M ∈ {M/dt, 10, 4, 1}`, and the same scan with
+  `ε_in ∈ {1, 2, 4}`.
+- **E1** — `KerrSchild(1.2, 0)` as the `:damped` target: a valid metric
+  that is not a solution; survival, the shell `C_a`, the drift of `M_irr`.
+- **E2** — `translate(KerrSchild(1, 0), (δ, 0, 0))`, `δ = h` and `4h`: the
+  proxy for a tracking error; the shell `C_a` against `δ`,
+  `center_offset`.
+- Controls: `:frozen` and `:pasted` with the range projection on.
+
+Accept: the scan's table in `CODE.md` "Measured results" and, under "The
+interior", the layer rule for a generic target — ramp thickness in cells,
+`ρ_max` as a rate, `ε_KO(r)` — marked **(measured in step 8c)** where the
+scan decides and **(proposed in step 8c)** where it interpolates; the
+prediction `n_L ≳ G (10 ρ_max M)^{1/3}` confirmed or replaced; a stated
+recommendation — proceed to steps 8d–8f, or to 8g — with the numbers it
+rests on. Nothing long in the suite; the `target` keyword and the profile
+get one short claim each.
+
+## Step 8d — The tracked horizon geometry
+
+`CODE.md`: "The interior" (placement, the radius assertions), "Analysis
+quantities" (the horizon rows), "Refinement and regridding" (the level
+floor); finding 3 above.
+
+Changes: `src/tracking.jl` — `HorizonTrack{T}` (host: `t_find, c_find,
+v_est, r_min, r_max, hlm, source ∈ {:analytic, :found, :coasting}, misses,
+nfinds`), `seed_track(case, t)` from the analytic center and radii,
+`update_track(tr, hz, t)` (velocity from the last two finds, coasting on a
+failed find, a throw naming the staleness after `max_misses`), and
+`track_center(tr) -> HoleCenter` so that every `center_at` consumer — the
+damping profile, the masks, `interior_radius` — is untouched. In
+`interior.jl`: `FittedInterior{T,NM}` (`isbits` kernel argument:
+`center::HoleCenter`, the shape as an `SVector` of *real* spherical-harmonic
+coefficients to `lmax_shape`, converted from the finder's `hlm` through
+`ash_resample` with the conversion tested against `ash_evaluate`; the
+analytic shape `r_h(θ) = R √((R² + a²)/(R² + a² cos²θ))`, boost-contracted,
+for the seed; bounding spheres `r_in, r_out` for the fast paths;
+`offset = m h`, `thickness = n_L h`; `ρ_max`, the ramps, `margin`),
+`fitted_geometry(int, t, x) -> (r, n̂, d)` with the depth `d` of finding 3,
+and `is_frozen`, `interior_profiles`, `in_layer(int, t, x)` (a protocol
+change for both interior types), `core_position` onto the core surface,
+`ShapeMask` for the norms and `footprint_evolved` on the depth;
+`fitted_interior(spec, tr, forest, G; t)` deriving `h` as the coarsest
+spacing among the blocks meeting the annulus (`_box_radii`) and refusing
+`r_min − (m + n_L + core_min) h ≤ 0` by name; `check_interior_radii` and
+`horizon_floor_level`/`level_bounds` on the track's radii, with the
+`singular_radius` check kept for the analytic-target variants only;
+`find_gh_horizon` gains `center=`; the lapse-collapse trigger — `min α`
+over the evolved region (8b's monitor) below a threshold forces a find at
+the next chunk boundary whatever the cadence. Record rows for the track's
+source, center, velocity and radii.
+
+Accept: the depth of an oblate spheroid recovers its axis and equator; the
+tracked geometry of the static Kerr-Schild hole agrees with the analytic
+one to interpolation accuracy after one find; a run whose finder is
+disabled after `0.1 M` coasts and records `:coasting`; a find whose `r_min`
+is perturbed by `G h` is refused; the kernels are bit-identical between an
+`Interior` and a `FittedInterior` holding the same sphere with the same
+profiles; the cost of the shape evaluation per layer point recorded.
+
+## Step 8e — The fitted target and the `:fitted` variant
+
+`CODE.md`: "The interior" (the target, as 8c and 8d amended it), "Initial
+data and backgrounds" (the core rule), "One right-hand-side evaluation";
+findings 1 and 2 above. **Two halves, reviewed between them**: 8e-i is
+host-side and has no kernel; 8e-ii is the kernel, the driver and the
+variant. An agent does 8e-i, reports, and continues to 8e-ii only when the
+reviewer has read 8e-i's numbers.
+
+8e-i — `src/fit.jl`: `build_fit(sampler, int, spec; cont)` — collocation
+points `x_p = c + r_1(n̂_p) n̂_p` on `EquiangularGrid(L)`; `state_sampler(fs,
+q)` through `interpolate_grad` with the footprint guard off *for this call*
+(its window reads `G h` inside `r_1`, where `ρ` is below `1/M` by 8c's
+rule); `analytic_sampler(bg, t)` by central differences along the ray; the
+samples converted to `(log α, β^i, γ_ij, Π_ab)` and their radial
+derivatives; the ansatz `Σ_{l ≥ 1} ỹ_lm(n̂) ρ^l (A_lm + B_lm ρ²)` plus
+`A₀ + B₀ ρ²` for scalars and tensors and `l ≥ 1` only for `β` (a polynomial
+in `x`, regular at the center, a valid metric there by finding 2); one
+`qr` for the 20 right-hand sides, `cont = 2` adding `C ρ⁴` and the
+second-derivative rows for the initial data; `fit_residual`; a validity
+sweep over eight radii × the collocation directions plus the center through
+`bounds_project`, recorded as `fit_valid` and thrown with `min det γ`,
+`min(−g^{tt})` and the remedies if it fails; `InteriorFit` holding the
+coefficients `((L+1)², cont+1, 20)` in a device array through `to_backend`
+(the `Hsrc` precedent). `test/fit_tests.jl`.
+
+Accept 8e-i: the complex→real harmonic conversion agrees with
+`ash_evaluate` to roundoff; the `cont = 2` fit of analytic Kerr-Schild data
+on `r_1` reproduces it there to `L` truncation and to interpolation order,
+and is a valid metric at every swept point for `a = 0` and `a = 9/10`; the
+`g_ab` angular-mean control is asserted *invalid*; the fit of the
+*evolved* state at the end of a `:damped` run agrees with the fit of the
+analytic solution to the run's masked error; the host cost per fit
+recorded (prediction: milliseconds).
+
+8e-ii — `GHProblem` gains `fit` and `with_interior(p, int; fit)`; the
+kernel gains a `fitwork` argument and the branch `INT === :fitted`: core
+`du = −ρ_max (u − u_fit)` with `F` not evaluated, layer
+`du = w F − ρ (u − u_fit)` with the fit evaluated only where `ρ > 0`,
+evolved `du = F`; `fitted_state(int, fitwork, r, n̂)` with the Legendre and
+Chebyshev recurrences shared with the shape evaluation, ADM reassembly, no
+allocation, no `return`; `gh_step_limiter!` and `paste_interior!` no-ops
+for `:fitted`. The driver per chunk: `with_interior` at this chunk's
+`ρ_max` (a rate from the spec); `solve`; `record!` (constraints, error,
+monitor, find, indicator, in that order); `update_track`; the regrid branch
+with `interior=` and `fit=`; `fitted_interior` at `stop`; `build_fit` on
+the ghosts the find just filled; the coefficients of the last two fits
+interpolated linearly in time inside the chunk so the target never jumps.
+Initial data: `case_state_tuple` for `:fitted` evaluates the `cont = 2`
+fit of the *analytic* solution inside `r_1(n̂)`, so a chart whose interior
+is singular gets regular data; `core_position` stays for `:damped`.
+`INTERIOR_VARIANTS` grows by `:fitted`; `FittedSpec{T}` (`margin` from
+8a's rule, `n_L`, `core_min`, `lmax_fit = 8`, `lmax_shape`, `ρ_max`, the
+ramps, the `ε_KO(r)` profile from 8c, `max_misses`) is what
+`case.interior` holds for it.
+
+Accept 8e-ii: one right-hand side with the `:fitted` layer equals
+`:damped`'s outside `r_1` bit-for-bit; `hole_fixture` `:fitted` to `0.15 M`
+has the masked error at `:damped`'s level, `fit_valid = true` and zero
+bounds hits; the same at `Float32`; the kernel cost of the fit recorded
+(prediction: `+5–10 %` per right-hand side at `L = 8`, evaluated only where
+`ρ > 0`).
+
+## Step 8f — The measurement matrix
+
+`CODE.md`: "Measured results", "The interior", milestone G5's acceptance.
+A section `generic` in `hole_runs.jl`; the long rows are Symmetry jobs.
+
+Changes: the section, and `CODE.md`. Every row records survival time,
+masked L2 and L∞, the shell `C_a` (8a's shells outside the horizon
+included), the residual against the truth where one exists, the drift,
+bounds hits and `bounds_r_max`, `fit_valid` and `fit_residual`, the
+horizon's `A`, `M_irr`, `J`, `M_ch` and the tracked `center_offset`:
+
+| case | variants | what it decides |
+|---|---|---|
+| Kerr-Schild `a = 0`, `50 M` | `:damped` (control), `:fitted`, the snapshot target, the fitted-Kerr target | the generic layer costs nothing on the case that needs nothing |
+| Kerr-Schild `a = 9/10`, `h = 5/128` | `:damped`, `:fitted` | the offset-surface layer on an oblate horizon |
+| harmonic `a = 0` and `a = 7/10` | `:fitted` | the small-horizon chart, and the first spin a sphere cannot hold |
+| **harmonic `a = 9/10`** | `:fitted` only | the blocked case; needs `m h < 0.1 M` on the equator (`h ≈ 5/256` at `m = 4`); the last row, and it may need a node |
+| boosted harmonic `a = 0` or `7/10`, `v = 0.3` | `:fitted` tracked against `:damped` analytic | G5's stand-in: tracking, release, staleness |
+| hand-over | `:damped` to `5 M`, then `:fitted` | a newly found horizon's first fit from evolved data |
+| coasting | the finder disabled for five chunks | the geometry without a find |
+
+Accept: the table in `CODE.md`; "The interior" rewritten around geometry,
+target, the ramp rule and `ρ_max` as a rate, with step 5's design kept as
+the analytic control; the `a = 9/10` open question closed, or restated
+with the measured `h` and the recommendation to run G5 at `a = 7/10`;
+G5's acceptance naming the tracked geometry; `CLAUDE.md`'s "Current state"
+and "Commands" updated. Mark the generic interior *(Done.)* under G5's
+entry.
+
+## Step 8g — Excision by a host reference (only if 8f says so)
+
+`CODE.md`: "Possible extensions" (excision), "The interior"; finding 4
+above; `notes/methods-ghso2.md` lines 210–233 for the sonic-surface
+recipe. Run only if the `:fitted` variant does not reach `50 M` on the
+first row of 8f's table.
+
+Changes, test-only, about 150 lines: a `stage_limiter!` that fills every
+owned point within `G` cells inside the sphere `r_1` by degree-`(q+1)`
+Lego extrapolation along the outward axis nearest the normal, reading its
+sources across blocks from `statearray(u, U)` (a host loop, allowed in
+`test/` only); the kernel runs the `:pasted` branch with the paste
+disabled. The `N = 6, 8, 10` sweep to `0.15 M` and the `50 M` run at
+extrapolation degrees `q − 1, q, q + 1`.
+
+Accept: the shell `C_a` at order `q` or not, survival or not, at each
+degree, recorded; the halo table (a block-local fill needs `3G` ghosts:
+stored volume ×4–7 at `N = 8` where `N ≥ 6G + 2` refuses it, ×1.8–2.7 at
+`N = 32`) recorded under "Possible extensions" as excision's price either
+way; if the test says build, the TreeAMR request (a restricted ghost
+exchange over the mask's blocks) written under "Upstream prerequisites".
+
 ## Step 8 — A hole that moves (G5)
 
 `CODE.md`: "The interior" (the moving hole), "Refinement and
 regridding" (what follows for the hole), "Boundaries: Dirichlet" (time
 dependence), milestone G5.
+
+**Starts from step 8f** (added 2026-09-23): the interior is the
+`:fitted` variant on the tracked geometry, with the analytic `:damped`
+layer as the control, and `a` is `9/10` if 8f's last row ran and
+`7/10` otherwise — Erik's call, recorded in `CODE.md`.
 
 Changes: the boosted harmonic Kerr case (`boost(Harmonic(M, a), v)`,
 `|v| ≈ 0.3`, `a = 0.9`); `refinement_buffer` from `|v| · chunk`; the

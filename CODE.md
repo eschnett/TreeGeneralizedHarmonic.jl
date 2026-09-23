@@ -115,7 +115,16 @@ inherited documents live in `notes/`.
   (see [The interior](#the-interior-a-pointwise-damping-layer)). This
   restricts black-hole runs to spacetimes with a known analytic
   solution — which is the proof-of-concept target, and exactly what an
-  excision milestone would be measured against.
+  excision milestone would be measured against. **(Amended 2026-09-23,
+  PLAN.md steps 8a–8g.)** The restriction is lifted by the *generic*
+  interior: the tracked apparent horizon supplies the geometry, a regular
+  fit of the evolved state the relaxation target, and a range projection
+  deep inside the insurance that reports where either fails. Nothing is
+  excised still; excision is priced under [Possible
+  extensions](#possible-extensions) and decided by step 8g's host-side
+  test. The design as those steps amend it is under [The
+  interior](#the-interior-a-pointwise-damping-layer) and the decision
+  under [Open questions](#open-questions).
 - **Analytic initial data, boundary data and gauge sources only.**
   Everything `SpacetimeMetrics` provides: Minkowski, the gauge wave,
   shifted Minkowski, Kerr-Schild, Kerr in harmonic coordinates, and
@@ -3092,7 +3101,14 @@ the design note that would start each:
   the hook slot between the phases. That wants an interior-reading
   device hook and, cleanly, *excised leaves* in TreeAMR (leaves that
   keep their place in the tree but carry no data). GHSO2's recipe for
-  the sonic surface applies unchanged.
+  the sonic surface applies unchanged. **(Priced 2026-09-23, PLAN.md
+  step 8g.)** A fill that keeps the `∂²` stencil's order must reproduce
+  the Taylor polynomial to degree `q + 1`, so a block-local fill needs a
+  `3G` halo — stored volume ×4–7 at `N = 8`, where the vertex invariant
+  `N ≥ 6G + 2` refuses it, ×1.8–2.7 at `N = 32` — or a second ghost
+  exchange per evaluation, and degree `q + 1` amplifies grid-scale noise
+  15–320× at depth 2. Excised leaves are block-granular and serve static
+  holes only.
 - **The damped harmonic gauge driver** (Lindblom–Szilágyi 2009;
   Szilágyi–Lindblom–Scheel 2009): `H_a` algebraic in `g` and
   `log(√γ/α)`, its gradient by the chain rule through `∂_a g`, no extra
@@ -3134,7 +3150,8 @@ the design note that would start each:
   fragile across resolutions.
 - **Smoothing the interior** for a spacetime without an analytic
   solution — the interior layer relaxing toward something other than
-  the exact solution — a research question about GH gauges.
+  the exact solution. **(Became PLAN.md step 8e on 2026-09-23**: the
+  fitted target; see [Open questions](#open-questions).**)**
 - **A hyperboloidal outer layer**, which this author's electrodynamics
   packages rehearse and which would retire the outer boundary question.
 - **Matter**, through the source slot: TreeHydro's scheme on this
@@ -3161,6 +3178,30 @@ spheroidal radius `R`, or run G5 at `a = 0.7` — are written out under
 [The interior](#the-interior-a-pointwise-damping-layer). Step 8 has to
 pick one before it can run the case this document is named for; nothing
 in G4 depends on it, and Kerr-Schild at `a = 9/10` runs today.
+
+**Answered in design review on 2026-09-23 — neither, and PLAN.md's steps
+8a–8g build and measure the answer.** The layer is keyed on the *found*
+horizon's offset surface `r_1(n̂) = r_h(n̂) − m h` — a sphere on the
+*tracked* radii does not contain the disk either, since `0.436 − m h` is
+far inside it, while the offset surface does once `m h < 0.1 M` on the
+equator — and it relaxes toward a regular fit of the evolved state
+instead of the analytic solution, so no singular set has to be contained
+and no analytic interior is needed: the same treatment serves a spinning,
+a moving and a newly found horizon. The review found three more things
+the steps rest on and measure: `ρ_max = 1/dt` is a *grid* rate (about
+`107/M` on the suite's fixture), which makes today's layer a paste two
+cells inside `r_1` that survives to `50 M` only because its target is
+exact — a generic target needs a thick ramp at a physical rate; the
+Lorentzian metrics are not convex in `g_ab` (the angular mean of
+Kerr-Schild `g_ab` inside the horizon has Euclidean signature), so every
+blend and clamp is made in ADM variables; and the discrete scheme's
+grid-scale modes have *outgoing* group velocity inside the horizon (every
+centered first-derivative stencil annihilates the Nyquist mode, so the
+shift advection does not act on it), attenuated only by dissipation —
+step 8a computes their penetration length for this package's stencils
+before anything is built, and it is what the margin `m` is measured
+against. `a = 7/10` stays the fallback for G5 if the last row of step
+8f's matrix does not fit a node.
 
 Still proposed, to be confirmed or amended by the milestones that
 first touch them:
