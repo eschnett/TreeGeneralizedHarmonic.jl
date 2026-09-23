@@ -63,10 +63,13 @@ interior, and its spherical core cannot hold harmonic Kerr's singular
 disk at `a = 9/10`, which is G5's case. Steps 8a (the leakage margin),
 8b (the range projection), 8c (the calibration of the layer for an
 inexact target), 8c′ (`ρ_max = 4/M` the default, decided 2026-09-23) and
-8d (the tracked horizon geometry) are done, and so is step 8e's host half,
-8e-i (the fitted target, its samplers, its validity sweep and its evaluator,
-and the boost-sign fix); 8e-ii — the kernel, the driver's per-chunk fit and
-the `:fitted` variant — is next, after review of 8e-i's numbers.**
+8d (the tracked horizon geometry) and 8e (the fitted target and the
+`:fitted` variant, with the boost-sign fix) are done; step 8f, the
+measurement matrix, is next. The proof-of-concept chart — harmonic Kerr at
+`a = 9/10` — now has `:fitted` initial data that is finite and a metric
+everywhere, and its run ends in the first chunk: the offset surface's data
+is not representable by the fit at `h = 5/256` (`CODE.md`, "The fitted
+target", piece 12).**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -221,8 +224,22 @@ twenty right-hand sides, rows weighted by `fit_row_weights`), `build_fit`
 with its validity sweep `fit_sweep`, `FitParams` (`isbits`) and
 `InteriorFit`, and the kernel-callable `fit_variables_at`/`fit_state`.
 `FittedSpec` has `lmax_fit = 8`. `interior.jl` has `hole_velocity` beside
-`hole_mass`, and `GHCase` derives its velocity from it. Nothing evaluates
-the fit in a kernel yet; `test/fit_tests.jl` is its file.
+`hole_mass`, and `GHCase` derives its velocity from it. `test/fit_tests.jl`
+is its file.
+
+From step 8e-ii there is a **`:fitted` variant**: `INTERIOR_VARIANTS` has
+`:fitted` (a `FittedInterior`'s only), `FittedSpec` has `target_bounds`
+(derived by `derive_target_bounds` when `nothing`), `fit.jl` has the
+40-variable target cache (`target_cache`, `fit_target_kernel!`,
+`fill_target!`) and `fitted_state_kernel!` for the initial data,
+`evolution.jl`'s `GHProblem` carries `target`, `fits`, `t_target` and has
+`refill_target`, the kernel's `:fitted` core and layer read the cache,
+`constraints.jl`'s error kernel measures the `:fitted` residual against it,
+and `driver.jl` builds the analytic `cont = 1` fit for the initial data,
+`refit!`s the state at every row, refills at every chunk start and splits a
+moving hole's chunk into pieces of `h/(4|v|)`. `evolve!` has the study knobs
+`fit_initial_cont` and `fit_initial_depth`. `hole_runs.jl` has a `fitted`
+section.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -447,6 +464,18 @@ julia --project=. --threads=4 test/hole_runs.jl tracked
 julia --project=. --threads=4 test/hole_runs.jl tracked=1/2
 ```
 
+The `fitted` section (added in step 8e) is not in the default list either:
+three rows, `fitted=fixture` (the suite's tracked hole to `1 M` under four
+choices of initial data against `:damped`, two minutes at four threads),
+`fitted=boosted` (a moving seed on 848 blocks, `:fitted` and `:damped`,
+ninety seconds) and `fitted=harmonic` (harmonic Kerr at `a = 9/10` on 2472
+blocks at `h = 5/256` — the initial data, one right-hand side, and the run,
+which ends in its first chunk; three minutes and about 3 GB):
+
+```bash
+julia --project=. --threads=4 test/hole_runs.jl fitted=fixture,boosted,harmonic
+```
+
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a
 64-core EPYC node, which is what makes them parallel — a node *core* is
@@ -617,9 +646,35 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   so its fit needs bounds of its own before `fit_state` projects into them.
 - **The fit's evaluator costs `2.2 µs` a point at `L = 8`** (`cont = 1`;
   `2.9 µs` at `cont = 2`), twenty-three analytic `u_exact`s: the
-  `20 × 81 × 2` contraction, not the recurrence (`85 ns`). Price a kernel
-  that evaluates it at every layer point before assuming `PLAN.md`'s
-  `+5–10 %`.
+  `20 × 81 × 2` contraction, not the recurrence (`85 ns`). That is why the
+  right-hand side reads a **cache** and never calls it (decided in review,
+  step 8e): a fill is `0.4`–`0.7` of a right-hand side, once a chunk.
+- **The cache is refilled when the center moves** (step 8e). It holds the
+  target on the grid at the fill time plus a slope in time; a moving
+  geometry would leave it behind, so a chunk whose tracked center would move
+  more than `h/4` is solved in pieces with a refill between, and the fill
+  covers the offset surface's bounding sphere plus one cell. A new mesh
+  (regrid) gets a new cache, filled at the next chunk's start. Change the
+  geometry of a `:fitted` problem and you must refill (`refill_target`).
+- **`:fitted` initial data are `C¹` at `r_1`, and it shows** (step 8e): the
+  `cont = 1` fit of the analytic solution inside the offset surface
+  (decided in review — `cont = 2` is not a metric on harmonic `a = 9/10`)
+  has the right value and slope and the wrong curvature, which the compact
+  second difference reads as an `O(1)` error at the first evolved points:
+  the fixture's masked error is `4.3×` `:damped`'s at `0.15 M`, `1.24×` at
+  `1 M`. `fit_initial_depth = n_L h` (the switch at the core surface) removes
+  it wherever the analytic solution is regular on the layer. Do not read a
+  `:fitted` run's early error as the target's.
+- **On harmonic Kerr at `a = 9/10` the fit is not good enough** (measured in
+  step 8e): with `m = 4` at `h = 5/256` the ring is `0.02 M` inside `r_1` at
+  the equator, the data there are a thousand times the axis's, and a
+  degree-`L + 2` polynomial is off between and below its collocation points
+  by `10³`–`10⁵` times the analytic second difference off the equator; the
+  run ends in its first chunk. `Π̃ = (α/√γ)Π` as the fitted momentum and
+  `L = 12` shrink that 20–650× each (host-side probe); 8f decides.
+- **A tracked run's first find starts from the seed's shape** (step 8e), not
+  a sphere of the mean radius, which on an oblate horizon can lie inside the
+  offset surface and be refused by the footprint guard.
 - **The depth replaces the radius** (step 8d). On the tracked geometry the
   layer is `0 < d ≤ n_L h` below the offset surface `r_1(n̂) = r_h(n̂) − m h`,
   so no radius alone says whether a point is in it: `in_layer(int, t, x)`
