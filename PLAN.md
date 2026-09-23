@@ -7,7 +7,7 @@ changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
 last milestone is marked *(Done.)* in `CODE.md`.
 
-**Steps 0–7, 8a and 8b are done. Step 8c is next** — the generic interior
+**Steps 0–7 and 8a–8c are done. Step 8d is next** — the generic interior
 (steps 8a–8g, added 2026-09-23), which step 8 needs before it can run
 its case.
 
@@ -701,6 +701,36 @@ get one short claim each.
 quantities" (the horizon rows), "Refinement and regridding" (the level
 floor); finding 3 above.
 
+**What step 8c hands over** (`CODE.md`, "The layer for an inexact target"
+and the step 8c entry under "Measured results"):
+
+- **The layer rule, measured on the fixture**: `ρ_max = 4/M` as a fixed
+  physical rate (`evolve!(…; ρ_max_fixed)` exists; the code's default is
+  still `1/dt` for the analytic `:damped` layer until the reviewer takes
+  the proposal), a ramp `n_L = max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)` cells over
+  which `ρ` rises from `0` at `r_1` to `ρ_max` (`8` at `q = 2`, `12` at
+  `q = 4`), `w` turning over in the inner half, and a *constant* `ε_KO`
+  (the `HorizonDissipation` profile makes a smooth transition worse and
+  stays off). `FittedInterior`'s `thickness` is `n_L h` by this rule.
+- **The tracked center must be good to about one cell.** A displaced
+  target at `δ = h` costs the exterior nothing; at `4h` it costs 3–4× or
+  ends the run. So `update_track` records the tracked center's distance
+  from the analytic one in cells wherever a case has one, the velocity
+  estimate's error times the chunk must stay below `h` for a moving hole
+  (a refusal or a recorded warning, decide and mark it), and the finder's
+  own accuracy (`center_offset` at `N_ah = 12–16`, `h = 5/64`: about `1e−3`
+  on the static hole) is what makes that achievable.
+- **Every run carries the range projection as a passive instrument**; its
+  hit count stayed zero on every surviving run of 8c, and the shell
+  validity rows are the signal of a failing transition.
+- **The leakage margin depends on the background** (step 8a's table for the
+  spinning holes): Kerr-Schild `a = 9/10` gets under one e-fold from
+  `m = 8` at `h = 5/256`, the harmonic equator 7–10 from `m = 4`. Keep
+  `m = 8` as the default and let `fitted_interior` report the path
+  integral `∫ dr/(h ℓ_max)` across its margin, computed by the functions
+  of `test/dispersion.jl` moved into `src/` if that is what it takes, so
+  that step 8f's rows carry their e-folds.
+
 Changes: `src/tracking.jl` — `HorizonTrack{T}` (host: `t_find, c_find,
 v_est, r_min, r_max, hlm, source ∈ {:analytic, :found, :coasting}, misses,
 nfinds`), `seed_track(case, t)` from the analytic center and radii,
@@ -741,7 +771,23 @@ profiles; the cost of the shape evaluation per layer point recorded.
 
 `CODE.md`: "The interior" (the target, as 8c and 8d amended it), "Initial
 data and backgrounds" (the core rule), "One right-hand-side evaluation";
-findings 1 and 2 above. **Two halves, reviewed between them**: 8e-i is
+findings 1 and 2 above. **What step 8c hands over**: the layer rule above
+(`ρ_max = 4/M`, `n_L = max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)`, constant `ε_KO`),
+under which a 20 % mass error, a curvature error of `4/M²` and a
+displacement of `h` each leave the exterior where the exact target leaves
+it (shell `C_a` `0.029–0.039`, masked error `0.027–0.032`, `M_irr` `0.9972`,
+flat from `10 M` to `50 M`, no projection hit); and the four things the
+fitted target must therefore be: **smooth** (a hard step at `r_1` gets
+out at about a percent and ends the run at `ε_KO ≤ 1/2`), **a valid
+metric at every point of the layer** (E3's other sign drove `α²` through
+zero; the validity sweep below is not optional), **regular on the layer**
+(a singular point of the target on a grid point ends the run at `t = 0`,
+and nothing checked it — the fit is a polynomial, so this is a check that
+the sampled data was finite), and **centered to about a cell** (8d's job).
+Continuity in *time* is the fifth: the coefficients are interpolated
+linearly between the last two fits. `FittedSpec`'s defaults are the rule's
+numbers, and the driver applies its rate through `chunk_interior`'s fixed
+path. **Two halves, reviewed between them**: 8e-i is
 host-side and has no kernel; 8e-ii is the kernel, the driver and the
 variant. An agent does 8e-i, reports, and continues to 8e-ii only when the
 reviewer has read 8e-i's numbers.
