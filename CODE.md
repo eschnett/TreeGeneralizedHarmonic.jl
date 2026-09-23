@@ -3644,7 +3644,14 @@ changes no other bit of the state; `evolved_nonfinite` sees the evolved one
 and not the layer's. **The control holds bit for bit**: `:damped` to
 `3/20 M` with the projection on makes `4 · nsteps + 1` calls, fires on none,
 and ends `isequal` to the run without it, with every record row
-identical.
+identical. **Across a regrid too (measured in step 8b, once, not in the
+suite)**: `refinement_tests.jl`'s moving-mesh run (the adaptive fixture from
+a hand-built 127-block mesh, one regrid to 120, `t = 1/10 M`, gate `0.625`)
+with the projection on makes `26 = 4 · 6 steps + 1 + 1 regrid` calls — the
+post-regrid application included — hands the run's `BoundsAccounting` to
+the rebuilt problem, fires on none, and ends `isequal` to the run without
+it. It is not in the suite because the suite's budget for this step is one
+short run, and the control above is it.
 
 **What it costs** (`hole_runs.jl bounds=cost`, the fixture's `N = 8` mesh,
 four threads on the development machine; prediction `0.4 %` of a step):
