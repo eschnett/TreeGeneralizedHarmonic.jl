@@ -48,6 +48,7 @@ using TreeGeneralizedHarmonic
     # hierarchy and the one the indicator chose — and because a failure in
     # either is cheaper to read than one in the analysis on top of them.
     include("horizon_tests.jl")
+    include("bounds_tests.jl")      # step 8b: the range projection, and its control
     include("type_tests.jl")
     include("threading_tests.jl")
 end

@@ -1232,6 +1232,119 @@ with a growing layer of compressed features at the freezing radius
 whose amplitude the dissipation may or may not saturate; on the moving
 hole `:frozen` fails and the other two agree.
 
+**The range projection: the third and last writer of the state (added in
+step 8b**, `src/bounds.jl`**).** Every interior treatment above is a
+*source* of states the equations cannot continue from — step 5 measured
+two of the three ending in "`√(det γ)` of a state that is no longer a
+metric" — and the generic interior of steps 8c–8e will be more so, since
+its target is no longer an exact solution. So there is an instrument that
+catches such a state where it first appears, repairs it minimally, and
+says when and where it did: a pointwise map of `(h, Π)` at every owned
+point with `r < r_gate`, installed as RK4's **stage limiter**,
+
+ 1. a **non-finite** component takes its Minkowski value, `0`, and is
+    counted separately — it is a different failure;
+ 2. the **spectrum of `γ_ij`** is clamped into `[λ_min, λ_max]` by a
+    symmetric eigendecomposition (Jacobi; a rescale to `det γ ≥ δ` would
+    not do, since two negative eigenvalues have a positive determinant);
+ 3. the **shift** `|β| = √(β_iγ^{ij}β_j)`, with the projected `γ`, is capped
+    at `β_max` by scaling `β_i`;
+ 4. the **lapse** `α² = β_iβ^i − g_tt` is clamped into `[α_min², α_max²]` by
+    moving `g_tt` alone;
+ 5. the **momentum** is rescaled by `(α/α′)(√γ′/√γ)` where the lapse was
+    raised from a positive value — so that `(α/√γ)Π`, the term the first
+    evolution equation adds to `∂_t h`, is unchanged — and its scale is
+    capped, `max_ab |(α′/√γ′)Π_ab| ≤ K_max`;
+
+and `g′ = (−α′² + β′·β′, β′_i, γ′_ij)` reassembled **only in the blocks
+that moved**. It is TreeHydro's atmosphere reset in shape (a pointwise map
+in the integrator's limiter hook, written back only where it fired,
+idempotent, counted, with a bitwise control) and deliberately *not* in
+substance, for two reasons that are both findings of the design review:
+
+- **Not a reset to a fixed state.** A metric that has left the range of
+  metrics is not vacuum dust: typically one quantity is wrong — a
+  spectrum through zero, a lapse through zero — and the rest is the
+  solution. Replacing the point would put an `O(1)` discontinuity into
+  the data a layer stencil reads (Kerr-Schild's `|h|` is about 5 at the
+  core's edge, against `0` for any fixed state), and the map is built to
+  move the offending quantity and leave the others their bits.
+- **Not a clamp per component of `h_ab`, and not a projection onto flat
+  space**, because the Lorentzian metrics are not convex in `g_ab`: the
+  angular mean of Kerr-Schild `g_ab` on the sphere `r = 1.15 M` has
+  `g_tt = +0.74`, a Euclidean signature (`PLAN.md`, finding 2), so a box
+  in `h_ab` contains non-metrics and excludes metrics. The ranges are
+  stated in ADM variables, where `α > 0` and `γ ≻ 0` are convex, and each
+  clamp is the nearest point of its own range.
+
+**Three writers, and no fourth**: the right-hand side never mutates `u`
+(the integrator's arithmetic is the first writer); the `:pasted` paste of
+the ball `r < r_1`, from the step limiter, is the second; the range
+projection, from the stage limiter, is the third. Both limiters are
+`solve` keywords (`stage_limiter`, `step_limiter`), not `RK4(; …)`
+arguments, whose constructor form is deprecated. The projection also runs
+once on the initial data and once after every regrid transfer, before the
+paste, which is the order RK4 applies the two — neither state went
+through a stage, and a prolongation into a fresh fine block is unlimited
+(TreeHydro's reason for the same call) **(proposed in step 8b**, for the
+initial data**)**.
+
+**Why a stage limiter and not a step limiter**: what it guards against is
+`F` evaluated on a stage vector that is not a metric, and a `NaN` in a
+stage is a `NaN` in the next stage's `F` at every point whose stencil
+reads it. Read against `OrdinaryDiffEqLowOrderRK` 2.2.5, RK4 calls the
+stage limiter on its three intermediate stages and then on `u`, before
+the FSAL evaluation and before the step limiter: four calls per step.
+
+**Where: the gate.** The projection's output is a clamp, and a clamp is a
+kink wherever it fires; a kink an evolved stencil reads is an `O(1)`
+right-hand-side error outside the layer. So it runs only at `r < r_gate`,
+and `check_bounds_gate` asserts at every regrid, beside the interior's
+radius checks, that `r_gate ≤ r_1 − R h` with `R` the stencils' Euclidean
+reach in spacings (`G` for `q ≤ 4`, the mixed derivative's `√2 · q/2` from
+`q = 6`). The proposed gate is **`r_gate = r_1 − 2 G h`** — twice the reach
+— **(proposed in step 8b**, until step 8a's leakage margin exists to
+replace the factor 2**)**; on the suite's fixture that is `0.8375` at
+`h = 5/64`, with `8.4 %` of the owned points inside it. The outer part of
+the layer, `r_gate ≤ r < r_1`, is unguarded by construction.
+
+**The proposed ranges** (`default_bounds`; a `StateBounds` has no default
+for any of them and `hole_case` has none beyond `bounds = nothing`)
+**(proposed in step 8b)**: `α ∈ [1/50, 50]`, `λ(γ) ∈ [1/100, 1000]`,
+`|β| ≤ 10`, `K_max = 100/M`, against the step-5 fixture's deepest data —
+Kerr-Schild at `r_0 = 2/5 M`, where `α = 0.41`, `λ = (1, 1, 6)`, `|β| = 2.04`
+and `max |(α/√γ)Π| = 10.4/M` — so that a healthy interior never fires.
+Flat space must be inside every range, and the constructor refuses one
+that excludes it: the non-finite repair writes Minkowski's components,
+and a repair the next check moves again is not idempotent.
+
+**Idempotent on the state and on the flag (measured in step 8b).** Every
+test carries a slack of `8 eps` of the scale of the terms it is made of —
+`‖γ‖` for the spectrum, `1 + |h_tt| + β_iβ^i` for `α²`, of which it is a
+difference — and every clamp moves to its bound exactly. TreeHydro found
+its floor's *state* a fixed point and its *flag* not; here the slack alone
+was not enough either: `β_iγ^{ij}β_j` carries `cond(γ)·eps` of rounding, and
+on 20 000 random states with `|h_ab| ≤ 5`, `|Π_ab| ≤ 100`, **18 re-fired**
+on the shift (402 at `|h_ab| ≤ 50`), moving the state by ulps. So a fired
+result is re-tested by exactly the arithmetic the next call will apply
+to the stored state — the ADM split is explicit scalar code, which Julia
+does not contract into fused multiply-adds, so it is the same bits at
+every call site — and re-projected until it passes (at most four times).
+With that, **zero** of 80 000 random states re-fire or move on a second
+application, at every scale.
+
+**Where nothing fires, the run is bit for bit the run without it.** That
+is the control the suite asserts, and it is what the "written back only
+where it fired" rule buys: the fixture's `:damped` run to `3/20 M` with
+the projection on makes `4 · nsteps + 1` limiter calls, fires on none, and
+ends in a state `isequal` to the run without it — so every comparison of
+a run with the projection against one without compares the projection and
+not roundoff.
+
+**What it does on the two runs that end** is measured under [Measured
+results](#the-range-projection-step-8b): step 5's `N = 6` `:damped` and
+`N = 8` `:pasted`.
+
 **What the layer costs.** `u_exact` is evaluated at every point of the
 layer at every RHS evaluation — one forward-mode dual pass through the
 background's metric per point, about a microsecond on a CPU by GHSO2's
@@ -1621,7 +1734,10 @@ tableau to keep it, which is worth knowing before G3 lengthens anything.
 The relaxation rate of the interior layer is bounded by RK4's stability
 on the negative real axis, and `ρ_max · dt = 1` keeps it well inside;
 the `:pasted` variant uses RK4's `step_limiter!(u, integrator, p, t)`
-hook, the one place the state may be written outside the RHS. Adaptive
+hook, and step 8b's range projection its `stage_limiter!` — the two places
+the state may be written outside the RHS, both passed as `solve` keywords
+**(amended in step 8b**; see [The
+interior](#the-interior-a-pointwise-damping-layer)**)**. Adaptive
 stepping is not used: the step is set by the CFL bound and
 `volume_weighted_norm` is not wired in as an `internalnorm` (TreeAMR's
 open question, not this package's).
@@ -1647,6 +1763,8 @@ the tests assert on them.
 | error against the analytic solution | `|u − u_exact|` per component into `diag`; masked volume-weighted L2 and L∞ | every chunk |
 | interior residual | `|u − u_exact|` inside the layer, L∞, the layer's own health | every chunk |
 | mesh statistics | leaf count per level, finest spacing, the indicator's `τ_max`, the refinement centroid against the analytic center | every chunk |
+| range projection | `bounds_hits` (points moved, summed over every stage-limiter call of the chunk), `bounds_nonfinite` (of those, points with a non-finite component), `bounds_r_max` (the outermost radius it fired at, `−1` where it did not); `nothing` for a case without bounds (added in step 8b) | every chunk |
+| validity monitor | over the layer `r_0 ≤ r < r_1` and over the `G` points outside it: `min_detγ`, `min_α` (the *signed* lapse, negative where `g^{tt} > 0`), `max_h`, `max_Π` (the largest component magnitudes) — `min_detγ_layer` … `max_Π_shell` (added in step 8b) | every chunk |
 
 **Constraints.** Both kernels mask the interior `r < r_1` and write zero
 inside it; the modified region is not a numerical solution. Norms are
@@ -1730,6 +1848,39 @@ point — and three decisions:
   A general `ShellMask` does the same job for any norm, which is how
   the three interior variants are compared over "the `G` points outside
   `r_1`".
+
+**(Implemented in step 8b**, `src/bounds.jl`**.)** The range projection's
+rows and the validity monitor's are written at every chunk, and three
+things the writing settled:
+
+- **The hit count is per call, summed over the chunk (proposed in step
+  8b).** A stage's flags are overwritten by the next stage's, so a count
+  read off the `DIAG_BOUNDS` slot once per chunk would say how many points
+  fired in the chunk's last stage, not in the chunk. `BoundsAccounting` —
+  host-side, mutable, one per run, shared by every problem the run
+  rebuilds, TreeHydro's `ResetAccounting` — adds each call's
+  `block_mapreduce` of the slot; a point that fires in every stage of a
+  step is four hits. It also keeps the time and radius of the first hit
+  for the run, which is the number the "when do hits start" question is
+  asked of.
+- **The validity monitor runs whether or not the projection is on.** The
+  projection says *that* a state left the range and where; the monitor
+  says how close the layer and the evolved points next to it are to
+  leaving it, so a run that ends in a degenerate metric has its approach
+  on the record. The lapse is the signed `sign(α²)√|α²|` from the ADM split
+  rather than `metric_quantities`' `1/√(−g^{tt})`, which has no value for
+  the states the row exists to report.
+- **`finite` is the evolved region's (amended in step 8b).** It was
+  `all(isfinite, u)` over the whole state, which with `max_speed_of`'s
+  identical check ended a run at the first `NaN` in the frozen core; both
+  now count non-finite values at `r ≥ r_1` (`evolved_nonfinite`). A `NaN`
+  in the core is the projection's business, not the end of the run. The
+  *initial data* is still checked everywhere, before anything else: a
+  non-finite value there is a case whose analytic solution is singular
+  somewhere the mesh reaches, which is the configuration error step 5's
+  check was written for, and not something to repair.
+  `diag` has **22** slots from step 8b: the projection's three, the
+  monitor's four and the non-finite count, appended.
 
 **(Implemented and measured in step 6.)** The mesh-statistics row gains
 `τ_max` and the refinement centroid, and both come out of the flagging pass
@@ -2009,6 +2160,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the **five** `Val`s and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. Step 5 split the streaming body out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and added `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3) |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook |
+| `src/bounds.jl` | the range projection (added in step 8b): `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
 | `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii, and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes |
 | `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4), or `hole_forest`'s nested shells around a hole (added in step 5, **here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
@@ -2017,7 +2169,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)** |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both

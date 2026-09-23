@@ -162,6 +162,15 @@ it at about one right-hand-side evaluation and compiles in 18 s). **Every
 norm is masked** by the interior at that chunk's `t`: the layer and the core
 are not a numerical solution and are not reported as one.
 
+Every row has the **validity monitor** (added in step 8b): the minimum of
+`det γ`, the minimum signed lapse and the largest `|h_ab|` and `|Π_ab|` over
+the layer and over the `G` points outside `r_1` ([`validity_rows`](@ref)) —
+and the **range projection's** counts for the chunk, `bounds_hits`,
+`bounds_nonfinite` and `bounds_r_max` (the outermost radius it fired at, `−1`
+where it did not), which are `nothing` for a case whose `bounds` is
+`nothing`. `finite` is the evolved region's: a `NaN` in the frozen core is
+the projection's business, not the end of the run ([`evolved_nonfinite`](@ref)).
+
 A case that carries a [`Horizon`](@ref) adds the horizon rows every `k`-th
 chunk (added in step 7): the found `origin` and its distance from the
 analytic center, the coordinate radii `r_min`, `r_mean`, `r_max`, the
@@ -203,6 +212,19 @@ G5.
 analysis record for that chunk already written — once at `t = 0` and once
 per chunk — which is what keeps a viewer free of any time stepping of its
 own.
+
+## The range projection (added in step 8b)
+
+A case with [`StateBounds`](@ref) gets `CODE.md`'s third state writer:
+[`gh_stage_limiter!`](@ref) is passed to `solve` as its `stage_limiter`,
+beside the `:pasted` variant's `step_limiter`, and runs on every stage
+vector; the same projection is applied once to the initial data and once to
+every freshly regridded state, neither of which went through a stage —
+TreeHydro's atmosphere reset, applied where TreeHydro applies it. One
+[`BoundsAccounting`](@ref) is made per run, handed to every problem the run
+builds, and returned as `bounds`; for a case without bounds the limiter is
+a no-op and `bounds` is `nothing`. Where the projection never fires, the
+run is **bit for bit** the run without it.
 """
 evolve!(case::GHCase{T}; kwargs...) where {T} = evolve!(T, case; kwargs...)
 
@@ -286,13 +308,28 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     end
     u = statevector(U)
     gather!(u, U)
+    # The initial data must be finite *everywhere*, core and layer included:
+    # the core rule makes it so, and a non-finite value here is a case whose
+    # analytic solution is singular somewhere the mesh reaches — a
+    # configuration error, not something for the range projection to repair
+    # (kept unmasked in step 8b, where the per-chunk check became the
+    # evolved region's).
+    all(isfinite, u) || throw(ArgumentError(
+        "the initial data is not finite: $(count(!isfinite, u)) of " *
+        "$(length(u)) values are NaN or Inf. The core rule fills every point " *
+        "inside r_0 from the sphere r_0, so this is a case whose analytic " *
+        "solution is singular somewhere the mesh reaches — check r_0 against " *
+        "the chart's singular set and against where |h| is still moderate."))
 
     # The problem is built once here — the gauge source is sampled in it,
     # which is the expensive setup phase — and only its interior is
     # replaced per chunk. Its constructor is also where `CODE.md`'s two
     # interior radius requirements are asserted, so the mesh the cycle just
-    # chose is checked before anything is integrated on it.
-    p0 = GHProblem(U, schedule, case; q=q, t=zero(T))
+    # chose is checked before anything is integrated on it. The range
+    # projection's record is made once, here, and every problem the run
+    # builds shares it (step 8b).
+    acc = case.bounds === nothing ? nothing : BoundsAccounting()
+    p0 = GHProblem(U, schedule, case; q=q, t=zero(T), accounting=acc)
     shell = horizon_shell(case)
     # **The record is `Float64` whatever the run computes in.** That is
     # what `precision.jl`'s `tofloat64` exists for: the analysis time
@@ -343,6 +380,12 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
               gh_indicator!(p, u, t; buffer=bufferwidth)
         centroid = ind === nothing || ind.centroid === nothing ? nothing :
                    ntuple(d -> R(ind.centroid[d]), 3)
+        # The range projection's counts since the previous row, and the
+        # validity monitor (step 8b). Both read the state array and nothing
+        # the rows above left in `diag`.
+        bh = acc === nothing ? (hits=nothing, nonfinite=nothing,
+                                r_max=nothing) : take_chunk!(acc)
+        val = validity_rows(p, u, t)
         rec = (t=R(t), dt=R(dt), steps=steps, λ=R(λ), λ_end=R(λ_end),
                cfl=R(cflnum),
                gauge_l2=R(maximum(c.gauge_l2)),
@@ -361,9 +404,11 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                centroid=centroid,
                centroid_offset=centroid === nothing ? nothing :
                                R(centroid_offset(case, t, ind.centroid)),
+               bounds_hits=bh.hits, bounds_nonfinite=bh.nonfinite,
+               bounds_r_max=bh.r_max, val...,
                nblocks=nleaves(forest), levels=forest_levels(forest),
                h=R(minimum_spacing(T, forest)),
-               finite=all(isfinite, u))
+               finite=evolved_nonfinite(p, u, t) == 0)
         push!(records, rec)
         observer === nothing || observer(p, t, u)
         return ind
@@ -375,6 +420,11 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     λ_initial = max_speed_of(p0, u, zero(T))
     dt0 = cfl * minimum_spacing(T, forest) / λ_initial
     p0 = with_interior(p0, chunk_interior(case, dt0, ρ_max_factor))
+    # The initial data has not been through a stage, so neither limiter
+    # has seen it: the range projection first, in the order RK4 applies
+    # the two (stage, then step), and the paste after it **(proposed in
+    # step 8b** — on analytic data neither fires**)**.
+    apply_bounds!(p0, u, zero(T))
     paste_interior!(p0, u, zero(T))
     record!(p0, zero(T), u, zero(T), 0, λ_initial, λ_initial, zero(T))
 
@@ -397,9 +447,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         # the constructor form is deprecated in the resolved
         # `OrdinaryDiffEqCore` and warns once per solve, which is once per
         # chunk (noted in step 5; `PLAN.md`'s sharp edge named the older
-        # spelling). The hook and its signature are unchanged.
+        # spelling). The hook and its signature are unchanged. The
+        # `stage_limiter` beside it is step 8b's range projection, a no-op
+        # for a case without bounds; both are `solve` keywords for the same
+        # reason.
         sol = solve(ODEProblem(gh_rhs!, u, (tstart, stop), p), RK4();
                     dt=dt_used, adaptive=false, save_everystep=false,
+                    stage_limiter=gh_stage_limiter!,
                     step_limiter=gh_step_limiter!)
         u = sol.u[end]
         nsteps += steps
@@ -426,12 +480,17 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
             if moved
                 nregrids += 1
                 schedule = GhostSchedule(U, ops)
-                p = GHProblem(U, schedule, case; q=q, t=stop)
+                p = GHProblem(U, schedule, case; q=q, t=stop, accounting=acc)
                 u = statevector(U)
                 gather!(u, U)
-                # The transferred state has not been through a step, so the
-                # `:pasted` variant's limiter has not run on it; every other
-                # variant compiles this away.
+                # The transferred state has not been through a step, so
+                # neither limiter has run on it: the range projection (a
+                # no-op without bounds) — the prolongation into a fresh fine
+                # block is unlimited and can leave an owned point outside
+                # every range, TreeHydro's reason for the same call — and
+                # the `:pasted` variant's paste, which every other variant
+                # compiles away.
+                apply_bounds!(p, u, stop)
                 paste_interior!(p, u, stop)
             end
         end
@@ -439,7 +498,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
 
     return (records=records, nsteps=nsteps, nchunks=length(records) - 1,
             nregrids=nregrids, passes=passes, converged=converged,
-            buffer=bufferwidth,
+            buffer=bufferwidth, bounds=acc,
             λ_initial=R(λ_initial), h=R(minimum_spacing(T, forest)),
             nblocks=nleaves(forest), levels=forest_levels(forest),
             interior=p.interior, problem=p, U=U, u=u, forest=forest)
@@ -464,14 +523,22 @@ end
 # `gh_dt` makes the same check for the same reason (added in step 5, after
 # a harmonic-Kerr configuration whose initial data was not finite in the
 # evolved region produced exactly that error).
+#
+# **The check is the evolved region's (amended in step 8b).** It was
+# `all(isfinite, u)`, which ended a run at the first `NaN` anywhere — the
+# frozen core included, where nothing evolved reads it until the layer's
+# stencils do, and where the range projection exists to repair it. A `NaN`
+# in the core is a hit; a `NaN` at `r ≥ r_1` is still the end.
 function max_speed_of(p::GHProblem{T}, u, t) where {T}
-    all(isfinite, u) || throw(ArgumentError(
-        "the state at t = $t is not finite, so there is no time step: " *
-        "$(count(!isfinite, u)) of $(length(u)) values are NaN or Inf. On " *
-        "the initial data this is a case whose analytic solution is " *
-        "singular somewhere the mesh reaches — check r_0 against where " *
-        "|h| is still moderate — and after a chunk it is a run that blew " *
-        "up, whose last analysis record says where."))
+    nbad = evolved_nonfinite(p, u, t)
+    nbad == 0 || throw(ArgumentError(
+        "the state at t = $t is not finite where it is evolved, so there is " *
+        "no time step: $nbad values at points outside the interior (r ≥ r_1, " *
+        "or everywhere for a case with no hole) are NaN or Inf. On the " *
+        "initial data this is a case whose analytic solution is singular " *
+        "somewhere the mesh reaches — check r_0 against where |h| is still " *
+        "moderate — and after a chunk it is a run that blew up, whose last " *
+        "analysis record says where."))
     scatter!(p.U, u)
     λ = max_speed(p; t=t)
     isfinite(λ) && λ > 0 || throw(ArgumentError(

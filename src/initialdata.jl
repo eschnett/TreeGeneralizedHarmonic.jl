@@ -30,6 +30,7 @@
     GHCase(T = Float64, background; box, periodic, ε_KO, γ0, γ2,
            center = (0, 0, 0), velocity = (0, 0, 0), interior = nothing,
            r_0 = 0, r_1 = 0, margin = 8, w_ramp = 1//2, ρ_ramp = 1//2,
+           refinement = nothing, horizon = nothing, bounds = nothing,
            chunk = 0)
 
 A case: the background, the box it is evolved in, the hole's analytic
@@ -85,6 +86,15 @@ seed. `CODE.md`'s analysis table puts the horizon rows "every `k`-th chunk,
 `refinement` is: a driver keyword would make the cadence a property of the
 run rather than of the study.
 
+**The range bounds (added in step 8b).** `bounds` is `nothing` — no range
+projection, which is every case before step 8b and the default — or a
+[`StateBounds`](@ref): the ranges of `α`, of `γ`'s spectrum, of `|β|` and of
+`Π`'s scale that the stage limiter holds the state inside at `r < r_gate`.
+A field of the case like `horizon`, for the same reason. It needs an
+interior, because its gate is a radius about the hole's center, and the gate
+must lie inside `r_1`; both are refused here by name, and the mesh-dependent
+half of the gate's placement is asserted where the interior's radii are.
+
 **A moving non-harmonic background is refused here**, with the message
 `CODE.md` asks for under "Gauge and constraint damping": such a background
 has a gauge source `H_a(x − vt)` that a per-chunk sample cannot represent,
@@ -104,7 +114,7 @@ right-hand side needs a case two steps before there is a driver, and a
 struct cannot be defined twice. `driver.jl` adds `evolve!` and the
 refinement fields step 6 needs.
 """
-struct GHCase{T,B,D,I,R,H}
+struct GHCase{T,B,D,I,R,H,X}
     background::B
     box::NTuple{3,Tuple{T,T}}
     periodic::NTuple{3,Bool}
@@ -115,6 +125,7 @@ struct GHCase{T,B,D,I,R,H}
     interior::I                  # an `Interior`, or `nothing`
     refinement::R                # a `Refinement`, or `nothing`
     horizon::H                   # a `Horizon`, or `nothing`
+    bounds::X                    # a `StateBounds`, or `nothing`
     chunk::T
 end
 
@@ -123,7 +134,7 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
                 velocity=(zero(T), zero(T), zero(T)), interior=nothing,
                 r_0=zero(T), r_1=zero(T), margin::Integer=8,
                 w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), refinement=nothing,
-                horizon=nothing, chunk=zero(T)) where {T}
+                horizon=nothing, bounds=nothing, chunk=zero(T)) where {T}
     isharmonic(background) || isstatic(background) || throw(ArgumentError(
         "this background is neither harmonic nor static, so its prescribed " *
         "gauge source H_a(x − vt) depends on time, and CODE.md's Hsrc field " *
@@ -153,11 +164,39 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
     int = interior === nothing ? nothing :
           Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
                    margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp)
+    check_case_bounds(bounds, int, T)
     return GHCase{T,typeof(background),typeof(damping),typeof(int),
-                  typeof(refinement),typeof(horizon)}(
+                  typeof(refinement),typeof(horizon),typeof(bounds)}(
         background, ntuple(d -> (T(box[d][1]), T(box[d][2])), Val(3)),
         ntuple(d -> Bool(periodic[d]), Val(3)), T(ε_KO), damping, T(γ2), c,
-        int, refinement, horizon, T(chunk))
+        int, refinement, horizon, bounds, T(chunk))
+end
+
+# The two refusals of a case's bounds that need no mesh (added in step 8b):
+# the working type, and an interior for the gate to be a radius about, with
+# the gate inside the layer's outer radius. The rest of the gate's placement
+# — deeper than every point an evolved stencil reads — depends on the
+# spacing, and is `check_bounds_gate`'s, at every regrid.
+check_case_bounds(::Nothing, int, ::Type) = nothing
+
+function check_case_bounds(bd, int, ::Type{T}) where {T}
+    bd isa StateBounds{T} || throw(ArgumentError(
+        "a case's bounds are a StateBounds{$T} or `nothing`, got a " *
+        "$(typeof(bd)): the ranges are kernel arguments in the case's own " *
+        "working type, like every other number the case carries."))
+    int === nothing && throw(ArgumentError(
+        "this case has range bounds but no interior: the projection is gated " *
+        "on r < r_gate from the hole's analytic center, and a case with no " *
+        "hole has no center — and nothing that is not a numerical solution " *
+        "for the projection to guard. Give the case an interior, or leave " *
+        "`bounds = nothing`."))
+    bd.r_gate ≤ int.r_1 || throw(ArgumentError(
+        "the range projection's gate r_gate = $(bd.r_gate) is outside the " *
+        "layer's outer radius r_1 = $(int.r_1): the projection would clamp " *
+        "evolved points, which are the Einstein equations and nothing else. " *
+        "The gate has to lie deeper than every point an evolved stencil " *
+        "reads; default_gate proposes r_1 − 2Gh."))
+    return nothing
 end
 
 GHCase(background; kwargs...) = GHCase(Float64, background; kwargs...)
@@ -176,9 +215,10 @@ and every evaluation.
 """
 with_interior(case::GHCase{T}, interior) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(interior),
-           typeof(case.refinement),typeof(case.horizon)}(
+           typeof(case.refinement),typeof(case.horizon),typeof(case.bounds)}(
         case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
-        case.center, interior, case.refinement, case.horizon, case.chunk)
+        case.center, interior, case.refinement, case.horizon, case.bounds,
+        case.chunk)
 
 """
     with_refinement(case::GHCase, refinement) -> GHCase
@@ -192,9 +232,10 @@ A reconstruction and not a mutation, for the reason
 """
 with_refinement(case::GHCase{T}, refinement) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
-           typeof(refinement),typeof(case.horizon)}(
+           typeof(refinement),typeof(case.horizon),typeof(case.bounds)}(
         case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
-        case.center, case.interior, refinement, case.horizon, case.chunk)
+        case.center, case.interior, refinement, case.horizon, case.bounds,
+        case.chunk)
 
 """
     with_horizon(case::GHCase, horizon) -> GHCase
@@ -208,9 +249,32 @@ A reconstruction and not a mutation, for the reason
 """
 with_horizon(case::GHCase{T}, horizon) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
-           typeof(case.refinement),typeof(horizon)}(
+           typeof(case.refinement),typeof(horizon),typeof(case.bounds)}(
         case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
-        case.center, case.interior, case.refinement, horizon, case.chunk)
+        case.center, case.interior, case.refinement, horizon, case.bounds,
+        case.chunk)
+
+"""
+    with_bounds(case::GHCase, bounds) -> GHCase
+
+The same case carrying different range bounds — `nothing` to switch the
+projection off, or a [`StateBounds`](@ref) — which is how a study compares a
+run with the projection against the same run without it, and how the gate
+is set once the mesh, and with it [`default_gate`](@ref), is known.
+
+A reconstruction and not a mutation, for the reason
+[`with_interior`](@ref) is (added in step 8b); the refusals of the
+constructor apply.
+"""
+function with_bounds(case::GHCase{T}, bounds) where {T}
+    check_case_bounds(bounds, case.interior, T)
+    return GHCase{T,typeof(case.background),typeof(case.γ0),
+                  typeof(case.interior),typeof(case.refinement),
+                  typeof(case.horizon),typeof(bounds)}(
+        case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
+        case.center, case.interior, case.refinement, case.horizon, bounds,
+        case.chunk)
+end
 
 """
     minkowski_case(T = Float64; L, ε_KO, γ0, γ2)
@@ -283,7 +347,8 @@ shifted_minkowski_case(::Type{T}=Float64; A=T(1//2), w=T(2), halfwidth=T(2),
     hole_case(T = Float64, background; halfwidth, r_0, r_1, chunk,
               M = 1, center = (0,0,0), velocity = (0,0,0),
               interior = :damped, margin = 8, ε_KO = 1//2,
-              γ0 = GHSO2's recipe, γ2 = 0, w_ramp, ρ_ramp)
+              γ0 = GHSO2's recipe, γ2 = 0, w_ramp, ρ_ramp,
+              refinement = nothing, horizon = nothing, bounds = nothing)
 
 A black hole in a **Dirichlet** box, with the damping layer of
 `CODE.md`'s "The interior" and GHSO2's recipe near a hole — the shape both
@@ -311,6 +376,11 @@ open**)**.
 `r_0`, `r_1` and `chunk` have no defaults: the two radii are what
 [`check_interior_radii`](@ref) measures against the mesh and the horizon,
 and the chunk is the cadence the analysis record is written at.
+
+`bounds = nothing` is the one default of step 8b's range projection, and it
+means "off" (added in step 8b): a [`StateBounds`](@ref) has no default for
+any of its ranges, and [`default_bounds`](@ref) is the named proposal a
+caller asks for explicitly.
 """
 function hole_case(::Type{T}, background; halfwidth, r_0, r_1, chunk,
                    M=one(T), center=(zero(T), zero(T), zero(T)),
@@ -320,14 +390,15 @@ function hole_case(::Type{T}, background; halfwidth, r_0, r_1, chunk,
                                       width=3 * T(M),
                                       center=HoleCenter(T, center, velocity)),
                    γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
-                   refinement=nothing, horizon=nothing) where {T}
+                   refinement=nothing, horizon=nothing,
+                   bounds=nothing) where {T}
     return GHCase(T, background;
                   box=ntuple(_ -> (-T(halfwidth), T(halfwidth)), Val(3)),
                   periodic=(false, false, false), ε_KO=ε_KO, γ0=γ0, γ2=γ2,
                   center=center, velocity=velocity, interior=interior,
                   r_0=r_0, r_1=r_1, margin=margin, w_ramp=w_ramp,
                   ρ_ramp=ρ_ramp, refinement=refinement, horizon=horizon,
-                  chunk=chunk)
+                  bounds=bounds, chunk=chunk)
 end
 
 hole_case(background; kwargs...) = hole_case(Float64, background; kwargs...)

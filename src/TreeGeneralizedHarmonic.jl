@@ -97,6 +97,13 @@ export InteriorMask, ShellMask, interior_mask
 export horizon_min_radius, horizon_max_radius, singular_radius
 export layer_spacing, check_interior_radii
 
+# The range projection (step 8b): the third and last writer of the state,
+# and the validity monitor
+export StateBounds, default_bounds, default_gate, check_bounds_gate
+export bounds_project, sym_eigen3, state_validity, with_bounds
+export BoundsAccounting, take_chunk!, apply_bounds!, gh_stage_limiter!
+export validity_rows, evolved_nonfinite
+
 # Boundaries
 export dirichlet
 
@@ -128,6 +135,11 @@ include("device.jl")
 include("pointwise.jl")
 include("stencils.jl")
 include("interior.jl")
+# After `interior.jl` (the gate is a radius about the interior's center, and
+# its check reads `layer_spacing`) and before `initialdata.jl`, whose
+# `GHCase` carries a `StateBounds`. The kernels here read `evolution.jl`'s
+# `diag` slots and `point_position`, which are resolved when they compile.
+include("bounds.jl")
 include("gauge.jl")
 include("initialdata.jl")
 include("boundaries.jl")

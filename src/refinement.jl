@@ -371,9 +371,9 @@ function gh_tau!(τfs::FieldSet{T,3}, U::FieldSet{T,3}, origins, spacings, mask;
     τfs.nvars ≥ slot || throw(ArgumentError(
         "the indicator writes τ into variable $slot of a field set with " *
         "$(τfs.nvars) variables: `diag` carries NDIAG = $NDIAG slots and " *
-        "DIAG_TAU = $DIAG_TAU is the last of them (CODE.md, \"Analysis " *
+        "τ is DIAG_TAU = $DIAG_TAU among them (CODE.md, \"Analysis " *
         "quantities\"), so a scratch set for the initial-data cycle needs " *
-        "at least as many."))
+        "at least that many."))
     map_blocks!(gh_tau_kernel!, U, τfs.work, U.work, origins, spacings, mask,
                 T(scale), T(ε), Int(slot), Val(U.G))
     return τfs

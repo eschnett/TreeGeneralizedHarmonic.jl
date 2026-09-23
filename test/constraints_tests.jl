@@ -366,10 +366,20 @@ end
     # `DIAG_MOM` are the first of a run of four and of three and must stay
     # where they are. Step 5 appended three slots (the masked error, the
     # interior residual and the gauge drift) and step 6 a fourth (the
-    # refinement indicator `τ`); neither moved one (amended in steps 5
-    # and 6).
+    # refinement indicator `τ`); step 8b appended eight (the range
+    # projection's three, the validity monitor's four and the evolved
+    # region's non-finite count); none moved one (amended in steps 5, 6
+    # and 8b).
     @test (DIAG_SPEED, DIAG_CGH, DIAG_HAM, DIAG_MOM, DIAG_MASK) ==
           (1, 2, 6, 7, 10)
     @test (DIAG_ERR, DIAG_RES, DIAG_DRIFT, DIAG_TAU) == (11, 12, 13, 14)
-    @test NDIAG == 14
+    @test (TreeGeneralizedHarmonic.DIAG_BOUNDS,
+           TreeGeneralizedHarmonic.DIAG_BOUNDS_NF,
+           TreeGeneralizedHarmonic.DIAG_BOUNDS_R,
+           TreeGeneralizedHarmonic.DIAG_DETG,
+           TreeGeneralizedHarmonic.DIAG_LAPSE,
+           TreeGeneralizedHarmonic.DIAG_HMAX,
+           TreeGeneralizedHarmonic.DIAG_PIMAX,
+           TreeGeneralizedHarmonic.DIAG_NONFINITE) == Tuple(15:22)
+    @test NDIAG == 22
 end

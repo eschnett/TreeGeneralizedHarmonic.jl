@@ -137,6 +137,19 @@ axis, `M_ch`) and `Horizon`, the cadence and resolution the case carries.
 `with_horizon`; `driver.jl`'s record grew the horizon rows, seeded from
 the previous find. There is no I/O and no CLI: those are step 9.
 
+From step 8b there is an **instrument**: `bounds.jl` — `StateBounds` (the
+ranges of `α`, `γ`'s spectrum, `|β|` and `Π`'s scale, and the gate radius;
+`default_bounds` and `default_gate` are the named proposals, and a
+`GHCase` carries one as `bounds`, default `nothing`), the pointwise
+`bounds_project` in ADM variables, `gh_bounds_kernel!` behind
+`gh_stage_limiter!` — the state's third writer, a `solve` keyword beside
+`step_limiter` — `BoundsAccounting`, the validity monitor
+(`validity_rows`) and `evolved_nonfinite`, which is what `max_speed_of`
+and the record's `finite` now read. `diag` has 22 slots; the record grew
+`bounds_hits`, `bounds_nonfinite`, `bounds_r_max` and the eight
+`min_detγ_layer` … `max_Π_shell` rows. `test/bounds_tests.jl` is its
+file, and `hole_runs.jl`'s `bounds` section its long runs.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -375,10 +388,34 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   End the block with the value instead. The error names the kernel and
   arrives at precompilation, so it is cheap; it is here because the
   package's own convention asks for an explicit `return` everywhere else.
-- **The RHS never mutates `u`.** The interior layer is a term of the
-  right-hand side, `du = w F(u) − ρ (u − u_exact)`. Only the `:pasted`
-  variant writes the state, and only from RK4's `step_limiter!`. Do not
-  add a third place.
+- **The RHS never mutates `u`, and the state has exactly three writers**
+  (amended in step 8b). The interior layer is a term of the right-hand
+  side, `du = w F(u) − ρ (u − u_exact)`, so the integrator's arithmetic is
+  the first writer; the `:pasted` paste of the ball `r < r_1`, from RK4's
+  `step_limiter!`, is the second; step 8b's range projection
+  (`src/bounds.jl`), from the `stage_limiter!` on every stage vector and
+  once after the initial fill and every regrid, is the third. Both limiters
+  are **`solve` keywords**, not `RK4(; …)` arguments — the constructor form
+  is deprecated and will be silently unread. Do not add a fourth writer.
+- **A limiter writes back only where it fired, and a run on which nothing
+  fires is bit for bit the run without it.** The range projection keeps a
+  healthy quantity's bits — it reassembles `h_tt`, `h_ti` or the spatial
+  block only when that block's range was violated, because `(−1 + h_tt) +
+  1` is not `h_tt` — and the kernel writes a point only where `hit` came
+  back true. `test/bounds_tests.jl`'s control asserts `isequal(u, u′)` for
+  the fixture with and without bounds; it is the claim every experiment
+  that compares the two rests on. A change that makes it a tolerance has
+  broken the projection, whatever else it fixed. The tests carry an
+  `8 eps` slack and a fired result is re-tested by the next call's own
+  arithmetic, which is what makes the *flag* idempotent too (without the
+  re-test, 18 in 20 000 random states re-fired on an ill-conditioned `γ`).
+- **A `NaN` in the core is a hit, not the end of the run** (step 8b):
+  `max_speed_of` and the record's `finite` count non-finite values at
+  evolved points only (`evolved_nonfinite`). The projection is gated at
+  `r < r_gate ≤ r_1 − (stencil reach)·h`, asserted at every regrid; the
+  outer part of the layer, `r_gate ≤ r < r_1`, is unguarded by design, and
+  a degenerate metric there still ends a run through the `DomainError` of
+  `metric_quantities`' `sqrt`.
 - **`F` is never evaluated where `w = 0`.** The frozen core holds
   finite, stale data by design — the analytic solution is singular
   inside it — and `F` of that data may be `NaN`; `0 · NaN = NaN`. The

@@ -64,7 +64,8 @@ end
 # The variable slots of the `diag` field set: the characteristic speed the
 # time step is taken from, the two constraint monitors of step 4, and the
 # indicator that says which points a masked norm counts. Step 5 adds the
-# masked error and the interior residual, step 6 the refinement indicator —
+# masked error and the interior residual, step 6 the refinement indicator,
+# step 8b the range projection's three and the validity monitor's four —
 # **appended**, never inserted, for the reason the next paragraph gives.
 #
 # `DIAG_CGH` and `DIAG_MOM` are the *first* of a contiguous run — four and
@@ -80,7 +81,15 @@ const DIAG_ERR = 11           # ‖u − u_exact‖, masked to the evolved regio
 const DIAG_RES = 12           # the same, inside the layer r_0 ≤ r < r_1
 const DIAG_DRIFT = 13         # |h_tt − h_tt,exact| in a shell at the horizon
 const DIAG_TAU = 14           # the Löhner indicator τ, masked inside r_1
-const NDIAG = 14
+const DIAG_BOUNDS = 15        # 1 where the range projection fired, else 0
+const DIAG_BOUNDS_NF = 16     # 1 where it found a non-finite component
+const DIAG_BOUNDS_R = 17      # the radius where it fired, 0 elsewhere
+const DIAG_DETG = 18          # det γ in the monitor's region (floatmax outside)
+const DIAG_LAPSE = 19         # the signed lapse there (floatmax outside)
+const DIAG_HMAX = 20          # max_ab |h_ab| there (0 outside)
+const DIAG_PIMAX = 21         # max_ab |Π_ab| there (0 outside)
+const DIAG_NONFINITE = 22     # non-finite values at an evolved point
+const NDIAG = 22
 
 # **The error slots are magnitudes, not components (proposed in step 5.)**
 # `CODE.md`'s analysis table says "`|u − u_exact|` per component into
@@ -408,10 +417,12 @@ owned point with `r < r_1`, straight into the **state** array.
 `CODE.md`, "Why a smooth layer and not a hard paste": overwriting a ball
 with the analytic solution is `(INTERIOR)` in the limit `ρ → ∞` on a step
 profile, and it is implemented exactly through RK4's `step_limiter!`, as
-TreeHydro implements its atmosphere reset. This is the **one** place in
-the package where the state is written outside the integrator's own
-arithmetic, and [`gh_step_limiter!`](@ref) is the only caller
-(`CLAUDE.md`, "The RHS never mutates `u`": do not add a third place).
+TreeHydro implements its atmosphere reset. It is one of the **two** places
+in the package where the state is written outside the integrator's own
+arithmetic, and [`gh_step_limiter!`](@ref) is its only caller; the other
+is step 8b's range projection, from the stage limiter
+([`gh_stage_limiter!`](@ref)). `CLAUDE.md`, "The RHS never mutates `u`":
+three writers, and do not add a fourth.
 
 The core rule applies here as everywhere the analytic solution is written
 into a grid: inside `r_0` the query goes to the sphere `r_0` along the ray
@@ -505,8 +516,17 @@ every regrid" means when every chunk builds a fresh problem — and because
 a background that reaches this point is static, so the time it is sampled
 at cannot matter. `CODE.md`, "Gauge and constraint damping", and the
 refusal in [`GHCase`](@ref) are the two halves of that sentence.
+
+`accounting` is the run's [`BoundsAccounting`](@ref), or `nothing` (added in
+step 8b): the host-side record the range projection adds its hits to. It is
+*handed in* rather than made here, because a run builds a fresh problem
+after every regrid and the totals have to survive that — [`evolve!`](@ref)
+makes one per run. For a case with bounds the constructor also asserts that
+the projection's gate lies deeper than every point an evolved stencil reads
+([`check_bounds_gate`](@ref)), beside the interior's own radius checks and
+for the same reason.
 """
-struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I}
+struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A}
     U::F
     schedule::S
     Hsrc::H                      # the sampled gauge source, or `nothing`
@@ -519,6 +539,7 @@ struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I}
     spacings::V
     case::C
     interior::I                  # an `Interior` at this chunk's ρ_max, or `nothing`
+    accounting::A                # the run's `BoundsAccounting`, or `nothing`
     hasdirichlet::Bool
     valG::Val{G}
     valq::Val{q}
@@ -528,7 +549,8 @@ struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I}
 end
 
 function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
-                   t=zero(T), interior=case.interior, margin_check=true) where {T}
+                   t=zero(T), interior=case.interior, margin_check=true,
+                   accounting=nothing) where {T}
     q ≥ 2 && iseven(q) || throw(ArgumentError(
         "the finite-difference order must be even and at least 2, so that " *
         "the centered stencils have an integer half-width q/2 and CODE.md's " *
@@ -580,13 +602,16 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
     if interior !== nothing && margin_check
         check_interior_radii(U.forest, interior, case.background, q ÷ 2 + 1;
                              t=t)
+        check_bounds_gate(U.forest, interior, case.bounds, q; t=t)
     end
 
     return GHProblem{T,U.G,Int(q),HASH,DISS,INT,typeof(U),typeof(schedule),
                      typeof(Hsrc),typeof(diag),typeof(origins),
-                     typeof(spacings),typeof(case),typeof(interior)}(
+                     typeof(spacings),typeof(case),typeof(interior),
+                     typeof(accounting)}(
         U, schedule, Hsrc, diag, origins, spacings, case, interior,
-        hasdirichlet, Val(U.G), Val(Int(q)), Val(HASH), Val(DISS), Val(INT))
+        accounting, hasdirichlet, Val(U.G), Val(Int(q)), Val(HASH), Val(DISS),
+        Val(INT))
 end
 
 """
@@ -599,7 +624,8 @@ builds at the start of every chunk once it knows that chunk's `dt`, since
 It shares the field sets, the schedule, the sampled gauge source and the
 uploaded geometry: rebuilding a whole [`GHProblem`](@ref) would re-sample
 the gauge source, which is the most expensive setup phase there is and
-which nothing about a new `ρ_max` invalidates.
+which nothing about a new `ρ_max` invalidates. It shares the run's
+[`BoundsAccounting`](@ref) too, which is what that record is for.
 """
 function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior) where {T,G,q,
                                                                        HASH,
@@ -607,9 +633,11 @@ function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior) where {T,G,q,
     INT = interior_variant(interior)
     return GHProblem{T,G,q,HASH,DISS,INT,typeof(p.U),typeof(p.schedule),
                      typeof(p.Hsrc),typeof(p.diag),typeof(p.origins),
-                     typeof(p.spacings),typeof(p.case),typeof(interior)}(
+                     typeof(p.spacings),typeof(p.case),typeof(interior),
+                     typeof(p.accounting)}(
         p.U, p.schedule, p.Hsrc, p.diag, p.origins, p.spacings, p.case,
-        interior, p.hasdirichlet, p.valG, p.valq, p.valH, p.valdiss, Val(INT))
+        interior, p.accounting, p.hasdirichlet, p.valG, p.valq, p.valH,
+        p.valdiss, Val(INT))
 end
 
 # The gauge source's working array, or `nothing` where there is none. The
@@ -658,11 +686,13 @@ every other variant, nothing at all.
 
 `CODE.md`, "Three variants, one switch": the hard paste is `(INTERIOR)` in
 the limit `ρ → ∞` on a step profile, and RK4's limiter hook is where it can
-be implemented *exactly*. It is also the only place in this package where
-the state is written outside the integrator — `CLAUDE.md`, "The RHS never
-mutates `u`" — and the dispatch below is what keeps it to one place: the
-`:none`, `:damped` and `:frozen` methods are empty and compile away, so the
-same `RK4(; step_limiter! = gh_step_limiter!)` serves every run.
+be implemented *exactly*. It is one of the two limiters that write the
+state outside the integrator — the other is the range projection of step
+8b, [`gh_stage_limiter!`](@ref) — and `CLAUDE.md`'s "The RHS never mutates
+`u`" names exactly these three writers. The dispatch below keeps this one
+to the variant that needs it: the `:none`, `:damped` and `:frozen` methods
+are empty and compile away, so the same `solve(…; step_limiter =
+gh_step_limiter!)` serves every run.
 
 `u` arrives in state layout and `statearray(u, p.U)` is the block view, as
 `PLAN.md`'s "Sharp edges" says.
