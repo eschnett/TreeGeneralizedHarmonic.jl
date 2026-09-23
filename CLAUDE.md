@@ -62,8 +62,9 @@ generic interior: step 5's layer needs an analytic center and an analytic
 interior, and its spherical core cannot hold harmonic Kerr's singular
 disk at `a = 9/10`, which is G5's case. Steps 8a (the leakage margin),
 8b (the range projection), 8c (the calibration of the layer for an
-inexact target) and 8c′ (`ρ_max = 4/M` the default, decided 2026-09-23)
-are done; step 8d, the tracked horizon geometry, is next.**
+inexact target), 8c′ (`ρ_max = 4/M` the default, decided 2026-09-23) and
+8d (the tracked horizon geometry) are done; step 8e, the fitted target and
+the `:fitted` variant, is next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -184,6 +185,30 @@ at it in every chunk. The grid rate `ρ_max · dt = 1` is the option
 keeps as history — and `hole_runs.jl`'s `calibration` (`:grid`) and `bounds`
 sections ask for it by name.
 
+From step 8d the layer can **follow the horizon that was found**: a case
+whose `interior` is a `FittedSpec` (the rule: `margin`, `n_L` — `0` for step
+8c's `max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)`, resolved by `evolve!` — `core_min`,
+`lmax_shape`, the ramps, `max_misses`, `α_trigger`, a `target`) has its
+layer rebuilt every chunk as a `FittedInterior` (`interior.jl`: the `isbits`
+kernel argument, the same variant `Val`s as `Interior`) from a
+`HorizonTrack` (`tracking.jl`: `seed_track` from the analytic answer,
+`update_track` from each find — coasting on a miss, a `TrackLostError`
+after `max_misses`, an `ArgumentError` for a jump of `r_min` over `G h/2` —
+and `track_center`, a `HoleCenter`). The layer is keyed on the **depth**
+`d = r_h(n̂) − m h − |x − c(t)|` below the tracked shape's offset surface, the
+shape being real spherical-harmonic coefficients in `ash_mode_index`'s
+slots (`real_harmonic_index`; `m < 0` is the sine), evaluated by
+`shape_series` with no angle. A `FittedInterior` holding step 5's sphere is
+step 5's layer **bit for bit**. `interior.jl` also has `ShapeMask`,
+`ShapeBand`, `geometry_radii`, `layer_radii`, `layer_mask`, `shell_mask`
+and `in_layer(int, t, x)`; `horizon.jl`'s `find_gh_horizon` takes
+`center =` and returns the radii about its own origin; `bounds.jl`'s monitor
+reduces over the evolved region too (`min_α_evolved`, the lapse-collapse
+trigger's input); `tracking.jl` has `margin_efolds`, step 8a's leakage moved
+in from `test/dispersion.jl`; the record has the `track_*` and `layer_*`
+rows and `margin_efolds`; `evolve!` takes `find`. `AbstractSphericalHarmonics`
+is a direct dependency. `test/tracking_tests.jl` is its file.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -241,9 +266,12 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **3857 assertions in 14m33** at one thread and **10m30** at
-four on the development machine after step 8c′, on a machine shared with
-sibling agents (the tree before it measured 3798 in 13m45 at one thread the
+The suite is **4410 assertions in 15m28** at one thread and **11m21** at
+four on the development machine after step 8d, on a machine shared with
+sibling agents (load 6–7): its 553 new claims are `tracking_tests.jl`,
+`54.7 s` / `32.4 s`, of which the two tracked runs are `40 s` / `18 s`.
+Step 8c′ measured **3857 in 14m33** and **10m30** (the tree before it
+measured 3798 in 13m45 at one thread the
 same afternoon): the default rate's price is `driver_tests.jl`'s variants
 testset, `26 s` → `82 s` at one thread, whose `:damped` and `:frozen` runs
 go to `1/2 M` because a residual relaxing at `4/M` saturates only there.
@@ -317,8 +345,8 @@ the two harmonic charts, and from step 6 the indicator's calibration and
 its adaptive run — are a **script**, run by hand, with its numbers
 recorded in `CODE.md` under "Measured results" (added in step 5). It takes
 an optional list of sections (`order`, `long`, `charts`, `indicator`,
-`horizon`, `bounds`; and `leakage` and `calibration`, which are not in the
-default list). An option `key=value` whose key is a section's name selects
+`horizon`, `bounds`; and `leakage`, `calibration` and `tracked`, which are
+not in the default list). An option `key=value` whose key is a section's name selects
 that section's subset and so names the section — `bounds=damped6` runs
 the one row and nothing by default (amended in step 8c):
 
@@ -381,6 +409,15 @@ validated locally:
 
 ```bash
 julia --project=. --threads=4 test/hole_runs.jl calibration runs=e3-n8-r4-c t_end=1/2
+```
+
+The `tracked` section (added in step 8d) is not in the default list either:
+the suite's tracked hole against step 5's sphere with the same layer, to
+`5 M` by default or to `tracked=<t_end>`, four minutes at four threads:
+
+```bash
+julia --project=. --threads=4 test/hole_runs.jl tracked
+julia --project=. --threads=4 test/hole_runs.jl tracked=1/2
 ```
 
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
@@ -514,6 +551,44 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   point of a 12-cell layer and throws at `t = 0`. The `residual` row is the
   layer's distance from the *background*, not from the target, and is
   large by construction for a wrong one.
+- **A `HoleCenter` is sometimes the *tracked* trajectory** (step 8d). A
+  `FittedInterior`'s center is `track_center(track)`, `c_find + v_est (t −
+  t_find)`, so its masks, its `interior_radius`, the range projection's gate
+  and the core rule are about the track, while `case.center` — the damping
+  profile, the refinement centroid's offset, `track_offset` — stays the
+  analytic one. Before comparing a radius with an analytic value, say which
+  center it is about: `find_gh_horizon`'s `r_min` is about its `center =`
+  (the analytic one unless given; a tracked run passes the prediction, so its
+  `center_offset` is the track's prediction error), and `origin_r_min` is
+  about the found surface's own origin, which is what the track and its
+  shape are.
+- **The depth replaces the radius** (step 8d). On the tracked geometry the
+  layer is `0 < d ≤ n_L h` below the offset surface `r_1(n̂) = r_h(n̂) − m h`,
+  so no radius alone says whether a point is in it: `in_layer(int, t, x)`
+  takes a position and a time (the old `in_layer(int, r)` is gone), the
+  kernel's predicates are asked of `interior_point(int, t, x)`, and a band
+  about the layer is `layer_mask`/`shell_mask`, never a `ShellMask` built
+  from `r_0` and `r_1` — a `FittedInterior` has neither field. A tracked case
+  holds a `FittedSpec`, not a layer: `GHProblem`, `state_callback`,
+  `level_bounds` and the `Π` post-pass refuse it and ask for `interior =
+  fitted_interior(…)`, which `evolve!` builds every chunk.
+- **The shape is a series at every layer point** (step 8d): `21 ns` at
+  `lmax = 4` and `79 ns` at `8` per point, against `96 ns` for the analytic
+  `u_exact` the layer already pays, evaluated only between the bounding
+  spheres `r_in − offset − thickness ≤ r < r_out − offset` — the fast paths
+  outside them are exact because the surface *is* the series clamped into
+  `[r_in, r_out]`. A right-hand side on the fixture is `1.1 %` dearer. The
+  real harmonics' slots are `ash_mode_index`'s, `m < 0` the sine, `ỹ^s =
+  −√2 Im Y_lm`; step 8e's fit must use the same convention, and
+  `real_from_complex` is the only conversion. Harmonic Kerr at `a = 9/10`
+  needs `lmax = 12` for a tenth of a cell at `h = 5/256` (Kerr-Schild: `4`).
+- **A tracked geometry's `h` is its layer's, and its margin is stated in
+  it.** `fitted_interior` reads the coarsest spacing of the blocks the layer
+  lives in; on the step-5 fixture the finest level is the cube `|x|_∞ ≤ 5/4`,
+  so `m = 8` puts the offset surface outside it and the geometry is refused
+  (`18 h = 2.8 M` needed of a horizon of `2 M`) — the suite's tracked runs
+  use `m = 10`. `margin_efolds` is what the margin buys along its real path,
+  at each block's own spacing.
 - **`F` is never evaluated where `w = 0`.** The frozen core holds
   finite, stale data by design — the analytic solution is singular
   inside it — and `F` of that data may be `NaN`; `0 · NaN = NaN`. The
@@ -652,7 +727,11 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   read `r_1 + (q+2)h/2` against the horizon's smallest coordinate radius
   before suspecting the finder — and remember that the fast flow's
   *transient* dips below its seed, which is how the harmonic chart at
-  `h = 5/64` fails and the same chart at `5/128` does not.
+  `h = 5/64` fails and the same chart at `5/128` does not. On a tracked
+  geometry (step 8d) the guard is a `ShapeMask`'s and exact by enumeration:
+  a footprint between the offset surface's two bounding spheres has every
+  one of its `(q+2)³` points classified, so it refuses exactly what the
+  norms mask.
 - **Ghosts must be filled before anything is interpolated**, with that
   call's hook. `find_gh_horizon` scatters and fills; `gh_adm_provider` and
   `interpolate` do not, and an unfilled halo makes the metric garbage

@@ -7,7 +7,7 @@ changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
 last milestone is marked *(Done.)* in `CODE.md`.
 
-**Steps 0–7, 8a–8c and 8c′ are done. Step 8d is next** — the generic interior
+**Steps 0–7, 8a–8d and 8c′ are done. Step 8e is next** — the generic interior
 (steps 8a–8g, added 2026-09-23), which step 8 needs before it can run
 its case.
 

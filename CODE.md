@@ -950,8 +950,11 @@ is *driven to the analytic solution*, and around the singularity the
 evolution is *switched off*. Both are decisions made **point by point**,
 as functions of the distance `r = |x − c(t)|` to the hole's analytic
 center `c(t) = c_0 + v t`, and neither knows anything about blocks,
-ghost zones or refinement levels (decided in review). The right-hand
-side at every point is
+ghost zones or refinement levels (decided in review). **(Amended in step
+8d:** or, for a case that asks for it, as functions of the *depth* below
+the tracked horizon's offset surface about the *tracked* center — "The
+tracked geometry" below, of which this section's sphere is the `l = 0`
+case.**)** The right-hand side at every point is
 
     ∂_t u = w(r) · F(u)  −  ρ(r) · (u − u_exact(x, t))                (INTERIOR)
 
@@ -1499,6 +1502,254 @@ bit where the runs without it do. The prediction that hits would start
 failures at `r_1`, which is step 8c's hypothesis about the layer's
 transition, measured from the other side.
 
+**The tracked geometry (added in step 8d**, `src/tracking.jl` and the
+second half of `src/interior.jl`**).** Everything above is keyed on
+`r = |x − c(t)|` about the *analytic* center. From step 8d a case may
+instead key its layer on the **found** horizon, `PLAN.md`'s finding 3: with
+`r_h(n̂)` the tracked apparent horizon's coordinate radius along the unit
+vector `n̂` from the *tracked* center `c(t)`, the layer is a function of the
+**depth**
+
+    d = r_h(n̂) − m h − |x − c(t)|,        offset surface r_1(n̂) = r_h(n̂) − m h,
+
+below the offset surface — `d ≤ 0` evolved, `0 < d ≤ n_L h` the layer
+(core surface `r_0(n̂) = r_1(n̂) − n_L h`), and beyond it the frozen core.
+The sphere is the `l = 0` case, and **a tracked geometry holding step 5's
+sphere is step 5's layer bit for bit (measured in step 8d)**: one
+right-hand side on the fixture is `isequal` for `:damped`, `:frozen` and
+`:pasted`, and so is the paste, because the profiles are one function
+(`_layer_profiles`) handed the two surfaces' radii along the ray, and the
+predicates are the sphere's in those radii — a point on the offset surface
+is evolved and one on the core surface is in the layer, as for the sphere.
+Six pieces, in the order a run meets them:
+
+1. **What the case holds is a rule, `FittedSpec`**, not a layer: the
+   variant, `m` (`margin = 8`, step 8a's default — one `m` for now, though
+   finding 3 already says the harmonic equator wants `4` and the axis more),
+   the ramp `n_L` (`0` meaning step 8c's rule `max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)`,
+   resolved by `evolve!` at the scheme's `G` and the run's rate — `8` at
+   `q = 2`, `12` at `q = 4` — and at the default `4/M` when the rate is the
+   grid's, whose value changes per chunk **(proposed in step 8d)**),
+   `core_min = 2`, `lmax_shape = 4`, `ρ_max` (`0` = the driver's default),
+   `max_misses = 3`, `α_trigger = 1/10` and a `target`. **Its ramps are
+   step 8c's rule, `ρ_ramp = 1`, `w_ramp = 1/2`**, since `n_L` was
+   calibrated as the width over which `ρ` rises; step 5's `1/2, 1/2` is the
+   fixture's **(proposed in step 8d**; the brief said `1/2` for both**)**. A
+   `FittedSpec` case needs a `Horizon` with `every ≥ 1`, and `evolve!`
+   refuses one without, saying why: a track that is never updated is the
+   analytic seed carried along forever.
+2. **The track, `HorizonTrack`** — host-side and immutable: the last find's
+   time `t_find` and recentred origin `c_find`, a velocity `v_est`, the found
+   surface's radii `r_min`, `r_max` **about its own origin**, its shape as
+   real coefficients, the finder's `hlm` and grid for the next seed, and
+   `source ∈ {:analytic, :found, :coasting}`, `misses`, `nfinds`.
+   `seed_track` starts it from the case's analytic center, velocity, radii
+   and shape. `update_track` replaces it on a successful find (the velocity
+   becomes the two last finds' difference once there is a previous find, and
+   stays the analytic one after the first); on a failed find it **coasts** —
+   everything kept, `misses + 1`, `source = :coasting` — and at `max_misses`
+   consecutive misses it throws a `TrackLostError` saying how old the
+   geometry is. **A find that moves `r_min` by more than half a stencil
+   reach `G h/2` is refused** (an `ArgumentError` naming both radii and
+   `G h`): the layer is an offset of that surface, and a jump exposes, on
+   the side it moves away from, points no layer ever treated **(proposed in
+   step 8d)**. `track_center(tr) = HoleCenter(c_find − v_est t_find, v_est)`
+   is all a kernel sees of it — so the masks, `interior_radius`, the range
+   projection's gate and the core rule work on the tracked trajectory
+   unchanged, and the center is still a function of `t` and never a mutated
+   field.
+3. **The kernel argument, `FittedInterior`** — built by `fitted_interior`
+   once per chunk and after every regrid from the track and the mesh:
+   the center, the shape as an `SVector` of real coefficients to
+   `lmax_shape`, its bounding radii `r_in`, `r_out`, `offset = m h`,
+   `thickness = n_L h`, the rate, the ramps and the target, and the `Val`
+   of the variant — so the right-hand-side kernel's `Val{INT}` is
+   `:damped`, `:frozen` or `:pasted` for both geometries. **`h` is the
+   coarsest spacing of the blocks the layer lives in**, the annulus
+   `[r_in − (m + n_L) h, r_out − m h]`, by one iteration from the finest
+   spacing — `PLAN.md` asked for the annulus out to the horizon itself, and
+   on the suite's fixture the horizon at `2 M` is in blocks twice as coarse
+   as its layer's, where a spacing read there asks for a layer that does not
+   fit (`18 h = 2.8 M`); so `h` is measured where step 5's `layer_spacing`
+   measures the sphere, and what the margin buys along its real path is
+   reported in e-folds, below **(proposed in step 8d)**. `fitted_interior`
+   refuses `r_in − (m + n_L + core_min) h ≤ 0` by name, and
+   `check_interior_radii` asserts the result — `offset ≥ m h` and
+   `thickness ≥ 2(G+1) h` at the layer blocks' spacing, which is step 5's
+   `r_1 ≤ r_h,min − m h` with **the track's radii** in every direction, and,
+   for the analytic-target variants (all three), `r_in − offset − thickness
+   > singular_radius + |c(t) − c_analytic(t)|`: the core rule still
+   evaluates the analytic solution on the core surface, so that surface
+   must still contain the chart's singular set, and that set is a ball about
+   the *analytic* center. The check is spherical — the core surface's
+   *smallest* radius against the set's largest — and so conservative for an
+   oblate core around a flat disk: on harmonic Kerr at `a = 9/10` it is
+   `0.436 − (m + n_L) h` against `0.9` and fails at every `h`, and even the
+   exact statement, the equatorial core radius `1 − (m + n_L) h` against
+   `0.9`, would need `(m + n_L) h < 0.1 M`, sixteen cells at `h ≤ 1/160` at
+   `q = 2`. **The tracked geometry does not unblock the proof-of-concept
+   case with an analytic target**; step 8e's `:fitted` target, which needs
+   no analytic interior and so no singular set inside the core, is what
+   does.
+4. **The shape: real spherical harmonics in `ash_mode_index`'s slots.**
+   `ỹ_l0 = Y_l0`, `ỹ_lm^c = √2 Re Y_lm`, `ỹ_lm^s = −√2 Im Y_lm` for `m ≥ 1`,
+   `Y_lm` the orthonormal Condon–Shortley harmonics of
+   `AbstractSphericalHarmonics`; the real coefficient of `(l, m)` is in slot
+   `l² + l + m + 1` with `m ≥ 0` the cosine (and `l0`) and `m < 0` the sine
+   of `|m|`, and a real function's complex coefficients convert as
+   `a_l0 = Re c_l0`, `a^c = √2 Re c_lm`, `a^s = √2 Im c_lm`
+   (`real_from_complex`, `complex_from_real`, `real_harmonic_index`)
+   **(proposed in step 8d; step 8e's fit shares the ordering and the
+   conversion)**. The finder's `hlm` is truncated to `lmax_shape` by
+   `ash_resample` first. The kernel evaluates the series
+   (`shape_series`) with **no angle**: `Y_lm = q_lm(cos θ) sin^m θ e^{imφ}`
+   with `q_lm` the fully normalized associated Legendre function over
+   `sin^m θ`, and `sin^m θ e^{imφ} = (n_x + i n_y)^m` — the Chebyshev
+   recurrence for `cos mφ, sin mφ` multiplied through by `sin^m θ`, which
+   removes both the `atan` and the division by `sin θ` that would need a
+   guard on the axis. Runtime loop bound `lmax`, no allocation, generic in
+   `T`. **The conversion is `sYlm`'s to roundoff (measured in step 8d)**:
+   at 200 random directions the largest error is `3.7` and `6.4` eps of the
+   function at `lmax = 4, 8` at `Float64`, `1.6` and `5.3` eps at `Float32`;
+   on `EquiangularGrid(6)` it is `ash_evaluate`'s to the same.
+   **The surface is the series clamped into `[r_in, r_out]`** — the extremes
+   over both poles and a `(4 lmax + 3) × (8 lmax + 6)` grid of directions —
+   which makes the two fast paths **exact shortcuts rather than
+   approximations** (proposed in step 8d): outside `r_out − offset` a point
+   is evolved and inside `r_in − offset − thickness` it is frozen in every
+   direction, and neither evaluates the series.
+5. **The seed is the analytic horizon**, `r_h(θ) = R √((R² + a²)/(R² +
+   a² cos²θ))` — `R = r₊` for Kerr-Schild, `√(M² − a²)` for the harmonic
+   chart; both charts' spheroid of constant radial coordinate, checked
+   against their quartic at random directions, since `SpacetimeMetrics`
+   exposes no horizon — turned for `rotate`, contracted along `v` by
+   `√(1 − v²)` for `boost` (`analytic_horizon_radius`), and **sampled at
+   `L = max(4 lmax + 4, 32)` and truncated**, the spectral projection,
+   rather than interpolated at `lmax`'s own points, which would alias the
+   spheroid's higher multipoles into the kept ones **(proposed in step
+   8d)**. **What the truncation costs (measured in step 8d)**, the largest
+   radius error over directions: **Kerr-Schild `a = 9/10`: `1.2e−3` at
+   `lmax = 4`, `8.1e−6` at `8`** (`5.5e−8`, `3.8e−10` at `12`, `16`) — the
+   axis and equator and `r_in`, `r_out` against `horizon_min_radius`,
+   `horizon_max_radius` to the same; **harmonic Kerr `a = 9/10`: `4.6e−2`,
+   `7.2e−3`, `1.1e−3` and `1.7e−4` at `lmax = 4, 8, 12, 16`** — `2.4`,
+   `0.37`, `0.057` and `0.009` cells at `h = 5/256` — since its spheroid is
+   oblate in the ratio that sets the multipoles' decay (`a²/R² = 4.3` against
+   `0.39`). The default `lmax_shape = 4` is Kerr-Schild's (`0.06` cells at
+   `h = 5/256`); harmonic Kerr at `a = 9/10` needs `lmax = 12` for a tenth of
+   a cell, which step 8f's rows should carry.
+6. **The masks and the guard.** `ShapeMask` (`d ≤ 0` evolved, the same fast
+   paths) is what `interior_mask` returns, so every masked norm, the speed
+   kernel and the indicator exclude exactly the region the kernel modifies;
+   `ShapeBand` is the band `r_1(n̂) + lo ≤ r < r_1(n̂) + hi`, which
+   `layer_mask` and `shell_mask` return for the validity monitor and the
+   variants' shell — the sphere returns step 8b's `ShellMask`s, value for
+   value. **The footprint guard is exact by enumeration** where the shape
+   can matter: a footprint whose nearest lattice point is outside
+   `r_out − offset` passes, one inside `r_in − offset` is refused, and in
+   between each of the `(q+2)³` points is classified by the mask itself
+   **(proposed in step 8d**, over the brief's "use the bounding sphere
+   `r_in − offset`", which would let a footprint read the layer's outer part
+   wherever the horizon is farther than its smallest radius — on harmonic
+   Kerr's equator by more than the whole margin**)**; 2000 random
+   footprints about an `a = 9/10` shape agree with the definition.
+
+**The protocol both geometries speak (amended in step 8d).** `in_layer(int,
+t, x)` takes a position and a time and not a radius, `interior_point(int, t,
+x)` is what the kernel's three predicates (`is_frozen`, `is_outside`,
+`interior_profiles`) are evaluated on — the radius for the sphere, the
+radius with the two surfaces' radii along the ray for the tracked geometry —
+`geometry_radii(int, background)` is the horizon's smallest and largest
+radius the layer is placed inside (the analytic ones, or `r_in`, `r_out`),
+`layer_radii(int)` the layer's innermost radii, and `layer_mask`,
+`shell_mask` the two bands; `find_gh_horizon` takes `center =`, the point
+its radii are measured from, and returns the radii about its own origin as
+`origin_r_min`, `origin_r_mean`, `origin_r_max`.
+
+**Per chunk, in the driver.** The initial data goes through the core rule
+of the seed's geometry (`fill_exact!(…; interior)`); at every row the find
+starts from the track's prediction `c_find + v_est (t − t_find)` and
+measures its radii from there, so the row's `center_offset` is **the
+track's prediction error**; `update_track`; the next chunk's geometry from
+the updated track on this mesh, asserted like the sphere; after a regrid,
+the same track on the new mesh. Four decisions the loop needed, each
+**(proposed in step 8d)**:
+
+- **The lapse-collapse trigger** (the design review's idea 10): the
+  validity monitor now also reduces over the whole evolved region
+  (`min_detγ_evolved`, `min_α_evolved`), and a row whose `min_α_evolved` is
+  below `α_trigger` forces a find at the next chunk boundary whatever the
+  cadence; that row records `track_trigger = true`.
+- **A lost track ends the run with its record.** `evolve!` records the row
+  of the last miss, calls the observer, and throws the `TrackLostError`
+  carrying the record — step 7's reason for recording a failed find rather
+  than throwing it, applied to the one failure that has to end the run.
+- **The velocity estimate's error is recorded, not refused.** The row's
+  `track_prediction` is the found origin's distance from the prediction in
+  cells; the jump refusal is what guards the geometry, and step 8c measured
+  a displacement of `h` costing the exterior nothing. A moving hole whose
+  prediction error exceeds a cell per chunk is G5's to decide on.
+- **The gauge source is re-sampled only when the core surface has moved
+  half a cell** (`surface_shift`) since the sample it was taken with: the
+  sample applies the core rule, so a point the moving core releases into
+  the layer reads the source of its projection on the old surface — within
+  the surface's movement of the true point, and weighted by a `w` that
+  vanishes to second order there. On the static hole the surface moves by
+  `10⁻⁴` a chunk and nothing is re-sampled.
+
+**A boost moves the hole the other way (found in step 8d, not fixed).**
+`SpacetimeMetrics.boost(m, v)` evaluates `m` at `Λᵀx` with `Λ`'s `+γv`
+entries, so the rest frame's origin is at `x = −v t` in the lab: the metric
+of `boost(KerrSchild(1, 0), (0.3, 0, 0))` at `t = 1` is singular at
+`x = −0.3`, not `+0.3` (measured). `HoleCenter`'s docstring calls `v` "the
+coordinate velocity of `boost(background, v)`", which is the wrong sign;
+nothing in G4 moves, and the tracked seed would carry `case.center.v` until
+two finds replace it. G5 has to build its case with `velocity = −v` for
+`boost(bg, v)`, or say which convention it takes — the analytic shape's
+contraction does not depend on the sign.
+
+`evolve!` also takes `find`, the function the horizon rows call —
+`find_gh_horizon`, or a test's wrapper that disables it — because the
+observer is called after the find and cannot reach it **(proposed in step
+8d)**. The damping profile `γ0` and a `HorizonDissipation` stay on the
+case's analytic trajectory: both are smooth on the scale of `M`, not of a
+cell **(proposed in step 8d)**.
+
+**What the margin buys, per row** (`margin_efolds`, moved into `src/` from
+`test/dispersion.jl` as `PLAN.md`'s hand-over from step 8c asks): step 8a's
+path integral `n_e = ∫_{r_1(n̂)}^{r_h(n̂)} ε dr/(h ℓ_max,1)`, along the six
+grid axes from the tracked center — where the one-dimensional symbol is
+exact — with the background's coefficients, `ε_KO` at each point and the
+spacing of the block each point is in; the row carries the least of the
+six. It reproduces the script's `1.81` and `2.07` e-folds for `m = 8` at
+`h = 5/64` (`q = 2`, `4`) to the digits `CODE.md` records **(measured in
+step 8d)**. On the suite's tracked fixture — `m = 10` cells of `5/64` from
+`r_1 = 1.22`, of which the outer `0.75 M` lie in blocks of `5/32` — it is
+**`1.45`**, where a uniform `5/64` would give `2.68`.
+
+**What it costs (measured in step 8d**, Apple silicon, Julia 1.13, one
+thread**).** The series is **`21 ns` per point at `lmax = 4` and `79 ns`
+at `lmax = 8`**, against **`96 ns`** for one analytic `u_exact` of
+Kerr-Schild `a = 9/10` (`background_state`, the dual pass the layer already
+pays), and it is evaluated only between the bounding spheres. A
+right-hand side on the fixture with the tracked geometry at `lmax = 4` is
+**`1.1 %`** dearer than with the sphere, a `0.15 M` run **`5 %`** (four
+threads: `3.16 s` against `3.00 s`), of which the host side per chunk is
+`fitted_interior` at `0.04 ms` and `margin_efolds` at `0.6 ms`.
+
+**What it measures on the static hole (measured in step 8d).** One find of
+the fixture's initial data (`N_ah = 12`) puts the origin `1.4e−5 M` from
+the analytic center — **`track_offset = 1.8e−4` cells** — with the found
+surface's `r_min = 2.00043`, `r_max = 2.00068` about it against `r₊ = 2`.
+A `:damped` run of the fixture on the tracked geometry to `0.15 M`, the
+finder every chunk, against step 5's sphere with the same layer (`r_1 =
+2 − 10h`, `n_L = 8`, step 8c's ramps): masked error **`3.110274e−3`
+against `3.110271e−3`**, the shell's `C_a` L2 **`1.0745462e−2` against
+`1.0745448e−2`**, the layer residual `0.203` against `0.206`, no
+projection hit on either, the track at most **`3.3e−4` cells** from the
+analytic center and its prediction error `1.2–1.8e−4` cells per find —
+the tracked hole is the analytic one to six digits.
+
 **What the layer costs.** `u_exact` is evaluated at every point of the
 layer at every RHS evaluation — one forward-mode dual pass through the
 background's metric per point, about a microsecond on a CPU by GHSO2's
@@ -1864,6 +2115,27 @@ settled, each stated where it happens:
   table, and the run's `passes`, `converged`, `nregrids` and the buffer
   width it used.
 
+**(Amended in step 8d:** the floor reads the horizon the layer actually
+follows.**)** `horizon_floor_level` and `level_bounds` take the layer's
+radii through two accessors, `geometry_radii(int, background)` — the
+horizon's smallest and largest radius, the analytic ones for step 5's
+sphere and the tracked shape's `r_in`, `r_out` for a tracked geometry — and
+`layer_radii(int)`, so the sphere's floor is value for value what it was and
+a tracked one's shell runs from its offset surface's smallest radius to its
+horizon's largest plus `floor_margin`. The tracked geometry's **level** is
+the level of the spacing its offset and ramp were built at: they are stated
+in spacings, `offset = m h`, so `offset/m` *is* the `h` the sphere's formula
+derives, and the floor keeps the layer's blocks from coarsening past it —
+which is what would make `check_interior_radii` fire at the next chunk —
+without asking for a finer one; the next geometry is rebuilt on whatever the
+indicator chose **(proposed in step 8d)**. The indicator takes the
+geometry the run holds (`indicator_flags(…; interior)`), and the
+initial-data cycle rebuilds a tracked geometry on every pass's mesh and
+re-evaluates the data with the final one's core rule. The suite exercises
+none of this on a mesh that moves — its tracked runs are on the step-5
+fixture's frozen hierarchy — and step 8f's matrix is where a tracked
+geometry is first regridded.
+
 ## Time integration
 
 **Fixed-step RK4 from `OrdinaryDiffEqLowOrderRK`** (decided), as
@@ -1924,7 +2196,9 @@ the tests assert on them.
 | interior residual | `|u − u_exact|` inside the layer, L∞, the layer's own health | every chunk |
 | mesh statistics | leaf count per level, finest spacing, the indicator's `τ_max`, the refinement centroid against the analytic center | every chunk |
 | range projection | `bounds_hits` (points moved, summed over every stage-limiter call of the chunk), `bounds_nonfinite` (of those, points with a non-finite component), `bounds_r_max` (the outermost radius it fired at, `−1` where it did not); `nothing` for a case without bounds (added in step 8b) | every chunk |
-| validity monitor | over the layer `r_0 ≤ r < r_1` and over the `G` points outside it: `min_detγ`, `min_α` (the *signed* lapse, negative where `g^{tt} > 0`), `max_h`, `max_Π` (the largest component magnitudes) — `min_detγ_layer` … `max_Π_shell` (added in step 8b) | every chunk |
+| validity monitor | over the layer `r_0 ≤ r < r_1` and over the `G` points outside it: `min_detγ`, `min_α` (the *signed* lapse, negative where `g^{tt} > 0`), `max_h`, `max_Π` (the largest component magnitudes) — `min_detγ_layer` … `max_Π_shell` (added in step 8b); and over the whole evolved region, `min_detγ_evolved`, `min_α_evolved` — the lapse-collapse trigger's input (added in step 8d). On the tracked geometry the two bands are its own (`layer_mask`, `shell_mask`) | every chunk |
+| horizon track | for a case whose interior is a `FittedSpec` (added in step 8d; `nothing` otherwise): `track_source` (`:found`, `:coasting`), `track_center` and `track_velocity` (the tracked trajectory after this row's find), `track_r_min`, `track_r_max` (the found surface's radii about its own origin), **`track_offset`** (the tracked center's distance from the analytic one, in cells of the finest spacing — the number "good to about a cell" is read from), `track_misses`, `track_prediction` (the found origin's distance from where the track predicted it, in cells; `nothing` without a find), `track_trigger` (this row's find was forced by the lapse trigger) | every chunk, the find every `k`-th or when triggered |
+| tracked layer | the geometry the next chunk runs on: `layer_h` (the spacing its offset and ramp are stated in), `layer_offset = m h`, `layer_thickness = n_L h`, `layer_r_in`, `layer_r_out` (the shape's bounding radii), and `margin_efolds` — step 8a's leakage e-folds across the margin, the least of the six grid axes (added in step 8d) | every chunk |
 
 **Constraints.** Both kernels mask the interior `r < r_1` and write zero
 inside it; the modified region is not a numerical solution. Norms are
@@ -2105,7 +2379,13 @@ sharp test rather than a picture.
 The horizon finder is a *diagnostic*, not a tracker: the layer follows
 the analytic center, and the refinement follows the indicator. A run in
 which the found horizon and the analytic center disagree by more than a
-few finest spacings has found a bug, not a feature to track.
+few finest spacings has found a bug, not a feature to track. **(Amended
+in step 8d:** a case whose interior is a `FittedSpec` asks for its layer to
+follow the found horizon, and then the finder's answer is an input —
+through `src/tracking.jl`'s track, from the row the driver records, under
+[The interior](#the-interior-a-pointwise-damping-layer), "The tracked
+geometry". Every other case is as this paragraph says, and `track_offset`
+is the row that says whether a tracked one has found a bug.**)**
 
 **(Implemented and measured in step 7**, `src/horizon.jl`.**)** Five
 things the writing settled, each stated where it is made in that file:
@@ -2129,7 +2409,14 @@ things the writing settled, each stated where it is made in that file:
   centers is a row of its own, `center_offset`, and it is the number the
   paragraph above turns into a bug report. `r_mean` is the `sin θ`-weighted
   mean over the collocation points, which is `∮ r dΩ/4π` to the accuracy
-  of the grid's own quadrature.
+  of the grid's own quadrature. **(Amended in step 8d:** `find_gh_horizon`
+  takes `center =`, the point the radii and `center_offset` are measured
+  from, defaulting to the analytic center, and also returns the radii about
+  the surface's own recentred origin, `origin_r_min`, `origin_r_mean`,
+  `origin_r_max` — what the shape `hlm` describes, and what a tracked
+  geometry is built from. A tracked run passes its predicted center, so its
+  rows' `r_min` … `r_max` are about the track and its `center_offset` is the
+  track's prediction error.**)**
 - **A failed find is recorded, not thrown (proposed in step 7).** The
   horizon is a diagnostic and nothing in the evolution reads it, so a
   find that throws — the guard refusing a flow that wandered inward, a
@@ -2321,15 +2608,16 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c) |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook |
 | `src/bounds.jl` | the range projection (added in step 8b): `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
-| `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii and the hole's mass (`hole_mass`, added in step 8c′), and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes |
+| `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii and the hole's mass (`hole_mass`, added in step 8c′), and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes. **Step 8d adds the tracked geometry's kernel side**: the real harmonics (`real_harmonic_index`, `real_from_complex`/`complex_from_real`, the recurrence `shape_series`, `shape_bounds`), the analytic horizon of the seed (`analytic_horizon_radius`), `FittedSpec` — what a case holds — and `FittedInterior` — the kernel argument — with `interior_point`, `fitted_geometry`, `core_position`, `ShapeMask`, `ShapeBand`, `geometry_spacing` and its `check_interior_radii`; and the protocol both geometries speak (`in_layer(int, t, x)`, `interior_point`, `is_outside`, `geometry_radii`, `layer_radii`, `layer_mask`, `shell_mask`) |
 | `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4), or `hole_forest`'s nested shells around a hole (added in step 5, **here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
 | `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate step 5's interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` (added in step 4) |
 | `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
+| `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl` |
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written (added in step 8c′) — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. Step 8c adds the E3 target `CurvatureTarget` to `evolution_cases.jl`, its claims to `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. Step 8c adds the E3 target `CurvatureTarget` to `evolution_cases.jl`, its claims to `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. Step 8d adds `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and makes `evolution_cases.jl`'s shell norms the interior's own `shell_mask` |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
@@ -2357,7 +2645,13 @@ selects **0.1.1**. The remaining three entries are what keeps the Julia
 floor at 1.11, and two of them are necessary rather than chosen —
 `KorzynskiSpin` is not in General at all, and `ApparentHorizonFinder`
 `2.1` is not released there (General has `2.0.0`). Vendoring a package or
-adding a local-path source would hide that instead of stating it. Tests add
+adding a local-path source would hide that instead of stating it.
+**`AbstractSphericalHarmonics` is a direct dependency from step 8d** (`1.2`,
+registered; it was already in the manifest through `ApparentHorizonFinder`):
+the tracked geometry converts the finder's coefficients with its
+`ash_resample` and samples the seed on its `EquiangularGrid`, and a package
+this one calls is one it names, not one it reaches through another's
+namespace. The tests list it too, for `sYlm` and `ash_evaluate`. Tests add
 `MultiFloats` and `ForwardDiff` — the latter because the checks on the
 expanded form differentiate the analytic solution one layer above the one
 `SpacetimeMetrics` takes internally (added in step 1). `bin/` adds
@@ -4282,6 +4576,80 @@ one section whose rerun no longer reproduces its table — step 8a's layer
 was at `1/dt` — and `test/dispersion.jl`'s one-dimensional model of it stays
 at `1/dt` too, as the model of the runs it was compared against.
 
+### The tracked geometry (step 8d)
+
+`src/tracking.jl`, the second half of `src/interior.jl`, the tracked chunk
+in `src/driver.jl`, and `test/tracking_tests.jl`; the design is under [The
+interior](#the-interior-a-pointwise-damping-layer), "The tracked geometry".
+No long run is required by the step, and none is in `hole_runs.jl`.
+
+**The suite.** **4410 assertions in 15m28 at one thread and 11m21 at
+four** on the development machine, shared with sibling agents (load
+average 6–7), against step 8c′'s 3857 in 14m33 and 10m30. The 553 new ones
+are `tracking_tests.jl`'s, **`54.7 s` at one thread and `32.4 s` at
+four**: the host-side part `2.3 s` (464 assertions, 415 of them the seed on
+the charts' quartic), one right-hand side per variant and one find `12 s`,
+and the two runs — the lost track with the trigger, and the tracked hole
+against the sphere — `40 s` / `18 s`, most of it the compilation of the
+tracked geometry's kernels (`1.3 s` each once the fixture's are compiled).
+No other testset's claims changed; the protocol change touched only
+`interior_tests.jl`'s one call of `in_layer`.
+
+**The acceptance list, with its numbers** (all measured in step 8d on the
+development machine, Julia 1.13):
+
+| claim | number |
+|---|---|
+| real harmonics against `sYlm` at 200 random directions, largest error of the function | `3.7` / `6.4` eps at `lmax = 4` / `8` (`Float64`), `1.6` / `5.3` eps (`Float32`) |
+| the same against `ash_evaluate` on `EquiangularGrid(6)` | below `16` eps |
+| truncation of the analytic seed, Kerr-Schild `a = 9/10`, largest radius error | `1.2e−3`, `8.1e−6`, `5.5e−8`, `3.8e−10` at `lmax = 4, 8, 12, 16` |
+| the same, harmonic Kerr `a = 9/10` | `4.6e−2`, `7.2e−3`, `1.1e−3`, `1.7e−4` (`2.4`, `0.37`, `0.057`, `0.009` cells at `h = 5/256`) |
+| a fitted sphere against step 5's `Interior`, one right-hand side and the paste | `isequal` for `:damped`, `:frozen`, `:pasted` |
+| one find of the fixture's initial data (`N_ah = 12`): the tracked center | `1.4e−5 M` from the analytic one, **`track_offset = 1.8e−4` cells** |
+| the same: `r_min`, `r_max` about the found origin, against `r₊ = 2` | `2.00043`, `2.00068` |
+| a find with `r_min` moved by `G h` | refused (`ArgumentError`); by `G h/4`, accepted |
+| a finder disabled after `1/10 M` (chunk `1/20`, `max_misses = 2`) | `:coasting` at `3/20 M`, `TrackLostError` at `1/5 M` carrying the five rows, "0.1 M before t = 0.2" |
+| the lapse-collapse trigger at `α_trigger = 1` with `every = 100` | every find after the first forced, `track_trigger = true` on those rows |
+| a `:damped` tracked run of the fixture to `0.15 M` against step 5's sphere with the same layer (`r_1 = 2 − 10 h`, `n_L = 8`, `ρ_ramp = 1`): masked error L2 | `3.110274e−3` against `3.110271e−3` |
+| the same: the `G`-point shell's `C_a` L2, the layer residual | `1.0745462e−2` against `1.0745448e−2`; `0.203` against `0.206` |
+| the same: projection hits, `track_offset`, prediction error, re-samples | `0` and `0`; at most `3.3e−4` cells; `1.2–1.8e−4` cells per find; none |
+| `margin_efolds` on the sphere `r_h = 2`, `m = 8`, `h = 5/64`, `ε_KO = 1/2` | `1.810` (`q = 2`), `2.073` (`q = 4`) — `test/dispersion.jl`'s `1.81`, `2.07` |
+| the same on the tracked fixture, `m = 10` through the blocks the path crosses | `1.45` (a uniform `5/64` would give `2.68`) |
+| the footprint guard on an `a = 9/10` shape, 2000 random footprints | agrees with the definition on every one |
+| cost per point: `shape_series` at `lmax = 4`, `8`; one analytic `u_exact` | `21 ns`, `79 ns`; `96 ns` |
+| cost of the tracked geometry: one right-hand side on the fixture, a `0.15 M` run at four threads | `+1.1 %`; `3.16 s` against `3.00 s` (`+5 %`) |
+| host side per chunk: `fitted_interior`, `margin_efolds` | `0.04 ms`, `0.6 ms` |
+
+**The same comparison to `5 M`** (`julia --project=. --threads=4
+test/hole_runs.jl tracked`, the section added in step 8d and not in the
+default list; chunks of `M/4`, the finder every chunk; measured once, not in
+the suite). The tracked layer follows a found horizon that shrinks with the
+solution's own drift — `r_in` from `2.00042` to `1.99564` by `5 M`, as
+`M_irr` falls from `1.00029` to `0.99760` — and stays step 5's layer to a
+percent:
+
+| `t/M` | masked L2, tracked | sphere | shell `C_a` L2, tracked | sphere | `M_irr`, tracked | sphere | `track_offset` (cells) |
+|---|---|---|---|---|---|---|---|
+| 0 | 0 | 0 | 1.0796e−2 | 1.0796e−2 | 1.0002880 | 1.0002880 | 1.8e−4 |
+| 1 | 1.4002e−2 | 1.3991e−2 | 1.2401e−2 | 1.2400e−2 | 0.9991516 | 0.9991516 | 7.4e−4 |
+| 2 | 1.4177e−2 | 1.4147e−2 | 1.4550e−2 | 1.4508e−2 | 0.9983334 | 0.9983334 | 2.9e−4 |
+| 3 | 1.6146e−2 | 1.6090e−2 | 1.8469e−2 | 1.8408e−2 | 0.9980183 | 0.9980182 | 7.4e−4 |
+| 4 | 1.8755e−2 | 1.8595e−2 | 2.1214e−2 | 2.1107e−2 | 0.9977899 | 0.9977897 | 1.8e−3 |
+| 5 | 2.0436e−2 | 2.0233e−2 | 2.2995e−2 | 2.2864e−2 | 0.9976053 | 0.9976048 | 3.0e−3 |
+
+The difference grows to `1.0 %` in the masked error and `0.6 %` in the
+shell by `5 M`, in the tracked run's disfavour, and `M_irr` agrees to
+`4e−7`; neither run's projection fires, nothing is re-sampled (the core
+surface moves by `5e−3 M`, a sixteenth of a cell, in `5 M`), and the
+margin is `1.47` e-folds at the end. **`track_offset` grows, `3.0e−3` cells
+at `5 M`** — the velocity estimate is two finds' difference, and the
+finder's `1e−4`-cell noise over a chunk of `M/4` is a velocity of `4e−4`
+cells per `M` that the prediction integrates — while the per-find
+prediction error stays below `6.8e−4` cells. A static hole's track would be
+better held without a velocity at all; a moving one's is G5's question,
+and a velocity smoothed over several finds is the first remedy to try
+**(proposed in step 8d)**.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -4404,6 +4772,19 @@ step 8a computes their penetration length for this package's stencils
 before anything is built, and it is what the margin `m` is measured
 against. `a = 7/10` stays the fallback for G5 if the last row of step
 8f's matrix does not fit a node.
+
+**The offset surface is built (step 8d).** A case whose interior is a
+`FittedSpec` keys its layer on the depth below the tracked horizon's offset
+surface, with the track's center, velocity and shape (to `lmax_shape`)
+updated from every find — under [The
+interior](#the-interior-a-pointwise-damping-layer), "The tracked geometry";
+on the static hole it is the analytic layer to six digits. What it does
+not do yet is the second half of the answer: with an analytic target the
+core surface must still contain the chart's singular set, which harmonic
+Kerr at `a = 9/10` refuses at every `h` — so the proof-of-concept case waits
+for step 8e's `:fitted` target, and its shape needs `lmax = 12` for a tenth
+of a cell at `h = 5/256` where Kerr-Schild's needs `4` (measured in step
+8d).
 
 Still proposed, to be confirmed or amended by the milestones that
 first touch them:
