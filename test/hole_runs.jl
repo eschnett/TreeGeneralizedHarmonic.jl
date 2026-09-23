@@ -1476,12 +1476,49 @@ function cal_screens()
                            ref="e0ref-$(tag)"))
     end
     specs["e0"] = e0
+    # E0 again with the `ε_KO(r)` profile across the margin, `ε_out = 1/2`
+    # rising to `ε_in`: step 8a's recommendation, tested on the step it was
+    # made for (added after the first screens, in which the constant
+    # `ε_KO = 1/2` run did not survive the step). Each against a reference
+    # with the same profile, so the difference is the step's alone.
+    e0p = Any[]
+    for ε in (2, 4)
+        push!(e0p, cal_spec("e0ref-p$(ε)"; exp=:e0, variant=:pasted,
+                            eps_in=ε, mesh=:uniform, chunk=1 // 4, every=4))
+        push!(e0p, cal_spec("e0-p$(ε)"; exp=:e0, variant=:pasted, target=:e1,
+                            eps_in=ε, mesh=:uniform, chunk=1 // 4, every=4,
+                            ref="e0ref-p$(ε)"))
+    end
+    specs["e0p"] = e0p
     return specs
 end
 
 # The survivors of the screens, run to `50 M` at `chunk = 1 M` as step 5's
-# table was — one list per batch job, written in after the screens.
-const CAL_LONG = Dict{String,Vector{String}}()
+# table was — one list per batch job of eight workers at eight threads,
+# written in after the screens. Not every survivor (the screens left 99 of
+# the 120): every configuration of the `ε_KO = 1/2` scan, the profile at the
+# two thickest ramps and the two physical rates that screened best — and at
+# the grid rate on the same two ramps, at `ε_in = 4` — the E1 and E2 targets
+# at `n_L = 6` (`ρ_max = 4/M`), `8` and `12`, every `δ = 4h` survivor, and the
+# four controls **(proposed in step 8c)**; `CODE.md` has the screens of the
+# rest.
+const CAL_LONG = Dict{String,Vector{String}}(
+    "long1" => ["ctl-damped8", "ctl-damped6", "ctl-pasted", "ctl-frozen",
+                "e3-nd-rgrid-c", "e3-n4-rgrid-c", "e3-n4-r10-c", "e3-n4-r4-c"],
+    "long2" => ["e3-n4-r1-c", "e3-n6-rgrid-c", "e3-n6-r10-c", "e3-n6-r4-c",
+                "e3-n6-r1-c", "e3-n8-rgrid-c", "e3-n8-r10-c", "e3-n8-r4-c"],
+    "long3" => ["e3-n8-r1-c", "e3-n12-rgrid-c", "e3-n12-r10-c", "e3-n12-r4-c",
+                "e3-n12-r1-c", "e3-n12-rgrid-p4", "e3-n8-rgrid-p4",
+                "e3-n12-r4-p1"],
+    "long4" => ["e3-n12-r4-p2", "e3-n12-r4-p4", "e3-n12-r1-p1", "e3-n12-r1-p2",
+                "e3-n12-r1-p4", "e3-n8-r4-p1", "e3-n8-r4-p2", "e3-n8-r4-p4"],
+    "long5" => ["e3-n8-r1-p1", "e3-n8-r1-p2", "e3-n8-r1-p4", "e1-n6-r4-c",
+                "e1-n8-r10-c", "e1-n8-r4-c", "e1-n8-r1-c", "e1-n12-rgrid-c"],
+    "long6" => ["e1-n12-r10-c", "e1-n12-r4-c", "e1-n12-r1-c", "e2h-n6-r4-c",
+                "e2h-n8-rgrid-c", "e2h-n8-r10-c", "e2h-n8-r4-c", "e2h-n8-r1-c"],
+    "long7" => ["e2h-n12-rgrid-c", "e2h-n12-r10-c", "e2h-n12-r4-c",
+                "e2h-n12-r1-c", "e2h4-n6-r10-c", "e2h4-n6-r4-c", "e2h4-n8-r10-c",
+                "e2h4-n8-r4-c"])
 
 cal_long(spec) = merge(spec, (t_end=50 // 1, chunk=1 // 1, every=2))
 
@@ -1530,6 +1567,20 @@ function cal_setup(sp)
 end
 
 cal_fmt(x) = x === nothing ? "      —  " : Printf.format(Printf.Format("%9.3e"), x)
+
+# The root cause of a run that threw, through the task wrappers a threaded
+# kernel puts around it — the `DomainError` and not the `TaskFailedException`.
+function cal_root_cause(e)
+    while true
+        if e isa TaskFailedException
+            e = e.task.result
+        elseif e isa CompositeException
+            e = first(e.exceptions)
+        else
+            return first(split(sprint(showerror, e), '\n'))
+        end
+    end
+end
 
 """
 One run: `evolve!` with an observer that writes the record's rows it needs
@@ -1622,7 +1673,7 @@ function cal_run(sp; t_end=nothing, reference=nothing, geometry=nothing)
                 t_end=tend, cfl=T(1 // 5), observer=watch, kw...)
     catch err
         err isa InterruptException && rethrow()
-        failure = first(split(sprint(showerror, err), '\n'))
+        failure = cal_root_cause(err)
         nothing
     end
     wall = time() - t0
@@ -1812,7 +1863,8 @@ function cal_report(results, all)
     end
 end
 
-const CAL_ALL_SCREENS = ["sweep", "controls", "scan", "profile", "targets", "e0"]
+const CAL_ALL_SCREENS = ["sweep", "controls", "scan", "profile", "targets", "e0",
+                         "e0p"]
 
 if "calibration" in SECTIONS || haskey(OPTIONS, "calibration")
     t_end_opt = haskey(OPTIONS, "t_end") ? only(leak_option("t_end", [5 // 1])) :
