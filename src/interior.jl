@@ -59,8 +59,13 @@ exactly what makes a kernel argument non-`isbits` and a run
 thread-dependent (`CLAUDE.md`, "A callback must capture no `Type` and no
 host array").
 
-`v` is the coordinate velocity of `boost(background, v)` and is zero for
-every static case; G5 is where it is not.
+`v` is the hole's coordinate velocity in the lab frame, zero for every
+static case; G5 is where it is not. **For `boost(background, u)` it is
+`−u`, not `u` (corrected in step 8e):** `SpacetimeMetrics` evaluates the
+boosted metric at `Λᵀx`, so the rest frame's origin moves at `−u` in the
+lab. [`hole_velocity`](@ref) is the one place that is written, and
+[`GHCase`](@ref) derives `v` from it — and refuses a `velocity` keyword that
+disagrees.
 """
 struct HoleCenter{T}
     c0::SVector{3,T}
@@ -620,6 +625,80 @@ hole_mass(m::SpacetimeMetrics.RotatedMetric) = hole_mass(m.metric)
 # The rest mass: a boost changes the hole's energy and its coordinate shape,
 # not the parameter the solution is written in.
 hole_mass(m::SpacetimeMetrics.BoostedMetric) = hole_mass(m.metric)
+
+"""
+    hole_velocity(background) -> SVector{3}
+
+The hole's **coordinate velocity in the lab frame**, for the backgrounds that
+have a hole: the `v` of the analytic trajectory `c(t) = c₀ + v t` that
+[`GHCase`](@ref) builds its [`HoleCenter`](@ref) from.
+
+`KerrSchild` and `Harmonic` are static, so zero. `translate` moves the hole
+and does not change its velocity; `rotate` turns it, `R v` (the metric at `x`
+is the unrotated one at `Rᵀx`). **`boost(m, v)` moves the hole at `−v`
+(found in step 8d, fixed in step 8e):** `SpacetimeMetrics` evaluates the
+boosted metric as `Λ g(Λᵀx) Λᵀ`, with `Λ`'s `+γv` entries, so the rest
+frame's origin `Λᵀx = 0` is the lab's `x = −v t` —
+`metric(boost(KerrSchild(1, 0), (0.3, 0, 0)), (1, x, 0, 0))` is singular at
+`x = −0.3`, not at `+0.3`. A boost of a hole that already moves composes the
+two velocities relativistically (`Λ(−v)` applied to the inner hole's
+4-velocity), which is `−v` exactly when the inner hole is static.
+
+A background this package cannot classify — flat space in any chart, or a
+metric outside the list — is refused by name, as [`hole_mass`](@ref) refuses
+it: a velocity that is a guess would put the layer, the damping profile and
+the tracked seed on the wrong trajectory without saying so.
+"""
+function hole_velocity end
+
+hole_velocity(ks::KerrSchild) = zero(SVector{3,typeof(ks.mass)})
+hole_velocity(ha::Harmonic) = zero(SVector{3,typeof(ha.mass)})
+hole_velocity(m::SpacetimeMetrics.TranslatedMetric) = hole_velocity(m.metric)
+
+function hole_velocity(m::SpacetimeMetrics.RotatedMetric)
+    u = hole_velocity(m.metric)
+    R = m.R
+    # `x = R x_old` on the spatial block, so a trajectory `x_old = u t` is
+    # `x = (R u) t`.
+    return SVector(R[2, 2] * u[1] + R[2, 3] * u[2] + R[2, 4] * u[3],
+                   R[3, 2] * u[1] + R[3, 3] * u[2] + R[3, 4] * u[3],
+                   R[4, 2] * u[1] + R[4, 3] * u[2] + R[4, 4] * u[3])
+end
+
+function hole_velocity(m::SpacetimeMetrics.BoostedMetric)
+    u = hole_velocity(m.metric)
+    v = m.velocity
+    # The rest frame's origin `Λᵀx = 0` is `x = −v t`: exactly `−v`, not a
+    # composition that rounds to it, for the static hole every case has.
+    iszero(u) && return -v
+    # `x = Λ(−v) x_old` for the symmetric `Λ`, so the lab 4-velocity is
+    # `Λ(−v)` of `γ_u (1, u)` and the lab velocity is its ratio.
+    β² = v[1] * v[1] + v[2] * v[2] + v[3] * v[3]
+    γ = 1 / sqrt(1 - β²)
+    f = (γ - 1) / β²
+    vu = v[1] * u[1] + v[2] * u[2] + v[3] * u[3]
+    den = γ * (1 - vu)
+    return SVector(ntuple(i -> (u[i] + f * v[i] * vu - γ * v[i]) / den, 3))
+end
+
+hole_velocity(bg::AbstractMetric) = throw(ArgumentError(
+    "$(typeof(bg)) has no hole whose velocity this package knows how to " *
+    "read: hole_velocity classifies KerrSchild and Harmonic (static) and " *
+    "translate, rotate and boost of either — and SpacetimeMetrics' " *
+    "boost(m, v) moves the hole at −v, since it evaluates m at Λᵀx. A " *
+    "background outside that list needs a hole_velocity method before a " *
+    "case derives its trajectory from it; a case with no hole passes its " *
+    "`velocity` explicitly or takes zero."))
+
+# Whether `hole_velocity` classifies the background: the one question
+# `GHCase` asks before deriving a trajectory from it, so that a flat-space
+# case keeps its zero velocity without a `try` (added in step 8e).
+has_hole_velocity(::Union{KerrSchild,Harmonic}) = true
+has_hole_velocity(m::Union{SpacetimeMetrics.TranslatedMetric,
+                           SpacetimeMetrics.RotatedMetric,
+                           SpacetimeMetrics.BoostedMetric}) =
+    has_hole_velocity(m.metric)
+has_hole_velocity(::AbstractMetric) = false
 
 """
     singular_radius(background) -> T

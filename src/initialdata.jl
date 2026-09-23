@@ -28,7 +28,8 @@
 
 """
     GHCase(T = Float64, background; box, periodic, ε_KO, γ0, γ2,
-           center = (0, 0, 0), velocity = (0, 0, 0), interior = nothing,
+           center = (0, 0, 0), velocity = the background's,
+           interior = nothing,
            r_0 = 0, r_1 = 0, margin = 8, w_ramp = 1//2, ρ_ramp = 1//2,
            target = nothing, refinement = nothing, horizon = nothing,
            bounds = nothing, chunk = 0)
@@ -74,7 +75,14 @@ target) and needs a [`Horizon`](@ref) to be tracked with.
 
 `center` and `velocity` are the hole's analytic trajectory `c(t) = c₀ + v
 t` — the thing the interior, the damping profile and the refinement
-centroid all measure a distance from. `chunk` is the regrid
+centroid all measure a distance from. **The velocity is the background's
+(amended in step 8e):** left unset it is [`hole_velocity`](@ref)`(background)`
+— zero for a static hole, `−u` for `boost(m, u)`, which `SpacetimeMetrics`
+evaluates at `Λᵀx` so that its hole moves the other way — and zero for a
+background with no hole; given, it must agree with the background's, and an
+`ArgumentError` stating both and the convention refuses one that does not.
+Step 8d found the sign; before step 8e a boosted case carried `v = +u` unless
+told otherwise, and nothing in G4 moves. `chunk` is the regrid
 cadence [`evolve!`](@ref) runs at; zero means "not a case that is
 evolved in chunks", and the driver says so rather than assuming one.
 
@@ -149,9 +157,8 @@ struct GHCase{T,B,D,I,R,H,X,E}
 end
 
 function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
-                center=(zero(T), zero(T), zero(T)),
-                velocity=(zero(T), zero(T), zero(T)), interior=nothing,
-                r_0=zero(T), r_1=zero(T), margin::Integer=8,
+                center=(zero(T), zero(T), zero(T)), velocity=nothing,
+                interior=nothing, r_0=zero(T), r_1=zero(T), margin::Integer=8,
                 w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), target=nothing,
                 refinement=nothing, horizon=nothing, bounds=nothing,
                 chunk=zero(T)) where {T}
@@ -180,7 +187,7 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
     T(chunk) ≥ 0 || throw(ArgumentError(
         "the chunk length is a regrid cadence and cannot be negative, got " *
         "$chunk; zero means the case states none and evolve! must be told."))
-    c = HoleCenter(T, center, velocity)
+    c = HoleCenter(T, center, case_velocity(T, background, velocity))
     interior === nothing && target !== nothing && throw(ArgumentError(
         "this case has a layer target but no interior: the target is what " *
         "the damping layer relaxes toward, and a case with no hole has no " *
@@ -210,6 +217,43 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
         background, ntuple(d -> (T(box[d][1]), T(box[d][2])), Val(3)),
         ntuple(d -> Bool(periodic[d]), Val(3)), ε, damping, T(γ2), c,
         int, refinement, horizon, bounds, T(chunk))
+end
+
+"""
+    case_velocity(T, background, velocity) -> SVector{3,T}
+
+The velocity a case's [`HoleCenter`](@ref) carries (added in step 8e): the
+background's own, [`hole_velocity`](@ref), when `velocity` is `nothing`;
+zero when it is `nothing` and the background has no hole this package can
+classify (flat space in any chart); and `velocity` itself when it is given —
+after checking it against the background's where there is one, to `8 eps`,
+and refusing it with both vectors and the convention when it disagrees. A
+keyword that disagrees with the background is a case whose layer, damping
+profile and tracked seed move one way while its hole moves the other, which
+is what step 8d found `boost`'s sign would do to a case built with `+u`.
+"""
+function case_velocity(::Type{T}, background, velocity) where {T}
+    known = has_hole_velocity(background)
+    if velocity === nothing
+        known || return zero(SVector{3,T})
+        vb = hole_velocity(background)
+        return SVector{3,T}(T(vb[1]), T(vb[2]), T(vb[3]))
+    end
+    v = SVector{3,T}(T(velocity[1]), T(velocity[2]), T(velocity[3]))
+    known || return v
+    vb = hole_velocity(background)
+    vbt = SVector{3,T}(T(vb[1]), T(vb[2]), T(vb[3]))
+    δ = sqrt(sum(abs2, v - vbt))
+    δ ≤ 8 * eps(T) || throw(ArgumentError(
+        "the case's velocity = $(Tuple(v)) disagrees with its background's " *
+        "hole, which moves at hole_velocity(background) = $(Tuple(vbt)) " *
+        "(a difference of $δ): SpacetimeMetrics' boost(m, u) evaluates m at " *
+        "Λᵀx, so the boosted hole's rest-frame origin is the lab's x = −u t " *
+        "and its velocity is −u, not u (found in step 8d, fixed in step 8e). " *
+        "A case whose trajectory disagrees with its hole puts the layer, the " *
+        "damping profile and the tracked seed where the hole is not. Leave " *
+        "`velocity` unset to take the background's."))
+    return vbt
 end
 
 # The Kreiss–Oliger amplitude a case carries (added in step 8c): a number in
@@ -465,7 +509,7 @@ shifted_minkowski_case(::Type{T}=Float64; A=T(1//2), w=T(2), halfwidth=T(2),
 
 """
     hole_case(T = Float64, background; halfwidth, r_0, r_1, chunk,
-              M = 1, center = (0,0,0), velocity = (0,0,0),
+              M = 1, center = (0,0,0), velocity = the background's,
               interior = :damped, margin = 8, ε_KO = 1//2,
               γ0 = GHSO2's recipe, γ2 = 0, w_ramp, ρ_ramp, target = nothing,
               refinement = nothing, horizon = nothing, bounds = nothing)
@@ -508,11 +552,8 @@ caller asks for explicitly.
 function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                    chunk,
                    M=one(T), center=(zero(T), zero(T), zero(T)),
-                   velocity=(zero(T), zero(T), zero(T)), interior=:damped,
-                   margin::Integer=8, ε_KO=T(1 // 2),
-                   γ0=GaussianDamping(T; near=1 / T(M), far=1 / (10 * T(M)),
-                                      width=3 * T(M),
-                                      center=HoleCenter(T, center, velocity)),
+                   velocity=nothing, interior=:damped,
+                   margin::Integer=8, ε_KO=T(1 // 2), γ0=nothing,
                    γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
                    target=nothing, refinement=nothing, horizon=nothing,
                    bounds=nothing) where {T}
@@ -531,10 +572,18 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
             "are what check_interior_radii measures against the mesh and the " *
             "horizon (CODE.md, \"The interior\")."))
     end
+    # The damping profile moves with the hole, so it is built on the case's
+    # own trajectory — the background's velocity unless one is given, and
+    # then that one, checked by `GHCase` (amended in step 8e: it was built on
+    # the keyword's default zero, which a boosted hole does not have).
+    v = case_velocity(T, background, velocity)
+    damping = γ0 !== nothing ? γ0 :
+              GaussianDamping(T; near=1 / T(M), far=1 / (10 * T(M)),
+                              width=3 * T(M), center=HoleCenter(T, center, v))
     return GHCase(T, background;
                   box=ntuple(_ -> (-T(halfwidth), T(halfwidth)), Val(3)),
-                  periodic=(false, false, false), ε_KO=ε_KO, γ0=γ0, γ2=γ2,
-                  center=center, velocity=velocity, interior=interior,
+                  periodic=(false, false, false), ε_KO=ε_KO, γ0=damping,
+                  γ2=γ2, center=center, velocity=v, interior=interior,
                   r_0=r_0 === nothing ? zero(T) : r_0,
                   r_1=r_1 === nothing ? zero(T) : r_1, margin=margin,
                   w_ramp=w_ramp,

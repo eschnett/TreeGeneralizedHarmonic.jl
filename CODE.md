@@ -1697,16 +1697,31 @@ the same track on the new mesh. Four decisions the loop needed, each
   vanishes to second order there. On the static hole the surface moves by
   `10⁻⁴` a chunk and nothing is re-sampled.
 
-**A boost moves the hole the other way (found in step 8d, not fixed).**
-`SpacetimeMetrics.boost(m, v)` evaluates `m` at `Λᵀx` with `Λ`'s `+γv`
-entries, so the rest frame's origin is at `x = −v t` in the lab: the metric
-of `boost(KerrSchild(1, 0), (0.3, 0, 0))` at `t = 1` is singular at
-`x = −0.3`, not `+0.3` (measured). `HoleCenter`'s docstring calls `v` "the
-coordinate velocity of `boost(background, v)`", which is the wrong sign;
-nothing in G4 moves, and the tracked seed would carry `case.center.v` until
-two finds replace it. G5 has to build its case with `velocity = −v` for
-`boost(bg, v)`, or say which convention it takes — the analytic shape's
-contraction does not depend on the sign.
+**A boost moves the hole the other way (found in step 8d, fixed in step
+8e).** `SpacetimeMetrics.boost(m, v)` evaluates `m` at `Λᵀx` with `Λ`'s
+`+γv` entries, so the rest frame's origin is at `x = −v t` in the lab: the
+metric of `boost(KerrSchild(1, 0), (0.3, 0, 0))` at `t = 1` is singular at
+`x = −0.3`, not `+0.3` (measured). `HoleCenter`'s docstring called `v` "the
+coordinate velocity of `boost(background, v)`", which is the wrong sign, and
+a case built without a `velocity` keyword carried zero. **Fixed in step 8e**
+by one dispatch beside `hole_mass`: `hole_velocity(background)` is zero for
+`KerrSchild` and `Harmonic`, passed through `translate`, turned by `rotate`
+(`R u`, since the rotated metric at `x` is the original at `Rᵀx`), `−v` for
+`boost(m, v)` of a static hole and the relativistic composition `Λ(−v)` of
+the inner hole's 4-velocity otherwise, and an `ArgumentError` naming the type
+for a background it cannot classify. `GHCase` (and `hole_case`, whose default
+damping profile moves with the hole) derives `velocity` from it when the
+keyword is not given — zero for a background with no hole — and refuses a
+keyword that disagrees with it by more than `8 eps`, stating both vectors and
+the convention; `HoleCenter`'s docstring says `−u`. `test/interior_tests.jl`
+asserts that the seed track of a `boost(Harmonic(1, 0), (0.3, 0, 0))` case is
+at `(−0.3, 0, 0)` at `t = 1`, where the boosted Kerr-Schild metric is
+singular (`|g_tt| = 1.0e17` there, `4.9` at `+0.3`), and that the former sign
+is refused. No existing test, fixture or `hole_runs.jl` section passes a
+`velocity`, and the one boosted case the suite builds (`gauge_tests.jl`'s
+harmonic neighbour of the refused Kerr-Schild) asserts only that it is
+accepted; nothing in G4 moves, so nothing measured changes. The analytic
+shape's contraction does not depend on the sign.
 
 `evolve!` also takes `find`, the function the horizon rows call —
 `find_gh_horizon`, or a test's wrapper that disables it — because the

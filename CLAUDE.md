@@ -775,6 +775,13 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   cannot represent. Use `boost(Harmonic(M, a), v)`, which is harmonic
   (`H ≡ 0`) — a boost preserves the harmonic condition. The refusal's
   message says this; do not weaken it.
+- **`boost(m, v)` moves the hole at `−v`** (found in step 8d, fixed in step
+  8e). `SpacetimeMetrics` evaluates the boosted metric at `Λᵀx`, so
+  `boost(KerrSchild(1, 0), (0.3, 0, 0))` is singular at `x = −0.3 t`.
+  `hole_velocity(background)` is the one place the sign is written; `GHCase`
+  derives the case's velocity from it when the keyword is left unset and
+  refuses a keyword that disagrees. Do not pass `velocity = v` for a boost
+  by `v` — leave it unset.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
   dissipation" and — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in

@@ -99,6 +99,7 @@ export HoleCenter, center_at, Interior, with_ρ_max, interior_variant, layer_tar
 export interior_profiles, is_frozen, in_layer, core_position, smoothstep
 export InteriorMask, ShellMask, interior_mask
 export horizon_min_radius, horizon_max_radius, singular_radius, hole_mass
+export hole_velocity
 export layer_spacing, check_interior_radii, layer_mask, shell_mask
 export geometry_radii, layer_radii
 

@@ -265,6 +265,71 @@ import SpacetimeMetrics as SM
                                chunk=T(1 // 10))) === T(8)
     end
 
+    # `SpacetimeMetrics.boost(m, v)` evaluates `m` at `Λᵀx`, so its hole moves
+    # at `−v` (found in step 8d, fixed in step 8e). A case that carried `+v`
+    # would put its layer, its damping profile and its tracked seed a distance
+    # `2|v|t` from the hole — on the singular point of the chart after a
+    # crossing time — and nothing in G4 moves, so nothing else would notice.
+    @testset "a boosted hole moves at −v, and a case that says otherwise is refused" begin
+        v = SVector{3,T}(T(3 // 10), 0, 0)
+        ks = SM.KerrSchild(one(T), zero(T))
+        @test hole_velocity(ks) == zero(SVector{3,T})
+        @test hole_velocity(SM.Harmonic(one(T), T(9 // 10))) == zero(SVector{3,T})
+        bks = SM.boost(ks, v)
+        @test hole_velocity(bks) == -v
+        # Where the metric says the hole is: singular at `c(1) = −v`, regular
+        # at `+v`, where the former convention put it.
+        c = center_at(HoleCenter(T, (0, 0, 0), hole_velocity(bks)), one(T))
+        @test c == -v
+        @test abs(SM.metric(bks, SVector{4,T}(1, c...))[1, 1]) > 1e10
+        @test abs(SM.metric(bks, SVector{4,T}(1, v...))[1, 1]) < 10
+        # Through the wrappers: a translation keeps it, a rotation turns it
+        # (the metric at `x` is the unrotated one at `Rᵀx`, so the velocity
+        # is `R u`), and a boost of a moving hole composes relativistically.
+        @test hole_velocity(SM.translate(bks, SVector{4,T}(0, 1, 2, 3))) == -v
+        rot = SM.rotate(bks, T(3 // 10), T(7 // 10), T(-2 // 5))
+        R3 = rot.R[2:4, 2:4]
+        @test hole_velocity(rot) ≈ R3 * (-v) atol = 4 * eps(T)
+        rotated_hole = center_at(HoleCenter(T, (0, 0, 0), hole_velocity(rot)),
+                                 one(T))
+        @test abs(SM.metric(rot, SVector{4,T}(1, rotated_hole...))[1, 1]) > 1e10
+        w = SVector{3,T}(T(1 // 5), 0, 0)
+        @test hole_velocity(SM.boost(bks, w))[1] ≈ -(v[1] + w[1]) / (1 + v[1] * w[1])
+        @test_throws "no hole whose velocity" hole_velocity(SM.Minkowski())
+        @test_throws "no hole whose velocity" hole_velocity(
+            SM.boost(SM.Minkowski(), v))
+        # The case derives it — and its damping profile moves with it — and
+        # the tracked seed carries it: at `t = 1` the seed's center is where
+        # the boosted Kerr-Schild metric above is singular. (A boosted
+        # Kerr-Schild *case* is refused as a moving non-harmonic background,
+        # so the case is harmonic Kerr under the same boost.)
+        bh = SM.boost(SM.Harmonic(one(T), zero(T)), v)
+        case = hole_case(T, bh; halfwidth=T(5), chunk=T(1 // 10),
+                         interior=FittedSpec(T))
+        @test case.center.v == -v
+        @test case.γ0.center == case.center
+        seed = center_at(track_center(seed_track(case, 0)), one(T))
+        @test seed == -v
+        @test abs(SM.metric(bks, SVector{4,T}(1, seed...))[1, 1]) > 1e10
+        # A keyword that agrees is accepted; one with the former sign is
+        # refused, saying both and why.
+        box = ntuple(_ -> (T(-8), T(8)), 3)
+        kw = (box=box, periodic=(false, false, false), ε_KO=T(1 // 2), γ0=one(T),
+              γ2=zero(T))
+        @test GHCase(T, bh; kw..., velocity=(T(-3 // 10), 0, 0)).center.v == -v
+        @test_throws "disagrees with its background's hole" GHCase(
+            T, bh; kw..., velocity=Tuple(v))
+        @test_throws "−u, not u" hole_case(T, bh; halfwidth=T(5),
+                                           chunk=T(1 // 10), velocity=Tuple(v),
+                                           interior=FittedSpec(T))
+        # A background with no hole keeps whatever it is told, zero by default.
+        @test minkowski_case(T; L=1, ε_KO=0, γ0=0, γ2=0).center.v ==
+              zero(SVector{3,T})
+        @test GHCase(T, SM.Minkowski(); kw..., velocity=Tuple(v)).center.v == v
+        # And every static case this package builds is what it was.
+        @test hole_fixture(T).center.v == zero(SVector{3,T})
+    end
+
     # The frozen hierarchy is what the convergence protocol is stated on:
     # if the block layout moved with `N`, a rate measured on it would be a
     # rate of two different meshes.
