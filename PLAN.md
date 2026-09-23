@@ -837,7 +837,44 @@ the sampled data was finite), and **centered to about a cell** (8d's job).
 Continuity in *time* is the fifth: the coefficients are interpolated
 linearly between the last two fits. `FittedSpec`'s defaults are the rule's
 numbers, and the driver applies its rate through `chunk_interior`'s fixed
-path. **Two halves, reviewed between them**: 8e-i is
+path.
+
+**What step 8d hands over** (its report's section 6 and `CODE.md`, "The
+tracked geometry"):
+
+- **The real-harmonic convention the fit must share**: slot `l² + l + m + 1`
+  (as `ash_mode_index`), `m ≥ 0` cosine (and `l0`), `m < 0` sine;
+  `ỹᶜ = √2 Re Y_lm`, `ỹˢ = −√2 Im Y_lm`, `a_l0 = Re c_l0`, `aᶜ = √2 Re c`,
+  `aˢ = √2 Im c`; convert only with `real_from_complex`/`complex_from_real`;
+  `shape_series` (a Legendre recurrence in `n_z` times `(n_x + i n_y)^m`, no
+  angles) is the kernel-side evaluator to reuse for `fitted_state`. It costs
+  21 ns per point at `lmax = 4` and 79 ns at `8`, against 96 ns for one
+  analytic `u_exact`; harmonic Kerr at `a = 9/10` needs `lmax = 12` for a
+  tenth of a cell at `h = 5/256`, Kerr-Schild is fine at `4`.
+- **The protocol 8d changed**: `in_layer(int, t, x)`; the kernel asks
+  `interior_point`/`is_frozen`/`is_outside`/`interior_profiles`;
+  `geometry_radii(int, bg)`, `layer_radii(int)`, `layer_mask`, `shell_mask`;
+  `find_gh_horizon(center=)` returning `origin_r_min/mean/max`;
+  `FittedInterior` carries `h`, `n_L`, `margin` and `target`; a raw
+  `FittedSpec` is refused by `GHProblem`, `state_callback`, `level_bounds`
+  and the `Π` post-pass — the driver builds the geometry per chunk with
+  `fitted_interior(spec, track, forest, G; t, n_L)`.
+- **The track's accuracy**: `track_offset` `1.8e−4` cells after one find,
+  `3.3e−4` at `0.15 M`, `3.0e−3` at `5 M` on the static hole; the growth is
+  the two-find velocity integrating finder noise, and smoothing the velocity
+  over several finds is the first thing to try if a moving hole needs it.
+- **Harmonic `a = 9/10` is still refused** by the analytic-target core rule
+  (a ball cannot hold the disk); it is this step's fitted target and its
+  initial-data fill that lift the refusal — that row of 8f is the proof.
+- **The boost sign (found in step 8d, verified in review)**:
+  `SpacetimeMetrics.boost(m, v)` moves the hole at `−v`, and `HoleCenter`'s
+  docstring says the opposite. Fix it here: a `hole_velocity(background)`
+  dispatch beside `hole_mass` (zero for a static hole, `−v` for a
+  `BoostedMetric`, through translate and rotate), `GHCase` deriving
+  `velocity` from it when the keyword is not given and refusing a keyword
+  that disagrees, the docstring corrected, and a test that the seed
+  track's center at `t = 1` sits where the boosted metric is singular.
+ **Two halves, reviewed between them**: 8e-i is
 host-side and has no kernel; 8e-ii is the kernel, the driver and the
 variant. An agent does 8e-i, reports, and continues to 8e-ii only when the
 reviewer has read 8e-i's numbers.
