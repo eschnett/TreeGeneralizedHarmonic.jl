@@ -7,7 +7,7 @@ changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
 last milestone is marked *(Done.)* in `CODE.md`.
 
-**Steps 0–7 are done. Steps 8a and 8b are next** — the generic interior
+**Steps 0–7, 8a and 8b are done. Step 8c is next** — the generic interior
 (steps 8a–8g, added 2026-09-23), which step 8 needs before it can run
 its case.
 
@@ -619,6 +619,35 @@ recorded (prediction: `0.4 %` of a step). One short run added to the suite.
 `CODE.md`: "The interior" (the profiles, `ρ_max`, the three variants and
 their measured table); finding 1 above is the hypothesis under test.
 
+**What steps 8a and 8b hand over** (their reports' section 6, and
+`CODE.md`'s step 8a and 8b entries under "Measured results"):
+
+- **Step 5's two failing runs die at the transition `r_1`, not deep
+  inside** (measured in step 8b): `N = 6` `:damped` and `N = 8` `:pasted`
+  both degenerate in the *evolved* shell just outside `r_1` (`r = 1.18` to
+  `1.31` against `r_1 = 1.15`), through the lapse's square root on a stage
+  vector, after a shell error that grows from the first chunk; the range
+  projection never fires on either. That is finding 1 measured from the
+  other side, and it is what this step calibrates. The numbers to watch
+  are the validity monitor's shell rows — `min_α_shell`, `min_detγ_shell`,
+  `max_Π_shell` — and the shell error, not `bounds_hits`.
+- **Every run of this step carries the range projection** (`default_bounds`,
+  `default_gate = r_1 − 2 G h`) as a passive instrument; its hit count is
+  expected to stay zero, and a nonzero count is a finding to record with
+  the radius and time of the first hit (`bounds_r_max`, the accounting's
+  `first_t`, `first_r`). `diag` has 22 slots; do not insert one.
+- **The leakage margin** (measured in step 8a): on this fixture `m = 8`
+  attenuates grid-scale content made at `r_1` by `e^{−2.9}` to `e^{−4.6}`
+  (about 1 % by `2 M`, 4–6 % long-time); the frozen-coefficient prediction
+  is right on the depth dependence and overstates the level 4–7×. The
+  shells `[r_h + k h, r_h + (k+1) h]` and their `ShellMask`s are built in
+  `hole_runs.jl`'s `leakage` section (`leak_geometry`); reuse them for E0.
+- **Dissipation raised only inside the layer buys nothing; raised across
+  the margin it cuts the transmission 4–15×** (step 8a's one-dimensional
+  model, `ε_in = 4`). So the profile below rises from the *horizon*, not
+  from `r_1`, and `ε_in ≤ 4` keeps RK4 inside its real-axis limit at
+  `cfl = 1/4`.
+
 Changes, the smallest that make the experiments possible: `Interior` gets
 an optional `target` background (`isbits`, default `nothing` meaning the
 case's own), read where the kernel evaluates `u_exact`
@@ -628,9 +657,10 @@ source and the error reference stay on the *true* background, so
 `DIAG_RES` measures the layer's distance from the truth. `chunk_interior`
 gains `ρ_max_fixed` (a rate) as the alternative to `factor/dt`, threaded
 through `evolve!`. A `C²` dissipation profile `ε_KO(r)` in `gauge.jl`
-beside `GaussianDamping` — the exterior's value at and outside `r_1`,
-rising to `ε_in` inside the layer — accepted by `GHCase` where a number is
-today. Test-side target wrappers in `test/evolution_cases.jl` implementing
+beside `GaussianDamping` — the exterior's value at and outside the
+*horizon* (`r_h,min` of the case), rising to `ε_in` at `r_1` and held
+inside (amended after step 8a; see the handover above) — accepted by
+`GHCase` where a number is today. Test-side target wrappers in `test/evolution_cases.jl` implementing
 `SpacetimeMetrics`' `metric`/`dmetric` interface. A section `calibration`
 in `hole_runs.jl` with the experiments below, on `hole_fixture` (`q = 2`,
 `N = 8`, `h = 5/64`), screened at `5 M` and run to `50 M` where they
@@ -652,7 +682,9 @@ finder's `M_irr`, step 8a's shells outside the horizon and step 8b's rows:
 - **E2** — `translate(KerrSchild(1, 0), (δ, 0, 0))`, `δ = h` and `4h`: the
   proxy for a tracking error; the shell `C_a` against `δ`,
   `center_offset`.
-- Controls: `:frozen` and `:pasted` with the range projection on.
+- Controls: `:frozen` and `:pasted`, and the step-5 `:damped` at `N = 6`
+  whose end step 8b replayed, all with the range projection on; the
+  shell validity rows of each beside the scan's.
 
 Accept: the scan's table in `CODE.md` "Measured results" and, under "The
 interior", the layer rule for a generic target — ramp thickness in cells,

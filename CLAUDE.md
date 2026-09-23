@@ -60,7 +60,8 @@ and `M_ch` at Kerr's values in both charts and at `a = 9/10`. Before the
 moving hole (G5) come PLAN.md's steps 8a–8g (added 2026-09-23), the
 generic interior: step 5's layer needs an analytic center and an analytic
 interior, and its spherical core cannot hold harmonic Kerr's singular
-disk at `a = 9/10`, which is G5's case. Steps 8a and 8b are next.**
+disk at `a = 9/10`, which is G5's case. Steps 8a (the leakage margin) and
+8b (the range projection) are done; step 8c, the calibration, is next.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
