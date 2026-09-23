@@ -7,7 +7,7 @@ changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
 last milestone is marked *(Done.)* in `CODE.md`.
 
-**Steps 0–7 and 8a–8c are done. Step 8c′ (the default rate) is next, then 8d** — the generic interior
+**Steps 0–7, 8a–8c and 8c′ are done. Step 8d is next** — the generic interior
 (steps 8a–8g, added 2026-09-23), which step 8 needs before it can run
 its case.
 
@@ -162,8 +162,11 @@ writing kernels.
 - **`Val`s are built once per chunk** in `GHProblem`: `G`, `q`, whether
   there is a gauge source, whether there is an interior. Building them
   per evaluation recompiles or dispatches dynamically on every stage.
-- **`ρ_max` is bounded by RK4's stability**, about `2.8/dt` on the
-  negative real axis; the driver sets `ρ_max · dt = 1` per chunk.
+- **`ρ_max` is a physical rate, `4/M` by default** (decided 2026-09-23,
+  step 8c′; `M` from `hole_mass`), read once per run; `ρ_max_factor`
+  selects the former grid rate `factor/dt`, which RK4's stability bounds
+  at about `2.8/dt` on the negative real axis, and a fixed rate above
+  `1/dt` is refused.
 - **Don't name a keyword `maxlevel`** (it shadows TreeAMR's
   `maxlevel(forest)`); use `maxlevel_cap`.
 - **`RK4(; step_limiter!)`** exists in `OrdinaryDiffEqLowOrderRK` with
