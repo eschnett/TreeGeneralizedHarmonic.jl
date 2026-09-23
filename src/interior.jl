@@ -15,6 +15,15 @@
 #                       `ρ` rising from 0 at `r_1` to `ρ_max`;
 #   * `r < r_0`      — the frozen core, `du = 0` and `F` **not evaluated**.
 #
+# **The second half of the file is the tracked geometry (step 8d)**: the same
+# three regions below the found horizon's offset surface `r_h(n̂) − m h`
+# about the *tracked* center, keyed on the depth under it — `FittedInterior`,
+# its real-harmonic shape, its masks and its checks. The two geometries share
+# the profiles and speak one protocol (`interior_point`, `is_frozen`,
+# `is_outside`, `interior_profiles`, `in_layer(int, t, x)`, `core_position`,
+# `interior_mask`, `layer_mask`, `shell_mask`, `geometry_radii`), so that the
+# kernels do not know which one they hold.
+#
 # Everything in this file is a function of position and time. Nothing here
 # knows about a block, a level or a ghost width, and a change that makes
 # one of these depend on such a thing is wrong (`CLAUDE.md`, "No

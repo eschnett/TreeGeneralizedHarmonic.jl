@@ -38,6 +38,12 @@
 # and 5.6 node-hours on Symmetry, run by group
 # (`hole_runs.jl calibration=scan+profile`); its own header says how.
 #
+# Step 8d adds the `tracked` section, which is not in the default list: the
+# suite's tracked hole — the step-5 fixture's mesh, `m = 10`, the finder every
+# chunk — against step 5's sphere with the same layer, to `5 M` by default
+# (`hole_runs.jl tracked`, or `tracked=<t_end>`), four minutes at four
+# threads. Its table is in `CODE.md`, "The tracked geometry (step 8d)".
+#
 # Step 8a adds the `leakage` section, which is **not** in the default list:
 # eighty-eight evolutions on a 512-block mesh are one batch job on a 64-core
 # Symmetry node (`julia --project=. --threads=64 test/hole_runs.jl leakage`;
@@ -74,7 +80,7 @@ say(fmt, args...) = println(Printf.format(Printf.Format(fmt), args...))
 # `hole_runs.jl bounds=damped6` alone run every default section as well,
 # since no bare name was given).
 const SECTION_NAMES = ["order", "long", "charts", "indicator", "horizon",
-                       "bounds", "leakage", "calibration"]
+                       "bounds", "leakage", "calibration", "tracked"]
 const SECTIONS = let names = filter(a -> !occursin('=', a), ARGS)
     keyed = [first(split(a, '='; limit=2)) for a in ARGS if occursin('=', a)]
     isempty(names) && !any(in(SECTION_NAMES), keyed) ?
@@ -1967,6 +1973,61 @@ if "calibration" in SECTIONS || haskey(OPTIONS, "calibration")
         end
         say("%d runs in %.0f s", length(results), time() - t0)
         cal_report(results, all)
+    end
+end
+
+# --- (9) the tracked geometry against the sphere (step 8d) -------------------
+#
+# The claim of `test/tracking_tests.jl`'s last testset, carried from `0.15 M`
+# to a few `M`: on the static hole the layer that follows the found horizon is
+# step 5's layer to the tracking, and the track stays within a cell of the
+# analytic center. Both runs carry the range projection and the finder every
+# chunk; the shell is the `G`-point shell of each run's own geometry.
+if "tracked" in SECTIONS || haskey(OPTIONS, "tracked")
+    println("\n=== (9) the tracked geometry against step 5's sphere, " *
+            "Kerr-Schild a = 0, the step-5 fixture's mesh, m = 10 ===")
+    let q = 2, h = T(5 // 64), chunk = T(1 // 4),
+        t_end = T(only(leak_option("tracked", [5 // 1])))
+
+        ops = Operators(prolongation=q + 2, restriction=q + 2)
+        common = (halfwidth=T(5 // 2), chunk=chunk,
+                  horizon=Horizon(T; every=1, N=12, spin=false),
+                  bounds=default_bounds(T; M=1, r_gate=T(9 // 10)))
+        cases = (tracked=kerr_schild_case(T; interior=FittedSpec(T; margin=10),
+                                          common...),
+                 sphere=kerr_schild_case(T; r_0=2 - 18h, r_1=2 - 10h,
+                                         margin=10, w_ramp=T(1 // 2),
+                                         ρ_ramp=one(T), common...))
+        outs = Dict{Symbol,Any}()
+        shell = Dict{Symbol,Vector{Float64}}()
+        for (name, case) in pairs(cases)
+            shell[name] = Float64[]
+            watch(p, t, u) =
+                push!(shell[name], gh_outside_shell_norms(p, u, t).gauge_l2)
+            t0 = time()
+            outs[name] = evolve!(T, case; forest=shells(case, 8, (T(3), T(3), one(T))),
+                                 q=q, ops=ops, t_end=t_end, observer=watch)
+            say("%-8s %d steps, %.0f s", String(name), outs[name].nsteps,
+                time() - t0)
+        end
+        f, s = outs[:tracked], outs[:sphere]
+        println("| t/M | masked L2, tracked | sphere | shell C_a L2, tracked | " *
+                "sphere | M_irr, tracked | sphere | track_offset (cells) | " *
+                "prediction (cells) | hits |")
+        for i in eachindex(f.records)
+            (i == 1 || iszero(mod(i - 1, 4)) || i == length(f.records)) || continue
+            rf, rs = f.records[i], s.records[i]
+            say("| %.2f | %.4e | %.4e | %.4e | %.4e | %.7f | %.7f | %.2e | %.2e | %d/%d |",
+                rf.t, rf.err_l2, rs.err_l2, shell[:tracked][i], shell[:sphere][i],
+                rf.M_irr, rs.M_irr, rf.track_offset,
+                something(rf.track_prediction, NaN), rf.bounds_hits, rs.bounds_hits)
+        end
+        say("max track_offset %.2e cells, max prediction %.2e cells, %d re-samples; " *
+            "at the end r_in = %.6f, r_out = %.6f, margin %.2f e-folds",
+            maximum(r -> r.track_offset, f.records),
+            maximum(r -> something(r.track_prediction, 0.0), f.records),
+            f.nresamples, f.records[end].layer_r_in, f.records[end].layer_r_out,
+            f.records[end].margin_efolds)
     end
 end
 

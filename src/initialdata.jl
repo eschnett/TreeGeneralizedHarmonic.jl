@@ -64,6 +64,14 @@ parameters"; decided 2026-09-23, step 8c′), or to the grid rate `1/dt` or a
 fixed rate when [`evolve!`](@ref) is asked for one — because which rate a
 run relaxes at is a choice about the run, and the case is the hole.
 
+**Or a tracked layer (added in step 8d).** `interior` may instead be a
+[`FittedSpec`](@ref): the rule a layer is built by, once per chunk, from the
+horizon that was found — `evolve!` seeds a [`HorizonTrack`](@ref) from this
+case's analytic answer, updates it from each find, and runs each chunk on
+the [`FittedInterior`](@ref) [`fitted_interior`](@ref) builds from it. Such a
+case takes no `r_0`, `r_1` or `target` of its own (the spec carries its
+target) and needs a [`Horizon`](@ref) to be tracked with.
+
 `center` and `velocity` are the hole's analytic trajectory `c(t) = c₀ + v
 t` — the thing the interior, the damping profile and the refinement
 centroid all measure a distance from. `chunk` is the regrid
@@ -487,7 +495,10 @@ open**)**.
 
 `r_0`, `r_1` and `chunk` have no defaults: the two radii are what
 [`check_interior_radii`](@ref) measures against the mesh and the horizon,
-and the chunk is the cadence the analysis record is written at.
+and the chunk is the cadence the analysis record is written at. A
+`:damped`, `:frozen` or `:pasted` layer without both radii is refused by
+name, and a tracked one (`interior = FittedSpec(…)`, step 8d) with either —
+its radii come from the horizon that was found.
 
 `bounds = nothing` is the one default of step 8b's range projection, and it
 means "off" (added in step 8b): a [`StateBounds`](@ref) has no default for
