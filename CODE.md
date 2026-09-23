@@ -506,9 +506,10 @@ and the dissipation acts on all three axes at a third of the phase each,
 `0.74, 0.80, 0.97, 1.47` at `q = 4`, `0.88, 0.91, 1.02, 1.34` at `q = 6`, for
 `r = 1.0 … 1.8` at `ε_KO = 1`). And **the time integrator adds nothing**:
 the fully discrete scheme, RK4 at `cfl = 1/4` on the fixture's
-`λ_max = 1.671`, agrees with every semi-discrete entry to the digits
-printed, and at `ε_KO = 0` RK4's own damping, `O((ω dt)⁶)`, leaves
-`ℓ > 10⁶` cells. What this means for the margin `m` is under [The
+`λ_max = 1.671`, agrees with every semi-discrete entry off the horizon to
+the digits printed (at `r = 2 M`, where both are unbounded as `θ → 0`, its
+supremum over the `θ` grid is over a thousand cells), and at `ε_KO = 0`
+RK4's own damping, `O((ω dt)⁶)`, leaves `ℓ > 10⁶` cells. What this means for the margin `m` is under [The
 interior](#the-interior-a-pointwise-damping-layer), and what a 3D run does
 with it is under [Measured results](#measured-results), step 8a.
 
