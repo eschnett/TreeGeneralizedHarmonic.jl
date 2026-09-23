@@ -2943,9 +2943,10 @@ the same fixture, runs and time:
 | | | **rate** | | **2.16** | **2.74** | **2.01** | **2.03** |
 
 The error is the grid rate's to 1.5 % at every `N`, and lower, the
-constraint to `0.1 %`, and their rates agree to the second digit. The residual is ten to fifteen times
-larger and one order slower, and both are the balance above with a fixed
-`ρ`: `residual ≈ w F/ρ_max` is `O(h^q)` when `ρ_max` does not grow as `1/h`.
+constraint to `0.1 %`, and their rates agree to the second digit. The
+residual is ten to fifteen times larger and one order slower, and both are
+the balance above with a fixed `ρ`: `residual ≈ w F/ρ_max` is `O(h^q)` when
+`ρ_max` does not grow as `1/h`.
 Masking now takes the L2 from `3.536e−2` to `3.336e−3` and the L∞ from
 `7.965e−1` — which is the residual — to `3.501e−2`.
 
@@ -4392,8 +4393,8 @@ the steps rest on and measure: `ρ_max = 1/dt` is a *grid* rate (about
 `107/M` on the suite's fixture), which makes today's layer a paste two
 cells inside `r_1` that survives to `50 M` only because its target is
 exact — a generic target needs a thick ramp at a physical rate (step 8c
-measured it, and from step 8c′ `4/M` is the default, decided 2026-09-23); the
-Lorentzian metrics are not convex in `g_ab` (the angular mean of
+measured it, and from step 8c′ `4/M` is the default, decided 2026-09-23);
+the Lorentzian metrics are not convex in `g_ab` (the angular mean of
 Kerr-Schild `g_ab` inside the horizon has Euclidean signature), so every
 blend and clamp is made in ADM variables; and the discrete scheme's
 grid-scale modes have *outgoing* group velocity inside the horizon (every
@@ -4429,11 +4430,11 @@ first touch them:
 5. **The defaults** — `q = 4`, `N = 32`, `cfl = 1/4`, `ε_KO = 0.5`,
    `γ0 = 1/M` near the hole, `m = 8`, a layer of `2(G + 1)` spacings,
    `ρ_max = 4/M` (`ρ_max · dt = 1` until 2026-09-23), the indicator's
-   thresholds — are starting values for G4–G6 to confirm or move. Three of them survived G2 on flat space
-   and on a gauge wave: `cfl = 1/4` (no run needed less), `ε_KO = 0.5`
-   (the noise test, and no order lost) and `q = 4` as the development
-   order (`q = 2, 6, 8` all run, at 0.5×, 1.3× and 1.9× the cost of
-   `q = 4`). None of that is yet a statement about a hole. Step 8a split
+   thresholds — are starting values for G4–G6 to confirm or move. Three
+   of them survived G2 on flat space and on a gauge wave: `cfl = 1/4` (no
+   run needed less), `ε_KO = 0.5` (the noise test, and no order lost) and
+   `q = 4` as the development order (`q = 2, 6, 8` all run, at 0.5×, 1.3×
+   and 1.9× the cost of `q = 4`). None of that is yet a statement about a hole. Step 8a split
    `m` into a stencil margin and a leakage margin, measured that `m = 8`
    attenuates grid-scale content from `r_1` by `e^{−2.9}` to `e^{−4.6}` on
    the fixture, and left the default where it is until step 8c says what
