@@ -128,6 +128,13 @@ StateBounds(::Type{T}=Float64; α_min, α_max, λ_min, λ_max, β_max, K_max,
             r_gate) where {T} =
     StateBounds{T}(α_min, α_max, λ_min, λ_max, β_max, K_max, r_gate)
 
+# The same ranges in another working type — how a `FittedSpec`'s target
+# bounds and `build_fit`'s `bounds` keyword meet a run's `T` (step 8e).
+_bounds_in(::Type{T}, b::StateBounds{T}) where {T} = b
+_bounds_in(::Type{T}, b::StateBounds) where {T} =
+    StateBounds{T}(b.α_min, b.α_max, b.λ_min, b.λ_max, b.β_max, b.K_max,
+                   b.r_gate)
+
 """
     default_bounds(T = Float64; M, r_gate) -> StateBounds{T}
 

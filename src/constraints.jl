@@ -281,10 +281,17 @@ a per-step one.
 
 `interior === nothing` is no hole: the residual and the drift slots are
 written zero, which is what a case without an interior should report.
+
+**For the `:fitted` variant (step 8e) the residual is the layer's distance
+from its target**, `‖u − u_fit‖` read from the cache `tw` at `t_f`, and the
+analytic solution is evaluated only at the points the error and the drift
+rows read — the fitted interior has no analytic one, and harmonic Kerr's is
+singular inside the offset surface **(proposed in step 8e)**.
 """
 @kernel function gh_error_kernel!(diag, @Const(work), @Const(origins),
                                   @Const(spacings), bg, interior, mask, t,
-                                  r_shell_lo, r_shell_hi, ::Val{G}) where {G}
+                                  r_shell_lo, r_shell_hi, tw, t_f,
+                                  ::Val{G}) where {G}
     I = @index(Global, NTuple)
     b = I[4]
     inner = ntuple(d -> I[d], Val(3))
@@ -292,6 +299,41 @@ written zero, which is what a case without an interior should report.
     T = eltype(diag)
 
     x = point_position(origins, spacings, b, I)
+    if interior_variant(interior) === :fitted
+        # The fitted layer (step 8e) has no analytic interior to be measured
+        # against — harmonic Kerr's is singular on a disk inside the offset
+        # surface — so the analytic solution is evaluated only where a row
+        # reads it (the evolved points and the horizon shell), and the
+        # residual is the layer's distance from its *target*, the cache.
+        keep = is_evolved(mask, x)
+        r = interior_radius(interior, t, x)
+        inshell = (r_shell_lo ≤ r) & (r ≤ r_shell_hi)
+        e = zero(T)
+        d1 = zero(T)
+        # Names of their own: a variable a closure captures and that is
+        # assigned twice in one function is boxed, and the analytic branch
+        # below captures `vals`.
+        if keep | inshell
+            va = state_tuple(bg, t, x)
+            e = sqrt(_fold(ntuple(Val(2 * NC)) do v
+                d = work[c..., v, b] - va[v]
+                d * d
+            end))
+            d1 = abs(work[c..., 1, b] - va[1])
+        end
+        lay = in_layer(interior, t, x)
+        ef = zero(T)
+        if lay
+            ef = sqrt(_fold(ntuple(Val(2 * NC)) do v
+                d = work[c..., v, b] - _cached_target(tw, inner, b, v, t, t_f)
+                d * d
+            end))
+        end
+        diag[inner..., DIAG_MASK, b] = keep ? one(T) : zero(T)
+        diag[inner..., DIAG_ERR, b] = keep ? e : zero(T)
+        diag[inner..., DIAG_RES, b] = lay ? ef : zero(T)
+        diag[inner..., DIAG_DRIFT, b] = inshell ? d1 : zero(T)
+    else
     vals = case_state_tuple(bg, interior, t, x)
     # A fold rather than an accumulator: a kernel body may not close over a
     # mutated local, and the summation order of a norm is part of it.
@@ -309,6 +351,7 @@ written zero, which is what a case without an interior should report.
     inshell = (r_shell_lo ≤ r) & (r ≤ r_shell_hi)
     diag[inner..., DIAG_DRIFT, b] =
         inshell ? abs(work[c..., 1, b] - vals[1]) : zero(T)
+    end
 end
 
 """
@@ -497,7 +540,8 @@ function gh_error!(p::GHProblem{T}, u, t; mask=interior_mask(p.interior, T(t)),
     scatter!(p.U, u)
     map_blocks!(gh_error_kernel!, p.U, p.diag.work, p.U.work, p.origins,
                 p.spacings, p.case.background, p.interior, mask, T(t),
-                T(shell[1]), T(shell[2]), p.valG)
+                T(shell[1]), T(shell[2]), target_work(p.target), p.t_target,
+                p.valG)
     return p
 end
 

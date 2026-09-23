@@ -182,7 +182,9 @@ struct Interior{T,V,X}
     target::X                    # the layer's target metric, or `nothing`
 end
 
-const INTERIOR_VARIANTS = (:damped, :pasted, :frozen)
+# `:fitted` (added in step 8e) relaxes toward the fitted target on the
+# tracked geometry and is a `FittedInterior`'s only: `Interior` refuses it.
+const INTERIOR_VARIANTS = (:damped, :pasted, :frozen, :fitted)
 
 function Interior(::Type{T}=Float64; center, r_0, r_1, ρ_max=zero(T),
                   variant::Symbol=:damped, w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
@@ -194,6 +196,11 @@ function Interior(::Type{T}=Float64; center, r_0, r_1, ρ_max=zero(T),
         ":frozen is the pure mask ρ = 0 that pile-up at the freezing radius " *
         "is expected to defeat, and :pasted is the hard overwrite through " *
         "RK4's step_limiter!."))
+    variant === :fitted && throw(ArgumentError(
+        "the :fitted variant relaxes toward a fit of the state on the tracked " *
+        "geometry's offset surface (CODE.md, \"The fitted target\"), and a " *
+        "sphere about the analytic center has none: give the case interior = " *
+        "FittedSpec(T; variant = :fitted, …) and a Horizon to track it with."))
     c = center isa HoleCenter ? HoleCenter{T}(SVector{3,T}(center.c0),
                                               SVector{3,T}(center.v)) :
         HoleCenter(T, center)
@@ -1174,7 +1181,7 @@ analytic_horizon_radius(bg::AbstractMetric, n) = horizon_min_radius(bg)
     FittedSpec(T = Float64; variant = :damped, margin = 8, n_L = 0,
                core_min = 2, lmax_shape = 4, lmax_fit = 8, ρ_max = 0,
                w_ramp = 1//2, ρ_ramp = 1, max_misses = 3, α_trigger = 1//10,
-               target = nothing)
+               target = nothing, target_bounds = nothing)
 
 What a [`GHCase`](@ref) holds as its `interior` for the **tracked**
 geometry (step 8d): not a layer, but the rule a layer is built by, once per
@@ -1208,12 +1215,20 @@ the hole; the geometry is a function of the run.
   through before the run ends ([`update_track`](@ref)); `α_trigger` is the
   lapse below which, over the evolved region, a find is forced at the next
   chunk boundary whatever the cadence (the lapse-collapse trigger).
-- `target` is what the layer relaxes toward, as for [`Interior`](@ref).
+- `target` is what the layer relaxes toward, as for [`Interior`](@ref) —
+  for the analytic variants; `:fitted` (step 8e) relaxes toward the fit of
+  the state and takes none.
+- `target_bounds` is the [`StateBounds`](@ref) the `:fitted` target is
+  projected into ([`fit_state`](@ref)); `nothing`, the default, derives them
+  at the start of a run from the analytic data on the seed's offset surface
+  ([`derive_target_bounds`](@ref)), **decided in review, step 8e**, because
+  `default_bounds` is Kerr-Schild's and harmonic Kerr's data exceeds it.
 
 `isbits`: the numbers that have a "use the rule" value spell it `0`, since a
-`Union{Nothing, T}` field would not be.
+`Union{Nothing, T}` field would not be; the two optional objects are type
+parameters.
 """
-struct FittedSpec{T,V,X}
+struct FittedSpec{T,V,X,B}
     margin::Int
     n_L::Int
     core_min::Int
@@ -1226,6 +1241,7 @@ struct FittedSpec{T,V,X}
     α_trigger::T
     valvariant::Val{V}
     target::X
+    target_bounds::B
 end
 
 function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
@@ -1233,11 +1249,20 @@ function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
                     lmax_shape::Integer=4, lmax_fit::Integer=8, ρ_max=zero(T),
                     w_ramp=T(1 // 2),
                     ρ_ramp=one(T), max_misses::Integer=3,
-                    α_trigger=T(1 // 10), target=nothing) where {T}
+                    α_trigger=T(1 // 10), target=nothing,
+                    target_bounds=nothing) where {T}
     variant in INTERIOR_VARIANTS || throw(ArgumentError(
         "the interior variant must be one of $(INTERIOR_VARIANTS), got " *
-        ":$variant; the tracked geometry runs CODE.md's three variants as " *
-        "the sphere does."))
+        ":$variant; the tracked geometry runs CODE.md's three analytic " *
+        "variants as the sphere does, and step 8e's :fitted."))
+    variant === :fitted && target !== nothing && throw(ArgumentError(
+        "a :fitted layer relaxes toward the fit of the evolved state, so it " *
+        "takes no analytic target metric; `target` is for :damped, :frozen " *
+        "and :pasted."))
+    target_bounds === nothing || target_bounds isa StateBounds || throw(ArgumentError(
+        "target_bounds is a StateBounds (the ranges the :fitted target is " *
+        "projected into) or nothing, to derive them from the seed's data; " *
+        "got a $(typeof(target_bounds))."))
     margin ≥ 1 || throw(ArgumentError(
         "the margin m is a number of spacings and must be at least 1, got " *
         "$margin; CODE.md's default is 8 and its floor G + 1, which " *
@@ -1269,10 +1294,11 @@ function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
         "α_trigger is a lapse and must be non-negative (0 switches the " *
         "trigger off), got $α_trigger."))
     check_layer_target(target)
-    return FittedSpec{T,variant,typeof(target)}(
+    tb = target_bounds === nothing ? nothing : _bounds_in(T, target_bounds)
+    return FittedSpec{T,variant,typeof(target),typeof(tb)}(
         Int(margin), Int(n_L), Int(core_min), Int(lmax_shape), Int(lmax_fit),
         T(ρ_max), wr,
-        ρr, Int(max_misses), T(α_trigger), Val(variant), target)
+        ρr, Int(max_misses), T(α_trigger), Val(variant), target, tb)
 end
 
 interior_variant(::FittedSpec{T,V}) where {T,V} = V
@@ -1495,6 +1521,9 @@ end
 @inline is_frozen(int::FittedInterior{T,:damped}, g) where {T} = g.r < g.r_0
 @inline is_frozen(int::FittedInterior{T,:frozen}, g) where {T} = g.r < g.r_0
 @inline is_frozen(int::FittedInterior{T,:pasted}, g) where {T} = g.r < g.r_1
+# The fitted core (step 8e): `F` is not evaluated below the core surface, and
+# the kernel relaxes it toward the target at `ρ_max` instead of freezing it.
+@inline is_frozen(int::FittedInterior{T,:fitted}, g) where {T} = g.r < g.r_0
 
 @inline is_outside(int::FittedInterior, g) = g.r ≥ g.r_1
 
@@ -1651,6 +1680,9 @@ blocks the layer lives in ([`geometry_spacing`](@ref)),
     thickness ≥ 2(G + 1) h
     r_in − offset − thickness > singular_radius(background) + |c(t) − c_analytic(t)|
 
+(The third is skipped for step 8e's `:fitted`, which evaluates no analytic
+interior; its `singular` field is then `−1`.)
+
 The first two are step 5's two requirements with the **track's** radii in
 place of `horizon_min_radius(background)`: the horizon the layer is put
 inside is the one that was found, in every direction, and the margin is
@@ -1688,7 +1720,12 @@ function check_interior_radii(forest::Forest{3}, int::FittedInterior{T},
         b = center_at(int.center, T(t))
         sqrt((a[1] - b[1])^2 + (a[2] - b[2])^2 + (a[3] - b[3])^2)
     end
-    r_sing = T(singular_radius(background)) + δ
+    # The `:fitted` variant evaluates no analytic interior — its initial data
+    # and its target are the fit's inside the offset surface (step 8e) — so
+    # the chart's singular set may lie anywhere inside that surface, which is
+    # the whole point of it; the check is the analytic variants'.
+    r_sing = interior_variant(int) === :fitted ? -one(T) :
+             T(singular_radius(background)) + δ
     r_core > r_sing || throw(ArgumentError(
         "the tracked core surface does not contain the chart's singular set: " *
         "its smallest radius is r_in − offset − thickness = $r_core about the " *

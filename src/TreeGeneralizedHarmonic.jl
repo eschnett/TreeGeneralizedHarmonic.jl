@@ -120,6 +120,7 @@ export fit_variables, state_from_fit, real_solid_harmonics, fit_directions
 export state_sampler, analytic_sampler, StateSampler, AnalyticSampler
 export FitParams, InteriorFit, solve_fit, build_fit, fit_sweep, fit_row_weights
 export fit_variables_at, fit_state, fit_residual, fit_valid
+export derive_target_bounds, target_cache, fill_target!, refill_target
 
 # The range projection (step 8b): the third and last writer of the state,
 # and the validity monitor

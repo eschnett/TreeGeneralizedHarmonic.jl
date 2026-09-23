@@ -22,23 +22,22 @@
 #     twenty variables are `(log α, β^i, γ_ij, Π_ab)`: `α = exp(log α)` is
 #     positive by construction, `γ` is convex (a mean of positive-definite
 #     matrices is one), `β` is unconstrained, and `g_ab` is reassembled.
-#   * **The shift has no constant term — by default, and not for a moving
-#     hole.** `PLAN.md` asks for `l ≥ 1` only, so that `β` vanishes at the
-#     center. What that needs is no `ρ⁰ ỹ_00` term; the `ρ² ỹ_00` and
-#     `ρ⁴ ỹ_00` terms vanish there too and stay, since without them a
-#     shift's `l = 0` part on the surface could not be fitted at all
-#     (proposed in step 8e). A *boosted* hole's shift has one — its angular
-#     mean on the offset surface is `0.17` against a mean `|β|` of `0.63` for
-#     `boost(KerrSchild(1, 0), 0.3 x̂)` — which a slope `2B₀` cannot match,
-#     and `shift_constant = true` fits the constant as for every other
-#     variable (measured in step 8e: the state on the surface to `1.9e−5`
-#     against `1.3e−2`). Validity does not need `β(0) = 0`: any shift with
-#     `α > 0` and `γ ≻ 0` is a Lorentzian metric.
-#   * **One QR serves both designs.** The shift's columns are the scalars'
-#     without the constant, which is ordered *last*: Householder QR without
-#     pivoting factors the leading columns first, so the leading block of
-#     `R` is the shift's own factorization and its solution is the
-#     least-squares one, not a truncation of the scalars'.
+#   * **The shift keeps its constant term (decided in review, step 8e).**
+#     `PLAN.md` asked for `l ≥ 1` only, so that `β` vanishes at the center;
+#     a *boosted* hole's shift has an `l = 0` part on the offset surface —
+#     its angular mean is `0.17` against a mean `|β|` of `0.63` for
+#     `boost(KerrSchild(1, 0), 0.3 x̂)` — which neither `l ≥ 1` nor a slope
+#     `2B₀` of `ρ² ỹ_00` can match (measured in step 8e: the state on the
+#     surface `1.3e−2` off without the constant, `1.9e−5` with it). Validity
+#     does not need `β(0) = 0` — any shift with `α > 0` and `γ ≻ 0` is a
+#     Lorentzian metric — and the static hole is the same fit to roundoff
+#     either way. `shift_constant = false` is the brief's ansatz, kept as a
+#     switch: no `ρ⁰ ỹ_00` term, the `ρ²`, `ρ⁴` ones kept.
+#   * **One QR serves both designs.** Without its constant the shift's
+#     columns are the scalars' minus the constant, which is ordered *last*:
+#     Householder QR without pivoting factors the leading columns first, so
+#     the leading block of `R` is the shift's own factorization and its
+#     solution is the least-squares one, not a truncation of the scalars'.
 #   * **The evaluator is the kernel's.** [`fit_variables_at`](@ref) and
 #     [`fit_state`](@ref) are `@inline` functions on scalars and `SVector`s
 #     over a coefficient array — no allocation, no `return` in the body,
@@ -476,7 +475,8 @@ fit_row_weights(L::Integer, cont::Integer) =
     (slot == 1 && k == 0) ? ncol : (slot - 1) * nb + k
 
 """
-    solve_fit(ξs, samples, L, cont, rbar; weights = fit_row_weights(L, cont))
+    solve_fit(ξs, samples, L, cont, rbar; weights = fit_row_weights(L, cont),
+              shift_constant = true)
         -> (coeffs, residual, conditioning, model)
 
 The least-squares system of [`build_fit`](@ref), given the collocation
@@ -490,10 +490,10 @@ Rows: the values `f(ξ_p) = v_p`, the radial derivatives
 basis is differentiated exactly. Columns: `(L + 1)² (cont + 1)`, the
 constant last. **One Householder QR** (`LinearAlgebra.qr`, no pivoting) for
 all twenty right-hand sides: the seventeen scalar and tensor variables are
-solved with the whole triangular factor and the shift with its leading
-block, which *is* the factorization of the shift's columns — or, with
-`shift_constant = true`, the shift like the others (see `fit.jl`'s header:
-what a moving hole needs). Each block of
+solved with the whole triangular factor, and the shift either so or with its leading
+block, which *is* the factorization of the shift's columns, when
+`shift_constant = false`; by default the shift keeps its constant and is
+solved like the others (see `fit.jl`'s header: what a moving hole needs). Each block of
 rows is weighted by [`fit_row_weights`](@ref), and within a block the
 points are weighted alike, so the residual the solution minimises is the
 one at the collocation points, which is where [`fit_residual`](@ref)
@@ -508,7 +508,7 @@ Julia thread count, and nothing here sets either.
 """
 function solve_fit(ξs::AbstractVector{SVector{3,T}}, samples, L::Integer,
                    cont::Integer, rbar; weights=fit_row_weights(L, cont),
-                   shift_constant::Bool=false) where {T}
+                   shift_constant::Bool=true) where {T}
     np = length(ξs)
     NS = (L + 1)^2
     nb = cont + 1
@@ -736,7 +736,7 @@ end
 """
     build_fit(sampler, int::FittedInterior, spec::FittedSpec; cont = 1,
               bounds, L = spec.lmax_fit, backend = CPU(), check = true,
-              weights = fit_row_weights(L, cont), shift_constant = false)
+              weights = fit_row_weights(L, cont), shift_constant = true)
         -> InteriorFit
 
 The fitted target of step 8e, on the tracked geometry `int` at the
@@ -753,9 +753,9 @@ sampler's time `t` — `CODE.md`, "The fitted target":
  3. **The ansatz** `f_v = Σ_{lm} S_lm(ξ) Σ_k C_{lm,k,v} ρ^{2k}`, `ξ = (x −
     c)/r̄`, `r̄` the mean of `r_1(n̂_p)`: a polynomial in `x` of degree `L +
     2 cont`, regular at the center; `k ≤ cont`, and the shift without its
-    constant term unless `shift_constant = true` — which a moving hole
-    needs (`fit.jl`'s header; the default is `PLAN.md`'s, **(proposed in
-    step 8e)** for the reviewer to flip before G5). `cont = 1` matches
+    constant term only if `shift_constant = false` — the default keeps it,
+    which a moving hole needs (`fit.jl`'s header; **decided in review, step
+    8e**). `cont = 1` matches
     values and slopes (the evolved state's fit); `cont = 2` also curvatures
     (the initial data's, from the analytic sampler).
  4. **One least-squares solve** ([`solve_fit`](@ref)), the residual
@@ -775,14 +775,12 @@ function build_fit(sampler, int::FittedInterior{T}, spec::FittedSpec;
                    cont::Integer=1, bounds::StateBounds, L::Integer=spec.lmax_fit,
                    backend=CPU(), check::Bool=true,
                    weights=fit_row_weights(L, cont),
-                   shift_constant::Bool=false) where {T}
+                   shift_constant::Bool=true) where {T}
     cont in (1, 2) || throw(ArgumentError(
         "cont is the fit's radial order, 1 (values and slopes, the evolved " *
         "state's fit) or 2 (and curvatures, the initial data's), got $cont."))
     L ≥ 1 || throw(ArgumentError("the fit's degree must be at least 1, got L = $L."))
-    bd = bounds isa StateBounds{T} ? bounds :
-         StateBounds{T}(bounds.α_min, bounds.α_max, bounds.λ_min, bounds.λ_max,
-                        bounds.β_max, bounds.K_max, bounds.r_gate)
+    bd = _bounds_in(T, bounds)
     t = T(sampler.t)
     c = center_at(int.center, t)
     ns = [SVector{3,T}(T(n[1]), T(n[2]), T(n[3])) for n in fit_directions(L)]
@@ -828,4 +826,201 @@ function build_fit(sampler, int::FittedInterior{T}, spec::FittedSpec;
     return InteriorFit{T,typeof(to_backend(backend, coeffs)),typeof(coeffs)}(
         params, to_backend(backend, coeffs), coeffs, t, c, xs, model,
         residual, conditioning, sweep.valid, sweep)
+end
+
+# --- the target's ranges ---------------------------------------------------------
+
+"""
+    derive_target_bounds(T, background, int::FittedInterior; t = 0, L = 8)
+        -> StateBounds{T}
+
+The ranges the `:fitted` target is projected into ([`fit_state`](@ref)),
+from the **analytic** data on the geometry's offset surface at `t` — the
+seed's, at the start of a run — **(decided in review, step 8e)**: each upper
+range four times the largest value found there (`α`, the eigenvalues of `γ`,
+`|β|`, `max_ab |(α/√γ)Π_ab|`), and each lower one a quarter of the smallest
+(`α`, `λ(γ)`) **(the factors proposed in step 8e)**, widened where needed so
+that flat space stays inside (`StateBounds` requires it: `α_min, λ_min ≤ 1/2`
+and `α_max, λ_max ≥ 2`).
+
+Why not [`default_bounds`](@ref): those are step 8b's proposal for the
+Kerr-Schild fixture, and harmonic Kerr at `a = 9/10` has `|(α/√γ)Π| = 366/M`
+on its offset surface at `h = 5/256`, `m = 4` against their `K_max =
+100/M` (measured in step 8e) — a projection into them would clamp the
+target where the chart's own solution lives. The samples are `Float64` and
+the collocation grid is the fit's own (`fit_directions(L)`); the gate radius
+is not read by `fit_state` and is set to the offset surface's smallest.
+"""
+function derive_target_bounds(::Type{T}, background, int::FittedInterior;
+                              t=0, L::Integer=8) where {T}
+    c = center_at(int.center, typeof(int.r_in)(t))
+    αlo, αhi = Inf, 0.0
+    λlo, λhi = Inf, 0.0
+    βhi, Khi = 0.0, 0.0
+    for n in fit_directions(L)
+        nn = SVector{3,typeof(int.r_in)}(n)
+        r1 = tofloat64(shape_radius(int, nn) - int.offset)
+        x = ntuple(d -> tofloat64(c[d]) + r1 * n[d], 3)
+        u = SVector{NFIT,Float64}(state_tuple(background, Float64(t), x))
+        all(isfinite, u) || throw(ArgumentError(
+            "the analytic data on the offset surface is not finite at " *
+            "$x: the geometry's surface meets the chart's singular set, and " *
+            "no range can be derived there (nor any fit built)."))
+        h = SVector{NC,Float64}(ntuple(k -> u[k], Val(NC)))
+        s = _adm_split(_sym4(h))
+        α = sqrt(s.α²)
+        λ, _ = sym_eigen3(SMatrix{3,3,Float64}(1 + h[5], h[6], h[7], h[6], 1 + h[8],
+                                               h[9], h[7], h[9], 1 + h[10]))
+        K = maximum(k -> abs(u[NC + k]), 1:NC) * α / sqrt(s.detγ)
+        αlo, αhi = min(αlo, α), max(αhi, α)
+        λlo, λhi = min(λlo, minimum(λ)), max(λhi, maximum(λ))
+        βhi = max(βhi, sqrt(max(s.bb, 0.0)))
+        Khi = max(Khi, K)
+    end
+    rg = tofloat64(int.r_in - int.offset)
+    return StateBounds{T}(min(αlo / 4, 0.5), max(4αhi, 2.0), min(λlo / 4, 0.5),
+                          max(4λhi, 2.0), βhi > 0 ? 4βhi : 1.0,
+                          Khi > 0 ? 4Khi : 1.0, rg)
+end
+
+# --- the target on the grid (the kernel half, step 8e-ii) --------------------------
+#
+# `CODE.md`, "The fitted target" — the cache (decided in review, step 8e): the
+# right-hand side does not evaluate the fit, at `2.2 µs` a point at `L = 8`;
+# it reads it from a field set filled once per fit and per refill. The field
+# set is `Hsrc`'s shape — `G = 0`, read at the owned point, never differenced
+# — with **40 variables: the target `A` (the packed `(h, Π)`, 1–20) at the
+# fill time `t_f` and its slope in time `S` (21–40)**, so that the kernel's
+# target at `t` is `A + (t − t_f) S`, two loads per variable (**proposed in
+# step 8e**: one field set rather than two, and the slope rather than the
+# previous fit's values, since the slope is what the time interpolation
+# multiplies). `A` and `S` are the latest fit `F_a` (built at `t_a`) and the
+# one before it `F_b` (at `t_b`), both evaluated at the fill time about their
+# own tracked centers:
+#
+#     S = (F_a − F_b)/(t_a − t_b),    A = F_a + (t_f − t_a) S,
+#
+# the linear continuation of the last two fits — `S = 0` when there is no
+# previous fit or the two were built at the same time.
+
+# The target's value at the owned point `inner` of block `b`, variable `v`
+# (1–20), at time `t`: the kernel side of the cache.
+@inline _cached_target(tw, inner, b::Int, v::Int, t, t_f) =
+    @inbounds tw[inner..., v, b] + (t - t_f) * tw[inner..., 2NC + v, b]
+
+"""
+    fit_target_kernel!(out, origins, spacings, interior, pa, ca, pb, cb, t_a, κ,
+                       t_f, r_fill, ::Val{HASB})
+
+Fill the target cache at every owned point with `r < r_fill` about the
+geometry's center — the offset surface's bounding sphere plus one cell,
+so that a center that moves by the refill rule's `h/4` never exposes a layer
+point that was not filled — and zero elsewhere: `A` and `S` of the latest
+fit `(pa, ca)` built at `t_a` and, where `HASB`, the previous one `(pb, cb)`
+with `κ = 1/(t_a − t_b)`, both through [`fit_state`](@ref) with their
+coefficient arrays as device arguments. One evaluator pass per fit per
+filled point, at the refill cadence.
+"""
+@kernel function fit_target_kernel!(out, @Const(origins), @Const(spacings),
+                                    interior, pa, @Const(ca), pb, @Const(cb),
+                                    t_a, κ, t_f, r_fill,
+                                    ::Val{HASB}) where {HASB}
+    I = @index(Global, NTuple)
+    b = I[4]
+    inner = ntuple(d -> I[d], Val(3))
+    T = eltype(out)
+    x = point_position(origins, spacings, b, I)
+    if interior_radius(interior, t_f, x) < r_fill
+        ha, Πa = fit_state(pa, ca, x, t_f)
+        if HASB
+            hb, Πb = fit_state(pb, cb, x, t_f)
+            ntuple(Val(NC)) do v
+                sh = κ * (ha[v] - hb[v])
+                sΠ = κ * (Πa[v] - Πb[v])
+                out[inner..., v, b] = ha[v] + (t_f - t_a) * sh
+                out[inner..., NC + v, b] = Πa[v] + (t_f - t_a) * sΠ
+                out[inner..., 2NC + v, b] = sh
+                out[inner..., 3NC + v, b] = sΠ
+                nothing
+            end
+        else
+            ntuple(Val(NC)) do v
+                out[inner..., v, b] = ha[v]
+                out[inner..., NC + v, b] = Πa[v]
+                out[inner..., 2NC + v, b] = zero(T)
+                out[inner..., 3NC + v, b] = zero(T)
+                nothing
+            end
+        end
+    else
+        ntuple(Val(4NC)) do v
+            out[inner..., v, b] = zero(T)
+            nothing
+        end
+    end
+end
+
+"""
+    target_cache(U::FieldSet) -> FieldSet
+
+A fresh, zeroed target cache on `U`'s forest and backend: `4 NC = 40`
+variables (the target and its slope), `G = 0`, `U`'s centering.
+"""
+target_cache(U::FieldSet{T,3}) where {T} =
+    FieldSet{T}(U.forest, 4NC; G=0, centering=U.centering,
+                backend=get_backend(U.work))
+
+"""
+    fill_target!(target, origins, spacings, interior, fits, t) -> target
+
+Fill the cache `target` at time `t` from `fits = (latest, previous)`
+([`InteriorFit`](@ref)s, the second `nothing` before there are two) on the
+geometry `interior` ([`fit_target_kernel!`](@ref)).
+"""
+function fill_target!(target::FieldSet{T,3}, origins, spacings,
+                      interior::FittedInterior, fits, t) where {T}
+    fa, fb = fits
+    hasb = fb !== nothing && fa.t > fb.t
+    κ = hasb ? inv(fa.t - fb.t) : zero(T)
+    r_fill = (interior.r_out - interior.offset) + interior.h
+    pb, cb = hasb ? (fb.params, fb.coeffs) : (fa.params, fa.coeffs)
+    map_blocks!(fit_target_kernel!, target, target.work, origins, spacings,
+                interior, fa.params, fa.coeffs, pb, cb, T(fa.t), κ, T(t),
+                T(r_fill), Val(hasb))
+    return target
+end
+
+"""
+    fitted_state_kernel!(u, tw, origins, spacings, bg, interior, t, t_f, d_init)
+
+The `:fitted` variant's initial data (decided in review, step 8e): the
+analytic state [`state_tuple`](@ref) outside the offset surface and the
+cached target — the `cont = 1` fit of the analytic solution — below it,
+written into the state array's owned points. No core rule and no analytic
+evaluation inside the offset surface, so a chart whose interior is singular
+— harmonic Kerr's disk — gets regular data. `d_init` moves the switch to the
+depth `d_init` below the offset surface (at most the ramp's thickness): `0`
+is the decision; a positive depth is the study knob of `evolve!`'s
+`fit_initial_depth` (proposed in step 8e).
+"""
+@kernel function fitted_state_kernel!(u, @Const(tw), @Const(origins),
+                                      @Const(spacings), bg, interior, t, t_f,
+                                      d_init)
+    I = @index(Global, NTuple)
+    b = I[4]
+    inner = ntuple(d -> I[d], Val(3))
+    x = point_position(origins, spacings, b, I)
+    g = interior_point(interior, t, x)
+    if g.r ≥ g.r_1 - d_init
+        vals = state_tuple(bg, t, x)
+        ntuple(Val(2NC)) do v
+            u[inner..., v, b] = vals[v]
+            nothing
+        end
+    else
+        ntuple(Val(2NC)) do v
+            u[inner..., v, b] = _cached_target(tw, inner, b, v, t, t_f)
+            nothing
+        end
+    end
 end

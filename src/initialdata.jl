@@ -852,6 +852,12 @@ function state_callback(case::GHCase{T}, t; interior=case.interior) where {T}
         "built by: the core rule needs the geometry itself — pass `interior " *
         "= fitted_interior(…)`, which is what evolve! does for the initial " *
         "data (step 8d)."))
+    interior_variant(int) === :fitted && throw(ArgumentError(
+        "a :fitted interior's initial data is the analytic solution outside " *
+        "the offset surface and the fit of it inside, read from the target " *
+        "cache (fitted_state_kernel!, which evolve! runs): a coordinate " *
+        "callback would evaluate the analytic solution inside, where the " *
+        "fitted variant exists not to (decided in review, step 8e)."))
     tt = T(t)
     return AllVariables(x -> case_state_tuple(bg, int, tt, x))
 end

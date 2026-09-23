@@ -346,9 +346,9 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
 """
 @kernel function gh_rhs_kernel!(du, @Const(work), Hwork, @Const(origins),
                                 @Const(spacings), bg, damping, γ2, ε_KO,
-                                interior, t, ::Val{G}, ::Val{q}, ::Val{HASH},
-                                ::Val{DISS}, ::Val{INT}) where {G,q,HASH,DISS,
-                                                                INT}
+                                interior, t, tw, t_f, ::Val{G}, ::Val{q},
+                                ::Val{HASH}, ::Val{DISS},
+                                ::Val{INT}) where {G,q,HASH,DISS,INT}
     I = @index(Global, NTuple)                    # (i1, i2, i3, block)
     b = I[4]
     inner = ntuple(d -> I[d], Val(3))             # state-layout index
@@ -392,11 +392,23 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
         # branches below are the same for both.
         g = interior_point(interior, t, x)
         if is_frozen(interior, g)
-            # `du = 0`, and `F` is not evaluated: this is the branch
-            # `CLAUDE.md` says must come before the stencils.
-            ntuple(Val(2 * NC)) do v
-                du[inner..., v, b] = zero(T)
-                nothing
+            # `F` is not evaluated: this is the branch `CLAUDE.md` says must
+            # come before the stencils. `du = 0` for the analytic variants;
+            # the fitted core (step 8e) relaxes toward the cached target at
+            # the full rate, `du = −ρ_max (u − u_fit)`.
+            if INT === :fitted
+                ρc = interior.ρ_max
+                ntuple(Val(2 * NC)) do v
+                    du[inner..., v, b] = -ρc * (work[var + (v - 1) * sv] -
+                                                _cached_target(tw, inner, b, v,
+                                                               t, t_f))
+                    nothing
+                end
+            else
+                ntuple(Val(2 * NC)) do v
+                    du[inner..., v, b] = zero(T)
+                    nothing
+                end
             end
         else
             ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
@@ -406,6 +418,23 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
                 ntuple(Val(NC)) do v
                     du[inner..., v, b] = ∂ₜh[v]
                     du[inner..., NC + v, b] = ∂ₜΠ[v]
+                    nothing
+                end
+            elseif INT === :fitted
+                # The fitted layer (step 8e): the same profiles, relaxing
+                # toward the cached target, `A + (t − t_f) S`, two loads a
+                # variable and no evaluation of the fit here.
+                # (Its own names: `w` and `ρ` are captured below, and a
+                # captured variable assigned twice in one function is boxed.)
+                wf, ρf = interior_profiles(interior, g)
+                ntuple(Val(NC)) do v
+                    du[inner..., v, b] =
+                        wf * ∂ₜh[v] - ρf * (work[var + (v - 1) * sv] -
+                                            _cached_target(tw, inner, b, v, t, t_f))
+                    du[inner..., NC + v, b] =
+                        wf * ∂ₜΠ[v] - ρf * (work[var + (NC + v - 1) * sv] -
+                                            _cached_target(tw, inner, b, NC + v,
+                                                           t, t_f))
                     nothing
                 end
             else
@@ -548,7 +577,7 @@ the projection's gate lies deeper than every point an evolved stencil reads
 ([`check_bounds_gate`](@ref)), beside the interior's own radius checks and
 for the same reason.
 """
-struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A}
+struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A,X,Y}
     U::F
     schedule::S
     Hsrc::H                      # the sampled gauge source, or `nothing`
@@ -562,6 +591,12 @@ struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A}
     case::C
     interior::I                  # an `Interior` or a `FittedInterior` at this chunk's ρ_max, or `nothing`
     accounting::A                # the run's `BoundsAccounting`, or `nothing`
+    # The `:fitted` target (step 8e): the cache the kernel reads (a 40-variable
+    # `G = 0` field set, or `nothing`), the fits it was filled from (host-side,
+    # `(latest, previous)`, or `nothing`) and the time it was filled at.
+    target::X
+    fits::Y
+    t_target::T
     hasdirichlet::Bool
     valG::Val{G}
     valq::Val{q}
@@ -572,7 +607,8 @@ end
 
 function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
                    t=zero(T), interior=case.interior, margin_check=true,
-                   accounting=nothing) where {T}
+                   accounting=nothing, target=nothing, fits=nothing,
+                   t_target=zero(T)) where {T}
     q ≥ 2 && iseven(q) || throw(ArgumentError(
         "the finite-difference order must be even and at least 2, so that " *
         "the centered stencils have an integer half-width q/2 and CODE.md's " *
@@ -633,13 +669,18 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         check_bounds_gate(U.forest, interior, case.bounds, q; t=t)
     end
 
+    INT === :fitted && target === nothing && throw(ArgumentError(
+        "a :fitted interior relaxes toward a target the kernel reads from a " *
+        "cache field set, and this problem has none: pass `target = " *
+        "target_cache(U)` and fill it (fill_target!), which is what evolve! " *
+        "does (CODE.md, \"The fitted target\")."))
     return GHProblem{T,U.G,Int(q),HASH,DISS,INT,typeof(U),typeof(schedule),
                      typeof(Hsrc),typeof(diag),typeof(origins),
                      typeof(spacings),typeof(case),typeof(interior),
-                     typeof(accounting)}(
+                     typeof(accounting),typeof(target),typeof(fits)}(
         U, schedule, Hsrc, diag, origins, spacings, case, interior,
-        accounting, hasdirichlet, Val(U.G), Val(Int(q)), Val(HASH), Val(DISS),
-        Val(INT))
+        accounting, target, fits, T(t_target), hasdirichlet, Val(U.G),
+        Val(Int(q)), Val(HASH), Val(DISS), Val(INT))
 end
 
 """
@@ -657,18 +698,41 @@ the gauge source, which is the most expensive setup phase there is and
 which nothing about a new `ρ_max` invalidates. It shares the run's
 [`BoundsAccounting`](@ref) too, which is what that record is for.
 """
-function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior) where {T,G,q,
-                                                                       HASH,
-                                                                       DISS}
+function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior;
+                       fits=p.fits, target=p.target,
+                       t_target=p.t_target) where {T,G,q,HASH,DISS}
     INT = interior_variant(interior)
+    INT === :fitted && target === nothing && throw(ArgumentError(
+        "a :fitted interior needs the problem's target cache; this problem " *
+        "has none (see GHProblem's `target`)."))
     return GHProblem{T,G,q,HASH,DISS,INT,typeof(p.U),typeof(p.schedule),
                      typeof(p.Hsrc),typeof(p.diag),typeof(p.origins),
                      typeof(p.spacings),typeof(p.case),typeof(interior),
-                     typeof(p.accounting)}(
+                     typeof(p.accounting),typeof(target),typeof(fits)}(
         p.U, p.schedule, p.Hsrc, p.diag, p.origins, p.spacings, p.case,
-        interior, p.accounting, p.hasdirichlet, p.valG, p.valq, p.valH,
-        p.valdiss, Val(INT))
+        interior, p.accounting, target, fits, T(t_target), p.hasdirichlet,
+        p.valG, p.valq, p.valH, p.valdiss, Val(INT))
 end
+
+"""
+    refill_target(p::GHProblem, t; fits = p.fits) -> GHProblem
+
+Fill `p`'s target cache at time `t` from `fits = (latest, previous)` on
+`p`'s geometry ([`fill_target!`](@ref)), and return the problem that reads
+it: the same field sets, with the fits and the fill time recorded. What the
+driver calls after every fit and whenever the refill rule says the tracked
+center has moved far enough (step 8e).
+"""
+function refill_target(p::GHProblem{T}, t; fits=p.fits) where {T}
+    p.target === nothing && throw(ArgumentError(
+        "this problem has no target cache to fill."))
+    fill_target!(p.target, p.origins, p.spacings, p.interior, fits, T(t))
+    return with_interior(p, p.interior; fits=fits, t_target=T(t))
+end
+
+# The cache's working array, or `nothing`, for the kernels.
+target_work(::Nothing) = nothing
+target_work(fs::FieldSet) = fs.work
 
 # The gauge source's working array, or `nothing` where there is none. The
 # kernel never asks whether it has one — its `Val` already said.
@@ -703,7 +767,8 @@ function gh_rhs!(du, u, p::GHProblem, t)
     map_blocks!(gh_rhs_kernel!, p.U, statearray(du, p.U), p.U.work,
                 gauge_work(p.Hsrc), p.origins, p.spacings, p.case.background,
                 p.case.γ0, p.case.γ2, p.case.ε_KO, p.interior, eltype(p.U.work)(t),
-                p.valG, p.valq, p.valH, p.valdiss, p.valint)
+                target_work(p.target), p.t_target, p.valG, p.valq, p.valH,
+                p.valdiss, p.valint)
     return nothing
 end
 
@@ -732,6 +797,9 @@ gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:none},
 gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:damped},
                  t) where {T,G,q,HASH,DISS} = nothing
 gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:frozen},
+                 t) where {T,G,q,HASH,DISS} = nothing
+# The fitted layer writes nothing (step 8e): its target is a term of `du`.
+gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:fitted},
                  t) where {T,G,q,HASH,DISS} = nothing
 
 function gh_step_limiter!(u, integrator,
