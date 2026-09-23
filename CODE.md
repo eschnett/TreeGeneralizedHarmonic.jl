@@ -1980,13 +1980,14 @@ toward it (step 8e-ii):
    — so that a center moving by the refill rule's `h/4` never exposes an
    unfilled layer point **(proposed in step 8e)** — and zeros elsewhere; the
    cache is the host evaluator bit for bit. **What it costs (measured in step
-   8e**, one thread, on the fixture's 120 blocks**)**: a fill is `44 ms` from
-   one fit and `75 ms` from two, `0.4` and `0.7` of a right-hand side
-   (`107 ms`), once a chunk of about forty evaluations; a right-hand side
-   with the fitted layer is `111 ms` against the `:damped` layer's `107 ms`
-   (the cache's loads where `:damped` takes a dual pass; the two are within
-   this machine's noise, and a second measurement gave `106.7` against
-   `107.6`).
+   8e**, one thread, on the fixture's 120 blocks**)**: a fill is `43–44 ms`
+   from one fit and `75 ms` from two, `0.4` and `0.7` of a right-hand side,
+   once a chunk of about forty evaluations; a right-hand side with the
+   fitted layer is within `±4 %` of the `:damped` layer's either way — `111`
+   against `107 ms`, `106.7` against `107.6`, and in the suite's run `114`
+   against `118` — the cache's two loads a variable where `:damped` takes the
+   analytic solution's dual pass, which the prediction ("a few percent")
+   had as a cost and is at worst a wash.
 9. **The refill rule (decided in review, step 8e).** The cache is refilled
    from the current fits at every chunk's start — after every fit — and,
    for a geometry that moves, whenever the tracked center would move by
@@ -5069,7 +5070,14 @@ the design is "The fitted target", pieces 8–12, and the decisions of the
 review of 8e-i are marked there. The long rows are `hole_runs.jl fitted`
 (`fitted=fixture`, `boosted`, `harmonic`).
 
-**The suite.** SUITE_LINE_II
+**The suite.** **4616 assertions in 14m21 at one thread and 10m41 at
+four** (load 6–8, rising to 13 during the four-thread run), against 8e-i's
+4578 in 15m09 and 10m52. The 38 new claims are `fit_tests.jl`'s "The fitted
+variant" — `47.7 s` at one thread and `39.5 s` at four, of which the
+bit-identity testset is `6.3 s` and the fixture's `:fitted` run to `0.15 M`
+with its one `Float32` chunk `41.5 s`: the step's one short run, and the
+`Float32` chunk beside it — plus the 8e-i testsets' sixteen for the shift
+constant's two paths.
 
 **The acceptance list, with its numbers** (measured in step 8e):
 
@@ -5077,7 +5085,7 @@ review of 8e-i are marked there. The long rows are `hole_runs.jl fitted`
 |---|---|
 | one right-hand side, `:fitted` against `:damped` on the same geometry and rate, outside the offset surface | bit for bit at all 45 545 points; the core `−ρ_max (u − u_fit)` exactly; the layer's difference `ρ (u_fit − u_exact)` to `1.4e−14` |
 | the cache against the host evaluator | bit for bit |
-| a right-hand side, `:fitted` and `:damped` layers, fixture, one thread | `111 ms`, `107 ms` (a second measurement `106.7`, `107.6`) |
+| a right-hand side, `:fitted` and `:damped` layers, fixture, one thread | `111 ms`, `107 ms` (again `106.7`, `107.6`; in the suite `114`, `118`) |
 | a fill of the cache from one fit, from two | `44 ms`, `75 ms` — `0.4`, `0.7` of a right-hand side, once a chunk |
 | the fixture `:fitted` to `0.15 M`: masked error L2, L∞, against `:damped` | `1.33e−2`, `0.177` against `3.11e−3`, `0.035` (`4.3×`, the initial data's kink; asserted `≤ 6×`) |
 | the same: `fit_valid`, projection hits, `track_offset`, fit failures, mid-chunk refills | every row; `0`; below `3.3e−4` cells; `0`; `0` |
