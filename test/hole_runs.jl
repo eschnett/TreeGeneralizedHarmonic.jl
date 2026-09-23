@@ -64,7 +64,8 @@ say(fmt, args...) = println(Printf.format(Printf.Format(fmt), args...))
 # the `leakage` section's subsets: `q=2 d=4 eps=0,1/2`), so that a subset
 # can be validated locally with the same code the batch job runs.
 const SECTIONS = let names = filter(a -> !occursin('=', a), ARGS)
-    isempty(names) ? ["order", "long", "charts", "indicator", "horizon"] : names
+    isempty(names) ? ["order", "long", "charts", "indicator", "horizon", "bounds"] :
+    names
 end
 const OPTIONS = Dict(String(first(split(a, '='; limit=2))) =>
                      String(last(split(a, '='; limit=2)))
@@ -925,5 +926,408 @@ if "leakage" in SECTIONS
         end
     end
 end
+
+# --- (7) the range projection on the two runs that end (added in step 8b) --
+#
+# `CODE.md`, "The interior" (the range projection) and `PLAN.md`'s step 8b.
+# Step 5's table has two rows that end in a degenerate metric: `:damped` one
+# resolution coarser than the suite's (`N = 6`, `21 M`) and `:pasted` at the
+# suite's (`N = 8`, `17 M`). Each is run twice here, without the projection
+# and with it at the proposed bounds and gate, and the two are compared
+# chunk by chunk: the runs are bit for bit the same until the projection
+# first fires (the suite's control is the claim that says so), so every
+# difference after that is the clamp's, and the question the section answers
+# is how far out it reaches — the constraint norms and the state difference
+# in shells `[r_h + k h, r_h + (k+1) h]`, `k = 0 … 8`, outside the horizon
+# (`r_h = 2 M`), which are step 8a's shells.
+#
+# The prediction to confirm or correct is `PLAN.md`'s: hits start "deep,
+# several `M` before the crash". The kernel's cost is measured first, on the
+# suite's `N = 8` mesh (prediction: 0.4 % of a step).
+#
+# Rows: `cost`, `damped6`, `pasted8`; all by default, or a subset as
+# `bounds=damped6,pasted8`, which is how the section is split across batch
+# jobs.
+# The rows come from the `bounds=<row>,…` option (step 8a's `key=value`
+# protocol, so the argument is in `OPTIONS` and not in `SECTIONS`), or all
+# three when the section is named or run by default (merged in review).
+const BOUNDS_ROWS = haskey(OPTIONS, "bounds") ?
+                    String.(split(OPTIONS["bounds"], ',')) :
+                    "bounds" in SECTIONS ? ["cost", "damped6", "pasted8"] : String[]
+# `t_end` is `50 M`, the length of step 5's table; `TREEGH_BOUNDS_TEND`
+# overrides it for a smoke test of the section itself.
+const BOUNDS_TEND = T(parse(Float64, get(ENV, "TREEGH_BOUNDS_TEND", "50")))
+# Its autopsy steps the integrator by hand, which `evolution_cases.jl` does
+# not import.
+using SciMLBase: init, step!
+
+# The section is a function rather than a top-level block: it defines
+# closures that assign to its own locals, which a script's soft scope makes
+# ambiguous (and turns into warnings, or into an `UndefVarError`).
+function bounds_section(rows)
+    println("\n=== (6) the range projection ===")
+    q = 2
+    G = q ÷ 2 + 1
+    ops = Operators(prolongation=q + 2, restriction=q + 2)
+    radii = (T(10), T(10), one(T))
+    base_case(variant) = kerr_schild_case(T; M=1, a=0, halfwidth=T(5 // 2),
+                                          r_0=T(2 // 5), r_1=T(23 // 20),
+                                          chunk=one(T), margin=8,
+                                          interior=variant)
+    bounded(case, forest) =
+        with_bounds(case, default_bounds(T; M=1,
+                                         r_gate=default_gate(case.interior,
+                                                             forest, q)))
+
+    if "cost" in rows
+        println("\n-- the kernel's cost on the suite's mesh (N = 8, " *
+                "$(Threads.nthreads()) threads) --")
+        case0 = base_case(:damped)
+        forest = shells(case0, 8, radii)
+        case = bounded(case0, forest)
+        fs = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3),
+                         backend=CPU())
+        p = GHProblem(fs, GhostSchedule(fs, ops), case; q=q,
+                      interior=with_ρ_max(case.interior, T(10)),
+                      accounting=BoundsAccounting())
+        fill_exact!(fs, case, zero(T))
+        u = statevector(fs)
+        gather!(u, fs)
+        du = similar(u)
+        npts = nblocks(fs) * forest.N^3
+        ngate = 0
+        for b in 1:nblocks(fs), k in 1:forest.N, j in 1:forest.N,
+            i in 1:forest.N
+
+            x = coordinates(fs, b, (i + G, j + G, k + G))
+            sqrt(sum(abs2, x)) < case.bounds.r_gate && (ngate += 1)
+        end
+        best(f) = (f(); minimum(1:7) do _
+            t0 = time_ns()
+            f()
+            (time_ns() - t0) / 1e9
+        end)
+        trhs = best(() -> gh_rhs!(du, u, p, zero(T)))
+        tlim = best(() -> gh_stage_limiter!(u, nothing, p, zero(T)))
+        # One RK4 step here is four stage-limiter calls and five right-hand
+        # sides: four stages, and the FSAL re-evaluation a non-trivial step
+        # limiter asks for.
+        say("  points %d, inside the gate r < %.4f: %d (%.1f %%)", npts,
+            case.bounds.r_gate, ngate, 100 * ngate / npts)
+        say("  RHS %.4f s (%.0f ns/point)   stage limiter %.5f s " *
+            "(%.1f ns/point, %.0f ns/gated point)", trhs, trhs * 1e9 / npts,
+            tlim, tlim * 1e9 / npts, tlim * 1e9 / max(ngate, 1))
+        say("  the projection's share of a step: %.2f %% " *
+            "(4 limiter calls against 5 RHS)",
+            100 * 4 * tlim / (5 * trhs + 4 * tlim))
+        # And what it costs where it fires: every gated point with a
+        # negative eigenvalue of γ, the worst case — a Jacobi decomposition,
+        # a recomposition, and the verification pass, at every one.
+        xx = TreeGeneralizedHarmonic._pairindex(2, 2)
+        spoiled = copy(u)
+        As = statearray(spoiled, fs)
+        for b in 1:nblocks(fs), k in 1:forest.N, j in 1:forest.N,
+            i in 1:forest.N
+
+            x = coordinates(fs, b, (i + G, j + G, k + G))
+            sqrt(sum(abs2, x)) < case.bounds.r_gate || continue
+            As[i, j, k, xx, b] = -T(3 // 2)
+        end
+        work = copy(spoiled)
+        tfire = (copyto!(work, spoiled); gh_stage_limiter!(work, nothing, p,
+                                                            zero(T));
+                 minimum(1:5) do _
+                     copyto!(work, spoiled)
+                     t0 = time_ns()
+                     gh_stage_limiter!(work, nothing, p, zero(T))
+                     (time_ns() - t0) / 1e9
+                 end)
+        say("  firing at every gated point: %.5f s (%.0f ns/gated point, " *
+            "%.1f × the healthy call)", tfire, tfire * 1e9 / max(ngate, 1),
+            tfire / tlim)
+    end
+
+    # The shells outside the horizon: the gauge constraint's L2 and L∞ in
+    # each, and — against the unbounded run's state at the same time — the
+    # largest change of any component there.
+    function shell_readings(p, t, u; rh=T(2), K=8)
+        tt = T(t)
+        h = minimum_spacing(T, p.U.forest)
+        c = center_at(p.interior.center, tt)
+        return map(0:K) do k
+            mask = ShellMask{T}(c, rh + k * h, rh + (k + 1) * h)
+            gh_constraint!(p, u, tt; mask=mask)
+            cn = constraint_norms(p)
+            (l2=Float64(maximum(cn.gauge_l2)),
+             linf=Float64(maximum(cn.gauge_linf)))
+        end
+    end
+    # Each owned point's radius and shell index, once per mesh (no regrid).
+    function shell_index(U; rh=T(2), K=8)
+        N = U.forest.N
+        G = first(U.G)
+        h = minimum_spacing(T, U.forest)
+        idx = Array{Int}(undef, N, N, N, nblocks(U))
+        rad = Array{T}(undef, N, N, N, nblocks(U))
+        for b in 1:nblocks(U), k in 1:N, j in 1:N, i in 1:N
+            r = sqrt(sum(abs2, coordinates(U, b, (i + G, j + G, k + G))))
+            rad[i, j, k, b] = r
+            s = floor((r - rh) / h)
+            idx[i, j, k, b] = 0 ≤ s ≤ K ? Int(s) : -1
+        end
+        return idx, rad
+    end
+    function shell_diffs(U, idx, u1, u0; K=8)
+        A1 = statearray(u1, U)
+        A0 = statearray(u0, U)
+        d = zeros(K + 1)
+        N = U.forest.N
+        for b in 1:nblocks(U), k in 1:N, j in 1:N, i in 1:N
+            s = idx[i, j, k, b]
+            s < 0 && continue
+            for v in 1:20
+                d[s + 1] = max(d[s + 1], abs(A1[i, j, k, v, b] - A0[i, j, k, v, b]))
+            end
+        end
+        return d
+    end
+
+    # Radial bins of the state's validity, host-side: in each bin the
+    # smallest `det γ` and signed lapse (with the radius they occur at), the
+    # largest `|Π_ab|`, the largest `‖u − u_exact‖`, and how many values are
+    # not finite. This is the autopsy the record cannot give once a run has
+    # thrown: it says *where* the state stopped being a metric.
+    function radial_bins(U, u, case, t, edges)
+        N = U.forest.N
+        G = first(U.G)
+        A = statearray(u, U)
+        nb = length(edges) - 1
+        dγ = fill(Inf, nb)
+        rdγ = fill(NaN, nb)
+        α = fill(Inf, nb)
+        rα = fill(NaN, nb)
+        Πm = zeros(nb)
+        err = zeros(nb)
+        bad = zeros(Int, nb)
+        tt = T(t)
+        for b in 1:nblocks(U), k in 1:N, j in 1:N, i in 1:N
+            x = coordinates(U, b, (i + G, j + G, k + G))
+            r = sqrt(sum(abs2, x))
+            s = clamp(searchsortedlast(edges, r), 1, nb)
+            hv = SVector{10,T}(ntuple(v -> A[i, j, k, v, b], 10))
+            Πv = SVector{10,T}(ntuple(v -> A[i, j, k, 10 + v, b], 10))
+            nf = count(!isfinite, hv) + count(!isfinite, Πv)
+            bad[s] += nf
+            nf > 0 && continue
+            d, a, _, pm = state_validity(hv, Πv)
+            a == floatmax(T) && (a = T(NaN))
+            (d < dγ[s]) && (dγ[s] = d; rdγ[s] = r)
+            (a < α[s] || isnan(a)) && (α[s] = a; rα[s] = r)
+            Πm[s] = max(Πm[s], pm)
+            ex = case_state_tuple(case.background, case.interior, tt, x)
+            e = sqrt(sum(v -> (A[i, j, k, v, b] - ex[v])^2, 1:20))
+            err[s] = max(err[s], e)
+        end
+        return (; dγ, rdγ, α, rα, Πm, err, bad)
+    end
+    # The root cause of a run that threw, through the task wrappers a
+    # threaded kernel puts around it, with the package's own frames of its
+    # backtrace — which kernel, and which line.
+    function describe_failure(e, bt)
+        root = e
+        while true
+            if root isa TaskFailedException
+                stk = Base.current_exceptions(root.task)
+                isempty(stk) || (bt = stk[end].backtrace)
+                root = root.task.result
+            elseif root isa CompositeException
+                root = first(root.exceptions)
+            else
+                break
+            end
+        end
+        msg = first(split(sprint(showerror, root), '\n'))
+        frames = [string(f.func, " @ ", basename(string(f.file)), ":", f.line)
+                  for f in stacktrace(bt)
+                  if occursin("TreeGeneralizedHarmonic", string(f.file))]
+        return msg, first(unique(frames), 6)
+    end
+    fmt(x) = Printf.format(Printf.Format("%9.2e"), x)
+    fmtr(x) = Printf.format(Printf.Format("%6.3f"), x)
+
+    for (label, N, variant) in (("damped6", 6, :damped), ("pasted8", 8, :pasted))
+        label in rows || continue
+        println("\n-- $label: KS a=0, q=2, N=$N, :$variant, to $(BOUNDS_TEND) M, " *
+                "without the projection, with it at the proposed gate, and at " *
+                "the widest gate the assertion allows --")
+        case0 = base_case(variant)
+        int = case0.interior
+        forest0 = shells(case0, N, radii)
+        h = minimum_spacing(T, forest0)
+        case1 = bounded(case0, forest0)
+        widest = check_bounds_gate(forest0, int, case1.bounds, q).allowed
+        case2 = with_bounds(case0, default_bounds(T; M=1, r_gate=widest))
+        r_h = T(horizon_min_radius(case0.background))
+        edges = T[0, int.r_0, case1.bounds.r_gate, int.r_1, int.r_1 + G * h,
+                  int.r_1 + 2G * h, r_h, r_h + 4h, Inf]
+        names = ["core", "in-layer", "out-layer", "r1+Gh", "r1+2Gh", "→r_h",
+                 "r_h+4h", "outside"]
+        say("  r_0 = %.4f  r_gate = %.4f (widest %.4f)  r_1 = %.4f  h = %.5f",
+            int.r_0, case1.bounds.r_gate, widest, int.r_1, h)
+        println("  radial bins: ", join((Printf.format(Printf.Format("%s [%.3f, %.3f)"),
+                                                       names[k], edges[k], edges[k + 1])
+                                         for k in 1:length(names)), ", "))
+        refstates = Dict{Int,Vector{T}}()
+        chunks = Dict{Tuple{Int,Int},Any}()
+        outs = Dict{Int,Any}()
+        idx = shell_index(FieldSet{T}(forest0, 20; G=G, centering=vertexcentered(3),
+                                      backend=CPU()))
+        runs = ((0, "no projection", case0), (1, "gate r_1 − 2Gh", case1),
+                (2, "gate r_1 − Rh", case2))
+        for (run, what, case) in runs
+            forest = shells(case, N, radii)
+            reached = Ref(zero(T))
+            function watch(p, t, u)
+                reached[] = T(t)
+                c = round(Int, t)
+                run == 0 && (refstates[c] = copy(u))
+                d = run > 0 && haskey(refstates, c) ?
+                    shell_diffs(p.U, idx[1], u, refstates[c]) : nothing
+                chunks[(run, c)] = (hits=p.accounting === nothing ? 0 :
+                                         p.accounting.hits,
+                                    shells=shell_readings(p, t, u), diff=d,
+                                    bins=run == 0 ? radial_bins(p.U, u, case, t, edges) :
+                                         nothing)
+                return nothing
+            end
+            t0 = time()
+            local failure = nothing
+            out = try
+                evolve!(T, case; forest=forest, q=q, ops=ops,
+                        t_end=BOUNDS_TEND, cfl=T(1 // 5), observer=watch)
+            catch e
+                e isa InterruptException && rethrow()
+                failure = describe_failure(e, catch_backtrace())
+                nothing
+            end
+            acc = out === nothing ? nothing : out.bounds
+            outs[run] = (reached=reached[], wall=time() - t0, failure=failure,
+                         acc=acc)
+            say("  run %d (%s): reached %.2f M in %.1f s%s", run, what,
+                reached[], time() - t0, failure === nothing ? "" :
+                                        ", then threw: " * failure[1])
+            failure === nothing || println("     in: ", join(failure[2], " ← "))
+            if run > 0
+                hs = [chunks[(run, c)].hits for c in 0:round(Int, reached[])]
+                c1 = findfirst(>(0), hs)
+                say("     projection hits: %d in total%s", last(hs),
+                    c1 === nothing ? ", never fired" :
+                    Printf.format(Printf.Format(", first in the chunk ending at t = %d M"),
+                                  c1 - 1))
+                acc === nothing ||
+                    say("     accounting: %d calls, first hit at t = %.4f M, " *
+                        "r = %.4f; outermost %.4f", acc.calls, acc.first_t,
+                        acc.first_r, acc.r_max)
+            end
+        end
+
+        # The run without the projection, chunk by chunk and bin by bin.
+        c_end = round(Int, outs[0].reached)
+        for (title, key, f) in (("min det γ", :dγ, fmt), ("min α (signed)", :α, fmt),
+                                ("radius of that min α", :rα, fmtr),
+                                ("max |Π_ab|", :Πm, fmt),
+                                ("max ‖u − u_exact‖", :err, fmt),
+                                ("non-finite values", :bad, string))
+            println("  $title, by bin (", join(names, ", "), "):")
+            for c in 0:c_end
+                b = chunks[(0, c)].bins
+                say("   t=%4d  %s", c, join((lpad(f(x), 9) for x in getfield(b, key)), " "))
+            end
+        end
+
+        # Whether the clamp's discontinuity reached the horizon: the shells
+        # outside it, at the chunks where a run with the projection first
+        # fired and after — against the run without it.
+        for run in (1, 2)
+            hs = [chunks[(run, c)].hits for c in 0:round(Int, outs[run].reached)]
+            c1 = findfirst(>(0), hs)
+            c1 === nothing && continue
+            c1 -= 1
+            println("  run $run: shells [r_h + k h, r_h + (k+1) h], k = 0 … 8, " *
+                    "from the chunk it first fired in")
+            for c in unique(filter(c -> haskey(chunks, (run, c)),
+                                   [c1, c1 + 1, c1 + 2, c1 + 5, c1 + 10, c1 + 20]))
+                on = chunks[(run, c)]
+                off = get(chunks, (0, c), nothing)
+                say("   t = %4d  C_a L∞ on : %s", c, join((fmt(x.linf) for x in on.shells), " "))
+                off === nothing ||
+                    say("              C_a L∞ off: %s", join((fmt(x.linf) for x in off.shells), " "))
+                on.diff === nothing ||
+                    say("              max |Δu|  : %s", join((fmt(x) for x in on.diff), " "))
+            end
+        end
+
+        # The autopsy: the run without the projection again, to the last
+        # chunk it finished — bit for bit the same run — and then the fatal
+        # chunk one step at a time, with the integrator `evolve!` uses and
+        # the step it would take, until it throws. `TREEGH_BOUNDS_AUTOPSY=1`
+        # forces it on the last chunk of a run that did not throw, which is
+        # how the autopsy itself is smoke-tested.
+        forced = get(ENV, "TREEGH_BOUNDS_AUTOPSY", "") == "1"
+        if outs[0].failure !== nothing || forced
+            c_a = outs[0].failure === nothing ? c_end - 1 : c_end
+            println("  autopsy of the chunk $(c_a) → $(c_a + 1) M, step by step, " *
+                    "without the projection:")
+            forest = shells(case0, N, radii)
+            out = evolve!(T, case0; forest=forest, q=q, ops=ops, t_end=T(c_a),
+                          cfl=T(1 // 5))
+            p = out.problem
+            u = copy(out.u)
+            tc = T(c_a)
+            λ = TreeGeneralizedHarmonic.max_speed_of(p, u, tc)
+            dt = T(1 // 5) * minimum_spacing(T, out.forest) / λ
+            steps = max(1, ceil(Int, 1 / dt))
+            dt_used = one(T) / steps
+            p = with_interior(p, TreeGeneralizedHarmonic.chunk_interior(case0,
+                                                                        dt_used,
+                                                                        one(T)))
+            integ = init(ODEProblem(gh_rhs!, u, (tc, tc + 1), p), RK4();
+                         dt=dt_used, adaptive=false, save_everystep=false,
+                         stage_limiter=gh_stage_limiter!,
+                         step_limiter=gh_step_limiter!)
+            history = Any[]
+            fatal = nothing
+            for s in 1:steps
+                try
+                    step!(integ)
+                catch e
+                    e isa InterruptException && rethrow()
+                    fatal = (step=s, what=describe_failure(e, catch_backtrace()))
+                    break
+                end
+                push!(history, (step=s, t=integ.t,
+                                bins=radial_bins(p.U, integ.u, case0, integ.t, edges)))
+            end
+            say("   %d steps of dt = %.5f; %s", steps, dt_used,
+                fatal === nothing ? "the chunk integrated, so the failure is " *
+                                    "the end-of-chunk check" :
+                                    "step $(fatal.step) threw: $(fatal.what[1])")
+            fatal === nothing || println("     in: ", join(fatal.what[2], " ← "))
+            for e in history[max(1, end - 7):end]
+                b = e.bins
+                say("   step %3d t=%8.4f", e.step, e.t)
+                say("     min α     %s", join((lpad(fmt(x), 9) for x in b.α), " "))
+                say("     at r      %s", join((lpad(fmtr(x), 9) for x in b.rα), " "))
+                say("     min detγ  %s", join((lpad(fmt(x), 9) for x in b.dγ), " "))
+                say("     max |Π|   %s", join((lpad(fmt(x), 9) for x in b.Πm), " "))
+                say("     max err   %s", join((lpad(fmt(x), 9) for x in b.err), " "))
+                say("     non-finite %s", join((lpad(string(x), 9) for x in b.bad), " "))
+            end
+        end
+        empty!(refstates)
+    end
+end
+
+isempty(BOUNDS_ROWS) || bounds_section(BOUNDS_ROWS)
 
 println("\ndone")
