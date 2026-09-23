@@ -32,8 +32,17 @@
 # adaptive run at the chosen thresholds against a frozen hierarchy of the
 # same finest spacing. It is here rather than in the suite because at the
 # calibrated thresholds this hole asks for 848 blocks.
+#
+# Step 8a adds the `leakage` section, which is **not** in the default list:
+# eighty evolutions on a 512-block mesh are a batch job on Symmetry
+# (`.claude/orchestration/symmetry-run.sh <worktree> <name> hole:leakage`),
+# and it runs its evolutions concurrently when it is given the threads for
+# it. It asks how much grid-scale content made inside the horizon crosses
+# it — `PLAN.md`'s finding 4 — against the predictions of
+# `test/dispersion.jl`.
 
 import Printf
+using Serialization: deserialize, serialize
 using TreeAMR
 using TreeGeneralizedHarmonic
 using KernelAbstractions: CPU
@@ -50,9 +59,16 @@ const T = Float64
 # everything else in this package is.
 say(fmt, args...) = println(Printf.format(Printf.Format(fmt), args...))
 
-# Which sections to run; all of them by default.
-const SECTIONS = isempty(ARGS) ?
-                 ["order", "long", "charts", "indicator", "horizon"] : ARGS
+# Which sections to run; all of them by default. An argument of the form
+# `key=value` is not a section but an option of one (added in step 8a, for
+# the `leakage` section's subsets: `q=2 d=4 eps=0,1/2`), so that a subset
+# can be validated locally with the same code the batch job runs.
+const SECTIONS = let names = filter(a -> !occursin('=', a), ARGS)
+    isempty(names) ? ["order", "long", "charts", "indicator", "horizon"] : names
+end
+const OPTIONS = Dict(String(first(split(a, '='; limit=2))) =>
+                     String(last(split(a, '='; limit=2)))
+                     for a in ARGS if occursin('=', a))
 
 """
 The frozen hierarchy: one shell radius per refinement level. A radius of
@@ -477,6 +493,435 @@ if "horizon" in SECTIONS
             say("   t=%5.2f  r=(%.6f, %.6f, %.6f)  area %.6f  M_irr %.6f  " *
                 "J %9.2e  M_ch %.6f  offset %8.2e", r.t, r.r_min, r.r_mean,
                 r.r_max, r.area, r.M_irr, r.J, r.M_ch, r.center_offset)
+        end
+    end
+end
+
+# --- (6) leakage: what crosses the horizon from inside it -----------------
+#
+# `PLAN.md`'s finding 4: the discrete scheme is not causal at the grid scale.
+# Every centered first derivative annihilates the Nyquist mode, so the shift
+# advection that makes everything ingoing inside the horizon does not act on
+# it, and grid-scale content made there can cross the horizon, attenuated
+# only by the dissipation. `test/dispersion.jl` predicts how much; this
+# section measures it on the step-5 fixture's hole.
+#
+# **The measurement.** A radial ripple is added to `h_tt` in the initial
+# data — `A (1 − s²)³ cos(2π(r − r_c)/λ)`, `s = (r − r_c)/(2h)`, a window
+# four cells wide centered at depth `d` cells below the horizon,
+# `r_c = r_h − d h`, with `A = 1e−3` and `λ = 2h, 4h, 8h` — and the run is
+# compared, point by point and chunk by chunk, with the same run without it.
+# The L∞ over the ten `h` components of the difference is taken in the
+# shells `r_h + k h ≤ r < r_h + (k+1) h` — `ShellMask`'s membership, one
+# mask per shell — for `k = 0 … 8` outside the horizon and `k = −10 … −1`
+# inside it; the largest value over the run is what the tables hold,
+# divided by `A`. Three views of each shell: all of it; the points within
+# 18° of a grid axis, which is the direction `test/dispersion.jl`'s
+# one-dimensional model is about and the least damped one; and the points
+# with every `|n_d| ≥ 0.4`, a cone about each diagonal, whose box face is
+# beyond `r = 3` — the axes meet the Dirichlet face at `r = 5/2 = r_h +
+# 6.4 h`, which *reflects* what reaches it, so shells `k ≥ 4` along an axis
+# see incident and reflected content together.
+#
+# Four decisions, each **(proposed in step 8a)** in `CODE.md`:
+#
+#   * **The mesh is the fixture's finest level everywhere** — `hole_fixture`
+#     at `h = 5/64` on a uniform level-3 forest of 512 blocks, rather than
+#     its 120-block hierarchy. That hierarchy refines the cube
+#     `|x|_∞ ≤ 5/4`, so the horizon at `r = 2` straddles the coarse-fine
+#     face and, along the axes, all of the margin but its innermost 1.3
+#     cells is at `h = 5/32`, where a ripple of wavelength `2 × 5/64` is a
+#     constant. What would be measured there is the interface, not the
+#     scheme.
+#   * **The ripple is in `h_tt` alone, with `Π` untouched.** The principal
+#     part is the same scalar operator for every component (`CODE.md`, "One
+#     right-hand-side evaluation"), so one component is as good as twenty;
+#     and `Π = 0` excites the two branches of the dispersion relation
+#     equally, where a choice of `Π` would pick one.
+#   * **`d` is the depth of the window's center.** The window is `2h` on
+#     either side, so `d = 2` touches the horizon and `d = 8` clears
+#     `r_1 = 23/20` by nine tenths of a cell; the gap between `r_1` and
+#     `r_h` is 10.9 cells, and a four-cell window is what fits all three.
+#     A consequence the tables must be read with: a window four cells wide
+#     is broadband whatever `λ` is, and `λ = 8h` is half a wavelength of it.
+#   * **The runs are `2 M` long, not `1 M`**, sampled every `1/20 M`.
+#     `test/dispersion.jl` puts the least-attenuated modes at group
+#     velocities of `0.1–0.3`, three to fourteen `M` from depth `d` to the
+#     outer shells, so at `1 M` the deep sources would not have arrived; the
+#     one-dimensional model carries the prediction to `10 M`, and the 3D
+#     runs are what check it at `2 M`.
+#
+# **How it runs.** The unit of work is a *group*: one reference run and the
+# ripples measured against it. With a node's worth of threads (sixteen or
+# more) the groups run as subprocesses all at once, each `(q, ε)` split in
+# two; with fewer, one after the other in this process. The numbers do not
+# depend on which (checked on two rows at `t = 1/20 M`, one thread per
+# worker against four in this process: identical to every digit printed —
+# the threading invariant, met here). On one `amddebugq` node the whole
+# section is 45 minutes, a run 6–8 minutes at three or five threads. A
+# subset is chosen with options, e.g.
+#
+#     julia --project=. --threads=4 test/hole_runs.jl leakage q=2 d=4 \
+#         eps=0,1/2 lambda=2 t_end=1/4
+#
+# The ripple is added to the initial data by the **observer at `t = 0`**:
+# `evolve!` hands its observer the state vector the first chunk integrates
+# from, and this is the one way a test adds to the initial data without a
+# change under `src/` (which step 8a makes none of). A run in which the
+# ripple did not reach the evolution would show a difference of exactly
+# zero, and is refused.
+
+const LEAK_AMPLITUDE = 1e-3
+const LEAK_WINDOW = 2              # the window's half-width, in cells
+const LEAK_SHELLS = -10:8          # shell k: r_h + k h ≤ r < r_h + (k+1) h
+const LEAK_OUTSIDE = 0:8
+const LEAK_CHUNK = 1 // 20
+const LEAK_RADII = (T(10), T(10), T(10))   # uniform at level 3: 512 blocks
+
+# `a,b,c` or `p/q` lists, for the `key=value` options.
+leak_option(key, default) = !haskey(OPTIONS, key) ? default :
+    [occursin('/', x) ? parse(Int, split(x, '/')[1]) // parse(Int, split(x, '/')[2]) :
+     parse(Int, x) // 1 for x in split(OPTIONS[key], ',')]
+
+leak_ripple(r, r_c, λ, h) =
+    (s = (r - r_c) / (LEAK_WINDOW * h);
+     abs(s) < 1 ? T(LEAK_AMPLITUDE) * (1 - s^2)^3 * cos(2π * (r - r_c) / λ) : zero(T))
+
+"""
+Every owned point of the leakage mesh that lies in one of the shells, with
+its shell (by `ShellMask`'s own membership test) and its direction class.
+Built once: the forest is rebuilt for every run, deterministically, and
+each run checks that its block count and first position agree.
+"""
+function leak_geometry(U, c, r_h, h)
+    N = U.forest.N
+    G = first(U.G)
+    masks = [ShellMask{T}(c, r_h + k * h, r_h + (k + 1) * h) for k in LEAK_SHELLS]
+    pts = NTuple{4,Int}[]
+    shell = Int[]
+    radius = T[]
+    axis = Bool[]
+    diag = Bool[]
+    for b in 1:nblocks(U), k in 1:N, j in 1:N, i in 1:N
+        x = coordinates(U, b, (i + G, j + G, k + G))
+        m = findfirst(mk -> is_evolved(mk, x), masks)
+        m === nothing && continue
+        d = SVector{3,T}(x) - c
+        r = sqrt(sum(abs2, d))
+        n = abs.(d) ./ r
+        push!(pts, (i, j, k, b))
+        push!(shell, m)
+        push!(radius, r)
+        push!(axis, maximum(n) ≥ cosd(18))
+        push!(diag, minimum(n) ≥ 2 // 5)
+    end
+    return (points=pts, shell=shell, radius=radius, axis=axis, diag=diag,
+            N=N, G=G,
+            nblocks=nblocks(U), x1=coordinates(U, 1, (G + 1, G + 1, G + 1)),
+            counts=[count(==(m), shell) for m in eachindex(LEAK_SHELLS)])
+end
+
+"""
+One leakage run: the fixture at `q` and `ε_KO` to `t_end`, with the ripple
+`(λ, d)` added at `t = 0` when `ripple` is given. With `reference =
+nothing` it returns the `h` of every measured point at every chunk; with a
+reference it returns the largest `|δh|` per shell, view and chunk.
+"""
+function leak_run(q, ε; t_end, geometry, ripple=nothing, reference=nothing)
+    case = hole_fixture(T; q=q, ε_KO=T(ε), chunk=T(LEAK_CHUNK))
+    r_h = T(horizon_min_radius(case.background))
+    snaps = Matrix{T}[]
+    nchunk = ceilint(T(t_end) / T(LEAK_CHUNK))
+    amax = zeros(T, length(LEAK_SHELLS), 3, nchunk + 1)
+    calls = Ref(0)
+    function watch(p, t, u)
+        calls[] += 1
+        c = calls[]
+        U = p.U
+        ua = statearray(u, U)
+        h = T(minimum_spacing(T, U.forest))
+        if c == 1
+            (nblocks(U) == geometry.nblocks &&
+             coordinates(U, 1, (geometry.G + 1, geometry.G + 1, geometry.G + 1)) ==
+             geometry.x1) || error("the leakage mesh is not the geometry's")
+            if ripple !== nothing
+                λ, d = ripple
+                cc = center_at(case.center, zero(T))
+                N, G = geometry.N, geometry.G
+                for b in 1:nblocks(U), k in 1:N, j in 1:N, i in 1:N
+                    x = coordinates(U, b, (i + G, j + G, k + G))
+                    r = sqrt(sum(abs2, SVector{3,T}(x) - cc))
+                    ua[i, j, k, 1, b] += leak_ripple(r, r_h - d * h, λ * h, h)
+                end
+            end
+        end
+        if reference === nothing
+            c == 1 && return nothing
+            snap = Matrix{T}(undef, 10, length(geometry.points))
+            for (n, (i, j, k, b)) in enumerate(geometry.points), v in 1:10
+                snap[v, n] = ua[i, j, k, v, b]
+            end
+            push!(snaps, snap)
+            return nothing
+        end
+        for (n, (i, j, k, b)) in enumerate(geometry.points)
+            # At `t = 0` the difference is the ripple itself, in `h_tt`.
+            δ = if c == 1
+                abs(leak_ripple(geometry.radius[n], r_h - ripple[2] * h,
+                                ripple[1] * h, h))
+            else
+                ref = reference.snaps[c - 1]
+                maximum(abs(ua[i, j, k, v, b] - ref[v, n]) for v in 1:10)
+            end
+            m = geometry.shell[n]
+            amax[m, 1, c] = max(amax[m, 1, c], δ)
+            geometry.axis[n] && (amax[m, 2, c] = max(amax[m, 2, c], δ))
+            geometry.diag[n] && (amax[m, 3, c] = max(amax[m, 3, c], δ))
+        end
+        return nothing
+    end
+    t0 = time()
+    out = gh_hole_run(T, case; N=8, q=q, t_end=T(t_end), radii=LEAK_RADII,
+                      observer=watch)
+    wall = time() - t0
+    dts = [r.dt for r in out.records]
+    if reference === nothing
+        return (snaps=snaps, dts=dts, wall=wall, nsteps=out.nsteps, h=out.h)
+    end
+    dts == reference.dts ||
+        @warn "the perturbed run's steps differ from the reference's" maxrel =
+            maximum(abs.(dts .- reference.dts) ./ max.(reference.dts, eps()))
+    # The ripple must have reached the evolution: at the first chunk the
+    # difference in the source's own shells is not zero.
+    maximum(amax[:, 1, 2]) > 0 ||
+        error("the ripple did not reach the evolution: the difference at " *
+              "the first chunk is exactly zero, so the observer's addition at " *
+              "t = 0 was not the state the first chunk integrated from")
+    return (amax=amax, wall=wall, nsteps=out.nsteps, h=out.h,
+            sameSteps=dts == reference.dts, finite=out.records[end].finite)
+end
+
+# The geometry for one order, from a forest built the way every run builds
+# its own.
+function leak_geometry(q)
+    case = hole_fixture(T; q=q)
+    f = hole_fixture_forest(T, case; N=8, radii=LEAK_RADII)
+    U = FieldSet{T}(f, 20; G=q ÷ 2 + 1, centering=vertexcentered(3),
+                    backend=CPU())
+    return leak_geometry(U, center_at(case.center, zero(T)),
+                         T(horizon_min_radius(case.background)),
+                         T(minimum_spacing(T, f)))
+end
+
+"""
+One **group**: the reference run at `(q, ε)` and the ripples measured
+against it, one after the other, each printing a line the moment it ends.
+A ripple that throws returns its exception rather than ending the group.
+"""
+function leak_group(q, ε, ripples; t_end)
+    geometry = leak_geometry(q)
+    ref = leak_run(q, ε; t_end=t_end, geometry=geometry)
+    iout = [findfirst(==(k), LEAK_SHELLS) for k in LEAK_OUTSIDE]
+    res = map(ripples) do (λ, d)
+        r = try
+            leak_run(q, ε; t_end=t_end, geometry=geometry, ripple=(λ, d),
+                     reference=ref)
+        catch e
+            e
+        end
+        if r isa Exception
+            say("   done q=%d ε=%.2f λ=%dh d=%d: **FAILED** %s", q, ε, λ, d,
+                first(split(sprint(showerror, r), '\n')))
+        else
+            peak = dropdims(maximum(r.amax; dims=3); dims=3) ./ LEAK_AMPLITUDE
+            say("   done q=%d ε=%.2f λ=%dh d=%d (%.0f s): A_k/A, k = 0 … 8: %s",
+                q, ε, λ, d, r.wall, leak_row(peak[iout, 1]))
+        end
+        flush(stdout)
+        r
+    end
+    return (keys=[(q, ε, λ, d) for (λ, d) in ripples], res=res,
+            refwall=ref.wall, refsteps=ref.nsteps, counts=geometry.counts,
+            npoints=length(geometry.points))
+end
+
+# `2//1` → `"2/1"`, the spelling the options take.
+leak_spell(x::Rational) = "$(numerator(x))/$(denominator(x))"
+leak_spell(x) = string(x)
+
+"""
+Run every group, each in a **subprocess** of its own with `threads[q]`
+threads, all at once, and return their results in order. A process of its
+own rather than a task, because sixteen runs sharing one process share its
+garbage collector and its scheduler, and a 64-core node measured at a
+third busy that way (step 8a's first batch job: 1228 % CPU in `top`, 23
+cores on average over its first sixteen minutes). Each worker's output goes
+to a log beside its result, and a worker that fails has its log's tail
+printed.
+"""
+function leak_fanout(groups, threads; λs, ds, t_end)
+    # Beside the batch job's own log when there is one (the Symmetry helper
+    # runs from a directory with `out/`), so that a job cut off by its time
+    # limit leaves each worker's finished rows behind; a scratch directory
+    # otherwise.
+    dir = isdir("out") ? mkpath(joinpath("out", "leakage")) : mktempdir()
+    println("   worker logs and results in ", abspath(dir))
+    project = dirname(Base.active_project())
+    procs = map(enumerate(groups)) do (n, (q, ε, part, nparts))
+        out = joinpath(dir, "group-$n.jls")
+        log = joinpath(dir, "group-$n.log")
+        cmd = `$(Base.julia_cmd()) --project=$project --threads=$(threads[q])
+               $(abspath(@__FILE__)) leakage worker=1 q=$q eps=$(leak_spell(ε))
+               part=$part/$nparts lambda=$(join(λs, ',')) d=$(join(ds, ','))
+               t_end=$(leak_spell(t_end)) out=$out`
+        io = open(log, "w")
+        (run(pipeline(cmd; stdout=io, stderr=io); wait=false), out, log, io)
+    end
+    return map(procs) do (proc, out, log, io)
+        wait(proc)
+        close(io)
+        if !success(proc) || !isfile(out)
+            println("   a worker failed; the end of its log ($log):")
+            foreach(l -> println("     ", l), last(readlines(log), 30))
+            return nothing
+        end
+        foreach(l -> startswith(l, "   done") && println(l), readlines(log))
+        return deserialize(out)
+    end
+end
+
+# Least-squares e-folds per cell of `A_k` against `k`, over the entries above
+# the difference's own floor.
+function leak_fit(ks, A; floor=1e-12)
+    sel = [i for i in eachindex(A) if A[i] > floor]
+    length(sel) ≥ 2 || return NaN
+    x = T[ks[i] for i in sel]
+    y = [log(A[i]) for i in sel]
+    x̄, ȳ = sum(x) / length(x), sum(y) / length(y)
+    return -sum((x .- x̄) .* (y .- ȳ)) / sum((x .- x̄) .^ 2)
+end
+
+leak_row(A) = join((Printf.format(Printf.Format("%.2e"), a) for a in A), " ")
+
+if "leakage" in SECTIONS
+    qs = Int.(leak_option("q", [2, 4]))
+    εs = leak_option("eps", [0 // 1, 1 // 4, 1 // 2, 1 // 1])
+    λs = Int.(leak_option("lambda", [2, 4, 8]))
+    ds = Int.(leak_option("d", [2, 4, 8]))
+    t_end_q = only(leak_option("t_end", [2 // 1]))
+    t_end = T(t_end_q)
+    ripples_all = [(λ, d) for λ in λs for d in ds]
+    if haskey(OPTIONS, "worker")
+        # One group of a batch job: `q`, `eps` and `part = i/n` name it, and
+        # it takes every `n`-th ripple starting at the `i`-th.
+        ipart, npart = parse.(Int, split(OPTIONS["part"], '/'))
+        grp = leak_group(only(qs), only(εs), ripples_all[ipart:npart:end];
+                         t_end=t_end)
+        serialize(OPTIONS["out"], grp)
+    else
+        println("\n=== (6) leakage: a ripple inside the horizon, and what " *
+                "reaches the shells outside it ===")
+        # With a node's worth of threads the groups run as subprocesses at
+        # once, each `(q, ε)` split in two with a reference each — `q = 4`
+        # given five threads and `q = 2` three, roughly their costs, so that
+        # sixteen workers fill 64 cores and finish together. With a
+        # workstation's, they run here one after the other.
+        nt = Threads.nthreads()
+        fan = nt ≥ 16
+        nparts = fan ? 2 : 1
+        threads = Dict(4 => max(1, round(Int, 5nt / 64)),
+                       2 => max(1, round(Int, 3nt / 64)),
+                       6 => max(1, round(Int, 6nt / 64)))
+        groups = [(q, ε, part, nparts) for q in sort(qs; rev=true) for ε in εs
+                  for part in 1:nparts]
+        say("q ∈ %s, ε_KO ∈ %s, λ/h ∈ %s, d ∈ %s, t_end = %.2f M, A = %.0e; " *
+            "%d groups %s", string(qs), string(Float64.(εs)), string(λs),
+            string(ds), t_end, LEAK_AMPLITUDE, length(groups),
+            fan ? "in subprocesses at $(join(("q=$q: $(threads[q]) threads"
+                                              for q in qs), ", "))" :
+            "in this process at $nt threads")
+        t0 = time()
+        outs = fan ? leak_fanout(groups, threads; λs=λs, ds=ds, t_end=t_end_q) :
+               [leak_group(q, ε, ripples_all[part:nparts:end]; t_end=t_end)
+                for (q, ε, part, nparts) in groups]
+        say("%d groups in %.0f s", length(groups), time() - t0)
+        good = filter(!isnothing, outs)
+        isempty(good) && error("every leakage group failed")
+        say("measured points: %d; per shell (k = %d … %d): %s",
+            first(good).npoints, first(LEAK_SHELLS), last(LEAK_SHELLS),
+            string(first(good).counts))
+        for (g, o) in zip(groups, outs)
+            o === nothing && continue
+            say("   reference q=%d ε=%.2f part %d/%d: %.0f s, %d steps", g[1],
+                g[2], g[3], g[4], o.refwall, o.refsteps)
+        end
+        # Back into the order of the tables.
+        byKey = Dict(k => r for o in good for (k, r) in zip(o.keys, o.res))
+        runkeys = [(q, ε, λ, d) for q in qs for ε in εs for λ in λs for d in ds
+                   if haskey(byKey, (q, ε, λ, d))]
+        res = [byKey[k] for k in runkeys]
+        iout = [findfirst(==(k), LEAK_SHELLS) for k in LEAK_OUTSIDE]
+        iin = [findfirst(==(k), LEAK_SHELLS) for k in first(LEAK_SHELLS):-1]
+        times = [T(c) * T(LEAK_CHUNK) for c in 0:ceilint(t_end / T(LEAK_CHUNK))]
+        for ((q, ε, λ, d), r) in zip(runkeys, res)
+            say("\n-- q=%d ε_KO=%.2f λ=%dh d=%d --", q, ε, λ, d)
+            if r isa Exception
+                println("   **FAILED**: ", first(split(sprint(showerror, r), '\n')))
+                continue
+            end
+            peak = dropdims(maximum(r.amax; dims=3); dims=3) ./ LEAK_AMPLITUDE
+            say("   wall %.0f s, steps %d, same steps as the reference: %s, " *
+                "finite: %s", r.wall, r.nsteps, r.sameSteps, r.finite)
+            println("   A_k/A outside, k = 0 … 8 (all)  : ", leak_row(peak[iout, 1]))
+            println("   A_k/A outside, k = 0 … 8 (axis) : ", leak_row(peak[iout, 2]))
+            println("   A_k/A outside, k = 0 … 8 (diag) : ", leak_row(peak[iout, 3]))
+            println("   A_k/A inside, k = −10 … −1 (all): ", leak_row(peak[iin, 1]))
+            k0 = findfirst(==(0), LEAK_SHELLS)
+            k8 = findfirst(==(8), LEAK_SHELLS)
+            println("   A_0(t)/A every 0.25 M (all)     : ",
+                    leak_row(r.amax[k0, 1, 1:5:end] ./ LEAK_AMPLITUDE))
+            println("   A_8(t)/A every 0.25 M (all)     : ",
+                    leak_row(r.amax[k8, 1, 1:5:end] ./ LEAK_AMPLITUDE))
+            c0 = argmax(r.amax[k0, 1, :])
+            c8 = argmax(r.amax[k8, 1, :])
+            say("   peaks at t = %.2f M (k = 0) and %.2f M (k = 8); e-folds per " *
+                "cell outside: all %.3f, axis %.3f, diag %.3f", times[c0], times[c8],
+                leak_fit(LEAK_OUTSIDE, peak[iout, 1]),
+                leak_fit(LEAK_OUTSIDE, peak[iout, 2]),
+                leak_fit(LEAK_OUTSIDE, peak[iout, 3]))
+        end
+
+        # The summary `CODE.md` records.
+        println("\n-- summary: A_0/A, A_4/A, A_8/A over the whole shell, the axis " *
+                "cone's A_0/A, and the e-folds per cell outside (all) --")
+        println("| q | ε_KO | λ/h | d | A_0/A | A_4/A | A_8/A | axis A_0/A | " *
+                "e-folds/cell |")
+        for ((q, ε, λ, d), r) in zip(runkeys, res)
+            r isa Exception && continue
+            peak = dropdims(maximum(r.amax; dims=3); dims=3) ./ LEAK_AMPLITUDE
+            say("| %d | %.2f | %d | %d | %.2e | %.2e | %.2e | %.2e | %.3f |", q, ε,
+                λ, d, peak[iout[1], 1], peak[iout[5], 1], peak[iout[9], 1],
+                peak[iout[1], 2], leak_fit(LEAK_OUTSIDE, peak[iout, 1]))
+        end
+        println("\n-- the depth dependence: e-folds per cell of A_0 against d " *
+                "(all, axis) --")
+        for q in qs, ε in εs, λ in λs
+            A = T[]
+            Aax = T[]
+            dd = Int[]
+            for d in ds
+                i = findfirst(==((q, ε, λ, d)), runkeys)
+                i === nothing && continue
+                r = res[i]
+                r isa Exception && continue
+                peak = dropdims(maximum(r.amax; dims=3); dims=3) ./ LEAK_AMPLITUDE
+                push!(dd, d)
+                push!(A, peak[iout[1], 1])
+                push!(Aax, peak[iout[1], 2])
+            end
+            length(dd) ≥ 2 || continue
+            say("| %d | %.2f | %d | %.3f | %.3f |", q, ε, λ, leak_fit(dd, A),
+                leak_fit(dd, Aax))
         end
     end
 end

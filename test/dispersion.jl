@@ -6,13 +6,15 @@
 #     julia --project=. test/dispersion.jl
 #
 # It is a **script and not a test**, in the manner of `test/hole_runs.jl`:
-# it prints tables and loads no `Test`. It evaluates no mesh and runs no
-# evolution. The one claim it rests on that is exact — the Nyquist mode's
-# group velocity under the order-`q` advection stencil — is asserted in
-# `Rational` by `test/stencils_tests.jl`; the checks below are the script's
-# checks on *itself* (the eigenvalues against the closed form, the numerical
-# group velocity against the analytic one, the frozen coefficients against
-# the metric), and a failed one throws.
+# it prints tables and loads no `Test`, and it takes about a minute. It
+# builds no mesh; its only evolutions are the one-dimensional model runs of
+# sections (4) and (5). The one claim it rests on that is exact — the
+# Nyquist mode's group velocity under the order-`q` advection stencil — is
+# asserted in `Rational` by `test/stencils_tests.jl`; the checks below are
+# the script's checks on *itself* (the eigenvalues against the closed form,
+# the numerical group velocity against the analytic one, the frozen
+# coefficients against the metric, the dissipation's symbol against
+# `−sin^{2r}(θ/2)`), and a failed one throws.
 #
 # ## The model, and the sign convention
 #
@@ -94,6 +96,14 @@
 #      on the way), and the least-attenuated mode is the leak. Its arrival
 #      time `∫ dr/v_g` is printed with it, because a run of finite length
 #      only sees the modes that have arrived.
+#   4. The **one-dimensional model run**: the code's principal part along a
+#      grid axis with the coefficients varying, the fixture's layer, RK4,
+#      and the `leakage` section's own ripple — the bridge from one mode at
+#      one radius to a packet on the way out, to `2 M` (what the 3D runs
+#      reach) and `10 M` (what they cannot afford).
+#   5. The same model with `ε_KO` rising **inside the layer** only, and
+#      rising **across the margin** from the horizon to `r_1` — `PLAN.md`'s
+#      question whether a dissipation profile makes `m = 8` enough.
 #
 # The frozen-coefficient model ignores refraction (a packet on a stationary
 # background conserves `ω`, not `θ`), the lower-order terms, and every

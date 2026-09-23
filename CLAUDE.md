@@ -175,7 +175,12 @@ part of the suite**: the `t = 50 M` runs, `q = 4`, the two harmonic
 charts, the indicator's calibration and — from step 7 — the horizon
 section (Kerr's numbers at `a = 9/10` and in the harmonic chart, on meshes
 of a thousand blocks) are minutes rather than seconds, and its numbers are
-in `CODE.md` with the command that produced them.
+in `CODE.md` with the command that produced them. Step 8a added a second
+script, **`test/dispersion.jl`** — the frozen-coefficient dispersion
+analysis of the package's own weights inside a horizon, the penetration
+length `ℓ` of grid-scale content, and a one-dimensional model run that
+predicts what the 3D runs measure — and a `leakage` section to
+`hole_runs.jl`, which is *not* in its default list (it is a batch job).
 `Project.toml` carries the `[sources]` pins and CI is in place — but
 **the CI matrix is temporarily reduced** (2026-09-19): Julia 1.11 and code
 coverage are both dropped, each with the removed lines and the reason in a
@@ -265,6 +270,26 @@ The `horizon` section (added in step 7) is Kerr's `A`, `M_irr`, `J` and
 horizon rows of a `t = 10 M` run; its two spinning-hole meshes are about a
 thousand blocks each, which is why they are here and not in the suite. It
 takes about eight minutes at four threads.
+
+The `leakage` section (added in step 8a) is eighty-eight `2 M` evolutions
+on a 512-block mesh — a ripple inside the horizon against the same run
+without it — and is **not** run by default: it is one Symmetry job, which
+fans its groups out into sixteen subprocesses when it has a node's
+threads (45m47 on one `amddebugq` node, inside that queue's hour with a
+quarter to spare — a longer `t_end` or a third order would not fit), and a
+subset of it runs locally through `key=value` options, one group after the
+other:
+
+```bash
+.claude/orchestration/symmetry-run.sh <worktree> <name> hole:leakage
+julia --project=. --threads=4 test/hole_runs.jl leakage q=2 d=4 eps=0,1/2 lambda=2 t_end=1/4
+```
+
+Its predictions are a script of their own, a minute at one thread:
+
+```bash
+julia --project=. test/dispersion.jl
+```
 
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a

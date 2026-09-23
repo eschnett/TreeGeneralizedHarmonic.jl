@@ -485,15 +485,21 @@ coefficients of that radius**:
 | `q = 6` | 8.7e−2 | 8.6e−2 | 9.6e−2 | 0.15 | 1 |
 
 Four things read off it. **At the horizon the supremum is at `θ → 0`**:
-branch 2's continuum speed `a − b` vanishes there, the discrete one is
-`O(θ^q)` against a dissipation of `O(θ^{q+2})`, and near the sonic surface
-the smooth outgoing modes are not damped at all — the continuum's marginal
-trapping, which no dissipation of this form can touch; `ℓ` is finite only
-some depth below the horizon, and a margin measured in cells therefore
-buys less at finer `h`, where it lies closer to the horizon. **Higher order
-is no cure**: it moves `θ_c` and the peak toward Nyquist, where the
-dissipation is stronger, but raises `v_g` as much, and deep inside
-(`r = M`) `ℓ_max` grows with `q`. **The axis is the direction to design
+branch 2's continuum speed `a − b` vanishes there, the discrete one's
+outward error is `O(θ^q)` against a dissipation of `O(θ^{q+2})`, and near
+the sonic surface the smooth outgoing modes are barely damped — the
+continuum's marginal trapping, which no dissipation of this form can
+touch. Close to it, with `δ = b/a − 1`, the script's numbers follow
+`ℓ_max ≈ C_q / (ε δ^{2/q})` with `C_2 = 0.28`, `C_4 = 0.64`, `C_6 = 0.93`
+(fitted at `r = 1.9 … 1.99 M`, `δ = 0.053 … 0.005`; `C_2 = 72/256` is also
+what the leading-order expansion of `v_g/σ` gives), so `ℓ` is finite only
+some depth below the horizon, and **a margin measured in cells buys less at
+finer `h`**, where it lies closer to the horizon. **Higher order helps near
+the horizon and not deep inside**: `δ^{−1/2}` and `δ^{−1/3}` diverge more
+slowly than `δ^{−1}`, so at `r = 1.8 M` `q = 4` and `6` have `2.13` and
+`2.10` against `q = 2`'s `3.10`; deep inside (`r = M`) `ℓ_max` grows with
+`q`, because the peak moves toward Nyquist, where the dissipation is
+stronger, but `v_g` rises as much. **The axis is the direction to design
 for**: along the grid diagonal, where the principal part reads `D₁ ⊗ D₁`
 and the dissipation acts on all three axes at a third of the phase each,
 `ℓ_max` is shorter at every entry (`0.63, 0.75, 1.14, 2.69` at `q = 2`,
@@ -906,6 +912,68 @@ spinning hole in harmonic coordinates `r_h,min` is small — about
 finest spacing the refinement must reach (about `0.02 M` there); the
 level floor under [Refinement](#refinement-and-regridding) is what
 guarantees it.
+
+**The margin `m` does two jobs, and they have different sizes (proposed in
+step 8a).** Inside the horizon the continuum lets nothing out, but the
+discrete scheme lets grid-scale content out, held back by the dissipation
+alone ([Kreiss–Oliger dissipation](#kreissoliger-dissipation), step 8a's
+table), and every interior treatment is a source of such content at `r_1`.
+So there are two rules, both **(proposed in step 8a)** for the reviewer to
+confirm:
+
+1. **The stencil margin, `m ≥ G + 1`** — the bound above, unchanged and now
+   named: no stencil of a point on or outside the horizon reaches a point
+   where `w < 1` or `ρ > 0`, so the horizon is evolved by the unmodified
+   equations. It is a statement about the scheme's reach and it is exact.
+2. **The leakage margin, `m ≥ n_e ℓ_max`**, for a wanted attenuation
+   `e^{−n_e}` of what the interior makes at `r_1`, with `ℓ_max` the
+   frozen-coefficient penetration length at `r_1` along a grid axis at the
+   run's `q` and `ε_KO`. That is *necessary* and not sufficient: `ℓ` grows
+   toward the horizon, so what the margin actually buys is the path integral
+   `n_e ≤ ∫_{r_1}^{r_h} dr / (h ℓ_max(r))`. Near the horizon, with
+   `δ = b/a − 1 ≈ g (r_h − r)` along the normal (`g = 1/(2M)` for
+   Kerr-Schild at `a = 0`) and `ℓ_max ≈ C_q/(ε δ^{2/q})`, the integral is
+   `ε (g h)^{2/q} m^{1+2/q} / ((1 + 2/q) C_q)` e-folds — at `q = 2`,
+   `m ≥ √(2 C_2 n_e / (ε g h))`, which is `m ≥ √(1.1 n_e M/(ε h))` in
+   Kerr-Schild. **The leakage margin in cells grows as the mesh is
+   refined**, as `h^{−1/2}` at `q = 2` and `h^{−1/3}` at `q = 4`, because a
+   margin of a fixed number of cells lies ever closer to the sonic surface.
+
+**What the fixture measures against it** (`test/hole_runs.jl leakage`,
+under [Measured results](#measured-results), step 8a). On the step-5 hole at
+`h = 5/64` and `ε_KO = 1/2`, content made `d` cells inside the horizon
+reaches the first shell outside it attenuated by **`e^{−0.40…0.51}` per
+cell of depth** at `t = 2 M` in 3D (`ℓ ≈ 2.0–2.5` cells, against
+`ℓ_max(r_1) = 2.1` at `q = 2` and `2.7` at `q = 4`), and the
+one-dimensional model of `test/dispersion.jl` — which reproduces the 3D
+numbers to within a factor 2.3 at `λ ≥ 4h` — says the slower modes that
+arrive later bring that down to **`e^{−0.16…0.37}` per cell by `10 M`**. From
+depth 8, the default margin, the transmitted amplitude is **1 %** of the
+source at `2 M` in 3D and **4–6 %** by `10 M` in 1D: `m = 8` is `e^{−2.9}`
+to `e^{−4.6}` at this resolution, not the `e^{−8/ℓ}` a constant `ℓ` would
+suggest, and `e^{−5}` needs `m ≈ 10–15` here (the `q = 2` formula says
+`12`) and more at finer `h`. What `n_e` has to be is set by the amplitude
+of what the interior makes, which step 8c's inexact targets measure; so the
+rules are stated and **the default `m = 8` is not changed**.
+
+**`ε_KO` rising inside the layer does not buy margin (proposed in step
+8a).** The leakage the margin is for is made at or outside `r_1` and crosses
+`r_1 ≤ r < r_h`, where a profile that rises only inside the layer still has
+the exterior's value: in the one-dimensional model to `10 M`, `ε_in = 1, 2,
+4` inside the layer changes the transmission from every depth by at most
+1.2 %. What does act is dissipation raised *across the margin* — `C²` from
+`ε_out = 1/2` at the horizon to `ε_in` at `r_1`, and held inside: at
+`ε_in = 4` it cuts the transmission from depth 8 by **4–15×** (`q = 2, 4`,
+`λ = 2h, 4h`), five to nine cells' worth at the long-time rate, and does not
+help a source within two cells of the horizon; doubling `ε_KO` everywhere,
+measured in 3D, cuts it by 1.7–2.5×. The recommendation to step 8c is
+therefore to start its `ε_KO(r)` profile's rise **at the horizon rather
+than at `r_1`** — the region is causally disconnected from the exterior in
+the continuum, and the dissipation is `O(h^{q+1})` whatever `ε` is — with
+`ε_in ≤ 4`, inside RK4's real-axis limit of about `6` on the 3D corner mode
+at `cfl = 1/4` (`3 ε dt/h ≤ 2.8`); and, if `n_e` must exceed about 5 at this
+resolution, to widen the margin as well, since neither lever alone is
+enough.
 
 **A ball cannot hide Kerr's singularity in the harmonic chart at
 `a = 9/10` (found in step 5, and this is the proof-of-concept case).**
@@ -2948,6 +3016,113 @@ interpolated data is **`2.2e−5`** at `h = 5/64`, which is what the
 `unif_tol` decision under [Analysis quantities](#analysis-quantities) is
 about.
 
+**Step 8a, the expectations: what crosses the horizon from inside it.** No
+`src` change. The suite is **3463 assertions in 13m01** at one thread and
+**10m01** at four (15m08 in a first four-thread run while a sibling step's
+suite shared the machine), the nineteen new ones being
+`stencils_tests.jl`'s Nyquist-slope testset. The frozen-coefficient table
+is under [Kreiss–Oliger dissipation](#kreissoliger-dissipation) and the
+two margin rules it leads to under [The
+interior](#the-interior-a-pointwise-damping-layer); this is the 3D
+measurement they are held against (`test/hole_runs.jl leakage`, one
+`amddebugq` node, sixteen groups as subprocesses, **45m47**; each of the
+88 runs `2 M` long and 350–480 s at three or five threads).
+
+*The experiment.* A radial ripple `A (1 − s²)³ cos(2π(r − r_c)/λ)`,
+`s = (r − r_c)/2h`, `A = 1e−3`, in `h_tt` with `Π` untouched, centered `d`
+cells inside the horizon (`r_c = r_h − d h`), on `hole_fixture` (`:damped`,
+`r_1 = 23/20`, the layer at `ρ_max = 1/dt`) at `h = 5/64`; `A_k` is the
+largest `|δh|` over the ten `h` components against the same run without
+the ripple, in the shell `r_h + k h ≤ r < r_h + (k+1) h` (`ShellMask`'s
+membership), over the chunk boundaries at every `1/20 M`. Four decisions
+the step was silent on, all **(proposed in step 8a)** and argued in the
+section's header: the mesh is the fixture's **finest level everywhere** — a
+uniform level-3 forest of 512 blocks, since the 120-block hierarchy puts
+the whole margin at `5/32` along the axes, where a `2h` ripple is a
+constant; the ripple is in **`h_tt` alone**, which excites both branches
+equally; `d` is the depth of the window's **center**, with a half-width of
+**two cells**, which is what fits `d = 2` inside the horizon and `d = 8`
+outside `r_1`; and the runs are **`2 M`** rather than `PLAN.md`'s `1 M`,
+because the dispersion analysis puts the slow modes three to fourteen `M`
+from depth `d` to the outer shells. The ripple enters through `evolve!`'s
+observer at `t = 0`, which is handed the state vector the first chunk
+integrates from; every perturbed run took the same 200 steps as its
+reference and stayed finite, and a run whose ripple had not reached the
+evolution would have been refused.
+
+*At the default `ε_KO = 1/2`*, the largest `A_0/A` over `λ = 2h, 4h, 8h`
+(the first shell outside the horizon) and `A_8/A`, against `PLAN.md`'s
+prediction `e^{−(d+k)/ℓ_max}` with `ℓ_max` at the source's radius, the path
+integral of `test/dispersion.jl` over the modes arriving by `2 M`, and its
+one-dimensional model at `2 M` and `10 M`:
+
+| `q` | `d` | 3D `A_0/A`, `2 M` | `e^{−d/ℓ_max}` | path, `2 M` | 1D, `2 M` | 1D, `10 M` | 3D `A_8/A` | `e^{−(d+8)/ℓ_max}` |
+|---|---|---|---|---|---|---|---|---|
+| 2 | 2 | 0.144 | 0.773 | 0.805 | 0.166 | 0.410 | 8.9e−3 | 0.276 |
+| 2 | 4 | 0.078 | 0.385 | 0.437 | 0.092 | 0.136 | 1.9e−3 | 0.057 |
+| 2 | 8 | 9.9e−3 | 0.039 | 0.047 | 8.9e−3 | 0.058 | 9.6e−5 | 1.6e−3 |
+| 4 | 2 | 0.166 | 0.657 | 0.715 | 0.117 | 0.348 | 8.4e−3 | 0.122 |
+| 4 | 4 | 0.077 | 0.324 | 0.397 | 0.044 | 0.177 | 3.3e−3 | 0.034 |
+| 4 | 8 | 8.3e−3 | 0.060 | 0.086 | 0.011 | 0.037 | 3.8e−4 | 3.6e−3 |
+
+and the attenuation per cell — the least-squares slope of `log A_0` against
+`d = 2, 4, 8`, over the three `λ` — against `1/ℓ_max(r_1)`, what a constant
+`ℓ` at the layer's radius would give:
+
+| `ε_KO` | 3D `q = 2`, `2 M` | 3D `q = 4`, `2 M` | 1D `q = 2`, `10 M` | 1D `q = 4`, `10 M` | `1/ℓ_max(r_1)`, `q = 2, 4` |
+|---|---|---|---|---|---|
+| 0 | 0.07–0.22 | 0.03–0.08 | −0.03–0.03 | 0.01–0.08 | 0, 0 |
+| 1/4 | 0.30–0.40 | 0.28–0.38 | 0.07–0.21 | 0.17–0.31 | 0.24, 0.19 |
+| 1/2 | 0.40–0.47 | 0.42–0.51 | 0.16–0.31 | 0.25–0.37 | 0.48, 0.37 |
+| 1 | 0.50–0.53 | 0.51–0.55 | 0.33–0.39 | 0.36–0.43 | 0.96, 0.75 |
+
+What agrees and what does not — the discrepancy `PLAN.md` asks to have
+recorded:
+
+- **The depth dependence is right at the default; the level is not.**
+  `PLAN.md`'s `e^{−d/ℓ_max}` overstates the `2 M` transmission 4–7× at
+  every depth — the ripple is broadband and splits between two branches,
+  and only the part near the least-damped `θ` crosses — while its slope
+  between `d = 2` and `8`, `0.50` e-folds per cell at `q = 2` and `0.40` at
+  `q = 4`, is within 20 % of the measured. The path integral does no better
+  on the level (the measurement is `0.18–0.21` of it at `q = 2`).
+- **The measurement is not `∝ ε`, and the prediction is.** From
+  `ε_KO = 1/4` to `1` the measured slope moves from about `0.35` to `0.52`
+  e-folds per cell, against `0.24 → 0.96` predicted, and doubling `ε_KO`
+  from `1/2` to `1` lowers `A_0` from depth 8 by only `1.7–2.5×`. The
+  one-dimensional model saturates the same way, so this is a property of
+  the principal part with coefficients that vary along the path, not of the
+  source terms or of the other directions; the likeliest reading is the
+  refraction the frozen model leaves out — a packet on a stationary
+  background conserves `ω`, not `θ`, and slides toward the less-damped
+  small `θ` as it nears the horizon — and it is a reading, not a
+  measurement.
+- **`2 M` is a lower bound.** At `q = 2` the transmission from depth 8 is
+  still rising at `2 M` (`3.5e−3` at `1.25 M`, `6.4e−3` at `2 M` for
+  `λ = 2h`); at `q = 4` it has levelled by `1.25 M`. The one-dimensional
+  model follows the 3D numbers to within a factor 2.3 at `λ ≥ 4h` and
+  `ε_KO > 0` — it undershoots them `1.2–3.8×` at `λ = 2h`, a ripple defined
+  on the radius that off the axes is not a Nyquist mode of the lattice, and
+  up to `6×` at `ε_KO = 0` — and it puts the long-time transmission from
+  depth 8 at **4–6 %**: above `PLAN.md`'s prediction at `q = 2` (`0.058`
+  against `0.039`) and below it at `q = 4` (`0.037` against `0.060`). As a
+  long-time estimate the frozen-coefficient formula is within a factor two.
+- **Outside the horizon it falls faster.** `A_8` is 3–11 % of
+  `e^{−(d+8)/ℓ_max}`; the decay outside is `0.30–0.59` e-folds per cell at
+  `ε_KO = 1/2` (`0.21–0.54` at `1/4`, `0.32–0.55` at `1`), since there
+  every mode is outgoing and the grid-scale ones are damped at their own
+  `σ`, and the Dirichlet face at `r_h + 6.4 h` along the axes reflects
+  whatever reaches it.
+- **Without dissipation nothing holds it back**, as `ℓ = ∞` says: at
+  `ε_KO = 0`, `A_0/A = 0.13–0.88` at `q = 2` and `0.48–1.10` at `q = 4`,
+  where it exceeds the source — the grid-scale growth step 3 measured on
+  flat space (×9.2 in a thousand steps) acting on it.
+- **The axis is where it leaks.** The cone within 18° of a grid axis holds
+  the shell's maximum in 44 of the 72 rows and never less than `0.56` of it,
+  and the diagonal cone is below the axis cone in 50 to 69 of the 72 rows
+  at every `k`, as the diagonal numbers under [Kreiss–Oliger
+  dissipation](#kreissoliger-dissipation) predict.
+
 ### What the suite costs, and where (measured 2026-09-19 on Symmetry)
 
 Measured on one `amddebugq` node, Julia 1.13.0, `Float64`, no coverage —
@@ -3315,4 +3490,9 @@ first touch them:
    and on a gauge wave: `cfl = 1/4` (no run needed less), `ε_KO = 0.5`
    (the noise test, and no order lost) and `q = 4` as the development
    order (`q = 2, 6, 8` all run, at 0.5×, 1.3× and 1.9× the cost of
-   `q = 4`). None of that is yet a statement about a hole.
+   `q = 4`). None of that is yet a statement about a hole. Step 8a split
+   `m` into a stencil margin and a leakage margin, measured that `m = 8`
+   attenuates grid-scale content from `r_1` by `e^{−2.9}` to `e^{−4.6}` on
+   the fixture, and left the default where it is until step 8c says what
+   amplitude it has to hold back **(proposed in step 8a**; see [The
+   interior](#the-interior-a-pointwise-damping-layer)**)**.
