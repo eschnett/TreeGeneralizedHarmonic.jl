@@ -7,7 +7,7 @@ changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
 last milestone is marked *(Done.)* in `CODE.md`.
 
-**Steps 0–7 and 8a–8c are done. Step 8d is next** — the generic interior
+**Steps 0–7 and 8a–8c are done. Step 8c′ (the default rate) is next, then 8d** — the generic interior
 (steps 8a–8g, added 2026-09-23), which step 8 needs before it can run
 its case.
 
@@ -694,6 +694,53 @@ prediction `n_L ≳ G (10 ρ_max M)^{1/3}` confirmed or replaced; a stated
 recommendation — proceed to steps 8d–8f, or to 8g — with the numbers it
 rests on. Nothing long in the suite; the `target` keyword and the profile
 get one short claim each.
+
+## Step 8c′ — `ρ_max = 4/M` is the default (decided 2026-09-23)
+
+Erik's decision on step 8c's proposal: the fixed physical rate `4/M` is
+the default relaxation rate of the layer for **every** variant, the
+analytic `:damped` layer included. `ρ_max · dt = 1` — a grid rate, about
+`107/M` on the suite's fixture, a paste two cells deep, and on the exact
+target six times the `50 M` error (step 8c) — stays available as the option
+`ρ_max_factor` and is no longer what a run gets by default.
+
+Changes: `evolve!` with neither `ρ_max_factor` nor `ρ_max_fixed` given
+relaxes at `4/M`, `M` the case's hole mass — a `hole_mass(background)`
+dispatch beside `horizon_min_radius` in `interior.jl` (`.mass` of
+`KerrSchild` and `Harmonic`, through `translate`, `rotate` and `boost`), so
+the default is a statement about the hole and not a number in the driver;
+`ρ_max_factor` given selects the grid rate as before; a case without a hole
+is untouched; the record's `ρ_max` row says what ran. The suite's claims
+that encoded the grid rate are **amended, not loosened** — this is a decided
+change of the spec: `driver_tests.jl`'s `r.ρ_max * r.dt ≈ 1` becomes
+`r.ρ_max ≈ 4/M`; the three-variants claim (`pasted.residual == 0`,
+`frozen.residual > 2 · damped.residual`, the shell `C_a` within
+`rtol = 1/4`) is re-measured at `4/M` — the sink now relaxes in `1/4 M`
+rather than in one step, so at `t = 1/10 M` the `:damped` residual may not
+yet be the saturated one; if the claim needs a longer `t_end` to be true,
+change the time and say why in `CODE.md`, and if it is false at any time,
+report it; the order sweep, the drift, the `Π` post-pass, the `Float32`
+row, the horizon and refinement runs re-measured, with no other assertion
+changed unless it encodes the rate. `hole_runs.jl`'s sections run at the new
+default; step 8c's `calibration` keeps its `:grid` rows through
+`ρ_max_factor`.
+
+`CODE.md`: "The profiles and their parameters" — `ρ_max · dt = 1`
+**(proposed)** becomes `ρ_max = 4/M` **(decided 2026-09-23)**, the grid rate
+kept as the option with the reason above; step 5's measured tables stay as
+history, annotated "at the grid rate `1/dt`, the default until 2026-09-23",
+and the re-measured suite numbers go beside them marked **(measured in step
+8c′)**; "Open questions" item 5 and every sentence that says `ρ_max·dt = 1`
+is the default; `CLAUDE.md`'s "Things that will bite" (the `ρ_max` entry)
+and "Current state". No new long run: step 8c already measured the exact
+target at `4/M` on the fixture's own layer to `50 M` (shell `C_a` `0.029`,
+masked L2 `0.027`), and that row is the default's `50 M` number.
+
+Accept: the suite green at one and four threads with the re-measured
+numbers in `CODE.md`; a `:damped` run of the fixture with no rate keyword
+has `ρ_max == 4/M` in every record row; `ρ_max_factor = 1` reproduces
+step 5's `t = 1/10 M` variants row to the digits `CODE.md` records; the
+default stated in one place and read from the hole's mass.
 
 ## Step 8d — The tracked horizon geometry
 
