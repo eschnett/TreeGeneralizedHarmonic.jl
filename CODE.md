@@ -3857,8 +3857,10 @@ this step (checked once against the tree at `70bd96c`, not in the suite).
 `a = 0`, `q = 2`, the 120-leaf hierarchy, `h = 5/64` at `N = 8`, `r_1 =
 23/20`, `m = 8`, `cfl = 1/5`, `ε_KO = 1/2` unless named — with the range
 projection on (`default_bounds`, `default_gate`) and the finder's `M_irr`
-every other chunk from the observer, which also writes the record's rows
-so that a run that throws keeps its approach. Screens are `5 M` at
+every other chunk (`N_ah = 12`, no spin) from the observer rather than
+from a case's `Horizon`, which the fixture does not carry — the observer
+writes the record's rows too, so that a run that throws keeps its approach
+**(proposed in step 8c)**. Screens are `5 M` at
 `chunk = 1/2 M`, the survivors `50 M` at `1 M` as step 5's table was.
 Thirteen `amddebugq` jobs, **5.6 node-hours**: four screen jobs (11–24
 minutes, 138 runs; a fixture screen is 149–357 s at four threads, sixteen
