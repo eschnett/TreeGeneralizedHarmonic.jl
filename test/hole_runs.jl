@@ -2458,6 +2458,7 @@ function gen_run(sp; t_end=nothing)
     obs = NamedTuple[]
     hzs = Dict{Float64,Any}()
     calls = Ref(0)
+    tstart = time()
     function finder(p, u, t; kw...)
         k = calls[]            # the chunk this find belongs to (0 at t = 0)
         if sp.coast !== nothing && sp.coast[1] ≤ k ≤ sp.coast[2]
@@ -2510,12 +2511,12 @@ function gen_run(sp; t_end=nothing)
                M_ch=hz === nothing ? nothing : hz.M_ch)
         push!(obs, row)
         say("   [%s] t=%6.3f err=%s/%s C=%s shC=%s hC0,2,4=%s,%s,%s res=%s " *
-            "drift=%s hits=%d M_irr=%s J=%s M_ch=%s %s", sp.label, row.t,
+            "drift=%s hits=%d M_irr=%s J=%s M_ch=%s %s %.0fs", sp.label, row.t,
             gen_fmt(row.err_l2), gen_fmt(row.err_linf), gen_fmt(row.gauge_l2),
             gen_fmt(row.sh_l2), gen_fmt(hs[1]), gen_fmt(hs[2]), gen_fmt(hs[3]),
             gen_fmt(row.residual), gen_fmt(row.drift), row.hits,
             gen_fmt(row.M_irr), gen_fmt(row.J), gen_fmt(row.M_ch),
-            String(row.variant))
+            String(row.variant), time() - tstart)
         flush(stdout)
         return nothing
     end
