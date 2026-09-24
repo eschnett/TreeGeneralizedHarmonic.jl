@@ -5219,7 +5219,19 @@ chunk with the Korzyński spin; five Symmetry jobs, measured once
 deadline (`harm`, `h7`, `boost`: `budget=3300`, a run stopped by it is
 marked "deadline").
 
-**The suite.** SUITE_PLACEHOLDER
+**The suite.** **4632 assertions in 20m59 at one thread and 12m22 at four**
+on the development machine (Apple silicon, Julia 1.13.0) under a load of
+8–15 from other work (a four-thread run the evening before, on the same
+tests without the moving-step change, measured 11m22 at a load of 5), against
+step 8e's 4616 in 14m21 and 10m41. The sixteen new assertions are
+`fit_tests.jl`'s: three for `Π̃`'s chain rule and round trip in "the static
+hole's fit is the hole" (host-side, below a second), and "the snapshot, the
+hand-over and the mesh cycle (step 8f)", **`25.9 s` at one thread and
+`16.6 s` at four** — the snapshot cache and one right-hand side, the
+hand-over run to `0.15 M`, and the adaptive fixture's mesh cycle as
+`:fitted` with one regridding chunk. One assertion changed its expression
+and not its claim: the evaluator's bit-identity with the reassembly now
+reassembles with the fit's own `tilde` flag, the new default.
 
 **The matrix** (the last row of each run: masked error L2 and L∞ over the
 evolved region, the `G`-point shell's `C_a` L2 above the offset surface,

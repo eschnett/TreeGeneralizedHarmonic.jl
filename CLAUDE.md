@@ -326,8 +326,13 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4616 assertions in 14m21** at one thread and **10m41** at
-four on the development machine after step 8e (load 6–13): the 38 new
+The suite is **4632 assertions in 20m59** at one thread and **12m22** at
+four after step 8f, on a machine loaded 8–15 by other work (11m22 at four
+threads the evening before at a load of 5): its sixteen new claims are
+`fit_tests.jl`'s `Π̃` chain rule and "the snapshot, the hand-over and the
+mesh cycle", `25.9 s` / `16.6 s`. After step 8e it was **4616 assertions in
+14m21** at one thread and **10m41** at four on the development machine
+(load 6–13): the 38 new
 claims are the `:fitted` variant's, `47.7 s` / `39.5 s`, most of it one
 `0.15 M` run of the fixture and one `Float32` chunk. After step 8e-i it was
 **4578 in 15m09** and **10m52** (load 6–8; an earlier
