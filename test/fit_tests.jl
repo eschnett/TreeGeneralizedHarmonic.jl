@@ -252,6 +252,37 @@ end
         @test worst_1 ≤ 1e-7
         @test worst_2 ≤ 1e-6
 
+        # The same two routes with the momentum fitted as `Π̃ = (α/√γ)Π`
+        # (added in step 8f, the default from then): the chain rule through
+        # `α/√γ` must agree with the differenced `Π̃` as `Π`'s does, and
+        # `state_from_fit` must invert `fit_variables` to roundoff — a wrong
+        # sign in `(log s)″` or a missing `√det γ` in the reassembly is a
+        # target whose momentum is off by the lapse.
+        worst_1t = 0.0
+        worst_2t = 0.0
+        worst_rt = 0.0
+        for i in eachindex(xs)
+            v, v1, v2 = fit_variables(u0[i], u1[i], u2[i]; tilde=true)
+            vk = [fit_variables(SVector{20}(state_tuple(bg, zero(T),
+                                                        Tuple(xs[i] + k * δ * ns[i])));
+                                tilde=true)
+                  for k in -2:2]
+            d1 = ((vk[1] - vk[5]) + 8 * (vk[4] - vk[2])) / (12δ)
+            d2 = (16 * (vk[2] + vk[4]) - (vk[1] + vk[5]) - 30 * vk[3]) / (12δ^2)
+            worst_1t = max(worst_1t, maximum(abs, v1 - d1) / maximum(abs, v1))
+            worst_2t = max(worst_2t, maximum(abs, v2 - d2) / maximum(abs, v2))
+            hb, Πb = state_from_fit(v, true)
+            worst_rt = max(worst_rt, maximum(abs, vcat(hb, Πb) - u0[i]) /
+                                     maximum(abs, u0[i]))
+        end
+        # Measured: 8.1e−8 (slope) and 1.2e−8 (curvature) — the stencil's
+        # `δ⁴` on `Π̃`, whose `α/√γ` factor steepens it — and the round trip
+        # to 3.0e−16 of the state.
+        @test worst_1t ≤ 4e-7
+        @test worst_2t ≤ 1e-6
+        @test worst_rt ≤ 16 * eps(T)
+        @info "the fit's chain rule, Π and Π̃" worst_1 worst_2 worst_1t worst_2t worst_rt
+
         # The state sampler on a field set holding the exact solution: the
         # fit reproduces the interpolated data, so its error on the surface
         # is the interpolation's, `O(h^{q+2})` — on the *same* surface at
@@ -444,8 +475,10 @@ end
             for (x, m) in zip(fit.points, fit.model)
                 v = fit_variables_at(fit.params, fit.host, x, t)
                 worst = max(worst, maximum(abs, v - m))
-                # The projection is the identity on the fit, bit for bit.
-                same &= isequal(fit_state(fit, x, t), state_from_fit(v))
+                # The projection is the identity on the fit, bit for bit (the
+                # reassembly the fit's own: `Π̃` from step 8f's default).
+                same &= isequal(fit_state(fit, x, t),
+                                state_from_fit(v, fit.params.tilde))
             end
             # Measured: 11 and 28 eps (Float64), 10 and 25 eps (Float32) of
             # the largest variable at cont = 1, 2 — the design matrix's
@@ -739,5 +772,110 @@ end
         # Measured: the masked error agrees with Float64's to 7e−6.
         @test r32.err_l2 ≈ r64.err_l2 rtol = 0.05
         @info "the fitted fixture at Float32, 0.1 M (step 8e)" err_l2 = (r32.err_l2, r64.err_l2) fit_residual = (r32.fit_residual, r64.fit_residual)
+    end
+
+    # Step 8f's controls and paths. The snapshot target is the state itself in
+    # the cache, so the core's `−ρ_max (u − u_target)` is exactly zero at the
+    # fill time; a snapshot that read the wrong array or the wrong points would
+    # relax the core toward something else, and the matrix's control row would
+    # measure that instead. The hand-over runs the analytic layer on the same
+    # geometry and then relaxes toward a fit of the *evolved* state — no
+    # initial-data kink, so its error is the analytic run's, and a switch at
+    # the wrong chunk or onto a stale cache would show in the variant rows or
+    # in the error. The mesh cycle of a `:fitted` case flags on the analytic
+    # layer's data, and refuses a chart whose analytic core is singular.
+    @testset "the snapshot, the hand-over and the mesh cycle (step 8f)" begin
+        cf = fitted_fixture(T; variant=:fitted)
+        forest = hole_fixture_forest(T, cf; N=8)
+        tr = seed_track(cf, 0)
+        gf = with_ρ_max(fitted_interior(cf.interior, tr, forest, G; t=0, n_L=8), T(4))
+        fs = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3), backend=CPU())
+        fill_exact!(fs, cf, zero(T); interior=with_variant(gf, :damped))
+        u = statevector(fs)
+        gather!(u, fs)
+        for i in eachindex(u)
+            u[i] += T(1 // 1000) * sin(T(i))
+        end
+        bd = derive_target_bounds(T, cf.background, gf; t=0)
+        fit = build_fit(analytic_sampler(cf.background, 0.0; δ=gf.h / 8), gf,
+                        cf.interior; cont=1, bounds=bd)
+        p = GHProblem(fs, GhostSchedule(fs, ops), cf; q=q, interior=gf,
+                      target=target_cache(fs), fits=(fit, nothing))
+        TGH.fill_snapshot!(p.target, statearray(u, fs), p.origins, p.spacings, gf,
+                           zero(T))
+        du = similar(u)
+        gh_rhs!(du, u, p, zero(T))
+        A = statearray(u, fs)
+        D = statearray(du, fs)
+        C = p.target.work
+        r_fill = (gf.r_out - gf.offset) + gf.h
+        cached = zeroed = core_zero = true
+        ncore = 0
+        for b in 1:nblocks(fs), k in 1:8, j in 1:8, i in 1:8
+            x = coordinates(fs, b, (i + G, j + G, k + G))
+            if TGH.interior_radius(gf, zero(T), x) < r_fill
+                cached &= all(v -> isequal(C[i, j, k, v, b], A[i, j, k, v, b]) &&
+                                   iszero(C[i, j, k, 20 + v, b]), 1:20)
+            else
+                zeroed &= all(v -> iszero(C[i, j, k, v, b]), 1:40)
+            end
+            if is_frozen(gf, interior_point(gf, zero(T), x))
+                ncore += 1
+                core_zero &= all(v -> D[i, j, k, v, b] == 0, 1:20)
+            end
+        end
+        @test cached && zeroed
+        @test ncore > 0 && core_zero
+        @test with_variant(gf, :damped) isa FittedInterior{T,:damped}
+        @test interior_variant(with_variant(cf.interior, :damped)) === :damped
+        @test_throws "not :fitted" evolve!(T, fitted_fixture(T; variant=:damped);
+                                           forest=forest, q=q, ops=ops,
+                                           t_end=T(1 // 20), handover=T(1 // 20))
+
+        # The hand-over at 0.1 M on chunks of 1/20: two :damped chunks, then
+        # :fitted from the fits of the evolved state at the rows before it.
+        (; out) = tracked_fixture_run()
+        ch = fitted_fixture(T; variant=:fitted, chunk=T(1 // 20))
+        ho = evolve!(T, ch; forest=forest, q=q, ops=ops, t_end=T(3 // 20),
+                     handover=T(1 // 10))
+        @test [r.variant for r in ho.records] == [:damped, :damped, :damped, :fitted]
+        @test all(r -> r.fit_valid === true && r.bounds_hits == 0 && r.finite,
+                  ho.records)
+        @test ho.handover == 0.1
+        # Measured: 3.101e−3 at 0.15 M against the :damped run's 3.110e−3 —
+        # the :fitted run from its analytic fit is 1.33e−2 (the kink above).
+        @test ho.records[end].err_l2 ≈ out.records[end].err_l2 rtol = 0.05
+        @info "the hand-over at 0.1 M against the damped run, 0.15 M (step 8f)" err_l2 = (ho.records[end].err_l2, out.records[end].err_l2) residual = [r.residual for r in ho.records]
+
+        # The initial-data cycle of a :fitted case, and one regridding chunk:
+        # the adaptive fixture's refinement, the layer at m = 4 over n_L = 6
+        # (the rule's 8 does not fit at this spacing), the finder every chunk.
+        ca = adaptive_hole_fixture(T; interior=FittedSpec(T; variant=:fitted,
+                                                          margin=4, n_L=6),
+                                   r_0=nothing, r_1=nothing,
+                                   horizon=Horizon(T; every=1, N=12, spin=false))
+        fa = hole_forest(T, ca; N=8, roots=4, radii=(T(5 // 2),))
+        ao = evolve!(T, ca; forest=fa, q=q, ops=ops, t_end=T(1 // 20), adapt=true,
+                     regrid=true)
+        @test ao.converged && ao.passes ≥ 1
+        @test all(r -> r.variant === :fitted && r.fit_valid === true && r.finite,
+                  ao.records)
+        # Measured: one pass to 288 blocks, the masked error 1.9e−3 at 1/20 M.
+        @test ao.records[end].err_l2 < 1e-2
+        @info "the mesh cycle of a fitted case (step 8f)" passes = ao.passes nblocks = ao.nblocks err_l2 = ao.records[end].err_l2
+        # Harmonic Kerr at a = 7/10: the analytic core surface cuts the disk,
+        # so there is no analytic data to flag on, and the refusal says so.
+        c7 = hole_case(T, SM.Harmonic(one(T), T(7 // 10)); halfwidth=T(5 // 4),
+                       chunk=T(1 // 20),
+                       interior=FittedSpec(T; variant=:fitted, margin=4,
+                                           lmax_shape=12),
+                       horizon=Horizon(T; every=1, N=12, spin=false),
+                       refinement=Refinement(T; refine_tol=T(2 // 5),
+                                             coarsen_tol=T(1 // 10),
+                                             maxlevel_cap=3, floor_margin=zero(T),
+                                             ceiling_cells=1))
+        f7 = hole_forest(T, c7; N=8, roots=1, radii=(T(10), T(8 // 5), T(13 // 10)))
+        @test_throws "singular" evolve!(T, c7; forest=f7, q=q, ops=ops,
+                                        t_end=T(1 // 20), adapt=true)
     end
 end
