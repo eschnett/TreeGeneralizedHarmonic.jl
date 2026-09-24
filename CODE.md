@@ -991,8 +991,8 @@ the first row of each and stays as the analytic control):
 **What step 8f's matrix decides (proposed in step 8f).** The `:fitted`
 target on the tracked geometry holds every hole the package has that the
 mesh resolves — Kerr-Schild `a = 0` to `50 M`, `a = 9/10` and harmonic
-`a = 0` to the ends of their rows, harmonic `a = 7/10` at `h = 5/256` to the
-six `M` an hour bought — so **excision (step 8g) is not needed**. It is not
+`a = 0` to the ends of their rows (`20 M`, `10 M`), harmonic `a = 7/10` at
+`h = 5/256` to `10 M`, the boosted hole to `5 M` — so **excision (step 8g) is not needed**. It is not
 free: where the analytic target exists it is the better one — `2×` the
 masked error and `2.8×` the shell's `C_a` on the static Kerr-Schild hole,
 `40×` on the spinning one — so **the analytic `:damped` layer stays the
@@ -3309,7 +3309,7 @@ refinement level, short times.
   measurement matrix (8f) under [Measured results](#measured-results);
   excision (8g) is not needed, since `:fitted` reaches `50 M` on the
   matrix's first row. What G5 inherits from 8f: G5's chart at `h = 5/256`
-  is 2472 blocks and a node-hour per six `M` when the hole sits still; at
+  is 2472 blocks and `630 s` of a node per `M` when the hole sits still; at
   `5/128` it does not survive; `:fitted` holds a boosted hole at `4/M`
   across `1.5 M` of the box, while the analytic `:damped` control on the
   boosted `a = 0` hole needs `ρ_max ≳ 20/M`, its frozen core released on the
@@ -5215,9 +5215,11 @@ in `src/driver.jl`; the design it decides is the summary at the head of
 2`, `cfl = 1/4` (`1/5` on the moving rows), `ε_KO = 1/2`, `ρ_max = 4/M`
 unless named, the ramp by step 8c's rule (`n_L = 8`), the finder every
 chunk with the Korzyński spin; five Symmetry jobs, measured once
-(2026-09-23), on `amdq` (`ks0`, `ks9`) and in `amddebugq` hours with a
-deadline (`harm`, `h7`, `boost`: `budget=3300`, a run stopped by it is
-marked "deadline").
+(2026-09-23/24), on `amdq` (`ks0`, `ks9`, `h7`) and in `amddebugq` hours with a
+deadline (`harm`, `boost`: `budget=3300`; `h7` reached its deadline at
+`6 M` there and was rerun to `10 M` on `amdq`; the boosted rows ran a
+second and a third time, at `cfl = 1/5` and with the moving-step sizing,
+after the CFL recheck stopped them at `1.5 M` and `1 M`).
 
 **The suite.** **4632 assertions in 20m59 at one thread and 12m22 at four**
 on the development machine (Apple silicon, Julia 1.13.0) under a load of
@@ -5256,7 +5258,7 @@ unless its hits are given, and every fit of every `:fitted` row was valid):
 | | `:fitted`, `m = 8`, `L = 12` | `20 M` | `0.258` / `4.32` | `0.109` | `9.7e−3`, `8.4e−3`, `8.4e−3` | `12.9` | `6.7e−2` | `0.8481` / `0.906` / `1.002` | `6.1e−3` |
 | harmonic `a = 0`, `h = 5/128`, 960 blocks | `:damped` (control) | `10 M` | `0.234` / `7.9` | `7.5e−3` | `1.4e−3`, `9.5e−4`, `7.4e−4` | `41` | `1.3e−3` | `0.99754` | `2.6e−3` |
 | | `:fitted` | `10 M` | `0.247` / `7.3` | `7.5e−3` | `1.8e−3`, `8.3e−4`, `5.9e−4` | `95` | `1.3e−3` | `0.99741` | `2.6e−3` |
-| harmonic `a = 7/10`, `m = 4`, `lmax_shape = L = 12` | `:fitted`, `h = 5/256`, 2472 blocks | `6 M` (deadline) | `2.88` / `86` | `0.148` | `2.7e−2`, `2.5e−2`, `2.0e−2` | `256` | `1.6e−2` | `0.9236` / `0.7056` / `0.9995` | |
+| harmonic `a = 7/10`, `m = 4`, `lmax_shape = L = 12` | `:fitted`, `h = 5/256`, 2472 blocks | `10 M` | `3.60` / `113` | `0.168` | `3.7e−2`, `3.1e−2`, `2.9e−2` | `284` | `2.1e−2` | `0.9230` / `0.7073` / `0.9994` | `1.5e−3` |
 | | `:fitted`, `h = 5/128`, 512 blocks, analytic data to `3h` | † `0.5 M` | `20` / `846` | `0.38` | | | | | |
 | | `:fitted`, `h = 5/128`, the decided data | † `3.5 M` | `55` / `2570` | `2.35` | | | | `0.9187` | |
 | `boost(Harmonic(1, 0), 0.3 x̂)` from `x = 0.75`, `h = 5/128`, 1128 blocks, `cfl = 1/5` | `:fitted`, tracked | `5 M` | `0.390` / `29` | `6.6e−2` | `1.8e−2`, `4.7e−3`, `4.8e−3` | `319` | `9.9e−3` | `0.99916` / `7e−6` / `0.99916` | `2.2e−2` |
@@ -5314,12 +5316,14 @@ What it says, row by row (**all measured in step 8f**):
 - **G5's chart, harmonic `a = 7/10`, runs at `h = 5/256` and not at
   `5/128`.** At `5/128` the offset surface's equator is `3.6` cells from the
   ring and the run ends at `0.5 M` (analytic data to `3h`) or `3.5 M` (the
-  decided data); at `5/256` it runs to the six `M` a node-hour bought, with
-  the horizon at Kerr's values (`M_irr` `0.24 %` low, `J` `0.8 %` high,
-  `M_ch` `5e−4` low) and the masked error growing and slowing (`0.75`,
-  `1.53`, `2.03`, `2.38`, `2.65`, `2.88` at `1 … 6 M`) — there is no
-  analytic control on this chart to split the target's share from the
-  chart's.
+  decided data); at `5/256` it reaches `10 M` (`6293 s` on a node, `amdq`;
+  the first hour-long attempt stopped at its deadline at `6 M` with the same
+  numbers), every fit valid, the track within `1.5e−3` cells, with the
+  horizon near Kerr's values (`M_irr` `0.30 %` low, `J` `1.0 %` high, `M_ch`
+  `6e−4` low) and the masked error growing and slowing (`0.75`, `1.53`,
+  `2.38`, `2.88`, `3.27`, `3.60` at `1, 2, 4, 6, 8, 10 M`; shell `C_a`
+  `0.041` to `0.168`) — there is no analytic control on this chart to split
+  the target's share from the chart's.
 
 - **The moving hole: the fitted target holds it at `4/M`, and the analytic
   layer does not.** The boosted harmonic hole crosses `1.5 M` of the box in
@@ -5401,7 +5405,7 @@ measurable (the Kerr-Schild `a = 0` rows above).
 threads, the Kerr-Schild fixture is `140 s` a `M` a row (seven `50 M` rows
 in `7057 s`); Kerr-Schild `a = 9/10` on 1632 blocks `360–410 s` a `M` at 21
 threads; harmonic `a = 0` on 960 blocks `195 s` a `M` at 16 threads; G5's
-chart on 2472 blocks `560 s` a `M` at 64 threads. The fits are `16 ms` and
+chart on 2472 blocks `630 s` a `M` at 64 threads. The fits are `16 ms` and
 a cache fill `47 ms` on the fixture (101 and 100 of them in a `50 M` row),
 and `46 ms` and `420 ms` on the `ks9` mesh. Before the workers were given
 one BLAS thread each, OpenBLAS's pools spinning after every fit put a node

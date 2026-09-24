@@ -69,8 +69,8 @@ are done, and the generic interior is marked *(Done.)* under G5: `:fitted`
 reaches `50 M` on the static Kerr-Schild hole at twice `:damped`'s error, so
 step 8g (excision) is not needed; the analytic layer stays the default where
 a chart admits it and `:fitted` is for G5's chart. **G5 runs at `a = 7/10`
-(decided 2026-09-23)**, which runs at `h = 5/256` (2472 blocks, a node-hour
-per six `M`) and not at `5/128`; harmonic `a = 9/10` waits with its price
+(decided 2026-09-23)**, which runs at `h = 5/256` (2472 blocks, `10 M` in
+1¾ node-hours) and not at `5/128`; harmonic `a = 9/10` waits with its price
 written down in `CODE.md`'s "Open questions" (`h ≲ 5/1024` on the equator,
 23 000 blocks, `38 h` a `50 M` run, and a fit that holds 45° first). Step 8,
 the moving hole, is next — and it inherits step 8f's findings that
