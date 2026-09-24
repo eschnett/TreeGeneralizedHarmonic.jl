@@ -2940,7 +2940,8 @@ if "generic" in SECTIONS || haskey(OPTIONS, "generic")
                      max(1, nt ÷ length(labels))
                 say("   %d workers of %d threads", length(labels), wt)
                 reduce(vcat, gen_fanout([([l], wt) for l in labels];
-                                        tag=join(names, "+"), t_end=t_end_opt);
+                                        tag=get(OPTIONS, "tag", join(names, "+")),
+                                        t_end=t_end_opt);
                        init=Any[])
             else
                 [gen_run(gen_specs[l]; t_end=t_end_opt) for l in labels]
