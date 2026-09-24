@@ -5759,7 +5759,7 @@ resolutions outside the horizon (`2.1`), the `N = 8` row's far field
 carrying the coarse levels' error as on the `a = 0` hole. The `N = 16`
 row's last two chunks are the Symmetry job that was still running.
 
-**Where the runs stood (2026-09-24, 19:30).** The tunnel to Symmetry
+**Where the runs stood (2026-09-24, 18:50).** The tunnel to Symmetry
 closed while `g5-adaptive` (`7 M`), `g5-static` (`8.25 M`) and
 `conv-h7-N16` (`M/4`) were running; their logs and the full reports, with
 the per-chunk refinement centroid, track offset, fit validity and block
