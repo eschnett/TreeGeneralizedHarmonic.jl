@@ -2557,6 +2557,11 @@ function gen_fanout(batches; tag, t_end)
     dir = mkpath(joinpath(base, tag))
     println("   worker logs and results in ", abspath(dir))
     project = dirname(Base.active_project())
+    # One process loads everything first, so that the workers find the
+    # package images their flags ask for instead of racing to build them —
+    # seven workers started at once on a fresh depot measured that race as
+    # "Precompiled image … not available" and a failed precompile (step 8f).
+    run(`$(Base.julia_cmd()) --project=$project -e "using TreeAMR, TreeGeneralizedHarmonic, StaticArrays, KernelAbstractions, SpacetimeMetrics, Serialization, Printf"`)
     procs = map(enumerate(batches)) do (n, (labels, nt))
         out = joinpath(dir, "worker-$n.jls")
         log = joinpath(dir, "worker-$n.log")
