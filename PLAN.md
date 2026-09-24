@@ -7,10 +7,10 @@ changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
 last milestone is marked *(Done.)* in `CODE.md`.
 
-**Steps 0–7, 8a–8e and 8c′ are done. Step 8f is running (started
-2026-09-23 in a fresh session), with G5's spin decided: `a = 7/10`** — the
-generic interior (steps 8a–8g, added 2026-09-23), which step 8 needs before
-it can run its case.
+**Steps 0–7, 8a–8f and 8c′ are done; the generic interior is *(Done.)*
+and step 8g is not needed (`:fitted` reaches `50 M` on 8f's first row).
+Step 8, the moving hole at `a = 7/10` (decided 2026-09-23), is running
+(started 2026-09-24 in a fresh session).**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1057,11 +1057,65 @@ dependence), milestone G5.
 layer as the control, and **`a = 7/10`** (decided 2026-09-23 before step
 8f started; `CODE.md` records why `a = 9/10` waits).
 
+**What step 8f hands over** (its report's section 6 and `CODE.md`, "The
+generic interior: the measurement matrix (step 8f)" and the summary at the
+head of "The interior"):
+
+- **G5's chart runs only as `:fitted`, and only at `h = 5/256`.** Harmonic
+  `a = 7/10` with `m = 4`, `lmax_shape = lmax_fit = 12`, `Π̃ = (α/√γ)Π` as
+  the fitted momentum (the default from 8f) and the state bounds derived
+  from the whole layer reaches `10 M` on 2472 blocks — `630 s` of a node
+  per `M` when the hole sits still, `10 M` in 1¾ node-hours on `amdq` —
+  with every fit valid, the track within `1.5e−3` cells, `M_irr` `0.3 %`
+  low, `J` `1.0 %` high, `M_ch` `6e−4` low, and a masked error that grows
+  and slows (`3.60` at `10 M`). At `5/128` it ends at `0.5–3.5 M`. There is
+  no analytic control on this chart (the analytic core cuts the disk), so
+  the control is the boosted **`a = 0`** hole, where `:damped` exists.
+- **Regridding a `:fitted` case needs something new, and step 8 builds
+  it.** `adapt = true` on a `:fitted` case chooses its mesh on the analytic
+  `:damped` data of the same geometry and is refused by name where the
+  analytic core meets the singular set — G5's own chart. Step 8 needs the
+  indicator to flag on the fitted data (a callback reading the cache) or on
+  the evolved state after the first chunk, and `regrid = true` along the
+  trajectory; 8f's moving rows crossed a fixed capsule of fine blocks
+  instead, which measures the layer and not the regrid. Decide, build,
+  record.
+- **The moving hole, measured on `boost(Harmonic(1, 0), 0.3 x̂)`** from
+  `x = 0.75` on 1128 blocks at `h = 5/128`, `cfl = 1/5`: `:fitted` holds
+  it at `4/M` to `5 M` with the track within `0.022` cells of the analytic
+  center and no projection hit; the analytic `:damped` layer at `4/M` ends
+  at `1.0–1.5 M` because its frozen core is released on the trailing side
+  after about `M` and needs **`ρ_max ≳ 20/M`** (proposed in 8f) — use that
+  rate for the analytic control, not the default. Every survivor's masked
+  error grows by about `0.08/M`, harmonic truncation at `5/128`. The step
+  is now sized from `λ (λ_end/λ)²` of the previous chunk (`driver.jl`),
+  because a crossing hole's fastest speed grows `0.1–0.3 %` a chunk and the
+  CFL recheck otherwise stops the run at any `cfl`; the recheck stays.
+- **Coasting** (the finder off for five chunks) costs `1 %`; the sixth miss
+  ends the run by `TrackLostError` at `max_misses`, as designed.
+- **The record has a `variant` row, the drift reads evolved points only**
+  (an oblate horizon's band reaches into the layer), and `evolve!` has
+  `handover` (the analytic layer until then, the fit after) and
+  `target_source = :snapshot` (a control that fails at `8 M`).
+- **Costs to plan with.** A spinning `:fitted` run's error is the fit's
+  (`L = 12` residual `2.5 %` on Kerr-Schild `a = 9/10`, `41×` the analytic
+  control's masked error); a cache fill at `L = 12` is `420 ms` on 1632
+  blocks; the evaluator doubles from `L = 8` to `12`.
+- **Symmetry mechanics.** `.claude/orchestration/symmetry-run.sh` now takes
+  `PART=amdq TLIM=24:00:00` in the environment, `~` for a space in a
+  `hole:` job, and does not precompile on the login node (its image made
+  jobs starting together race to rebuild). Give subprocess workers
+  `OPENBLAS_NUM_THREADS=1` and stagger job starts; `hole_runs.jl generic`'s
+  `budget=`, `tag=`, `t_end=` options and its one-row-per-chunk logs are
+  the model for step 8's section.
+
 Changes: the boosted harmonic Kerr case (`boost(Harmonic(M, a), v)`,
-`|v| ≈ 0.3`, `a = 7/10`); `refinement_buffer` from `|v| · chunk`; the
-layer with `c(t)`; the refinement centroid against the analytic center
-in the record; the horizon finder along the trajectory; a uniform-mesh
-control run at the finest spacing.
+`|v| ≈ 0.3`, `a = 7/10`), run as `:fitted` on the tracked geometry;
+`refinement_buffer` from `|v| · chunk`; the regrid path for a `:fitted`
+case along the trajectory (above); the refinement centroid against the
+analytic center in the record; the horizon finder along the trajectory;
+a uniform-mesh control run at the finest spacing; a section `moving` in
+`hole_runs.jl` for the rows that are Symmetry jobs.
 
 Accept: as `CODE.md` G5 — the indicator's refinement follows the hole
 with its centroid within a few finest spacings of the analytic center
