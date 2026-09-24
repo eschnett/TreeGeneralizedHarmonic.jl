@@ -7,9 +7,10 @@ changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
 last milestone is marked *(Done.)* in `CODE.md`.
 
-**Steps 0–7, 8a–8e and 8c′ are done. Step 8f is next, in a fresh session** — the generic interior
-(steps 8a–8g, added 2026-09-23), which step 8 needs before it can run
-its case.
+**Steps 0–7, 8a–8e and 8c′ are done. Step 8f is running (started
+2026-09-23 in a fresh session), with G5's spin decided: `a = 7/10`** — the
+generic interior (steps 8a–8g, added 2026-09-23), which step 8 needs before
+it can run its case.
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -964,10 +965,29 @@ fitted target", pieces 8–12):
   evolved point is `0.008 M`, below half a cell; the run ends at `2.5e−3 M`.
   It wants `h ≲ 5/1024` on the equator (a node-sized mesh), `Π̃ = (α/√γ)Π`
   fitted in place of `Π`, and `L ≥ 12` at the least — or a
-  direction-dependent margin. **Erik's decision, as the plan foresaw: run
-  G5 at `a = 7/10` (the plan's fallback), or spend a node on `a = 9/10`.**
-  The matrix below runs the `a = 7/10` rows either way and the `a = 9/10`
-  row only if he says so.
+  direction-dependent margin. **Decided 2026-09-23 (the orchestrating
+  session, with the decision delegated by Erik): G5 runs at `a = 7/10`, the
+  plan's fallback; no node is spent on `a = 9/10`.** The reasons, to be
+  recorded in `CODE.md`'s "Open questions": at the equator the *solution's
+  own* length scale at the first evolved point is below half a cell at
+  `h = 5/256`, so the failure is resolution before it is the fit; the best
+  host-side fit (`Π̃`, `L = 12`) is still `~100×` off the analytic second
+  difference at 45°; and what would unblock the chart is three unbuilt
+  ingredients (`Π̃` as the fitted momentum, `L ≥ 12`, an equator four times
+  finer or a direction-dependent margin) followed by a run whose time step
+  is a quarter of today's on a mesh with tens of thousands of blocks and no
+  checkpointing — a multi-node-day research item, not a row. The matrix
+  below therefore runs the `a = 7/10` rows as G5's chart. Its `a = 9/10`
+  row is **reduced to a host-side probe** that costs minutes and no node:
+  the initial data and one right-hand side at `h = 5/256` as 8e measured
+  them, the `Π̃` and `L = 12` kink numbers at the three latitudes
+  re-measured with whatever 8f changes in the fit, and a written estimate
+  of the node run (blocks, `dt`, right-hand sides, wall clock at 64
+  threads) at `h = 5/1024` on the equator — so that `CODE.md` closes the
+  question with numbers and a price rather than by abandoning it. If 8f
+  finds a cheap change that makes the `5/256` run survive its first chunk,
+  it may run that case to whatever `t_end` fits four local threads in
+  fifteen minutes, and report; it does not submit it to Symmetry.
 - **Rows and costs** (from 8e's estimates): Kerr-Schild `a = 0`, `50 M`,
   120 blocks, `m = 10`, `n_L = 8`, `L = 8`: about 40 min per variant at four
   threads; Kerr-Schild `a = 9/10`, `h = 5/128`, `m = 8`, about 1000 blocks:
@@ -990,15 +1010,16 @@ horizon's `A`, `M_irr`, `J`, `M_ch` and the tracked `center_offset`:
 | Kerr-Schild `a = 0`, `50 M` | `:damped` (control), `:fitted`, the snapshot target, the fitted-Kerr target | the generic layer costs nothing on the case that needs nothing |
 | Kerr-Schild `a = 9/10`, `h = 5/128` | `:damped`, `:fitted` | the offset-surface layer on an oblate horizon |
 | harmonic `a = 0` and `a = 7/10` | `:fitted` | the small-horizon chart, and the first spin a sphere cannot hold |
-| **harmonic `a = 9/10`** | `:fitted` only | the blocked case; needs `m h < 0.1 M` on the equator (`h ≈ 5/256` at `m = 4`); the last row, and it may need a node |
+| **harmonic `a = 9/10`** | `:fitted` only, **host-side probe** (decided 2026-09-23) | the blocked case: initial data, one right-hand side, the fit's kink at three latitudes, and the *price* of the node run at `h ≲ 5/1024` written down; no node is spent |
 | boosted harmonic `a = 0` or `7/10`, `v = 0.3` | `:fitted` tracked against `:damped` analytic | G5's stand-in: tracking, release, staleness |
 | hand-over | `:damped` to `5 M`, then `:fitted` | a newly found horizon's first fit from evolved data |
 | coasting | the finder disabled for five chunks | the geometry without a find |
 
 Accept: the table in `CODE.md`; "The interior" rewritten around geometry,
 target, the ramp rule and `ρ_max` as a rate, with step 5's design kept as
-the analytic control; the `a = 9/10` open question closed, or restated
-with the measured `h` and the recommendation to run G5 at `a = 7/10`;
+the analytic control; the `a = 9/10` open question closed with the
+measured `h`, the node run's estimated price, and G5 at `a = 7/10` recorded
+as decided (2026-09-23);
 G5's acceptance naming the tracked geometry; `CLAUDE.md`'s "Current state"
 and "Commands" updated. Mark the generic interior *(Done.)* under G5's
 entry.
@@ -1033,11 +1054,11 @@ dependence), milestone G5.
 
 **Starts from step 8f** (added 2026-09-23): the interior is the
 `:fitted` variant on the tracked geometry, with the analytic `:damped`
-layer as the control, and `a` is `9/10` if 8f's last row ran and
-`7/10` otherwise — Erik's call, recorded in `CODE.md`.
+layer as the control, and **`a = 7/10`** (decided 2026-09-23 before step
+8f started; `CODE.md` records why `a = 9/10` waits).
 
 Changes: the boosted harmonic Kerr case (`boost(Harmonic(M, a), v)`,
-`|v| ≈ 0.3`, `a = 0.9`); `refinement_buffer` from `|v| · chunk`; the
+`|v| ≈ 0.3`, `a = 7/10`); `refinement_buffer` from `|v| · chunk`; the
 layer with `c(t)`; the refinement centroid against the analytic center
 in the record; the horizon finder along the trajectory; a uniform-mesh
 control run at the finest spacing.
