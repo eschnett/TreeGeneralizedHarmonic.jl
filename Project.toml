@@ -14,6 +14,12 @@ SpacetimeMetrics = "77e61b41-605e-43a6-b70f-04b7dcd1f572"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TreeAMR = "91bc416d-811c-44c1-9bc4-b9c8bbdbbd08"
 
+[sources]
+ApparentHorizonFinder = {rev = "main", url = "https://github.com/eschnett/ApparentHorizonFinder.jl"}
+KorzynskiSpin = {rev = "main", url = "https://github.com/eschnett/KorzynskiSpin.jl"}
+SpacetimeMetrics = {rev = "main", url = "https://github.com/eschnett/SpacetimeMetrics.jl"}
+TreeAMR = {rev = "main", url = "https://github.com/eschnett/TreeAMR.jl"}
+
 [compat]
 ApparentHorizonFinder = "2.1"
 KernelAbstractions = "0.9.42, 1"
@@ -25,33 +31,3 @@ SpacetimeMetrics = "1.6"
 StaticArrays = "1"
 TreeAMR = "0.1.1"
 julia = "1.11"
-
-# **TreeAMR is a registry dependency** from v0.1.1 (2026-09-21): it is in
-# General, so `[compat]` selects it and it needs no `[sources]` entry. The
-# checkout at `~/src/jl/TreeAMR` is still not what the tests see — they now
-# see the *released* version, so an unpushed *or unreleased* change there
-# is invisible here.
-#
-# The other three are still located by `[sources]`, for two different
-# reasons:
-#
-#   * `SpacetimeMetrics` and `ApparentHorizonFinder` are registered, but
-#     `rev = "main"` is deliberate — both are developed alongside this
-#     package. `ApparentHorizonFinder` additionally *has* to be pinned:
-#     the `[compat]` bound below is `2.1` and General carries only up to
-#     `2.0.0`.
-#   * `KorzynskiSpin` is not registered at all. Its repository became
-#     **public** on 2026-09-21, so the URL is plain `https` like the
-#     others and the deploy key the workflow used is gone — an anonymous
-#     clean checkout and a fork's pull request both resolve it now, which
-#     is what the clean-checkout check in `CLAUDE.md` exists to prove.
-#
-# `[sources]` is what keeps the Julia floor at **1.11**: the section was
-# introduced there. Lowering the floor needs every entry below to go, which
-# needs `KorzynskiSpin` registered and `ApparentHorizonFinder` 2.1
-# released. Vendoring a package or adding a local-path source would hide
-# that rather than state it.
-[sources]
-ApparentHorizonFinder = {url = "https://github.com/eschnett/ApparentHorizonFinder.jl", rev = "main"}
-KorzynskiSpin = {url = "https://github.com/eschnett/KorzynskiSpin.jl", rev = "main"}
-SpacetimeMetrics = {url = "https://github.com/eschnett/SpacetimeMetrics.jl", rev = "main"}
