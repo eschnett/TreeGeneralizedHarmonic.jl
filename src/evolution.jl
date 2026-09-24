@@ -346,7 +346,8 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
 """
 @kernel function gh_rhs_kernel!(du, @Const(work), Hwork, @Const(origins),
                                 @Const(spacings), bg, damping, γ2, ε_KO,
-                                interior, t, tw, t_f, rate, ::Val{G}, ::Val{q},
+                                interior, t, tw, t_f, rate, trail, fitp,
+                                ::Val{G}, ::Val{q},
                                 ::Val{HASH}, ::Val{DISS},
                                 ::Val{INT}) where {G,q,HASH,DISS,INT}
     I = @index(Global, NTuple)                    # (i1, i2, i3, block)
@@ -396,7 +397,18 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
             # come before the stencils. `du = 0` for the analytic variants;
             # the fitted core (step 8e) relaxes toward the cached target at
             # the full rate, `du = −ρ_max (u − u_fit)`.
-            if INT === :fitted
+            if INT === :fitted && (fitp !== nothing || !iszero(trail))
+                # Step 8′'s levers (the side-dependent ramp does not touch
+                # the core, where `ρ = ρ_max` already; the exact target does).
+                ρc = interior.ρ_max
+                tg = _lever_target(tw, inner, b, t, t_f, fitp, x)
+                ntuple(Val(2 * NC)) do v
+                    du[inner..., v, b] = (rate ? _cached_rate(tw, inner, b, v) :
+                                          zero(T)) -
+                                         ρc * (work[var + (v - 1) * sv] - tg[v])
+                    nothing
+                end
+            elseif INT === :fitted
                 ρc = interior.ρ_max
                 # With the target's rate (step 8) the core follows the moving
                 # target instead of lagging it by `|∂_t u_fit|/ρ_max`: `du =
@@ -431,6 +443,25 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
                 ntuple(Val(NC)) do v
                     du[inner..., v, b] = ∂ₜh[v]
                     du[inner..., NC + v, b] = ∂ₜΠ[v]
+                    nothing
+                end
+            elseif INT === :fitted && (fitp !== nothing || !iszero(trail))
+                # Step 8′'s levers in the layer: the ramp narrowed on the
+                # trailing side (`trail`), the target the latest fit carried
+                # by its center to `t` exactly (`fitp`), or both.
+                wl, ρl = iszero(trail) ? interior_profiles(interior, g) :
+                         _trail_profiles(interior, g, t, x, trail)
+                tg = _lever_target(tw, inner, b, t, t_f, fitp, x)
+                ol = one(T) - wl
+                ntuple(Val(NC)) do v
+                    du[inner..., v, b] =
+                        wl * ∂ₜh[v] +
+                        (rate ? ol * _cached_rate(tw, inner, b, v) : zero(T)) -
+                        ρl * (work[var + (v - 1) * sv] - tg[v])
+                    du[inner..., NC + v, b] =
+                        wl * ∂ₜΠ[v] +
+                        (rate ? ol * _cached_rate(tw, inner, b, NC + v) : zero(T)) -
+                        ρl * (work[var + (NC + v - 1) * sv] - tg[NC + v])
                     nothing
                 end
             elseif INT === :fitted
@@ -632,6 +663,10 @@ struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A,X,Y}
     # slope then includes the fit's translation with the track, and the
     # kernel adds `(1 − w) ∂_t u_fit` in the layer and the core.
     target_rate::Bool
+    # Step 8′'s levers: the trailing side's ramp narrowing `trail` (0 = off)
+    # and the exact target (the latest fit evaluated in the kernel at `t`).
+    trail::T
+    target_exact::Bool
     hasdirichlet::Bool
     valG::Val{G}
     valq::Val{q}
@@ -643,7 +678,8 @@ end
 function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
                    t=zero(T), interior=case.interior, margin_check=true,
                    accounting=nothing, target=nothing, fits=nothing,
-                   t_target=zero(T), target_rate::Bool=false) where {T}
+                   t_target=zero(T), target_rate::Bool=false, trail=zero(T),
+                   target_exact::Bool=false) where {T}
     q ≥ 2 && iseven(q) || throw(ArgumentError(
         "the finite-difference order must be even and at least 2, so that " *
         "the centered stencils have an integer half-width q/2 and CODE.md's " *
@@ -714,7 +750,8 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
                      typeof(spacings),typeof(case),typeof(interior),
                      typeof(accounting),typeof(target),typeof(fits)}(
         U, schedule, Hsrc, diag, origins, spacings, case, interior,
-        accounting, target, fits, T(t_target), target_rate, hasdirichlet, Val(U.G),
+        accounting, target, fits, T(t_target), target_rate, T(trail),
+        target_exact, hasdirichlet, Val(U.G),
         Val(Int(q)), Val(HASH), Val(DISS), Val(INT))
 end
 
@@ -736,7 +773,8 @@ which nothing about a new `ρ_max` invalidates. It shares the run's
 function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior;
                        fits=p.fits, target=p.target,
                        t_target=p.t_target,
-                       target_rate::Bool=p.target_rate) where {T,G,q,HASH,DISS}
+                       target_rate::Bool=p.target_rate, trail=p.trail,
+                       target_exact::Bool=p.target_exact) where {T,G,q,HASH,DISS}
     INT = interior_variant(interior)
     INT === :fitted && target === nothing && throw(ArgumentError(
         "a :fitted interior needs the problem's target cache; this problem " *
@@ -747,7 +785,7 @@ function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior;
                      typeof(p.accounting),typeof(target),typeof(fits)}(
         p.U, p.schedule, p.Hsrc, p.diag, p.origins, p.spacings, p.case,
         interior, p.accounting, target, fits, T(t_target), target_rate,
-        p.hasdirichlet,
+        T(trail), target_exact, p.hasdirichlet,
         p.valG, p.valq, p.valH, p.valdiss, Val(INT))
 end
 
@@ -766,6 +804,45 @@ function refill_target(p::GHProblem{T}, t; fits=p.fits) where {T}
     fill_target!(p.target, p.origins, p.spacings, p.interior, fits, T(t);
                  rate=p.target_rate)
     return with_interior(p, p.interior; fits=fits, t_target=T(t))
+end
+
+# The exact target's kernel argument (step 8′): the latest fit's parameters
+# and coefficients, or `nothing` — which compiles the lever away.
+_exact_fit(p::GHProblem) =
+    p.target_exact && p.fits !== nothing ? (p.fits[1].params, p.fits[1].coeffs) :
+    nothing
+
+# Step 8′'s target at one point: the cache's linear continuation, or with
+# `fitp` the latest fit evaluated at `(x, t)` — carried by its tracked center
+# exactly rather than linearly between refills.
+@inline function _lever_target(tw, inner, b, t, t_f, fitp, x)
+    T = eltype(tw)
+    if fitp === nothing
+        return SVector{2NC,T}(ntuple(v -> _cached_target(tw, inner, b, v, t, t_f),
+                                     Val(2NC)))
+    else
+        h, Π = fit_state(fitp[1], fitp[2], x, t)
+        return SVector{2NC,T}(ntuple(v -> v ≤ NC ? T(h[v]) : T(Π[v - NC]),
+                                     Val(2NC)))
+    end
+end
+
+# Step 8′'s side-dependent ramp: `ρ`'s ramp fraction narrowed by the factor
+# `1 − trail · ζ` with `ζ = max(0, −n̂ · v̂)` about the tracked center, so that
+# on the trailing side, where grid points leave the layer, `ρ` reaches
+# `ρ_max` nearer the offset surface; `w` is unchanged.
+@inline function _trail_profiles(int::FittedInterior{T}, g, t, x, trail) where {T}
+    c = center_at(int.center, t)
+    v = int.center.v
+    s = sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
+    ζ = if iszero(s) || iszero(g.r)
+        zero(T)
+    else
+        max(zero(T), -((x[1] - c[1]) * v[1] + (x[2] - c[2]) * v[2] +
+                       (x[3] - c[3]) * v[3]) / (g.r * s))
+    end
+    return _layer_profiles(g.r, g.r_0, g.r_1, int.ρ_max, int.w_ramp,
+                           int.ρ_ramp * (one(T) - trail * ζ))
 end
 
 # The cache's working array, or `nothing`, for the kernels.
@@ -805,7 +882,8 @@ function gh_rhs!(du, u, p::GHProblem, t)
     map_blocks!(gh_rhs_kernel!, p.U, statearray(du, p.U), p.U.work,
                 gauge_work(p.Hsrc), p.origins, p.spacings, p.case.background,
                 p.case.γ0, p.case.γ2, p.case.ε_KO, p.interior, eltype(p.U.work)(t),
-                target_work(p.target), p.t_target, p.target_rate, p.valG,
+                target_work(p.target), p.t_target, p.target_rate, p.trail,
+                _exact_fit(p), p.valG,
                 p.valq, p.valH,
                 p.valdiss, p.valint)
     return nothing

@@ -290,6 +290,15 @@ step 8f's matrix ([`snapshot_target_kernel!`](@ref)).
 solution at the offset surface to the fit at that depth
 ([`fitted_state_kernel!`](@ref)).
 
+`trail_ramp`, `target_exact` and `refill_cells` are step 8′'s levers on the
+trailing side of a moving `:fitted` layer, each off (or at step 8e's value)
+by default and a run without it bit for bit: `ρ`'s ramp narrowed by
+`1 − trail_ramp · max(0, −n̂·v̂)`, so that it rises faster where grid points
+leave the layer; the target in the layer and the core the latest fit
+evaluated at `(x, t)` in the kernel — carried by its tracked center exactly
+instead of linearly between refills; and the refill cadence, the track's
+travel between refills in cells (`1/4`).
+
 `target_rate = true` (added in step 8, the default) feeds the target's rate
 forward: the cache's slope includes the fit's translation with the track,
 and the kernel adds `(1 − w) ∂_t u_fit` to the layer and the core, so that a
@@ -329,7 +338,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                  find=find_gh_horizon, fit_initial_cont::Integer=1,
                  fit_initial_depth=0, handover=0,
                  target_source::Symbol=:fit, target_rate::Bool=true,
-                 fit_initial_blend::Bool=false) where {T}
+                 fit_initial_blend::Bool=false, trail_ramp=0,
+                 target_exact::Bool=false, refill_cells=1 // 4) where {T}
     # The tracked geometry (step 8d) is built from the horizon that was found,
     # so a case that asks for it must carry the finder's parameters.
     fitted = case.interior isa FittedSpec
@@ -450,6 +460,19 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     # The target's rate (added in step 8): fed forward on the `:fitted`
     # target unless asked not to; the snapshot control's slope is zero.
     rate_on = fitmode && target_rate && target_source === :fit
+    # Step 8′'s three levers on the trailing side, each off by default and a
+    # run without it bit for bit: the ramp narrowed where grid points leave
+    # the layer, the latest fit evaluated exactly at `t` as the target, and
+    # the refill cadence in cells of the track's travel (`1/4`, step 8e's).
+    trail_on = fitmode ? T(trail_ramp) : zero(T)
+    zero(T) ≤ trail_on < one(T) || throw(ArgumentError(
+        "trail_ramp narrows ρ's ramp on the trailing side by 1 − trail_ramp·ζ " *
+        "and must lie in [0, 1), got $trail_ramp."))
+    exact_on = fitmode && target_exact && target_source === :fit
+    refill_frac = T(refill_cells)
+    refill_frac > 0 || throw(ArgumentError(
+        "refill_cells is the track's travel between refills in cells and must " *
+        "be positive, got $refill_cells."))
     d_init = T(fit_initial_depth)
     fitmode && handover_t == 0 && !(zero(T) ≤ d_init ≤ geom.thickness) &&
         throw(ArgumentError(
@@ -592,7 +615,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     acc = case.bounds === nothing ? nothing : BoundsAccounting()
     p0 = GHProblem(U, schedule, case; q=q, t=zero(T),
                    interior=kgeom(geom, zero(T)), accounting=acc,
-                   target=target0, fits=fits, target_rate=rate_on)
+                   target=target0, fits=fits, target_rate=rate_on,
+                   trail=trail_on, target_exact=exact_on)
     # The geometry the gauge source was sampled with (step 8d): the sample
     # applies the core rule, so a tracked core that moves far from it asks
     # for a fresh sample — see the chunk loop.
@@ -871,7 +895,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                 p = GHProblem(U, schedule, case; q=q, t=tstart,
                               interior=kgeom(geom, tstart), accounting=acc,
                               target=p.target, fits=p.fits,
-                              t_target=p.t_target, target_rate=rate_on)
+                              t_target=p.t_target, target_rate=rate_on,
+                              trail=trail_on, target_exact=exact_on)
                 geom_sampled = geom
                 nresamples += 1
             end
@@ -903,8 +928,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
             p = refill(p, tstart, u)
             speed = sqrt(sum(abs2, tr.v_est))
             npieces = speed > 0 ?
-                      clamp(ceilint(speed * (stop - tstart) / (geom.h / 4)), 1,
-                            steps) : 1
+                      clamp(ceilint(speed * (stop - tstart) /
+                                    (refill_frac == T(1 // 4) ? geom.h / 4 :
+                                     geom.h * refill_frac)), 1, steps) : 1
         end
 
         # `step_limiter` on `solve` and not `RK4(; step_limiter! = …)`:
@@ -972,7 +998,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                               interior=fitted ? kgeom(geom, stop) : geom,
                               accounting=acc,
                               target=fitmode ? target_cache(U) : nothing,
-                              fits=fits, t_target=stop, target_rate=rate_on)
+                              fits=fits, t_target=stop, target_rate=rate_on,
+                              trail=trail_on, target_exact=exact_on)
                 u = statevector(U)
                 gather!(u, U)
                 # The transferred state has not been through a step, so

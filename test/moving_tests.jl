@@ -177,6 +177,55 @@ const TGHm = TreeGeneralizedHarmonic
         gh_rhs!(db, u, pb, zero(T))
         @test da == db
         @info "the cache's slope against its own difference (step 8)" worst scale
+
+        # Step 8′'s exact target: the latest fit evaluated in the kernel. It
+        # changes the layer and the core and nothing outside the offset
+        # surface; and off, the problem is the one without it.
+        # (With the moving fit, a tenth of `M` after the cache was filled: a
+        # fit at rest at the fill time is the cache itself.)
+        pc = with_interior(pa, gf; target_exact=true, fits=(mv, nothing))
+        dc = similar(u)
+        gh_rhs!(da, u, pa, T(1 // 10))
+        gh_rhs!(dc, u, pc, T(1 // 10))
+        Da, Dc = statearray(da, fs), statearray(dc, fs)
+        outside_same = true
+        inside_moved = false
+        for b in 1:nblocks(fs), k in 1:8, j in 1:8, i in 1:8
+            x = coordinates(fs, b, (i + G, j + G, k + G))
+            g = interior_point(gf, zero(T), x)
+            same = all(v -> Da[i, j, k, v, b] == Dc[i, j, k, v, b], 1:20)
+            if g.r ≥ g.r_1
+                outside_same &= same
+            else
+                inside_moved |= !same
+            end
+        end
+        @test outside_same && inside_moved
+        @test with_interior(pc, gf; target_exact=false).target_exact == false
+    end
+
+    # Guards step 8′'s side-dependent ramp: `ρ` narrows its ramp only where
+    # grid points leave the layer, `(x − c)·v < 0`; on the leading side and
+    # for a geometry at rest the profiles are the plain ones bit for bit.
+    @testset "the trailing ramp narrows only behind a moving layer" begin
+        sh = SVector{1,T}(2 * sqrt(T(π)))             # the unit sphere
+        mk(v) = with_ρ_max(FittedInterior(T; center=HoleCenter(T, (0, 0, 0), v),
+                                          shape=sh, offset=T(1 // 10),
+                                          thickness=T(4 // 10), variant=:fitted,
+                                          ρ_ramp=one(T)), T(4))
+        im, i0 = mk((-T(3 // 10), 0, 0)), mk((0, 0, 0))
+        tp = TGHm._trail_profiles
+        for (x, trailing) in (((T(7 // 10), 0, 0), true),      # behind (+x)
+                              ((-T(7 // 10), 0, 0), false),    # ahead
+                              ((0, T(7 // 10), 0), false))     # abeam
+            g = interior_point(im, zero(T), x)
+            plain = interior_profiles(im, g)
+            w, ρ = tp(im, g, zero(T), x, T(3 // 4))
+            @test w == plain[1]
+            @test trailing ? ρ > plain[2] : ρ == plain[2]
+            @test tp(i0, interior_point(i0, zero(T), x), zero(T), x, T(3 // 4)) ==
+                  interior_profiles(i0, interior_point(i0, zero(T), x))
+        end
     end
 
     # Guards the cycle G5 needs: on a chart whose analytic interior is

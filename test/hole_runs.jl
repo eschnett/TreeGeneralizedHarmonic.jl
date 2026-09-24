@@ -3092,6 +3092,29 @@ function mv_groups()
                 kw=(fit_initial_blend=true,), workers=16),
         mv_spec("g5y-static"; v=0 // 1, halfwidth=5 // 2, roots=2, t_end=1 // 2,
                 workers=16)]
+    # Step 8′'s levers on the trailing side, screened on the boosted a = 0
+    # hole in the 5/2 box to M/2 (minutes a row at four threads), against the
+    # analytic :damped layer at 20/M and the same hole at rest.
+    l0 = (chart=:h0, x0=3 // 4, halfwidth=5 // 2, roots=2, cap=3, t_end=1 // 2,
+          workers=8)
+    d["l0"] = Any[
+        mv_spec("l0-base"; l0...),
+        mv_spec("l0-static"; l0..., v=0 // 1),
+        mv_spec("l0-damped20"; l0..., geom=:damped, rate=20),
+        mv_spec("l0-trail"; l0..., kw=(trail_ramp=3 // 4,)),
+        mv_spec("l0-trail-half"; l0..., kw=(trail_ramp=1 // 2,)),
+        mv_spec("l0-refill16"; l0..., kw=(refill_cells=1 // 16,)),
+        mv_spec("l0-exact"; l0..., kw=(target_exact=true,)),
+        mv_spec("l0-all"; l0..., kw=(trail_ramp=3 // 4, target_exact=true)),
+        mv_spec("l0-trail-9"; l0..., kw=(trail_ramp=9 // 10,)),
+        mv_spec("l0-trail-r8"; l0..., rate=8, kw=(trail_ramp=3 // 4,))]
+    # The same levers on G5's chart to M/2 (the g5y screen's configuration).
+    l7 = (x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2, workers=16)
+    d["l7"] = Any[
+        mv_spec("l7-trail"; l7..., kw=(trail_ramp=3 // 4,)),
+        mv_spec("l7-trail-9"; l7..., kw=(trail_ramp=9 // 10,)),
+        mv_spec("l7-exact"; l7..., kw=(target_exact=true,)),
+        mv_spec("l7-all"; l7..., kw=(trail_ramp=3 // 4, target_exact=true))]
     # The frozen hierarchy: N = 8, 12, 16, the margin and the ramp in cells
     # scaled with N so that the offset surface and the core surface are the
     # same surfaces at every N; the capsule covers the trajectory to t_end.
