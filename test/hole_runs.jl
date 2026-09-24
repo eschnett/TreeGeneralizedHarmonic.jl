@@ -2569,6 +2569,11 @@ function gen_fanout(batches; tag, t_end)
         cmd = `$(Base.julia_cmd()) --project=$project --threads=$nt
                $(abspath(@__FILE__)) generic worker=1
                runs=$(join(labels, ',')) out=$out $te`
+        # One BLAS thread a worker: a fit's QR is small, and OpenBLAS's
+        # default pool of a thread per core, spinning after every call, put a
+        # node's load at twice its cores with seven workers (measured in step
+        # 8f: ten times this machine's per-run time until it was set).
+        cmd = addenv(cmd, "OPENBLAS_NUM_THREADS" => "1")
         io = open(log, "w")
         (run(pipeline(cmd; stdout=io, stderr=io); wait=false), out, log, io)
     end
@@ -2823,13 +2828,12 @@ function gen_probe()
     # The price of the node run at h = 5/1024 on the equator.
     println("\n-- the node run at h = 5/1024, priced --")
     ring(box, lo, hi, zmax) = begin
-        # the box meets the solid torus lo ≤ ρ ≤ hi, |z| ≤ zmax
-        rmin = sqrt(sum(abs2, (max(box[1][d], min(0.0, box[2][d])) for d in 1:2)))
-        rmax = maximum(sqrt(sum(abs2, (c[d] for d in 1:2)))
-                       for c in Iterators.product((box[1][1], box[2][1]),
-                                                  (box[1][2], box[2][2])))
-        zlo = max(box[1][3], min(0.0, box[2][3]))
-        rmax ≥ lo && rmin ≤ hi && abs(zlo) ≤ zmax
+        # the box (`box[d] = (lo_d, hi_d)`) meets the solid torus
+        # lo ≤ ρ ≤ hi, |z| ≤ zmax about the z axis
+        near(d) = max(box[d][1], min(0.0, box[d][2]))
+        rmin = sqrt(near(1)^2 + near(2)^2)
+        rmax = maximum(sqrt(x^2 + y^2) for x in box[1], y in box[2])
+        rmax ≥ lo && rmin ≤ hi && abs(near(3)) ≤ zmax
     end
     ball(R) = box -> TreeGeneralizedHarmonic._box_meets_ball(box, (0.0, 0.0, 0.0), R)
     base = [ball(10.0), ball(1.6), ball(1.3), ball(1.0)]
