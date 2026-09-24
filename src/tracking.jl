@@ -169,6 +169,20 @@ analytic radii ([`horizon_min_radius`](@ref), [`horizon_max_radius`](@ref))
 and its analytic shape ([`analytic_shape`](@ref)), `source = :analytic`,
 no `hlm`.
 
+**The seed's smallest radius is the analytic surface's, not the
+`√(1 − v²)` bound (amended in step 8).** [`horizon_min_radius`](@ref) of a
+boosted hole is the rest frame's smallest radius times the contraction
+factor — a lower bound, exact when the smallest radius lies along the boost
+(a boosted Schwarzschild hole) and not otherwise: harmonic Kerr at
+`a = 7/10` boosted along `x̂`, G5's case, has its smallest radius `0.714`
+on the spin axis, which the boost does not contract, and the bound says
+`0.681`. The first find then reads `0.716` and is refused as a jump of
+`0.034`, over half a stencil at `h = 5/256` (measured in step 8). So the seed
+takes the larger of the bound and the least of
+[`analytic_horizon_radius`](@ref) over [`shape_sample_directions`](@ref),
+which includes both poles, for a hole that moves; a hole at rest keeps the
+bound, which is then exact, bit for bit.
+
 It is what the first chunk's geometry — and the initial data's core rule —
 is built from, and what the first find is judged against: a first find
 whose smallest radius is more than half a stencil from the analytic one is
@@ -177,9 +191,17 @@ refused like any other jump.
 function seed_track(case::GHCase{T}, t; lmax::Integer=_track_lmax(case)) where {T}
     bg = case.background
     c = center_at(case.center, T(t))
-    return HorizonTrack{T}(T(t), c, case.center.v, T(horizon_min_radius(bg)),
+    return HorizonTrack{T}(T(t), c, case.center.v, _seed_r_min(bg, lmax),
                            T(horizon_max_radius(bg)), analytic_shape(bg, lmax),
                            Int(lmax), nothing, nothing, :analytic, 0, 0)
+end
+
+function _seed_r_min(bg, lmax)
+    bound = horizon_min_radius(bg)
+    iszero(sum(abs2, hole_velocity(bg))) && return bound
+    sampled = minimum(n -> analytic_horizon_radius(bg, n),
+                      shape_sample_directions(lmax))
+    return max(bound, sampled)
 end
 
 """

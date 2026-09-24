@@ -959,6 +959,10 @@ end
 @inline _cached_target(tw, inner, b::Int, v::Int, t, t_f) =
     @inbounds tw[inner..., v, b] + (t - t_f) * tw[inner..., 2NC + v, b]
 
+# The target's rate `∂_t u_fit` at the owned point — the cache's slope — for
+# the feed-forward term of step 8.
+@inline _cached_rate(tw, inner, b::Int, v::Int) = @inbounds tw[inner..., 2NC + v, b]
+
 """
     fit_target_kernel!(out, origins, spacings, interior, pa, ca, pb, cb, t_a, κ,
                        t_f, r_fill, ::Val{HASB})
@@ -974,8 +978,8 @@ filled point, at the refill cadence.
 """
 @kernel function fit_target_kernel!(out, @Const(origins), @Const(spacings),
                                     interior, pa, @Const(ca), pb, @Const(cb),
-                                    t_a, κ, t_f, r_fill,
-                                    ::Val{HASB}) where {HASB}
+                                    t_a, κ, t_f, r_fill, δt,
+                                    ::Val{HASB}, ::Val{RATE}) where {HASB,RATE}
     I = @index(Global, NTuple)
     b = I[4]
     inner = ntuple(d -> I[d], Val(3))
@@ -983,6 +987,14 @@ filled point, at the refill cadence.
     x = point_position(origins, spacings, b, I)
     if interior_radius(interior, t_f, x) < r_fill
         ha, Πa = fit_state(pa, ca, x, t_f)
+        # The translation of the latest fit with the track at this point
+        # (step 8): the fit is a polynomial about a center that moves at the
+        # track's velocity, so its rate at a fixed point is a centered
+        # difference in the time it is evaluated at — exactly zero for a fit
+        # whose center does not move.
+        hp, Πp = RATE ? fit_state(pa, ca, x, t_f + δt) : (ha, Πa)
+        hm, Πm = RATE ? fit_state(pa, ca, x, t_f - δt) : (ha, Πa)
+        iδ = RATE ? inv(2 * δt) : zero(T)
         if HASB
             hb, Πb = fit_state(pb, cb, x, t_f)
             ntuple(Val(NC)) do v
@@ -990,16 +1002,16 @@ filled point, at the refill cadence.
                 sΠ = κ * (Πa[v] - Πb[v])
                 out[inner..., v, b] = ha[v] + (t_f - t_a) * sh
                 out[inner..., NC + v, b] = Πa[v] + (t_f - t_a) * sΠ
-                out[inner..., 2NC + v, b] = sh
-                out[inner..., 3NC + v, b] = sΠ
+                out[inner..., 2NC + v, b] = RATE ? sh + iδ * (hp[v] - hm[v]) : sh
+                out[inner..., 3NC + v, b] = RATE ? sΠ + iδ * (Πp[v] - Πm[v]) : sΠ
                 nothing
             end
         else
             ntuple(Val(NC)) do v
                 out[inner..., v, b] = ha[v]
                 out[inner..., NC + v, b] = Πa[v]
-                out[inner..., 2NC + v, b] = zero(T)
-                out[inner..., 3NC + v, b] = zero(T)
+                out[inner..., 2NC + v, b] = RATE ? iδ * (hp[v] - hm[v]) : zero(T)
+                out[inner..., 3NC + v, b] = RATE ? iδ * (Πp[v] - Πm[v]) : zero(T)
                 nothing
             end
         end
@@ -1029,15 +1041,20 @@ Fill the cache `target` at time `t` from `fits = (latest, previous)`
 geometry `interior` ([`fit_target_kernel!`](@ref)).
 """
 function fill_target!(target::FieldSet{T,3}, origins, spacings,
-                      interior::FittedInterior, fits, t) where {T}
+                      interior::FittedInterior, fits, t; rate::Bool=false) where {T}
     fa, fb = fits
     hasb = fb !== nothing && fa.t > fb.t
     κ = hasb ? inv(fa.t - fb.t) : zero(T)
     r_fill = (interior.r_out - interior.offset) + interior.h
     pb, cb = hasb ? (fb.params, fb.coeffs) : (fa.params, fa.coeffs)
+    # The time step of the translation's difference: the fit's center moves
+    # an eighth of a cell over it (any positive number for a fit at rest,
+    # whose difference is then exactly zero).
+    speed = sqrt(sum(abs2, fa.params.center.v))
+    δt = speed > 0 ? interior.h / (8 * speed) : one(T)
     map_blocks!(fit_target_kernel!, target, target.work, origins, spacings,
                 interior, fa.params, fa.coeffs, pb, cb, T(fa.t), κ, T(t),
-                T(r_fill), Val(hasb))
+                T(r_fill), T(δt), Val(hasb), Val(rate))
     return target
 end
 

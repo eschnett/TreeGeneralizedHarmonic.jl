@@ -51,6 +51,7 @@ using TreeGeneralizedHarmonic
     include("bounds_tests.jl")      # step 8b: the range projection, and its control
     include("tracking_tests.jl")    # step 8d: the tracked geometry, and its runs
     include("fit_tests.jl")         # step 8e: the fitted target (shares 8d's run)
+    include("moving_tests.jl")      # step 8: the moving hole's floor, seed and cycle
     include("type_tests.jl")
     include("threading_tests.jl")
 end

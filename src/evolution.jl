@@ -346,7 +346,7 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
 """
 @kernel function gh_rhs_kernel!(du, @Const(work), Hwork, @Const(origins),
                                 @Const(spacings), bg, damping, γ2, ε_KO,
-                                interior, t, tw, t_f, ::Val{G}, ::Val{q},
+                                interior, t, tw, t_f, rate, ::Val{G}, ::Val{q},
                                 ::Val{HASH}, ::Val{DISS},
                                 ::Val{INT}) where {G,q,HASH,DISS,INT}
     I = @index(Global, NTuple)                    # (i1, i2, i3, block)
@@ -398,11 +398,24 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
             # the full rate, `du = −ρ_max (u − u_fit)`.
             if INT === :fitted
                 ρc = interior.ρ_max
-                ntuple(Val(2 * NC)) do v
-                    du[inner..., v, b] = -ρc * (work[var + (v - 1) * sv] -
-                                                _cached_target(tw, inner, b, v,
-                                                               t, t_f))
-                    nothing
+                # With the target's rate (step 8) the core follows the moving
+                # target instead of lagging it by `|∂_t u_fit|/ρ_max`: `du =
+                # ∂_t u_fit − ρ_max (u − u_fit)`, `∂_t u_fit` the cache's slope.
+                if rate
+                    ntuple(Val(2 * NC)) do v
+                        du[inner..., v, b] = _cached_rate(tw, inner, b, v) -
+                                             ρc * (work[var + (v - 1) * sv] -
+                                                   _cached_target(tw, inner, b, v,
+                                                                  t, t_f))
+                        nothing
+                    end
+                else
+                    ntuple(Val(2 * NC)) do v
+                        du[inner..., v, b] = -ρc * (work[var + (v - 1) * sv] -
+                                                    _cached_target(tw, inner, b, v,
+                                                                   t, t_f))
+                        nothing
+                    end
                 end
             else
                 ntuple(Val(2 * NC)) do v
@@ -427,15 +440,33 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
                 # (Its own names: `w` and `ρ` are captured below, and a
                 # captured variable assigned twice in one function is boxed.)
                 wf, ρf = interior_profiles(interior, g)
-                ntuple(Val(NC)) do v
-                    du[inner..., v, b] =
-                        wf * ∂ₜh[v] - ρf * (work[var + (v - 1) * sv] -
-                                            _cached_target(tw, inner, b, v, t, t_f))
-                    du[inner..., NC + v, b] =
-                        wf * ∂ₜΠ[v] - ρf * (work[var + (NC + v - 1) * sv] -
-                                            _cached_target(tw, inner, b, NC + v,
-                                                           t, t_f))
-                    nothing
+                if rate
+                    # The target's rate where `F` is switched off (step 8):
+                    # `(1 − w) ∂_t u_fit`, so that a target that is the moving
+                    # solution is a steady state of the layer too.
+                    of = one(T) - wf
+                    ntuple(Val(NC)) do v
+                        du[inner..., v, b] =
+                            wf * ∂ₜh[v] + of * _cached_rate(tw, inner, b, v) -
+                            ρf * (work[var + (v - 1) * sv] -
+                                  _cached_target(tw, inner, b, v, t, t_f))
+                        du[inner..., NC + v, b] =
+                            wf * ∂ₜΠ[v] + of * _cached_rate(tw, inner, b, NC + v) -
+                            ρf * (work[var + (NC + v - 1) * sv] -
+                                  _cached_target(tw, inner, b, NC + v, t, t_f))
+                        nothing
+                    end
+                else
+                    ntuple(Val(NC)) do v
+                        du[inner..., v, b] =
+                            wf * ∂ₜh[v] - ρf * (work[var + (v - 1) * sv] -
+                                                _cached_target(tw, inner, b, v, t, t_f))
+                        du[inner..., NC + v, b] =
+                            wf * ∂ₜΠ[v] - ρf * (work[var + (NC + v - 1) * sv] -
+                                                _cached_target(tw, inner, b, NC + v,
+                                                               t, t_f))
+                        nothing
+                    end
                 end
             else
                 w, ρ = interior_profiles(interior, g)
@@ -597,6 +628,10 @@ struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A,X,Y}
     target::X
     fits::Y
     t_target::T
+    # Whether the `:fitted` target's rate is fed forward (step 8): the cache's
+    # slope then includes the fit's translation with the track, and the
+    # kernel adds `(1 − w) ∂_t u_fit` in the layer and the core.
+    target_rate::Bool
     hasdirichlet::Bool
     valG::Val{G}
     valq::Val{q}
@@ -608,7 +643,7 @@ end
 function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
                    t=zero(T), interior=case.interior, margin_check=true,
                    accounting=nothing, target=nothing, fits=nothing,
-                   t_target=zero(T)) where {T}
+                   t_target=zero(T), target_rate::Bool=false) where {T}
     q ≥ 2 && iseven(q) || throw(ArgumentError(
         "the finite-difference order must be even and at least 2, so that " *
         "the centered stencils have an integer half-width q/2 and CODE.md's " *
@@ -679,7 +714,7 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
                      typeof(spacings),typeof(case),typeof(interior),
                      typeof(accounting),typeof(target),typeof(fits)}(
         U, schedule, Hsrc, diag, origins, spacings, case, interior,
-        accounting, target, fits, T(t_target), hasdirichlet, Val(U.G),
+        accounting, target, fits, T(t_target), target_rate, hasdirichlet, Val(U.G),
         Val(Int(q)), Val(HASH), Val(DISS), Val(INT))
 end
 
@@ -700,7 +735,8 @@ which nothing about a new `ρ_max` invalidates. It shares the run's
 """
 function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior;
                        fits=p.fits, target=p.target,
-                       t_target=p.t_target) where {T,G,q,HASH,DISS}
+                       t_target=p.t_target,
+                       target_rate::Bool=p.target_rate) where {T,G,q,HASH,DISS}
     INT = interior_variant(interior)
     INT === :fitted && target === nothing && throw(ArgumentError(
         "a :fitted interior needs the problem's target cache; this problem " *
@@ -710,7 +746,8 @@ function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior;
                      typeof(p.spacings),typeof(p.case),typeof(interior),
                      typeof(p.accounting),typeof(target),typeof(fits)}(
         p.U, p.schedule, p.Hsrc, p.diag, p.origins, p.spacings, p.case,
-        interior, p.accounting, target, fits, T(t_target), p.hasdirichlet,
+        interior, p.accounting, target, fits, T(t_target), target_rate,
+        p.hasdirichlet,
         p.valG, p.valq, p.valH, p.valdiss, Val(INT))
 end
 
@@ -726,7 +763,8 @@ center has moved far enough (step 8e).
 function refill_target(p::GHProblem{T}, t; fits=p.fits) where {T}
     p.target === nothing && throw(ArgumentError(
         "this problem has no target cache to fill."))
-    fill_target!(p.target, p.origins, p.spacings, p.interior, fits, T(t))
+    fill_target!(p.target, p.origins, p.spacings, p.interior, fits, T(t);
+                 rate=p.target_rate)
     return with_interior(p, p.interior; fits=fits, t_target=T(t))
 end
 
@@ -767,7 +805,8 @@ function gh_rhs!(du, u, p::GHProblem, t)
     map_blocks!(gh_rhs_kernel!, p.U, statearray(du, p.U), p.U.work,
                 gauge_work(p.Hsrc), p.origins, p.spacings, p.case.background,
                 p.case.γ0, p.case.γ2, p.case.ε_KO, p.interior, eltype(p.U.work)(t),
-                target_work(p.target), p.t_target, p.valG, p.valq, p.valH,
+                target_work(p.target), p.t_target, p.target_rate, p.valG,
+                p.valq, p.valH,
                 p.valdiss, p.valint)
     return nothing
 end

@@ -93,7 +93,7 @@ say(fmt, args...) = println(Printf.format(Printf.Format(fmt), args...))
 # since no bare name was given).
 const SECTION_NAMES = ["order", "long", "charts", "indicator", "horizon",
                        "bounds", "leakage", "calibration", "tracked", "fitted",
-                       "generic"]
+                       "generic", "moving"]
 const SECTIONS = let names = filter(a -> !occursin('=', a), ARGS)
     keyed = [first(split(a, '='; limit=2)) for a in ARGS if occursin('=', a)]
     isempty(names) && !any(in(SECTION_NAMES), keyed) ?
@@ -2590,8 +2590,8 @@ function gen_run(sp; t_end=nothing)
             nblocks=nleaves(forest), obs=obs, recs=recs)
 end
 
-function gen_fanout(batches; tag, t_end)
-    base = isdir("out") ? joinpath("out", "generic") : mktempdir()
+function gen_fanout(batches; tag, t_end, section="generic")
+    base = isdir("out") ? joinpath("out", section) : mktempdir()
     dir = mkpath(joinpath(base, tag))
     println("   worker logs and results in ", abspath(dir))
     project = dirname(Base.active_project())
@@ -2606,7 +2606,7 @@ function gen_fanout(batches; tag, t_end)
         te = t_end === nothing ? "" : "t_end=$(leak_spell(t_end))"
         dl = isfinite(GEN_DEADLINE[]) ? "deadline=$(GEN_DEADLINE[])" : ""
         cmd = `$(Base.julia_cmd()) --project=$project --threads=$nt
-               $(abspath(@__FILE__)) generic worker=1
+               $(abspath(@__FILE__)) $section worker=1
                runs=$(join(labels, ',')) out=$out $te $dl`
         # One BLAS thread a worker: a fit's QR is small, and OpenBLAS's
         # default pool of a thread per core, spinning after every call, put a
@@ -2954,6 +2954,532 @@ if "generic" in SECTIONS || haskey(OPTIONS, "generic")
             gen_report(results)
         end
         probe && gen_probe()
+    end
+end
+
+# --- (12) the moving hole: G5 (step 8) --------------------------------------
+#
+# `PLAN.md`'s step 8 and `CODE.md`'s milestone G5: harmonic Kerr at `a = 7/10`
+# (decided 2026-09-23), boosted at `v = 0.3 x̂` — which moves it at `−0.3 x̂`,
+# `hole_velocity`'s sign — run as the `:fitted` variant on the tracked
+# geometry, on a mesh the indicator chooses and re-chooses at every chunk
+# boundary, against the controls that say what each claim of G5 rests on:
+#
+#   * `g5`: the crossing — `g5-adaptive`, from `x = 2` in a box of half-width
+#     `5 M` on a `4³` root brick, finest `h = 5/256` (level 4), and
+#     `g5-static`, the same hole at rest at the center, the "static run's
+#     level" the crossing is compared with;
+#   * `g5u`: the same crossing in a box of half-width `5/2 M` against a
+#     uniform mesh at the finest spacing (`g5b-adaptive`, `g5b-uniform`);
+#   * `conv`: the frozen hierarchy — a capsule of fine blocks around the
+#     trajectory, held fixed, `N = 8, 12, 16` with the margin and the ramp
+#     scaled with `N` so that the physical geometry is the same — on G5's
+#     chart (`conv-h7-N…`) and, with the analytic sphere at `20/M`, on the
+#     boosted `a = 0` hole (`conv-a0-N…`);
+#   * `ctl`: the boosted `a = 0` hole, where the analytic layer exists:
+#     `:fitted`, `:damped` at `20/M`, `:frozen` (predicted to fail) on the
+#     adaptive mesh across the box, and the adaptive-against-uniform pair in
+#     the `5/2` box at `h = 5/128`.
+#
+# Every row writes one line per chunk (the masked error, the error outside a
+# fixed sphere enclosing the horizon about the analytic center — the norm the
+# convergence rows compare, since the masked region moves with the offset
+# surface —, the shell's `C_a`, the layer's residual against the *truth* by
+# depth and by side, trailing or leading, the finder's `A`, `M_irr`, `J`,
+# `M_ch` and the found horizon's extent along the boost against the
+# analytic contraction), and the report adds the record's rows: the
+# refinement centroid against the analytic center in finest spacings, the
+# track, the blocks and levels per chunk. As in `generic`, with sixteen or
+# more threads the rows of a group are subprocess workers
+# (`moving=<group or label>,… threads=<n> tag=<name> t_end=<t> budget=<s>`),
+# and `moving=mesh` alone runs only the initial-data cycle of every
+# adaptive row and prints its mesh — a local check of what a row will cost:
+#
+#     julia --project=. --threads=4 test/hole_runs.jl moving=mesh
+#     julia --project=. --threads=4 test/hole_runs.jl moving=ctl-a0-fitted t_end=1/2
+
+const MV_Q = 2
+const MV_G = MV_Q ÷ 2 + 1
+
+mv_spec(label; chart=:h7, geom=:fitted, x0=0 // 1, v=3 // 10, halfwidth=5 // 1,
+        roots=4, N=8, cap=4, mesh=:adaptive, t_end, chunk=1 // 4,
+        margin=nothing, n_L=0, radii=nothing, rate=nothing, workers=nothing,
+        kw=(;)) =
+    (label=label, chart=chart, geom=geom, x0=x0, v=v, halfwidth=halfwidth,
+     roots=roots, N=N, cap=cap, mesh=mesh, t_end=t_end, chunk=chunk,
+     margin=margin, n_L=n_L, radii=radii, rate=rate, workers=workers, kw=kw)
+
+function mv_groups()
+    d = Dict{String,Vector{Any}}()
+    # The crossing: from x = 2 to x = −1.9 in 13 M, with the static hole at
+    # the center over the same time. (The horizon's equator is at 1 M and the
+    # ceiling one coarse cell, 5/16, deep: the hole stays 1.8 M clear of it.)
+    d["g5"] = Any[
+        mv_spec("g5-adaptive"; x0=2 // 1, t_end=13 // 1, workers=40),
+        mv_spec("g5-static"; v=0 // 1, t_end=13 // 1, workers=24)]
+    # The adaptive run against the uniform mesh at its finest spacing, in the
+    # box the uniform mesh fits a node in: 256³ points at 5/256.
+    d["g5u"] = Any[
+        mv_spec("g5b-adaptive"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=2 // 1,
+                workers=12),
+        mv_spec("g5b-uniform"; x0=3 // 10, halfwidth=5 // 2, roots=16, N=16,
+                mesh=:uniform, t_end=2 // 1, workers=52)]
+    # The frozen hierarchy: N = 8, 12, 16, the margin and the ramp in cells
+    # scaled with N so that the offset surface and the core surface are the
+    # same surfaces at every N; the capsule covers the trajectory to t_end.
+    d["conv"] = Any[]
+    for (N, w) in ((8, 6), (12, 14), (16, 36))
+        push!(d["conv"], mv_spec("conv-h7-N$N"; x0=3 // 10, halfwidth=5 // 2,
+                                 roots=2, N=N, mesh=:capsule, t_end=1 // 2,
+                                 chunk=1 // 8, margin=N ÷ 2, n_L=N,
+                                 radii=(10 // 1, 10 // 1, 3 // 2, 5 // 4),
+                                 workers=w))
+    end
+    for (N, w) in ((8, 2), (12, 2), (16, 4))
+        push!(d["conv"], mv_spec("conv-a0-N$N"; chart=:h0, geom=:sphere,
+                                 x0=3 // 10, halfwidth=5 // 2, roots=2, N=N,
+                                 cap=3, mesh=:capsule, t_end=1 // 2, chunk=1 // 8,
+                                 margin=N, n_L=12 * N ÷ 8, rate=20,
+                                 radii=(10 // 1, 10 // 1, 3 // 2), workers=w))
+    end
+    # The boosted a = 0 hole across the box at h = 5/128: the layer the chart
+    # allows as control, the rate a moving analytic layer needs (step 8f), and
+    # the frozen core, whose failure G5 asks to be measured.
+    d["ctl"] = Any[
+        mv_spec("ctl-a0-fitted"; chart=:h0, x0=2 // 1, cap=3, t_end=13 // 1,
+                workers=12),
+        mv_spec("ctl-a0-damped20"; chart=:h0, geom=:damped, x0=2 // 1, cap=3,
+                t_end=13 // 1, rate=20, workers=12),
+        mv_spec("ctl-a0-frozen"; chart=:h0, geom=:frozen, x0=2 // 1, cap=3,
+                t_end=13 // 1, workers=8),
+        mv_spec("ctl-a0b-adaptive"; chart=:h0, x0=3 // 4, halfwidth=5 // 2,
+                roots=2, cap=3, t_end=5 // 1, workers=8),
+        mv_spec("ctl-a0b-uniform"; chart=:h0, x0=3 // 4, halfwidth=5 // 2,
+                roots=16, cap=3, mesh=:uniform, t_end=5 // 1, workers=24)]
+    return d
+end
+
+function mv_all_specs()
+    all = Dict{String,Any}()
+    for (_, v) in mv_groups(), sp in v
+        all[sp.label] = sp
+    end
+    return all
+end
+
+function mv_background(sp)
+    a = sp.chart === :h7 ? T(7 // 10) : zero(T)
+    bg = SM.Harmonic(one(T), a)
+    iszero(sp.v) || (bg = SM.boost(bg, SVector{3,T}(T(sp.v), 0, 0)))
+    return SM.translate(bg, SVector{4,T}(0, T(sp.x0), 0, 0))
+end
+
+# The finest spacing a row's mesh reaches: the root spacing over `2^cap`, or
+# the uniform mesh's own.
+mv_hfine(sp) = sp.mesh === :uniform ? 2 * T(sp.halfwidth) / (sp.roots * sp.N) :
+               2 * T(sp.halfwidth) / (sp.roots * sp.N) / 2^sp.cap
+
+# The fixed frozen hierarchy around the trajectory (the capsule of step 8f's
+# boosted rows, on a root brick of `roots³`).
+function mv_capsule_forest(case, sp)
+    forest = gh_forest(T, case; N=sp.N, roots=sp.roots)
+    ts = range(zero(T), T(sp.t_end); length=33)
+    cs = [Tuple(center_at(case.center, t)) for t in ts]
+    for (ℓ, R) in enumerate(sp.radii)
+        targets = filter(forest.leaves) do k
+            level(k) == ℓ - 1 &&
+                any(c -> TreeGeneralizedHarmonic._box_meets_ball(block_extent(T, forest, k),
+                                                                 c, T(R)), cs)
+        end
+        refine!(forest, targets)
+        balance!(forest)
+    end
+    return forest
+end
+
+"""
+The case, the forest and the `evolve!` keywords of one moving row.
+"""
+function mv_setup(sp)
+    bg = mv_background(sp)
+    h7 = sp.chart === :h7
+    L_shape, L_fit, N_ah = h7 ? (12, 12, 16) : (4, 8, 12)
+    m = sp.margin !== nothing ? sp.margin : h7 ? 4 : 8
+    hf = mv_hfine(sp)
+    ref = sp.mesh === :adaptive ?
+          Refinement(T; refine_tol=T(2 // 5), coarsen_tol=T(1 // 10),
+                     maxlevel_cap=sp.cap, floor_margin=zero(T), ceiling_cells=1) :
+          nothing
+    hz = Horizon(T; every=1, N=N_ah, spin=true)
+    c0 = (T(sp.x0), zero(T), zero(T))
+    if sp.geom === :sphere
+        nL = sp.n_L > 0 ? sp.n_L : 12
+        r_1 = T(horizon_min_radius(bg)) - m * hf
+        case0 = hole_case(T, bg; halfwidth=T(sp.halfwidth), chunk=T(sp.chunk),
+                          center=c0, interior=:damped, r_0=r_1 - nL * hf, r_1=r_1,
+                          ρ_ramp=one(T), margin=m, horizon=hz, refinement=ref)
+    else
+        spec = FittedSpec(T; variant=sp.geom, margin=m, n_L=sp.n_L,
+                          lmax_shape=L_shape, lmax_fit=L_fit)
+        case0 = hole_case(T, bg; halfwidth=T(sp.halfwidth), chunk=T(sp.chunk),
+                          center=c0, interior=spec, horizon=hz, refinement=ref)
+    end
+    forest = if sp.mesh === :uniform
+        gh_forest(T, case0; N=sp.N, roots=sp.roots)
+    elseif sp.mesh === :capsule
+        mv_capsule_forest(case0, sp)
+    else
+        # The starting mesh of the cycle: shells to the finest level around
+        # the initial center, which the cycle then shapes. The finest shell
+        # holds the horizon's equator and the ramp below it.
+        radii = sp.radii !== nothing ? sp.radii :
+                sp.cap == 4 ? (T(3), T(2), T(3 // 2), T(6 // 5)) :
+                (T(3), T(2), T(13 // 10))
+        hole_forest(T, case0; N=sp.N, roots=sp.roots, radii=radii)
+    end
+    if sp.geom === :sphere
+        gate = default_gate(case0.interior, forest, MV_Q)
+        case = with_bounds(case0, mv_sphere_bounds(bg, case0.interior, gate))
+    else
+        geom = gen_seed_geometry(case0, forest)
+        gate = default_gate(geom, forest, MV_Q)
+        case = with_bounds(case0, gen_layer_bounds(bg, geom, gate))
+    end
+    kw = (cfl=T(1 // 5), adapt=sp.mesh === :adaptive, regrid=sp.mesh === :adaptive)
+    if sp.geom === :fitted
+        nL = sp.n_L > 0 ? sp.n_L :
+             layer_cells(MV_G, sp.rate === nothing ? default_relaxation_rate(case) :
+                               T(sp.rate), one(T))
+        kw = merge(kw, (fit_initial_depth=nL * hf,))
+    end
+    sp.rate === nothing || (kw = merge(kw, (ρ_max_fixed=T(sp.rate),)))
+    return case, forest, merge(kw, sp.kw)
+end
+
+# `gen_layer_bounds`' rule for step 5's sphere: the ranges of the analytic
+# data on the whole layer `r_0 ≤ r ≤ r_1` about the analytic center at
+# `t = 0`, so that the projection is passive on healthy data — step 8b's
+# Kerr-Schild proposal is exceeded by the harmonic chart's layer and fired
+# on the initial data (316 hits on `conv-a0-N8` at `t = 0`).
+function mv_sphere_bounds(bg, int, gate)
+    c = center_at(int.center, zero(T))
+    αlo, αhi, λlo, λhi, βhi, Khi = Inf, 0.0, Inf, 0.0, 0.0, 0.0
+    for n in fit_directions(12), s in range(0, 1; length=17)
+        r = int.r_0 + s * (int.r_1 - int.r_0)
+        u = SVector{20,T}(state_tuple(bg, zero(T), Tuple(c + r * SVector{3,T}(n))))
+        all(isfinite, u) || continue
+        hv = SVector{10,T}(ntuple(i -> u[i], 10))
+        d, α, _, _ = state_validity(hv, SVector{10,T}(ntuple(i -> u[10 + i], 10)))
+        (d > 0 && α > 0) || continue
+        γ = SMatrix{3,3,T}(1 + hv[5], hv[6], hv[7], hv[6], 1 + hv[8], hv[9], hv[7],
+                           hv[9], 1 + hv[10])
+        λ, _ = sym_eigen3(γ)
+        β = γ \ SVector{3,T}(hv[2], hv[3], hv[4])
+        αlo, αhi = min(αlo, α), max(αhi, α)
+        λlo, λhi = min(λlo, minimum(λ)), max(λhi, maximum(λ))
+        βhi = max(βhi, sqrt(max(β' * γ * β, zero(T))))
+        Khi = max(Khi, maximum(abs, u[11:20]) * α / sqrt(d))
+    end
+    return TreeGeneralizedHarmonic.StateBounds{T}(min(αlo / 4, 0.5), max(4αhi, 2.0),
+                                                  min(λlo / 4, 0.5), max(4λhi, 2.0),
+                                                  4βhi, 4Khi, gate)
+end
+
+# The layer's residual against the truth, by depth (four bins of the ramp,
+# the offset surface first) and by side — trailing, `(x − c)·v < 0`, where
+# the moving core releases points, or leading — as the largest `|u − u_exact|`
+# over the twenty variables: `CODE.md`'s "points released by the core relaxed
+# within `1/ρ_max`" as a number per chunk. Host-side, a test script's loop.
+function mv_layer_residual(p, u, t, bg)
+    int = p.interior
+    fs = p.U
+    A = statearray(u, fs)
+    G = first(fs.G)
+    N = fs.forest.N
+    vv = SVector{3,T}(hole_velocity(bg))
+    res = zeros(2, 4)
+    cnt = zeros(Int, 2, 4)
+    c = center_at(int.center, T(t))
+    for b in 1:nblocks(fs), k in 1:N, j in 1:N, i in 1:N
+        x = SVector{3,T}(coordinates(fs, b, (i + G, j + G, k + G)))
+        if int isa FittedInterior
+            g = interior_point(int, T(t), x)
+            r, r1, th = g.r, g.r_1, int.thickness
+        else
+            r, r1, th = interior_point(int, T(t), x), int.r_1, int.r_1 - int.r_0
+        end
+        d = r1 - r
+        (0 < d ≤ th) || continue
+        ue = state_tuple(bg, T(t), Tuple(x))
+        side = sum((x - c) .* vv) < 0 ? 1 : 2
+        bin = clamp(ceil(Int, 4 * d / th), 1, 4)
+        δ = maximum(v -> abs(A[i, j, k, v, b] - ue[v]), 1:20)
+        isfinite(δ) || (δ = Inf)
+        res[side, bin] = max(res[side, bin], δ)
+        cnt[side, bin] += 1
+    end
+    return res, cnt
+end
+
+"""
+One moving row: `evolve!` with an observer that writes a line per chunk and
+a finder wrapper that keeps the horizon's numbers and extent.
+"""
+function mv_run(sp; t_end=nothing)
+    case, forest, kw = mv_setup(sp)
+    bg = case.background
+    q = MV_Q
+    tend = t_end === nothing ? T(sp.t_end) : min(T(t_end), T(sp.t_end))
+    obs = NamedTuple[]
+    hzs = Dict{Float64,Any}()
+    tstart = time()
+    R_ext = T(horizon_max_radius(bg)) + 3 * mv_hfine(sp) * (sp.N ÷ 8)
+    ax = (SVector{3,T}(1, 0, 0), SVector{3,T}(0, 1, 0), SVector{3,T}(0, 0, 1))
+    contraction = T(analytic_horizon_radius(bg, ax[1]) / analytic_horizon_radius(bg, ax[2]))
+    function finder(p, u, t; kw...)
+        o = find_gh_horizon(p, u, t; kw...)
+        sh = SVector{169,T}(real_shape(o.hlm, o.grid, 12))
+        ext = map(n -> shape_series(sh, 12, n) + shape_series(sh, 12, -n), ax)
+        hzs[Float64(t)] = (area=o.area, M_irr=o.M_irr, J=o.J, M_ch=o.M_ch,
+                           success=o.success, extent=ext,
+                           contraction=ext[1] / ext[2])
+        return o
+    end
+    function watch(p, t, u)
+        tt = T(t)
+        int = p.interior
+        gh_error!(p, u, tt; shell=horizon_shell(case, int))
+        e = error_norms(p)
+        gh_constraint!(p, u, tt)
+        cn = constraint_norms(p)
+        sh = gh_outside_shell_norms(p, u, tt)
+        ca = center_at(case.center, tt)
+        gh_error!(p, u, tt; mask=ShellMask{T}(ca, R_ext, T(1e6)))
+        ex = error_norms(p)
+        lr, lc = mv_layer_residual(p, u, tt, bg)
+        acc = p.accounting
+        hz = get(hzs, Float64(tt), nothing)
+        row = (t=Float64(tt), err_l2=e.err_l2, err_linf=e.err_linf,
+               ext_l2=ex.err_l2, ext_linf=ex.err_linf,
+               gauge_l2=Float64(maximum(cn.gauge_l2)), residual=e.residual,
+               drift=e.drift, sh_l2=sh.gauge_l2, layer=lr, layer_n=lc,
+               hits=acc === nothing ? 0 : acc.hits,
+               nblocks=nleaves(p.U.forest), variant=interior_variant(int),
+               area=hz === nothing ? nothing : hz.area,
+               M_irr=hz === nothing ? nothing : hz.M_irr,
+               J=hz === nothing ? nothing : hz.J,
+               M_ch=hz === nothing ? nothing : hz.M_ch,
+               contraction=hz === nothing ? nothing : hz.contraction,
+               extent=hz === nothing ? nothing : hz.extent)
+        push!(obs, row)
+        say("   [%s] t=%6.3f err=%s/%s ext=%s/%s C=%s shC=%s res=%s layer(trail|lead, " *
+            "outer→inner)=%s|%s hits=%d M_irr=%s J=%s M_ch=%s x/y=%s (%s) blocks=%d %.0fs",
+            sp.label, row.t, gen_fmt(row.err_l2), gen_fmt(row.err_linf),
+            gen_fmt(row.ext_l2), gen_fmt(row.ext_linf), gen_fmt(row.gauge_l2),
+            gen_fmt(row.sh_l2), gen_fmt(row.residual),
+            join(gen_fmt.(lr[1, :]), ","), join(gen_fmt.(lr[2, :]), ","), row.hits,
+            gen_fmt(row.M_irr), gen_fmt(row.J), gen_fmt(row.M_ch),
+            gen_fmt(row.contraction), gen_fmt(contraction), row.nblocks,
+            time() - tstart)
+        flush(stdout)
+        time() > GEN_DEADLINE[] && throw(GenDeadline(row.t))
+        return nothing
+    end
+    t0 = time()
+    failure = nothing
+    stopped = false
+    out = try
+        evolve!(T, case; forest=forest, q=q,
+                ops=Operators(prolongation=q + 2, restriction=q + 2),
+                t_end=tend, observer=watch, find=finder, kw...)
+    catch err
+        err isa InterruptException && rethrow()
+        if err isa GenDeadline
+            stopped = true
+            say("   [%s] stopped at the deadline, t = %.3f M", sp.label, err.t)
+        else
+            failure = cal_root_cause(err)
+            err isa TrackLostError && (failure = "track lost: " * failure)
+        end
+        nothing
+    end
+    wall = time() - t0
+    reached = isempty(obs) ? 0.0 : obs[end].t
+    recs = out === nothing ? NamedTuple[] :
+           [(t=r.t, dt=r.dt, λ=r.λ, λ_end=r.λ_end, cfl=r.cfl, fit_valid=r.fit_valid,
+             fit_residual=r.fit_residual, track_offset=r.track_offset,
+             track_prediction=r.track_prediction, track_source=r.track_source,
+             track_center=r.track_center, track_velocity=r.track_velocity,
+             margin_efolds=r.margin_efolds, bounds_r_max=r.bounds_r_max,
+             center_offset=r.center_offset, horizon_success=r.horizon_success,
+             τ_max=r.τ_max, centroid=r.centroid, centroid_offset=r.centroid_offset,
+             nblocks=r.nblocks, levels=r.levels, h=r.h, layer_h=r.layer_h,
+             variant=r.variant) for r in out.records]
+    npts = out === nothing ? nothing : nleaves(out.forest) * sp.N^3
+    say("   done [%s] reached %.3f M of %.3f in %.0f s (%s steps, %s blocks at the end, " *
+        "%s passes, %s regrids)%s", sp.label, reached, tend, wall,
+        out === nothing ? "?" : string(out.nsteps),
+        out === nothing ? "?" : string(out.nblocks),
+        out === nothing ? "?" : string(out.passes),
+        out === nothing ? "?" : string(out.nregrids),
+        failure === nothing ? "" : ", then threw: " * failure)
+    out === nothing || say("   fits [%s]: %s", sp.label, string(out.fit_cost))
+    flush(stdout)
+    return (label=sp.label, spec=sp, reached=reached, t_end=Float64(tend),
+            failure=failure, stopped=stopped, wall=wall,
+            nsteps=out === nothing ? nothing : out.nsteps, obs=obs, recs=recs,
+            contraction=Float64(contraction), npoints=npts)
+end
+
+# Only the initial-data cycle of each adaptive row: its mesh, its levels and
+# what it took — what a row will cost, before it is sent anywhere.
+function mv_mesh(sp)
+    case, forest, kw = mv_setup(sp)
+    t0 = time()
+    out = try
+        evolve!(T, case; forest=forest, q=MV_Q,
+                ops=Operators(prolongation=MV_Q + 2, restriction=MV_Q + 2),
+                t_end=T(1 // 10^6), kw...)
+    catch err
+        say("   mesh [%s]: threw %s", sp.label, cal_root_cause(err))
+        return nothing
+    end
+    r = out.records[1]
+    say("   mesh [%s]: %d blocks (%s), %d points, %d passes, h = %.5f, layer h = %s, " *
+        "τ_max = %s, centroid offset %s M (centroid %s), err %s, %.0f s", sp.label,
+        out.nblocks, join(out.levels, "/"), out.nblocks * sp.N^3, out.passes, out.h,
+        gen_fmt(r.layer_h), gen_fmt(r.τ_max), gen_fmt(r.centroid_offset),
+        r.centroid === nothing ? "—" : join(gen_fmt.(r.centroid), ", "),
+        gen_fmt(r.err_l2), time() - t0)
+    return out
+end
+
+function mv_report(results)
+    println("\n-- the moving rows: the last chunk, and the extremes over the run --")
+    println("| row | reached | end | blocks (min–max) | err L2 / L∞ | ext L2 / L∞ | shell C_a " *
+            "| layer, trailing outer / leading outer | hits | fit valid | centroid offset " *
+            "(max, finest h) | track offset (max, cells) | M_irr / J / M_ch | x/y extent " *
+            "(analytic) | wall |")
+    for r in sort(results; by=r -> r.label)
+        isempty(r.obs) && (say("| %s | 0 | %s |", r.label,
+                                r.failure === nothing ? "?" : r.failure); continue)
+        l = r.obs[end]
+        hz = findlast(x -> x.M_irr !== nothing, r.obs)
+        nb = [x.nblocks for x in r.obs]
+        co = [x.centroid_offset / x.h for x in r.recs if x.centroid_offset !== nothing]
+        to = [x.track_offset for x in r.recs if x.track_offset !== nothing]
+        fv = isempty(r.recs) ? nothing : all(x -> x.fit_valid !== false, r.recs)
+        say("| %s | %.2f | %s | %d–%d | %s / %s | %s / %s | %s | %s / %s | %d | %s | %s | %s " *
+            "| %s / %s / %s | %s (%.5f) | %.0f s |", r.label, r.reached,
+            r.failure !== nothing ? "threw" : r.stopped ? "deadline" : "ok",
+            minimum(nb), maximum(nb), gen_fmt(l.err_l2), gen_fmt(l.err_linf),
+            gen_fmt(l.ext_l2), gen_fmt(l.ext_linf), gen_fmt(l.sh_l2),
+            gen_fmt(l.layer[1, 1]), gen_fmt(l.layer[2, 1]), l.hits, gen_fmt(fv),
+            isempty(co) ? "—" : gen_fmt(maximum(co)), isempty(to) ? "—" : gen_fmt(maximum(to)),
+            hz === nothing ? "—" : gen_fmt(r.obs[hz].M_irr),
+            hz === nothing ? "—" : gen_fmt(r.obs[hz].J),
+            hz === nothing ? "—" : gen_fmt(r.obs[hz].M_ch),
+            hz === nothing ? "—" : gen_fmt(r.obs[hz].contraction), r.contraction, r.wall)
+    end
+    for r in results
+        r.failure === nothing || say("   %s threw at %.3f M: %s", r.label, r.reached,
+                                     r.failure)
+    end
+    println("\n-- time series: masked err L2 / ext err L2 / blocks / centroid offset (finest h) --")
+    for r in sort(results; by=r -> r.label)
+        isempty(r.obs) && continue
+        step = r.t_end ≥ 4 ? 1.0 : r.t_end / 4
+        pts = [i for (i, x) in enumerate(r.obs) if x.t == 0 ||
+               abs(x.t / step - round(x.t / step)) < 1e-6 || i == length(r.obs)]
+        cell(i) = begin
+            x = r.obs[i]
+            rc = i ≤ length(r.recs) ? r.recs[i] : nothing
+            c = rc === nothing || rc.centroid_offset === nothing ? "—" :
+                Printf.format(Printf.Format("%.2f"), rc.centroid_offset / rc.h)
+            Printf.format(Printf.Format("t=%.4g %.3e/%.3e/%d/%s"), x.t, x.err_l2,
+                          x.ext_l2, x.nblocks, c)
+        end
+        println("   ", r.label, ": ", join(cell.(pts), "  "))
+    end
+    # The frozen-hierarchy rates: the error outside the fixed sphere, at the
+    # common times, between successive N of one chart.
+    for chart in ("h7", "a0")
+        rows = sort([r for r in results if startswith(r.label, "conv-$chart-N") &&
+                     !isempty(r.obs)]; by=r -> r.spec.N)
+        length(rows) ≥ 2 || continue
+        println("\n-- frozen hierarchy, $chart: ext err L2 (masked err L2) and the rates --")
+        for i in eachindex(rows[1].obs)
+            ts = rows[1].obs[i].t
+            es = [findfirst(x -> abs(x.t - ts) < 1e-9, r.obs) for r in rows]
+            any(isnothing, es) && continue
+            ext = [rows[k].obs[es[k]].ext_l2 for k in eachindex(rows)]
+            msk = [rows[k].obs[es[k]].err_l2 for k in eachindex(rows)]
+            rates = [log(ext[k] / ext[k + 1]) / log(rows[k + 1].spec.N / rows[k].spec.N)
+                     for k in 1:length(rows) - 1]
+            mrates = [log(msk[k] / msk[k + 1]) / log(rows[k + 1].spec.N / rows[k].spec.N)
+                      for k in 1:length(rows) - 1]
+            say("   t=%.4g  N=%s  ext %s  rates %s   masked %s  rates %s", ts,
+                join([r.spec.N for r in rows], "/"), join(gen_fmt.(ext), " "),
+                join([Printf.format(Printf.Format("%.2f"), x) for x in rates], " "),
+                join(gen_fmt.(msk), " "),
+                join([Printf.format(Printf.Format("%.2f"), x) for x in mrates], " "))
+        end
+    end
+end
+
+if "moving" in SECTIONS || haskey(OPTIONS, "moving")
+    LinearAlgebra.BLAS.set_num_threads(1)
+    haskey(OPTIONS, "budget") &&
+        (GEN_DEADLINE[] = time() + parse(Float64, OPTIONS["budget"]))
+    haskey(OPTIONS, "deadline") && (GEN_DEADLINE[] = parse(Float64, OPTIONS["deadline"]))
+    t_end_opt = haskey(OPTIONS, "t_end") ? only(leak_option("t_end", [1 // 1])) : nothing
+    mv_specs = mv_all_specs()
+    if haskey(OPTIONS, "worker")
+        labels = String.(split(OPTIONS["runs"], ','))
+        res = [mv_run(mv_specs[l]; t_end=t_end_opt) for l in labels]
+        serialize(OPTIONS["out"], res)
+    else
+        groups = mv_groups()
+        names = haskey(OPTIONS, "moving") ?
+                String.(split(OPTIONS["moving"], r"[,+]")) : ["g5", "g5u", "conv", "ctl"]
+        println("\n=== (12) the moving hole: G5 ===")
+        if all(startswith("mesh"), names)
+            for g in ("g5", "g5u", "ctl"), sp in groups[g]
+                sp.mesh === :adaptive || continue
+                (names == ["mesh"] || "mesh:" * sp.label in names) && mv_mesh(sp)
+            end
+        else
+            labels = String[]
+            for n in names
+                if haskey(groups, n)
+                    append!(labels, [sp.label for sp in groups[n]])
+                elseif haskey(mv_specs, n)
+                    push!(labels, n)
+                else
+                    error("no moving group or row $n")
+                end
+            end
+            nt = Threads.nthreads()
+            say("%d rows (%s) at %d threads%s", length(labels), join(names, ", "), nt,
+                t_end_opt === nothing ? "" : ", t_end ≤ $(Float64(t_end_opt)) M")
+            t0 = time()
+            results = if nt ≥ 16 && length(labels) > 1
+                wts = map(labels) do l
+                    haskey(OPTIONS, "threads") ? parse(Int, OPTIONS["threads"]) :
+                    mv_specs[l].workers !== nothing ? mv_specs[l].workers :
+                    max(1, nt ÷ length(labels))
+                end
+                say("   workers of %s threads", join(wts, "/"))
+                reduce(vcat, gen_fanout([([l], w) for (l, w) in zip(labels, wts)];
+                                        tag=get(OPTIONS, "tag", join(names, "+")),
+                                        t_end=t_end_opt, section="moving");
+                       init=Any[])
+            else
+                [mv_run(mv_specs[l]; t_end=t_end_opt) for l in labels]
+            end
+            say("%d rows in %.0f s", length(results), time() - t0)
+            mv_report(results)
+        end
     end
 end
 

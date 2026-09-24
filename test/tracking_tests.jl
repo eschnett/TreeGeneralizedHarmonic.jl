@@ -317,7 +317,10 @@ end
         @test horizon_floor_level(forest, geom, case.background, 2) == 3
         lb = level_bounds(case, forest, 0, 2; interior=geom)
         @test lb.floor_level == 3
-        @test lb.floor_lo == geom.r_in - geom.offset
+        # From the core surface, not the offset surface (amended in step 8:
+        # the geometry's spacing is read over the whole layer, and a floor
+        # that left its inner blocks free let them coarsen).
+        @test lb.floor_lo == layer_radii(geom)[1]
         @test lb.floor_hi == geom.r_out
         @test_throws "fitted_interior" level_bounds(case, forest, 0, 2)
     end

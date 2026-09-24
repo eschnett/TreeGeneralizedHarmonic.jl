@@ -153,6 +153,7 @@ export GHADMProvider, gh_adm_provider, find_gh_horizon, horizon_radii
 
 # The driver
 export evolve!, check_cfl, forest_levels, horizon_shell, default_relaxation_rate
+export fill_fitted_initial!, adapt_fitted_initial_data!
 export discrete_gradient_momentum!
 
 include("precision.jl")

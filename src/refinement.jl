@@ -494,7 +494,17 @@ time `t`.
 The floor's shell is `r_1 ≤ r ≤ r_h,max + floor_margin` around the hole's
 analytic center `c(t)`, and its level is [`horizon_floor_level`](@ref)'s.
 A case with no interior has no horizon and therefore no floor, which the
-empty shell `(0, −1)` says.
+empty shell `(0, −1)` says. A tracked geometry's shell starts at its core
+surface instead of its offset surface, since its spacing is read over the
+whole layer (amended in step 8; see `_floor_inner_radius`).
+
+`travel` widens the shell by the distance the hole moves before the next
+regrid, `|v| · chunk`, inward and outward (added in step 8): the floor is
+evaluated at the regrid's `t`, and a layer that moves during the chunk must
+stay in blocks the floor held — on the trailing side the core surface
+recedes into blocks just inside the shell's inner radius, on the leading
+side the horizon advances toward its outer one. `0` for a static hole, whose
+bounds are then what they were.
 
 The ceiling's margin is `ceiling_cells` **coarse** cells — the spacing at
 level 0, not the current finest one — measured inward from every
@@ -503,7 +513,8 @@ capped at `ceiling_level`, which is 0: `CODE.md`'s "blocks within a few
 coarse cells of the domain boundary are capped at the coarsest level".
 """
 function level_bounds(case::GHCase{T}, forest::Forest{3}, t,
-                      G::Integer; interior=case.interior) where {T}
+                      G::Integer; interior=case.interior,
+                      travel=zero(T)) where {T}
     ref = case.refinement
     ref === nothing && throw(ArgumentError(
         "this case carries no refinement parameters, so it has no thresholds " *
@@ -524,8 +535,8 @@ function level_bounds(case::GHCase{T}, forest::Forest{3}, t,
     lo, hi, L = if int === nothing
         (zero(T), -one(T), 0)
     else
-        (layer_radii(int)[2],
-         geometry_radii(int, case.background)[2] + ref.floor_margin,
+        (max(_floor_inner_radius(int) - T(travel), zero(T)),
+         geometry_radii(int, case.background)[2] + ref.floor_margin + T(travel),
          horizon_floor_level(forest, int, case.background, G))
     end
     L ≤ ref.maxlevel_cap || throw(ArgumentError(
@@ -541,6 +552,21 @@ function level_bounds(case::GHCase{T}, forest::Forest{3}, t,
                                          case.periodic, margin,
                                          ref.ceiling_level, ref.maxlevel_cap)
 end
+
+# The floor's inner radius. Step 5's sphere floors from `r_1` outward: its
+# spacing requirement is read at the blocks containing `r_1`
+# (`layer_spacing`). A tracked geometry reads its spacing `h` as the
+# coarsest of **every** block the layer lives in, the annulus down to the
+# core surface ([`fitted_interior`](@ref)), and states its offset and ramp in
+# that `h` — so a block inside the offset surface that the floor did not
+# cover could coarsen (the indicator is masked there, so it asks to), the
+# next geometry would be built at twice the spacing, and the floor derived
+# from *that* geometry would ask for one level less: a mesh that coarsens
+# around the hole a level per regrid. So a tracked floor starts at the core
+# surface's smallest radius **(amended in step 8**, where the tracked
+# geometry is first regridded along a trajectory**)**.
+_floor_inner_radius(int::Interior) = layer_radii(int)[2]
+_floor_inner_radius(int::FittedInterior) = layer_radii(int)[1]
 
 # Whether a block's extent meets the spherical shell `lo ≤ r ≤ hi` around
 # `c`: its nearest point is no farther than `hi` and its farthest no nearer
@@ -875,7 +901,8 @@ passes it here passes `buffer = 0` to `regrid!` and to
 """
 function indicator_flags(U::FieldSet{T,3}, case::GHCase{T}, t;
                          scratch=nothing, G::Integer=first(U.G),
-                         buffer::Integer=0, interior=case.interior) where {T}
+                         buffer::Integer=0, interior=case.interior,
+                         travel=zero(T)) where {T}
     ref = case.refinement
     ref === nothing && throw(ArgumentError(
         "this case carries no refinement parameters: build it with " *
@@ -894,7 +921,7 @@ function indicator_flags(U::FieldSet{T,3}, case::GHCase{T}, t;
                       backend=backend) : scratch
     gh_tau!(τfs, U, origins, spacings, mask; scale=scale, ε=ref.ε)
     out = refine_flags(τfs, level_bounds(case, U.forest, t, G;
-                                         interior=interior), ref;
+                                         interior=interior, travel=travel), ref;
                        buffer=buffer)
     return (flags=out.flags, τ_max=out.τ_max, centroid=out.centroid,
             nfiring=out.nfiring, scale=scale)
@@ -913,8 +940,9 @@ the part that cannot be skipped: the Löhner stencil reaches one point past
 the block face, `regrid!` fills ghosts only after the flags are computed,
 and a stale ghost corrupts the verdict silently.
 """
-function gh_indicator!(p::GHProblem{T}, u, t; buffer::Integer=0) where {T}
+function gh_indicator!(p::GHProblem{T}, u, t; buffer::Integer=0,
+                       travel=zero(T)) where {T}
     _prepare_monitor!(p, u, t)
     return indicator_flags(p.U, p.case, T(t); scratch=p.diag, G=first(p.U.G),
-                           buffer=buffer, interior=p.interior)
+                           buffer=buffer, interior=p.interior, travel=travel)
 end

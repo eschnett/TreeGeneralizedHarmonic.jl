@@ -782,8 +782,8 @@ end
     # geometry and then relaxes toward a fit of the *evolved* state — no
     # initial-data kink, so its error is the analytic run's, and a switch at
     # the wrong chunk or onto a stale cache would show in the variant rows or
-    # in the error. The mesh cycle of a `:fitted` case flags on the analytic
-    # layer's data, and refuses a chart whose analytic core is singular.
+    # in the error. The mesh cycle of a `:fitted` case converges and runs
+    # (amended in step 8: it flags on the fitted data, `moving_tests.jl`).
     @testset "the snapshot, the hand-over and the mesh cycle (step 8f)" begin
         cf = fitted_fixture(T; variant=:fitted)
         forest = hole_fixture_forest(T, cf; N=8)
@@ -863,19 +863,9 @@ end
         # Measured: one pass to 288 blocks, the masked error 1.9e−3 at 1/20 M.
         @test ao.records[end].err_l2 < 1e-2
         @info "the mesh cycle of a fitted case (step 8f)" passes = ao.passes nblocks = ao.nblocks err_l2 = ao.records[end].err_l2
-        # Harmonic Kerr at a = 7/10: the analytic core surface cuts the disk,
-        # so there is no analytic data to flag on, and the refusal says so.
-        c7 = hole_case(T, SM.Harmonic(one(T), T(7 // 10)); halfwidth=T(5 // 4),
-                       chunk=T(1 // 20),
-                       interior=FittedSpec(T; variant=:fitted, margin=4,
-                                           lmax_shape=12),
-                       horizon=Horizon(T; every=1, N=12, spin=false),
-                       refinement=Refinement(T; refine_tol=T(2 // 5),
-                                             coarsen_tol=T(1 // 10),
-                                             maxlevel_cap=3, floor_margin=zero(T),
-                                             ceiling_cells=1))
-        f7 = hole_forest(T, c7; N=8, roots=1, radii=(T(10), T(8 // 5), T(13 // 10)))
-        @test_throws "singular" evolve!(T, c7; forest=f7, q=q, ops=ops,
-                                        t_end=T(1 // 20), adapt=true)
+        # Harmonic Kerr at a = 7/10, whose analytic core surface cuts the
+        # disk, was refused here by name until step 8 gave a :fitted case a
+        # cycle on its own data; `moving_tests.jl` claims that cycle on this
+        # chart, and that the analytic geometry is still refused.
     end
 end
