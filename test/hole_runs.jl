@@ -91,7 +91,8 @@ say(fmt, args...) = println(Printf.format(Printf.Format(fmt), args...))
 # `hole_runs.jl bounds=damped6` alone run every default section as well,
 # since no bare name was given).
 const SECTION_NAMES = ["order", "long", "charts", "indicator", "horizon",
-                       "bounds", "leakage", "calibration", "tracked", "fitted"]
+                       "bounds", "leakage", "calibration", "tracked", "fitted",
+                       "generic"]
 const SECTIONS = let names = filter(a -> !occursin('=', a), ARGS)
     keyed = [first(split(a, '='; limit=2)) for a in ARGS if occursin('=', a)]
     isempty(names) && !any(in(SECTION_NAMES), keyed) ?
@@ -2190,6 +2191,714 @@ if "fitted" in SECTIONS || haskey(OPTIONS, "fitted")
             end
         end
     end
+    end
+end
+
+# --- (11) the measurement matrix: the generic interior (step 8f) -----------
+#
+# `PLAN.md`'s step 8f: every hole this package has, on the tracked geometry,
+# with the `:fitted` target against the analytic `:damped` layer where the
+# chart allows one, and the controls that say what the fit is worth — the
+# snapshot target (the state at the chunk's start, no fit), a Kerr target
+# built from the finder's own `M_ch`, `J` and origin, a hand-over from
+# `:damped` to `:fitted`, and a track that coasts. Its table is in `CODE.md`,
+# "The generic interior: the measurement matrix (step 8f)".
+#
+# **How it runs.** A run is a label (`ks0-fitted`, `boost-coast`, …) and a
+# group of runs is a batch job: `generic=<group or label>,…` (or `+`), with
+# `t_end=<t>` shortening every run — which is how each row is validated
+# locally before it is sent to Symmetry:
+#
+#     julia --project=. --threads=4 test/hole_runs.jl generic=ks0-fitted t_end=1/2
+#
+# The groups are `ks0` (Kerr-Schild `a = 0` to `50 M`: six rows and the
+# hand-over, 120 blocks each), `ks9` (Kerr-Schild `a = 9/10` at `h = 5/128`,
+# 1128 blocks), `harm` (harmonic `a = 0` and `a = 7/10`), `boost` (a boosted
+# harmonic hole crossing a fixed fine region, and the coasting track), and
+# `probe` (harmonic `a = 9/10`, host-side and in-process). With sixteen or
+# more threads the runs of a group go to subprocess workers of `threads=<n>`
+# threads each (default: the node's threads over the runs); each worker prints
+# one line per chunk, so a job cut off by its time limit leaves every finished
+# row in its log.
+#
+# Every row records, per chunk: the masked error (L2, L∞), the masked gauge
+# constraint, the `G`-point shell's `C_a` above the offset surface, the `C_a`
+# in step 8a's shells `[r_h + k h, r_h + (k+1) h)` outside the tracked horizon
+# (`k = 0, 2, 4`), the layer residual (against the truth for the analytic
+# variants, against the target for `:fitted`), the drift, the projection's
+# hits and outermost radius, `fit_valid` and `fit_residual`, the find's `A`,
+# `M_irr`, `J`, `M_ch` and the track's offset from the analytic center.
+
+const GEN_Q = 2
+const GEN_G = GEN_Q ÷ 2 + 1
+const GEN_HSHELLS = (0, 2, 4)
+
+gen_spec(label; chart, variant=:fitted, t_end, chunk, spec=(;), kw=(;),
+         kerr=false, coast=nothing) =
+    (label=label, chart=chart, variant=variant, t_end=t_end, chunk=chunk,
+     spec=spec, kw=kw, kerr=kerr, coast=coast)
+
+# The rows, by group. `kw` goes to `evolve!`; `spec` to `FittedSpec`.
+function gen_groups()
+    d = Dict{String,Vector{Any}}()
+    ks = (t_end=50 // 1, chunk=1 // 2)
+    dn = (fit_initial_depth=8 * T(5 // 64),)
+    d["ks0"] = Any[
+        gen_spec("ks0-damped"; chart=:ks0, variant=:damped, ks...),
+        gen_spec("ks0-fitted"; chart=:ks0, kw=dn, ks...),
+        gen_spec("ks0-fitted-r1"; chart=:ks0, ks...),
+        gen_spec("ks0-fitted-pi"; chart=:ks0, kw=dn, spec=(fit_tilde=false,), ks...),
+        gen_spec("ks0-snapshot"; chart=:ks0, kw=(dn..., target_source=:snapshot), ks...),
+        gen_spec("ks0-kerr"; chart=:ks0, variant=:damped, kerr=true, ks...),
+        gen_spec("handover"; chart=:ks0, kw=(handover=5 // 1,), ks...)]
+    k9 = (t_end=50 // 1, chunk=1 // 2)
+    d["ks9"] = Any[
+        gen_spec("ks9-damped"; chart=:ks9, variant=:damped, spec=(margin=5,), k9...),
+        gen_spec("ks9-fitted"; chart=:ks9, spec=(margin=5,),
+                 kw=(fit_initial_depth=8 * T(5 // 128),), k9...),
+        gen_spec("ks9-fitted-m8"; chart=:ks9, spec=(margin=8,),
+                 kw=(fit_initial_depth=8 * T(5 // 128),), k9...)]
+    d["harm"] = Any[
+        gen_spec("h0-fitted"; chart=:h0, kw=(fit_initial_depth=8 * T(5 // 128),),
+                 t_end=10 // 1, chunk=1 // 4),
+        gen_spec("h0-damped"; chart=:h0, variant=:damped, t_end=10 // 1, chunk=1 // 4),
+        gen_spec("h7-fitted"; chart=:h7, kw=(fit_initial_depth=8 * T(5 // 256),),
+                 t_end=10 // 1, chunk=1 // 4),
+        gen_spec("h7c-fitted"; chart=:h7c, kw=(fit_initial_depth=3 * T(5 // 128),),
+                 t_end=10 // 1, chunk=1 // 4),
+        gen_spec("h7c-fitted-r1"; chart=:h7c, t_end=10 // 1, chunk=1 // 4)]
+    bo = (t_end=5 // 1, chunk=1 // 4)
+    d["boost"] = Any[
+        gen_spec("boost-fitted"; chart=:boost, kw=(fit_initial_depth=8 * T(5 // 128),), bo...),
+        gen_spec("boost-damped"; chart=:boost, variant=:damped, bo...),
+        gen_spec("boost-sphere"; chart=:boost_sphere, variant=:damped, bo...),
+        gen_spec("boost-coast"; chart=:boost, kw=(fit_initial_depth=8 * T(5 // 128),),
+                 spec=(max_misses=6,), coast=(4, 9), bo...)]
+    return d
+end
+
+function gen_all_specs()
+    all = Dict{String,Any}()
+    for (_, v) in gen_groups(), sp in v
+        all[sp.label] = sp
+    end
+    return all
+end
+
+# The fine region of the boosted rows: every block of a level within `R` of
+# the segment the analytic center sweeps from `t = 0` to `t_end` — a capsule
+# (added in step 8f, over `regrid = true`, which a static-mesh study of the
+# tracked geometry does not need).
+function gen_capsule_forest(case; N, radii, t_end)
+    forest = gh_forest(T, case; N=N, roots=1)
+    ts = range(zero(T), T(t_end); length=33)
+    cs = [Tuple(center_at(case.center, t)) for t in ts]
+    for (ℓ, R) in enumerate(radii)
+        targets = filter(forest.leaves) do k
+            level(k) == ℓ - 1 &&
+                any(c -> TreeGeneralizedHarmonic._box_meets_ball(block_extent(T, forest, k),
+                                                                 c, T(R)), cs)
+        end
+        refine!(forest, targets)
+        balance!(forest)
+    end
+    return forest
+end
+
+# The seed geometry of a tracked case on a mesh, for its bounds and gate.
+function gen_seed_geometry(case, forest)
+    spec = case.interior
+    n_L = spec.n_L > 0 ? spec.n_L :
+          layer_cells(GEN_G, default_relaxation_rate(case), hole_mass(case.background))
+    return fitted_interior(spec, seed_track(case, zero(T)), forest, GEN_G;
+                           t=zero(T), n_L=n_L)
+end
+
+# A Kerr target from the finder (`PLAN.md`'s idea 4): `M_ch`, `J` and the
+# found origin of the initial data, the spin along the found axis when it is
+# resolved (`|J|/M_ch² > 10⁻⁴`) and none otherwise.
+function gen_kerr_target(case, forest)
+    q = GEN_Q
+    ops = Operators(prolongation=q + 2, restriction=q + 2)
+    geom = gen_seed_geometry(case, forest)
+    fs = FieldSet{T}(forest, 20; G=GEN_G, centering=vertexcentered(3), backend=CPU())
+    p = GHProblem(fs, GhostSchedule(fs, ops), case; q=q, interior=geom)
+    fill_exact!(fs, case, zero(T); interior=geom)
+    u = statevector(fs)
+    gather!(u, fs)
+    o = find_gh_horizon(p, u, zero(T); N=case.horizon.N, spin=true)
+    a = o.J / o.M_ch
+    abs(a) / o.M_ch > 1e-4 && error("a spinning Kerr target needs the rotation " *
+                                    "to the found axis, which is not built")
+    tgt = SM.translate(SM.KerrSchild(T(o.M_ch), zero(T)),
+                       SVector{4,T}(0, o.origin[1], o.origin[2], o.origin[3]))
+    say("   Kerr target from the find: M_ch = %.7f, J = %.2e, origin (%.2e, %.2e, %.2e)",
+        o.M_ch, o.J, o.origin...)
+    return tgt
+end
+
+# The range projection's ranges for a chart whose data exceed step 8b's
+# Kerr-Schild proposal: `derive_target_bounds`' rule — four times the largest
+# `α`, `λ(γ)`, `|β|`, `|(α/√γ)Π|`, a quarter of the smallest — over the
+# analytic data on the whole layer, from the offset surface down to the core
+# surface, and not on the surface alone, so that the instrument is passive on
+# healthy data as it is on the fixture (a non-finite sample, a point of a
+# chart's singular set, is skipped).
+function gen_layer_bounds(bg, geom, gate)
+    c = center_at(geom.center, zero(T))
+    αlo, αhi, λlo, λhi, βhi, Khi = Inf, 0.0, Inf, 0.0, 0.0, 0.0
+    for n in fit_directions(12), k in 0:ceil(Int, geom.thickness / geom.h)
+        nn = SVector{3,T}(n)
+        r = shape_radius(geom, nn) - geom.offset - k * geom.h
+        u = SVector{20,T}(state_tuple(bg, zero(T), Tuple(c + r * nn)))
+        all(isfinite, u) || continue
+        hv = SVector{10,T}(ntuple(i -> u[i], 10))
+        d, α, _, _ = state_validity(hv, SVector{10,T}(ntuple(i -> u[10 + i], 10)))
+        (d > 0 && α > 0) || continue
+        γ = SMatrix{3,3,T}(1 + hv[5], hv[6], hv[7], hv[6], 1 + hv[8], hv[9], hv[7],
+                           hv[9], 1 + hv[10])
+        λ, _ = sym_eigen3(γ)
+        β = γ \ SVector{3,T}(hv[2], hv[3], hv[4])
+        αlo, αhi = min(αlo, α), max(αhi, α)
+        λlo, λhi = min(λlo, minimum(λ)), max(λhi, maximum(λ))
+        βhi = max(βhi, sqrt(max(β' * γ * β, zero(T))))
+        Khi = max(Khi, maximum(abs, u[11:20]) * α / sqrt(d))
+    end
+    return TreeGeneralizedHarmonic.StateBounds{T}(min(αlo / 4, 0.5), max(4αhi, 2.0),
+                                                  min(λlo / 4, 0.5), max(4λhi, 2.0),
+                                                  4βhi, 4Khi, gate)
+end
+
+"""
+The case, the forest and the `evolve!` keywords of one row of the matrix.
+"""
+function gen_setup(sp)
+    fs_kw(margin, lmax_shape, lmax_fit) =
+        merge((variant=sp.variant, margin=margin, lmax_shape=lmax_shape,
+               lmax_fit=lmax_fit), sp.spec)
+    ch = sp.chart
+    if ch === :ks0
+        spec = FittedSpec(T; fs_kw(10, 4, 8)...)
+        case = kerr_schild_case(T; halfwidth=T(5 // 2), chunk=T(sp.chunk),
+                                interior=spec,
+                                horizon=Horizon(T; every=1, N=12, spin=true),
+                                bounds=default_bounds(T; M=1, r_gate=T(9 // 10)))
+        forest = hole_fixture_forest(T, case; N=8)
+        if sp.kerr
+            tgt = gen_kerr_target(case, forest)
+            spec = FittedSpec(T; fs_kw(10, 4, 8)..., target=tgt)
+            case = kerr_schild_case(T; halfwidth=T(5 // 2), chunk=T(sp.chunk),
+                                    interior=spec,
+                                    horizon=Horizon(T; every=1, N=12, spin=true),
+                                    bounds=default_bounds(T; M=1, r_gate=T(9 // 10)))
+        end
+    elseif ch in (:ks9, :h0, :h7, :h7c, :boost)
+        bg, hw, radii, lsh, lfit, N_ah = ch === :ks9 ?
+            (SM.KerrSchild(one(T), T(9 // 10)), T(5 // 2),
+             (T(10), T(10), T(2), T(8 // 5)), 4, 12, 16) :
+            ch === :h0 ? (SM.Harmonic(one(T), zero(T)), T(5 // 2),
+                          (T(10), T(10), T(3 // 2), T(6 // 5)), 4, 8, 12) :
+            ch === :h7 ? (SM.Harmonic(one(T), T(7 // 10)), T(5 // 4),
+                          (T(10), T(8 // 5), T(13 // 10), one(T)), 12, 12, 16) :
+            ch === :h7c ? (SM.Harmonic(one(T), T(7 // 10)), T(5 // 4),
+                           (T(10), T(8 // 5), T(13 // 10)), 12, 12, 16) :
+            (SM.translate(SM.boost(SM.Harmonic(one(T), zero(T)),
+                                   SVector{3,T}(T(3 // 10), 0, 0)),
+                          SVector{4,T}(0, T(3 // 4), 0, 0)), T(5 // 2),
+             (T(10), T(10), T(3 // 2), T(9 // 10)), 4, 8, 12)
+        margin = ch in (:h7, :h7c) ? 4 : 8
+        spec = FittedSpec(T; fs_kw(margin, lsh, lfit)...)
+        c0 = ch === :boost ? (T(3 // 4), zero(T), zero(T)) : (zero(T), zero(T), zero(T))
+        case0 = hole_case(T, bg; halfwidth=hw, chunk=T(sp.chunk), center=c0,
+                          interior=spec, horizon=Horizon(T; every=1, N=N_ah, spin=true))
+        forest = ch === :boost ?
+                 gen_capsule_forest(case0; N=8, radii=radii, t_end=sp.t_end) :
+                 hole_forest(T, case0; N=8, roots=1, radii=radii)
+        # The range projection's ranges: the fixture's for Kerr-Schild, the
+        # target's own for the harmonic charts (whose data exceed them), at
+        # the tracked geometry's gate.
+        geom = gen_seed_geometry(case0, forest)
+        gate = default_gate(geom, forest, GEN_Q)
+        bd = ch === :ks9 ? default_bounds(T; M=1, r_gate=gate) :
+             gen_layer_bounds(bg, geom, gate)
+        case = with_bounds(case0, bd)
+    elseif ch === :boost_sphere
+        bg = SM.translate(SM.boost(SM.Harmonic(one(T), zero(T)),
+                                   SVector{3,T}(T(3 // 10), 0, 0)),
+                          SVector{4,T}(0, T(3 // 4), 0, 0))
+        h = T(5 // 128)
+        r_1 = T(horizon_min_radius(bg)) - 8h
+        case0 = hole_case(T, bg; halfwidth=T(5 // 2), chunk=T(sp.chunk),
+                          center=(T(3 // 4), zero(T), zero(T)), interior=:damped,
+                          r_0=r_1 - 8h, r_1=r_1, ρ_ramp=one(T), margin=8,
+                          horizon=Horizon(T; every=1, N=12, spin=true))
+        forest = gen_capsule_forest(case0; N=8, radii=(T(10), T(10), T(3 // 2), T(9 // 10)),
+                                    t_end=sp.t_end)
+        bd = default_bounds(T; M=1, r_gate=default_gate(case0.interior, forest, GEN_Q))
+        case = with_bounds(case0, bd)
+    else
+        error("no chart $ch")
+    end
+    return case, forest
+end
+
+gen_fmt(x) = x === nothing ? "     —   " :
+             x isa Bool ? string(x) : Printf.format(Printf.Format("%9.3e"), x)
+
+"""
+One row of the matrix: `evolve!` with an observer that writes the shells and
+prints a line per chunk, and a finder wrapper that keeps the horizon's
+numbers — both into vectors that survive the run throwing — and, for the
+coasting row, returns a failed find over the chunks it names.
+"""
+function gen_run(sp; t_end=nothing)
+    case, forest = gen_setup(sp)
+    q = GEN_Q
+    tend = t_end === nothing ? T(sp.t_end) : min(T(t_end), T(sp.t_end))
+    obs = NamedTuple[]
+    hzs = Dict{Float64,Any}()
+    calls = Ref(0)
+    function finder(p, u, t; kw...)
+        k = calls[]            # the chunk this find belongs to (0 at t = 0)
+        if sp.coast !== nothing && sp.coast[1] ≤ k ≤ sp.coast[2]
+            error("the finder is switched off for chunks $(sp.coast) (coasting row)")
+        end
+        o = find_gh_horizon(p, u, t; kw...)
+        hzs[Float64(t)] = (area=o.area, M_irr=o.M_irr, J=o.J, M_ch=o.M_ch,
+                           success=o.success)
+        return o
+    end
+    function watch(p, t, u)
+        calls[] += 1
+        tt = T(t)
+        int = p.interior
+        gh_error!(p, u, tt; shell=horizon_shell(case, int))
+        e = error_norms(p)
+        gh_constraint!(p, u, tt)
+        cn = constraint_norms(p)
+        sh = gh_outside_shell_norms(p, u, tt)
+        v = validity_rows(p, u, tt)
+        hs = map(GEN_HSHELLS) do k
+            if int isa FittedInterior
+                c = center_at(int.center, tt)
+                mask = TreeGeneralizedHarmonic.ShapeBand(c, int.shape, int.lmax,
+                                                         int.r_in, int.r_out,
+                                                         int.offset,
+                                                         int.offset + k * int.h,
+                                                         int.offset + (k + 1) * int.h)
+            else
+                hh, _ = layer_spacing(p.U.forest, int, tt)
+                rh = T(horizon_min_radius(case.background))
+                mask = ShellMask{T}(center_at(int.center, tt), rh + k * hh,
+                                    rh + (k + 1) * hh)
+            end
+            gh_constraint!(p, u, tt; mask=mask)
+            maximum(constraint_norms(p).gauge_l2)
+        end
+        acc = p.accounting
+        hz = get(hzs, Float64(tt), nothing)
+        row = (t=Float64(tt), err_l2=e.err_l2, err_linf=e.err_linf,
+               gauge_l2=Float64(maximum(cn.gauge_l2)), residual=e.residual,
+               drift=e.drift, sh_l2=sh.gauge_l2, sh_linf=sh.gauge_linf,
+               hC=hs, hits=acc === nothing ? 0 : acc.hits,
+               r_hit=acc === nothing ? -1.0 : Float64(acc.r_max),
+               α_shell=v.min_α_shell, Π_shell=v.max_Π_shell,
+               variant=interior_variant(int),
+               area=hz === nothing ? nothing : hz.area,
+               M_irr=hz === nothing ? nothing : hz.M_irr,
+               J=hz === nothing ? nothing : hz.J,
+               M_ch=hz === nothing ? nothing : hz.M_ch)
+        push!(obs, row)
+        say("   [%s] t=%6.3f err=%s/%s C=%s shC=%s hC0,2,4=%s,%s,%s res=%s " *
+            "drift=%s hits=%d M_irr=%s J=%s M_ch=%s %s", sp.label, row.t,
+            gen_fmt(row.err_l2), gen_fmt(row.err_linf), gen_fmt(row.gauge_l2),
+            gen_fmt(row.sh_l2), gen_fmt(hs[1]), gen_fmt(hs[2]), gen_fmt(hs[3]),
+            gen_fmt(row.residual), gen_fmt(row.drift), row.hits,
+            gen_fmt(row.M_irr), gen_fmt(row.J), gen_fmt(row.M_ch),
+            String(row.variant))
+        flush(stdout)
+        return nothing
+    end
+    t0 = time()
+    failure = nothing
+    out = try
+        evolve!(T, case; forest=forest, q=q,
+                ops=Operators(prolongation=q + 2, restriction=q + 2),
+                t_end=tend, observer=watch, find=finder, sp.kw...)
+    catch err
+        err isa InterruptException && rethrow()
+        failure = cal_root_cause(err)
+        err isa TrackLostError && (failure = "track lost: " * failure)
+        nothing
+    end
+    wall = time() - t0
+    reached = isempty(obs) ? 0.0 : obs[end].t
+    recs = out === nothing ? NamedTuple[] :
+           [(t=r.t, dt=r.dt, fit_valid=r.fit_valid, fit_residual=r.fit_residual,
+             fit_refills=r.fit_refills, track_offset=r.track_offset,
+             track_prediction=r.track_prediction, track_source=r.track_source,
+             track_center=r.track_center, track_velocity=r.track_velocity,
+             margin_efolds=r.margin_efolds, bounds_r_max=r.bounds_r_max,
+             center_offset=r.center_offset, horizon_success=r.horizon_success,
+             nblocks=r.nblocks, h=r.h, variant=r.variant) for r in out.records]
+    say("   done [%s] reached %.3f M of %.3f in %.0f s (%s steps, %d blocks)%s",
+        sp.label, reached, tend, wall, out === nothing ? "?" : string(out.nsteps),
+        nleaves(forest), failure === nothing ? "" : ", then threw: " * failure)
+    out === nothing || say("   fits [%s]: %s", sp.label, string(out.fit_cost))
+    flush(stdout)
+    return (label=sp.label, spec=sp, reached=reached, t_end=Float64(tend),
+            failure=failure, wall=wall,
+            nsteps=out === nothing ? nothing : out.nsteps,
+            nblocks=nleaves(forest), obs=obs, recs=recs)
+end
+
+function gen_fanout(batches; tag, t_end)
+    base = isdir("out") ? joinpath("out", "generic") : mktempdir()
+    dir = mkpath(joinpath(base, tag))
+    println("   worker logs and results in ", abspath(dir))
+    project = dirname(Base.active_project())
+    procs = map(enumerate(batches)) do (n, (labels, nt))
+        out = joinpath(dir, "worker-$n.jls")
+        log = joinpath(dir, "worker-$n.log")
+        te = t_end === nothing ? "" : "t_end=$(leak_spell(t_end))"
+        cmd = `$(Base.julia_cmd()) --project=$project --threads=$nt
+               $(abspath(@__FILE__)) generic worker=1
+               runs=$(join(labels, ',')) out=$out $te`
+        io = open(log, "w")
+        (run(pipeline(cmd; stdout=io, stderr=io); wait=false), out, log, io)
+    end
+    return map(procs) do (proc, out, log, io)
+        wait(proc)
+        close(io)
+        if !success(proc) || !isfile(out)
+            println("   a worker failed; the end of its log ($log):")
+            foreach(l -> println("     ", l), last(readlines(log), 30))
+            return Any[]
+        end
+        foreach(l -> startswith(l, "   done") && println(l), readlines(log))
+        return deserialize(out)
+    end
+end
+
+function gen_report(results)
+    println("\n-- the matrix: the last chunk of every row, and the extremes over the run --")
+    println("| row | reached | end | err L2 | err L∞ | shell C_a L2 | C_a at r_h + 0, 2, 4 h " *
+            "| residual | drift | hits (r_max) | fit valid (all) | fit residual (max) " *
+            "| A | M_irr | J | M_ch | track offset (max, cells) | wall |")
+    for r in sort(results; by=r -> r.label)
+        isempty(r.obs) && (say("| %s | 0 | %s |", r.label,
+                                r.failure === nothing ? "?" : r.failure); continue)
+        l = r.obs[end]
+        mi = [x.M_irr for x in r.obs if x.M_irr !== nothing]
+        hz = findlast(x -> x.M_irr !== nothing, r.obs)
+        fv = isempty(r.recs) ? nothing : all(x -> x.fit_valid !== false, r.recs)
+        fr = isempty(r.recs) ? nothing :
+             (v = [x.fit_residual for x in r.recs if x.fit_residual !== nothing];
+              isempty(v) ? nothing : maximum(v))
+        to = isempty(r.recs) ? nothing :
+             (v = [x.track_offset for x in r.recs if x.track_offset !== nothing];
+              isempty(v) ? nothing : maximum(v))
+        rmax = isempty(r.recs) ? nothing :
+               (v = [x.bounds_r_max for x in r.recs if x.bounds_r_max !== nothing];
+                isempty(v) ? nothing : maximum(v))
+        say("| %s | %.2f | %s | %s | %s | %s | %s, %s, %s | %s | %s | %d (%s) | %s | %s " *
+            "| %s | %s | %s | %s | %s | %.0f s |", r.label, r.reached,
+            r.failure === nothing ? "ok" : "threw", gen_fmt(l.err_l2),
+            gen_fmt(l.err_linf), gen_fmt(l.sh_l2), gen_fmt(l.hC[1]), gen_fmt(l.hC[2]),
+            gen_fmt(l.hC[3]), gen_fmt(l.residual), gen_fmt(l.drift), l.hits,
+            gen_fmt(rmax), gen_fmt(fv), gen_fmt(fr),
+            hz === nothing ? "—" : gen_fmt(r.obs[hz].area),
+            hz === nothing ? "—" : gen_fmt(r.obs[hz].M_irr),
+            hz === nothing ? "—" : gen_fmt(r.obs[hz].J),
+            hz === nothing ? "—" : gen_fmt(r.obs[hz].M_ch), gen_fmt(to), r.wall)
+    end
+    for r in results
+        r.failure === nothing || say("   %s threw at %.3f M: %s", r.label, r.reached,
+                                     r.failure)
+    end
+    # The time series every 5 M (every M for runs shorter than 20 M).
+    println("\n-- time series: masked err L2 / shell C_a L2 / M_irr --")
+    for r in sort(results; by=r -> r.label)
+        isempty(r.obs) && continue
+        step = r.t_end ≥ 20 ? 5.0 : r.t_end ≥ 4 ? 1.0 : r.t_end / 5
+        pts = [x for x in r.obs if x.t == 0 || abs(x.t / step - round(x.t / step)) < 1e-6 ||
+               x === r.obs[end]]
+        println("   ", r.label, ": ", join([Printf.format(Printf.Format("t=%.4g %.3e/%.3e/%s"),
+                                                         x.t, x.err_l2, x.sh_l2,
+                                                         x.M_irr === nothing ? "—" :
+                                                         Printf.format(Printf.Format("%.6f"),
+                                                                       x.M_irr))
+                                              for x in pts], "  "))
+    end
+end
+
+# --- the probe: harmonic Kerr at a = 9/10, host-side (decided 2026-09-23) ---
+#
+# `PLAN.md`'s step 8f, "Decided 2026-09-23": G5 runs at `a = 7/10` and no node
+# is spent on `a = 9/10`; its row is this probe — the initial data and one
+# right-hand side at `h = 5/256` as step 8e measured them, the fit's kink at
+# three latitudes with whatever step 8f changed in the fit (`Π̃`, `L`), a run
+# to `t_end_probe` (default `1/20 M`), and the price of the node run at
+# `h = 5/1024` on the equator, written down.
+
+# The composite data's second difference along the ray at the first evolved
+# point `r_e = r_1(n̂) + h/2` — the analytic solution at `r_e` and `r_e + h`,
+# the fit at `r_e − h` — against the analytic solution's own: `CODE.md`'s
+# "kink" (step 8e's probe, redone in step 8f; the point is half a cell out of
+# step 8e's, whose numbers it reproduces to a factor of two off the equator).
+function gen_kink(bg, geom, fit, n)
+    h = geom.h
+    c = center_at(geom.center, zero(T))
+    r1 = shape_radius(geom, SVector{3,T}(n)) - geom.offset
+    re = r1 + h / 2
+    an(r) = SVector{20}(state_tuple(bg, zero(T), Tuple(c + r * n)))
+    ft(r) = vcat(fit_state(fit, c + r * n, zero(T))...)
+    D2a = (an(re + h) - 2an(re) + an(re - h)) / h^2
+    D2c = (an(re + h) - 2an(re) + ft(re - h)) / h^2
+    return maximum(abs, D2c - D2a), maximum(abs, D2a)
+end
+
+const GEN_KINK_DIRS = (("axis", SVector{3,T}(0, 0, 1)),
+                       ("45°", SVector{3,T}(1, 0, 1) / sqrt(T(2))),
+                       ("equator", SVector{3,T}(1, 0, 0)))
+
+# The kink table of one chart for a list of `(L, tilde)`.
+function gen_kink_table(label, bg, geom, spec, Ls)
+    bd = derive_target_bounds(T, bg, geom; t=0, L=8)
+    for (L, tl) in Ls
+        fit = build_fit(analytic_sampler(bg, 0.0; δ=geom.h / 8), geom, spec; cont=1,
+                        bounds=bd, L=L, tilde=tl, check=false)
+        ks = [gen_kink(bg, geom, fit, n) for (_, n) in GEN_KINK_DIRS]
+        say("| %s | %d | %s | %s | %.2e | %.3g | %.3g (%.3g) | %.3g (%.3g) | %.3g (%.3g) |",
+            label, L, tl ? "Π̃" : "Π", string(fit.valid), fit.residual.value,
+            fit.sweep.min_λ, ks[1]..., ks[2]..., ks[3]...)
+    end
+end
+
+# Leaves and points of a forest refined to `levels` levels wherever `pred(box)`.
+function gen_count_forest(case, N, preds)
+    forest = gh_forest(T, case; N=N, roots=1)
+    for pred in preds
+        ℓ = maxlevel(forest)
+        targets = filter(k -> level(k) == ℓ && pred(block_extent(T, forest, k)),
+                         forest.leaves)
+        isempty(targets) && break
+        refine!(forest, targets)
+        balance!(forest)
+    end
+    return nleaves(forest), forest_levels(forest)
+end
+
+function gen_probe()
+    println("\n=== (11p) harmonic Kerr a = 9/10: the host-side probe, m = 4, h = 5/256 ===")
+    q, G = GEN_Q, GEN_G
+    ops = Operators(prolongation=q + 2, restriction=q + 2)
+    bg = SM.Harmonic(one(T), T(9 // 10))
+    radii = (T(10), T(8 // 5), T(13 // 10), one(T))
+    mk(L, tl) = (spec = FittedSpec(T; variant=:fitted, margin=4, lmax_shape=12,
+                                   lmax_fit=L, fit_tilde=tl);
+                 case = hole_case(T, bg; halfwidth=T(5 // 4), chunk=T(1 // 400),
+                                  interior=spec,
+                                  horizon=Horizon(T; every=1, N=16, spin=false));
+                 (spec, case))
+    spec0, case0 = mk(8, false)
+    forest = hole_forest(T, case0; N=8, roots=1, radii=radii)
+    geom = with_ρ_max(fitted_interior(spec0, seed_track(case0, 0), forest, G; t=0,
+                                      n_L=8), T(4))
+    say("mesh: %d leaves, levels %s; h = %.5f, r_1 from %.4f (axis) to %.4f (equator), core from %.4f",
+        nleaves(forest), string(forest_levels(forest)), geom.h,
+        geom.r_in - geom.offset, geom.r_out - geom.offset,
+        geom.r_in - geom.offset - geom.thickness)
+    println("\n-- the kink at the first evolved point: |Δ²(composite) − Δ²(analytic)| (|Δ²(analytic)|), max over the packed components --")
+    println("| chart | L | momentum | valid | value residual | sweep min λ(γ) | axis | 45° | equator |")
+    gen_kink_table("harmonic a = 9/10", bg, geom, spec0,
+                   ((8, false), (8, true), (12, false), (12, true), (16, true)))
+    # The same for the charts the matrix runs, for comparison.
+    for (lab, b2, hw, rad, m, lsh) in
+        (("harmonic a = 7/10, 5/256", SM.Harmonic(one(T), T(7 // 10)), T(5 // 4), radii, 4, 12),
+         ("harmonic a = 7/10, 5/128", SM.Harmonic(one(T), T(7 // 10)), T(5 // 4),
+          (T(10), T(8 // 5), T(13 // 10)), 4, 12),
+         ("Kerr-Schild a = 9/10, 5/128", SM.KerrSchild(one(T), T(9 // 10)), T(5 // 2),
+          (T(10), T(10), T(8 // 5), T(5 // 4)), 5, 4),
+         ("harmonic a = 0, 5/128", SM.Harmonic(one(T), zero(T)), T(5 // 2),
+          (T(10), T(10), T(3 // 2), T(6 // 5)), 8, 4),
+         ("Kerr-Schild a = 0, fixture", SM.KerrSchild(one(T), zero(T)), T(5 // 2),
+          (T(3), T(3), one(T)), 10, 4))
+        s2 = FittedSpec(T; variant=:fitted, margin=m, lmax_shape=lsh)
+        c2 = hole_case(T, b2; halfwidth=hw, chunk=T(1 // 10), interior=s2,
+                       horizon=Horizon(T; every=1, N=16, spin=false))
+        f2 = hole_forest(T, c2; N=8, roots=1, radii=rad)
+        g2 = fitted_interior(s2, seed_track(c2, 0), f2, G; t=0, n_L=8)
+        gen_kink_table(lab, b2, g2, s2, ((8, false), (8, true), (12, false), (12, true)))
+    end
+
+    # The initial data and one right-hand side, at step 8e's fit and at 8f's.
+    Lbest = parse(Int, get(OPTIONS, "lmax_fit", "12"))
+    local p_best, u_best, fs_best, trhs_best
+    println()
+    for (L, tl) in ((8, false), (Lbest, true))
+        spec, case = mk(L, tl)
+        bd = derive_target_bounds(T, bg, geom; t=0, L=8)
+        t0 = time()
+        fit = build_fit(analytic_sampler(bg, 0.0; δ=geom.h / 8), geom, spec; cont=1,
+                        bounds=bd, check=false)
+        tfit = time() - t0
+        fs = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3), backend=CPU())
+        p = refill_target(GHProblem(fs, GhostSchedule(fs, ops), case; q=q,
+                                    interior=geom, target=target_cache(fs),
+                                    fits=(fit, nothing)), zero(T))
+        u = statevector(fs)
+        map_blocks!(TreeGeneralizedHarmonic.fitted_state_kernel!, fs, statearray(u, fs),
+                    p.target.work, p.origins, p.spacings, bg, p.interior, zero(T),
+                    zero(T), zero(T))
+        A = statearray(u, fs)
+        worst = (detγ=Inf, α=Inf, λ=Inf)
+        nbad = 0
+        for b in 1:nblocks(fs), k in 1:8, j in 1:8, i in 1:8
+            hv = SVector{10}(ntuple(v -> A[i, j, k, v, b], 10))
+            Πv = SVector{10}(ntuple(v -> A[i, j, k, 10 + v, b], 10))
+            d, α, _, _ = state_validity(hv, Πv)
+            λ, _ = sym_eigen3(SMatrix{3,3}(1 + hv[5], hv[6], hv[7], hv[6], 1 + hv[8],
+                                            hv[9], hv[7], hv[9], 1 + hv[10]))
+            worst = (detγ=min(worst.detγ, d), α=min(worst.α, α),
+                     λ=min(worst.λ, minimum(λ)))
+            nbad += !(d > 0 && α > 0 && minimum(λ) > 0 && all(isfinite, hv) &&
+                      all(isfinite, Πv))
+        end
+        du = similar(u)
+        gh_rhs!(du, u, p, zero(T))
+        t1 = time()
+        gh_rhs!(du, u, p, zero(T))
+        trhs = time() - t1
+        D = statearray(du, fs)
+        imax = argmax(abs.(D))
+        xmax = coordinates(fs, imax[5], (imax[1] + G, imax[2] + G, imax[3] + G))
+        say("L = %d, %s: fit valid %s (value residual %.2e, sweep min λ %.3g, %.2f s); " *
+            "initial data %d points, %d non-finite, %d not a metric, min det γ %.3g, " *
+            "min α %.3g, min λ(γ) %.3g; one RHS %.2f s at %d threads, max |du| %.3g at " *
+            "|x| = %.4f, z = %.4f",
+            L, tl ? "Π̃" : "Π", string(fit.valid), fit.residual.value, fit.sweep.min_λ,
+            tfit, length(u) ÷ 20, count(!isfinite, u), nbad, worst.detγ, worst.α,
+            worst.λ, trhs, Threads.nthreads(), maximum(abs, du),
+            sqrt(sum(abs2, xmax)), xmax[3])
+        if L == Lbest && tl
+            p_best, u_best, fs_best, trhs_best = p, u, fs, trhs
+        end
+    end
+
+    # The fastest speed and the step at 5/256, for the price below.
+    scatter!(fs_best, u_best)
+    λ = max_speed(p_best; t=zero(T))
+    dt = T(1 // 4) * geom.h / λ
+    npts = length(u_best) ÷ 20
+    say("λ_max = %.4g, dt = %.4g M at cfl = 1/4 (%.0f steps per M)", λ, dt, 1 / dt)
+
+    # The run, with 8f's fit: does it survive its first chunk?
+    tp = T(only(leak_option("t_end_probe", [1 // 20])))
+    specb, caseb = mk(Lbest, true)
+    reached = Ref(zero(T))
+    t0 = time()
+    rows = String[]
+    watch(p, t, u) = (reached[] = T(t);
+                      v = validity_rows(p, u, T(t));
+                      push!(rows, Printf.format(Printf.Format(
+                          "   t = %.4f: min α shell %.3g, min det γ shell %.3g, max |Π| shell %.3g, min α layer %.3g"),
+                          T(t), v.min_α_shell, v.min_detγ_shell, v.max_Π_shell, v.min_α_layer));
+                      println(rows[end]); flush(stdout))
+    fail = try
+        evolve!(T, caseb; forest=forest, q=q, ops=ops, t_end=tp, observer=watch)
+        nothing
+    catch e
+        e isa InterruptException && rethrow()
+        cal_root_cause(e)
+    end
+    say("the run with L = %d, Π̃: reached %.4f M of %.4f in %.0f s%s", Lbest, reached[],
+        tp, time() - t0, fail === nothing ? "" : "; it ended: " * fail)
+
+    # The price of the node run at h = 5/1024 on the equator.
+    println("\n-- the node run at h = 5/1024, priced --")
+    ring(box, lo, hi, zmax) = begin
+        # the box meets the solid torus lo ≤ ρ ≤ hi, |z| ≤ zmax
+        rmin = sqrt(sum(abs2, (max(box[1][d], min(0.0, box[2][d])) for d in 1:2)))
+        rmax = maximum(sqrt(sum(abs2, (c[d] for d in 1:2)))
+                       for c in Iterators.product((box[1][1], box[2][1]),
+                                                  (box[1][2], box[2][2])))
+        zlo = max(box[1][3], min(0.0, box[2][3]))
+        rmax ≥ lo && rmin ≤ hi && abs(zlo) ≤ zmax
+    end
+    ball(R) = box -> TreeGeneralizedHarmonic._box_meets_ball(box, (0.0, 0.0, 0.0), R)
+    base = [ball(10.0), ball(1.6), ball(1.3), ball(1.0)]
+    n256, lv256 = gen_count_forest(case0, 8, base)
+    nball, lvball = gen_count_forest(case0, 8, [base..., ball(1.0), ball(1.0)])
+    nring, lvring = gen_count_forest(case0, 8, [base..., b -> ring(b, 0.7, 1.1, 0.25),
+                                                b -> ring(b, 0.75, 1.05, 0.2)])
+    # The measured cost per point and thread of one right-hand side here; a
+    # Symmetry core is about twice as slow as this machine's (CLAUDE.md).
+    c_pt = trhs_best * Threads.nthreads() / npts
+    dt4 = dt / 4
+    println("| mesh | leaves | levels | points | memory (2.4 kB/pt, 8e) | RHS on 64 node threads " *
+            "| dt | wall per M | 10 M | 50 M |")
+    for (lab, n, lv, d) in (("5/256 (measured)", n256, lv256, dt),
+                            ("5/1024 inside |x| ≤ 1", nball, lvball, dt4),
+                            ("5/1024 on the equatorial band", nring, lvring, dt4))
+        pts = n * 8^3
+        trhs_node = pts * c_pt * 2 / 64
+        perM = trhs_node * 4 / d
+        say("| %s | %d | %s | %.3g | %.3g GB | %.3g s | %.3g | %.3g h | %.3g h | %.3g h |",
+            lab, n, string(lv), pts, pts * 2.4e3 / 1e9, trhs_node, d, perM / 3600,
+            10perM / 3600, 50perM / 3600)
+    end
+    say("(cost per point and thread measured here: %.3g µs; one RHS of the 5/256 mesh " *
+        "%.2f s at %d threads)", c_pt * 1e6, trhs_best, Threads.nthreads())
+end
+
+const GEN_DEFAULT = ["ks0", "ks9", "harm", "boost", "probe"]
+
+if "generic" in SECTIONS || haskey(OPTIONS, "generic")
+    t_end_opt = haskey(OPTIONS, "t_end") ? only(leak_option("t_end", [1 // 1])) : nothing
+    gen_specs = gen_all_specs()
+    if haskey(OPTIONS, "worker")
+        labels = String.(split(OPTIONS["runs"], ','))
+        res = [gen_run(gen_specs[l]; t_end=t_end_opt) for l in labels]
+        serialize(OPTIONS["out"], res)
+    else
+        groups = gen_groups()
+        names = haskey(OPTIONS, "generic") ?
+                String.(split(OPTIONS["generic"], r"[,+]")) : GEN_DEFAULT
+        labels = String[]
+        probe = "probe" in names
+        for n in names
+            if n == "probe"
+                continue
+            elseif haskey(groups, n)
+                append!(labels, [sp.label for sp in groups[n]])
+            elseif haskey(gen_specs, n)
+                push!(labels, n)
+            else
+                error("no generic group or row $n")
+            end
+        end
+        if !isempty(labels)
+            println("
+=== (11) the measurement matrix: the generic interior ===")
+            nt = Threads.nthreads()
+            say("%d rows (%s) at %d threads%s", length(labels), join(names, ", "), nt,
+                t_end_opt === nothing ? "" : ", t_end ≤ $(Float64(t_end_opt)) M")
+            t0 = time()
+            results = if nt ≥ 16 && length(labels) > 1
+                wt = haskey(OPTIONS, "threads") ? parse(Int, OPTIONS["threads"]) :
+                     max(1, nt ÷ length(labels))
+                say("   %d workers of %d threads", length(labels), wt)
+                reduce(vcat, gen_fanout([([l], wt) for l in labels];
+                                        tag=join(names, "+"), t_end=t_end_opt);
+                       init=Any[])
+            else
+                [gen_run(gen_specs[l]; t_end=t_end_opt) for l in labels]
+            end
+            say("%d rows in %.0f s", length(results), time() - t0)
+            gen_report(results)
+        end
+        probe && gen_probe()
     end
 end
 
