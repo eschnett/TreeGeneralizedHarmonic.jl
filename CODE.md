@@ -827,6 +827,16 @@ configuration to `t = 50 M`. This is the one measurement in the package
 that would not exist without the check, which is the argument for having
 it throw.
 
+**(Amended in step 8.)** A moving hole's step is sized from `λ` times the
+square of the growth the previous chunk measured (step 8f) **and never by
+less than 1 %**: once the hole crosses a mesh finer than step 8f's capsule
+the growth is not monotonic, and on step 8's uniform `5/128` control of the
+boosted `a = 0` hole the speed grew `0.27 %` in chunk 4 after a quieter
+chunk 3 — the recheck stopped the run at `0.75 M` with a CFL number of
+`0.20003` against the requested `0.2` (measured in step 8). The margin costs
+1 % of the steps of a moving run and nothing on a static one, whose step is
+unchanged bit for bit; the recheck stays **(proposed in step 8)**.
+
 ## Gauge and constraint damping
 
 **Prescribed gauge sources** (decided). `H_a(x)` is sampled from the
@@ -941,6 +951,14 @@ Dirichlet face costs the scheme nothing. `dirichlet(case, t)` returns
 `nothing` where the case is periodic in every dimension, so the
 right-hand side branches once on a `Bool` the problem stores rather than
 handing `fill_ghosts!` an argument whose type depends on the case.
+
+**(Measured in step 8.)** For G5's own background, `boost(Harmonic(1,
+7/10), 0.3 x̂)`, the hook built at `t = 7/10` writes the analytic state
+into the outer ghost planes, the shared upper plane and a corner **bit for
+bit** (`test/moving_tests.jl`), where the same points at `t = 0` differ by
+more than `10⁻³`: the time dependence of a hole that moves reaches the
+boundary through the hook's `t` and nothing else. Every moving run of step
+8 fills its boundary this way at every stage.
 
 ### The interior: a pointwise damping layer
 
@@ -1708,7 +1726,15 @@ Six pieces, in the order a run meets them:
    oblate in the ratio that sets the multipoles' decay (`a²/R² = 4.3` against
    `0.39`). The default `lmax_shape = 4` is Kerr-Schild's (`0.06` cells at
    `h = 5/256`); harmonic Kerr at `a = 9/10` needs `lmax = 12` for a tenth of
-   a cell, which step 8f's rows should carry.
+   a cell, which step 8f's rows should carry. **(Amended in step 8:)** the
+   seed's `r_min` of a **moving** hole is the least of the analytic surface
+   over `shape_sample_directions` (both poles included), not
+   `horizon_min_radius`'s `√(1 − v²)` bound, which is exact only when the
+   smallest radius lies along the boost: G5's hole has it on the spin axis,
+   `0.714`, which a boost along `x̂` does not contract, where the bound says
+   `0.681`, and the first find (`0.716`) was refused as a jump of `0.034`,
+   over `G h/2` at `h = 5/256` (measured in step 8). A hole at rest keeps
+   the bound, which is then exact, bit for bit.
 6. **The masks and the guard.** `ShapeMask` (`d ≤ 0` evolved, the same fast
    paths) is what `interior_mask` returns, so every masked norm, the speed
    kernel and the indicator exclude exactly the region the kernel modifies;
@@ -2191,6 +2217,50 @@ toward it (step 8e-ii):
    0.02 M` inside it, and the solution varies on the scale of that distance.
    Whatever the interior does, the chart at `a = 9/10` wants `h ≲ 5/1024` on
    its equator, or a margin that depends on the direction.
+13. **A moving target (added in step 8).** Two things change when the
+   geometry moves through the grid, and step 8 built one switch for each:
+   - **The target's rate is fed forward** (`evolve!(…; target_rate = true)`,
+     the default, **proposed in step 8**). A point relaxing toward a target
+     that moves lags it by `|∂_t u_fit|/ρ`, and where `w < 1` the layer also
+     advects the hole's structure at `w v` instead of `v`; so the cache's
+     slope now includes the latest fit's translation with the track — a
+     centered difference in the time the fit is evaluated at, an eighth of a
+     cell of travel each way, exactly zero for a fit at rest — and the
+     kernel adds `(1 − w) ∂_t u_fit` in the layer and the core, which makes a
+     target that is the moving solution a steady state of the modified
+     equation. The slope agrees with the cache's own difference to
+     `1.2e−4` relative, and a problem whose slope is zero is the problem
+     without it, `==` (`test/moving_tests.jl`). **It changes almost nothing
+     measurable (measured in step 8)**: `4.56e−2` against `4.67e−2` masked
+     at `0.5 M` on the boosted `a = 0` hole, `0.132` against `0.172` at
+     `M/4` on G5's chart with `w_ramp = 1` and `0.492` against `0.494` on the
+     default ramp —
+     the lag is not what the moving layer suffers from (next). It stays on,
+     since it is the consistent form and costs two evaluations of the fit
+     per filled point per refill.
+   - **The initial data are blended into the fit across the layer**
+     (`evolve!(…; fit_initial_blend = true)`, G5's rows, **proposed in step
+     8**). With `fit_initial_depth = n_L h` the data step from the analytic
+     solution to the fit at the core surface, and on G5's chart that step is
+     twenty-five times the solution (`Π_xx` from `1.5e4` to `600` on the
+     trailing equator). A static hole relaxes it away where `w = 0`; a moving
+     one carries it outward in depth on its trailing side, at the hole's
+     speed, into the evolved part of the layer, where `F` of a jump is
+     `O(jump/h²)`: at `t = M/4` the worst error of step 8's first G5 run was
+     `Π_xx = +2650` four cells deep on the trailing equator against a
+     solution of `1100`, where the fit was `−580` off — neither the truth nor
+     the target, and the masked L∞ was `334` against the static hole's `2.4`
+     (`hole_runs.jl moving`, the screens). The blend replaces the step by a
+     `C²` ramp in the fit's variables `(log α, β^i, γ_ij, Π̃_ab)` — never in
+     `g_ab` — from the analytic solution at the offset surface to the fit
+     at `fit_initial_depth`: masked L2 / L∞ at `M/4` **`0.115` / `18`**
+     against `0.49` / `334` with the step, the trailing layer's outer
+     quarter `53` against `1425` off the truth. It is not free on a static
+     hole (`0.075` / `9.5` against `0.032` / `2.4` at `M/4`: the blended
+     layer is not a solution where `w = 1`), which is why it is G5's row's
+     choice and not the default.
+   The table of the screens is in [Measured results](#measured-results),
+   "The moving hole (step 8)".
 
 #### What the layer costs
 
@@ -2579,6 +2649,58 @@ re-evaluates the data with the final one's core rule. The suite exercises
 none of this on a mesh that moves — its tracked runs are on the step-5
 fixture's frozen hierarchy — and step 8f's matrix is where a tracked
 geometry is first regridded.
+
+**(Amended in step 8:** the mesh follows the hole.**)** Four pieces, each
+**(proposed in step 8)**:
+
+- **A `:fitted` case's initial-data cycle flags on its own data**
+  (`adapt_fitted_initial_data!`): on every pass the geometry is rebuilt on
+  the current mesh, the case's initial data are filled on it
+  (`fill_fitted_initial!` — the analytic solution outside the offset
+  surface, the fit of it inside), the ghosts filled with the `t = 0` hook,
+  the masked indicator flags with the geometry's mask and floor, and
+  `regrid!` rebuilds without transferring — TreeAMR's
+  `adapt_to_initial_data!` written out, because a `:fitted` case's data live
+  partly in a cache a coordinate callback cannot read. Step 8f's cycle
+  flagged on the analytic `:damped` layer and refused G5's chart, where the
+  analytic core cuts the disk; this one converges there (2 passes to 456
+  blocks at `5/128` in the suite, 2 passes to 3536–4040 blocks at `5/256`
+  in the `moving` rows), and on a chart with analytic data it chooses the
+  analytic cycle's mesh exactly (the adaptive fixture: 288 blocks, one pass
+  each, `fa.leaves == fb.leaves`). The indicator is masked inside the
+  offset surface, so only the one point of Löhner's stencil that reaches
+  inside reads the fit. A hand-over case still cycles on its analytic
+  layer, which is its initial data.
+- **The tracked floor starts at the core surface, not the offset surface.**
+  A tracked geometry reads its spacing `h` as the coarsest of every block
+  the layer lives in, down to the core surface, and states its offset and
+  ramp in it; a floor that started at the offset surface left the inner
+  blocks free to coarsen (the indicator is masked there, so it asks to),
+  the next geometry would then double its spacing and its floor ask for a
+  level less — a mesh that loses a level per regrid around a moving hole.
+  Step 5's sphere keeps its floor from `r_1`.
+- **The floor is widened by the travel `|v| · chunk`**, inward and outward
+  (`level_bounds(…; travel)`): it is evaluated at the regrid's `t` and must
+  hold the blocks the layer reaches before the next one. The travelling
+  margin `buffer` was already `|v| · chunk` in cells (step 6): 5 cells at
+  `5/256` and 3 at `5/128` for `v = 0.3`, chunk `M/4`. Both are zero-width
+  for a static hole, whose bounds are unchanged.
+- **The regrid flags the evolved state** at every chunk boundary with the
+  geometry the next chunk runs on — nothing new: `gh_indicator!` already
+  read the state and the layer's mask. The first regrids of a tracked
+  geometry along a trajectory are step 8's `moving` rows.
+
+**What it measures on the boosted `a = 0` hole (measured in step 8**,
+`hole_runs.jl moving=ctl`, harmonic `a = 0` boosted at `0.3` from `x = 2`
+to `x = −1.9` in `13 M`, box `5 M` on a `4³` root brick, finest `5/128`,
+`chunk = M/4`**)**: the mesh regrids at 40 of the 52 chunk boundaries,
+between 1128 and 1912 blocks, every radius assertion holding at every one;
+the refinement centroid stays within **`1.4` finest spacings** of the
+analytic center over the crossing on the analytic `:damped` layer (`20/M`)
+and within **`7.3`** (typically 4–6) on the `:fitted` one, whose layer
+edge leaves more grid-scale content on the trailing side for the indicator
+to score; the static configuration's centroid is `0.29` spacings off at
+`t = 0`. The travelling hole is tracked within `0.028` cells.
 
 ## Time integration
 

@@ -73,11 +73,7 @@ a chart admits it and `:fitted` is for G5's chart. **G5 runs at `a = 7/10`
 1¾ node-hours) and not at `5/128`; harmonic `a = 9/10` waits with its price
 written down in `CODE.md`'s "Open questions" (`h ≲ 5/1024` on the equator,
 23 000 blocks, `38 h` a `50 M` run, and a fit that holds 45° first). Step 8,
-the moving hole, is next — and it inherits step 8f's findings that
-`:fitted` holds a boosted hole at `4/M` while the analytic `:damped` layer
-needs `ρ_max ≳ 20/M` (its frozen core is released on the trailing side
-after about `M` at `v = 0.3`), and that a moving hole's step is sized for
-the speed it will have.**
+the moving hole, has run (2026-09-24): G5_STATE_PLACEHOLDER**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -265,6 +261,24 @@ unchanged bit for bit): the fastest speed of a hole crossing the box grows
 by 0.1–0.3 % a chunk, and the CFL recheck stopped every boosted row at
 `cfl = 1/4` and at `1/5` without it.
 
+From step 8 the hole **moves across the mesh**: `driver.jl` has
+`adapt_fitted_initial_data!` and `fill_fitted_initial!` — a `:fitted` case's
+initial-data cycle flags on its own data (analytic outside the offset
+surface, the fit inside), rebuilt with the geometry on every pass, so G5's
+chart has a cycle (step 8f's flagged on the analytic layer and refused it);
+`evolve!` has `target_rate` (default on: the cache's slope carries the fit's
+translation with the track and the kernel adds `(1 − w) ∂_t u_fit` in the
+layer and the core; `GHProblem.target_rate`, `fill_target!(…; rate)`) and
+`fit_initial_blend` (the initial data blended `C²` in the fit's variables
+from the analytic solution at the offset surface to the fit at
+`fit_initial_depth`, G5's rows' choice); the level floor of a tracked
+geometry starts at its **core** surface and is widened by the travel
+`|v| · chunk` (`level_bounds`, `indicator_flags`, `gh_indicator!` take
+`travel`); a moving seed's `r_min` is its analytic surface's least radius
+(not `horizon_min_radius`'s `√(1 − v²)` bound); a moving hole's step keeps
+a 1 % margin. `test/moving_tests.jl` is its file and `hole_runs.jl`'s
+`moving` section its runs.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -326,8 +340,13 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4632 assertions in 20m59** at one thread and **12m22** at
-four after step 8f, on a machine loaded 8–15 by other work (11m22 at four
+The suite is **4659 assertions in 17m16** at one thread and **11m36** at
+four after step 8 (load 7–13): its 28 new claims are `moving_tests.jl`,
+`19.9 s` / `16.9 s`, most of it the compilation of the target's rate in the
+cache fill, and one of step 8f's claims — the refusal of G5's chart by the
+`:fitted` cycle — is gone with the refusal. After step 8f it was **4632
+assertions in 20m59** at one thread and **12m22** at
+four, on a machine loaded 8–15 by other work (11m22 at four
 threads the evening before at a load of 5): its sixteen new claims are
 `fit_tests.jl`'s `Π̃` chain rule and "the snapshot, the hand-over and the
 mesh cycle", `25.9 s` / `16.6 s`. After step 8e it was **4616 assertions in
@@ -535,6 +554,32 @@ which ends in its first chunk; three minutes and about 3 GB):
 julia --project=. --threads=4 test/hole_runs.jl fitted=fixture,boosted,harmonic
 ```
 
+The `moving` section (added in step 8) is G5's runs and is not in the default
+list: groups `g5` (G5's chart crossing a box of `5 M` from `x = 2` to
+`x = −1.9` in `13 M`, adaptive, and the same hole at rest — two workers on
+one `amdq` node, about seven hours), `g5u` (the crossing in a box of
+`5/2 M` against a uniform mesh at `5/256`, 256³ points, about 90 GB and five
+hours), `conv` (the frozen hierarchy, `N = 8, 12, 16`, on G5's chart and on
+the boosted `a = 0` hole with the analytic sphere; the `N = 16` G5 row is
+about four hours at 36 threads), `ctl` (the boosted `a = 0` hole across the
+box: `:fitted`, `:damped` at `20/M`, `:frozen`, and the adaptive-against-
+uniform pair at `5/128`) and the screens `g5v` … `g5z` (the moving layer's
+parameters to `M/2`, one `amddebugq` hour each). `moving=mesh` runs only the
+initial-data cycle of every adaptive row and prints its mesh (three minutes
+at four threads); `moving=<label>` one row; `t_end`, `budget`, `tag` and
+`threads` as in `generic`. Each worker prints one line per chunk: the masked
+error, the error outside a fixed sphere enclosing the horizon (what the
+convergence rows compare, since the masked region moves with the offset
+surface), the shell's `C_a`, the layer's error off the truth by depth and by
+side (trailing or leading), the finder's numbers and the horizon's extent
+along the boost against the contraction. Stagger job starts, and do not
+rsync the worktree while a job's workers are starting:
+
+```bash
+julia --project=. --threads=4 test/hole_runs.jl moving=mesh
+julia --project=. --threads=4 test/hole_runs.jl moving=ctl-a0-fitted t_end=1/2
+```
+
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a
 64-core EPYC node, which is what makes them parallel — a node *core* is
@@ -733,6 +778,26 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   by `10³`–`10⁵` times the analytic second difference off the equator; the
   run ends in its first chunk. `Π̃ = (α/√γ)Π` as the fitted momentum and
   `L = 12` shrink that 20–650× each (host-side probe); 8f decides.
+- **A moving layer exports what it holds through its trailing side**
+  (measured in step 8). Grid points move outward in depth at the hole's
+  speed on the side it leaves, so whatever the layer's inner part holds —
+  above all a step in the initial data — reaches the evolved part of the
+  layer, where `F` of a jump is `O(jump/h²)`. On G5's chart the step at the
+  core surface (`fit_initial_depth = n_L h`) is `25×` the solution, and the
+  first chunk's masked L∞ was `334` against the static hole's `2.4`;
+  `fit_initial_blend = true` makes it `18`. The target's rate
+  (`target_rate`, the lag of a point relaxing toward a moving target) is
+  not what matters there: `0.2 %`. Read the `moving` rows' trailing-side
+  layer error before suspecting the target.
+- **`horizon_min_radius` of a boosted hole is a bound, not the radius**
+  (found in step 8): the rest frame's smallest radius times `√(1 − v²)`,
+  exact only when that radius lies along the boost. A moving seed takes
+  its surface's least radius instead, or the first find of a boosted
+  spinning hole is refused as a jump.
+- **A tracked floor starts at the core surface** (amended in step 8): the
+  geometry's spacing is read over the whole layer, and a floor from the
+  offset surface let the blocks inside it coarsen and the next geometry
+  double its spacing, one level per regrid.
 - **A tracked run's first find starts from the seed's shape** (step 8e), not
   a sphere of the mean radius, which on an oblate horizon can lie inside the
   offset surface and be refused by the footprint guard.
