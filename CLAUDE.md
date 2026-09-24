@@ -73,7 +73,15 @@ a chart admits it and `:fitted` is for G5's chart. **G5 runs at `a = 7/10`
 1¾ node-hours) and not at `5/128`; harmonic `a = 9/10` waits with its price
 written down in `CODE.md`'s "Open questions" (`h ≲ 5/1024` on the equator,
 23 000 blocks, `38 h` a `50 M` run, and a fit that holds 45° first). Step 8,
-the moving hole, has run (2026-09-24): G5_STATE_PLACEHOLDER**
+the moving hole, has run (2026-09-24) and G5 is **not** done: the mesh
+follows the hole (the `:fitted` cycle on the case's own data, the floor from
+the core surface widened by the travel), the Dirichlet data are exact, the
+frozen hierarchy converges at order 2, the adaptive run is the uniform one
+at the hole with 6–9× fewer points, the horizon is found along the
+trajectory with Kerr's numbers and the boost's contraction, `:frozen` fails
+— but on G5's chart the moving layer's error is `3.3×` the static hole's
+at `7 M` and growing, carried out through the layer's trailing side
+(`CODE.md`, G5 and "The moving hole (step 8)").**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the

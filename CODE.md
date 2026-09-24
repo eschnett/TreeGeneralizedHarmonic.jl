@@ -3438,6 +3438,40 @@ refinement level, short times.
   trailing side after about `M` at `v = 0.3`; and a moving hole's step is
   sized for the speed it will have, since the fastest speed grows by
   0.1–0.3 % a chunk and the CFL recheck otherwise stops the run.
+  **Step 8 (2026-09-24): G5 is not done; seven of its ten items hold.**
+  Item by item (the numbers under [Measured results](#measured-results),
+  "The moving hole (step 8)"): *the refinement follows the hole* — yes, the
+  mesh is re-chosen at every chunk boundary around the tracked layer (the
+  `:fitted` cycle on the case's own data, the floor from the core surface
+  widened by the travel), with the centroid within `1.4` finest spacings of
+  the analytic center over the boosted `a = 0` hole's crossing on the
+  analytic layer and within `7.3` on the fitted one; on G5's chart the
+  centroid is `6.7` finest spacings off *before anything moves*, the
+  boosted spinning chart's own asymmetry, and its per-chunk record is on
+  Symmetry, unread (**partly measured**); *the layer follows the tracked
+  center and shape, the radius assertions at every regrid, the fit valid at
+  every row* — the runs regridded tens of times without an assertion firing
+  and without a failed find; the fit's per-row validity on G5's chart is in
+  the unread record (**measured on `a = 0`: every fit valid, the track
+  within `0.022` cells**); *the initial-data cycle* — done, on the fitted
+  data where the chart has no analytic interior (amended in step 8: "on the
+  analytic data of the same geometry where the chart allows it" became the
+  cycle on the case's own data, which agrees with it where it allows it);
+  *the Dirichlet data exact* — done, bit for bit at `t = 7/10`; *the masked
+  error at the static run's level over the crossing* — **not met**: `3.3×`
+  in L2 at `7 M` and growing four times as fast; *order `q` on the frozen
+  hierarchy* — **measured, `2.3`** in the masked norm over the first
+  `0.15 M` of travel; *the adaptive run matching the uniform one at fewer
+  points* — **measured to `1 M`**: to three digits at the hole with
+  6.5–9.3× fewer points, 2–4× the far-field error, the uniform run lost to a
+  `SIGBUS` twice after `1 M`; *the interior residual at truncation, released
+  points relaxed within `1/ρ_max`* — **not met**: the trailing side's outer
+  layer carries twice the leading side's error; *`:frozen` measured to fail*
+  — done, `1.0 M` on the boosted `a = 0` hole (on G5's chart it cannot be
+  built: the analytic core cuts the disk); *the horizon along the
+  trajectory* — done, `M_irr` `0.04 %`, `J` `0.3 %`, `M_ch` `7e−4` from
+  Kerr's and the contraction `0.9534` against `0.95394`. What remains is
+  the moving layer's trailing side on G5's chart.
 - **G6 — Infrastructure and the H200.** `io.jl`, slice output and
   viewers, `bin/gh.jl`, the per-phase benchmark on threads (TreeWave's
   table, on Symmetry) and **on the H200 in `Float64`**, in-kernel metric
@@ -5533,6 +5567,208 @@ and `46 ms` and `420 ms` on the `ks9` mesh. Before the workers were given
 one BLAS thread each, OpenBLAS's pools spinning after every fit put a node
 at twice its cores and the rows at ten times this machine's time per `M`.
 
+### The moving hole (step 8)
+
+`test/hole_runs.jl moving` (its header says how the rows are grouped and
+run), `test/moving_tests.jl`, and in `src/` the `:fitted` cycle
+(`adapt_fitted_initial_data!`, `fill_fitted_initial!`), the tracked floor
+from the core surface widened by the travel, the moving seed's `r_min`, the
+1 % step margin, the target's rate and the blended initial data. Every row
+is `q = 2`, `cfl = 1/5`, `ε_KO = 1/2`, `ρ_max = 4/M` unless named, `chunk
+= M/4`, the finder every chunk with the Korzyński spin (`N_ah = 16` on G5's
+chart, `12` on `a = 0`), `boost(·, 0.3 x̂)` moving the hole at `−0.3 x̂`.
+G5's chart is harmonic Kerr `a = 7/10` with `m = 4`, `n_L = 8`,
+`lmax_shape = lmax_fit = 12`, finest `h = 5/256`, the initial data blended
+from the analytic solution at the offset surface into the fit at the core
+surface; the `a = 0` hole has `m = 8`, `n_L = 8` (`12` at `20/M`), `lmax =
+4, 8`, finest `5/128`. Symmetry jobs on `amdq` and in `amddebugq` hours
+(the screens, `budget=3300`), 2026-09-24.
+
+**The suite.** **4659 assertions in 17m16 at one thread and 11m36 at four**
+on the development machine (Apple silicon, Julia 1.13.0, load 7–13),
+against step 8f's 4632 in 20m59 and 12m22 under a heavier load. The 28 new
+assertions are `test/moving_tests.jl`, **`19.9 s` at one thread and
+`16.9 s` at four**, of which `13.2 s` is the target's rate (the cache fill
+with its two extra evaluations compiles anew); one of step 8f's assertions,
+the refusal of G5's chart by the `:fitted` cycle, went with the refusal,
+and one of step 8d's changed its claim with the floor
+(`lb.floor_lo == layer_radii(geom)[1]`).
+
+**The `a = 0` hole across the box (`moving=ctl`, measured in step 8).**
+From `x = 2` to `x = −1.9` in `13 M`, box `5 M` on a `4³` root brick, the
+indicator's mesh re-chosen at every chunk (the adaptive rows), against the
+same hole in a box of `5/2 M` on the capsule-free adaptive mesh and on a
+uniform mesh at the finest spacing:
+
+| row | reached | masked L2 / L∞ at the end | error outside `r_h,max + 3h`, L2 / L∞ | shell `C_a` | trailing / leading outer quarter of the layer, off the truth | projection hits | centroid offset, max (finest `h`) | `M_irr` / `J` at the end | wall |
+|---|---|---|---|---|---|---|---|---|---|
+| `:fitted`, tracked | `13 M` | `0.174` / `33.8` | `1.66e−2` / `1.08` | `0.103` | `27.9` / `16.9` | 0 | `7.3` | `0.9965` / `1.6e−5` | `5947 s` |
+| `:damped` at `20/M`, tracked | `13 M` | `0.153` / `40.6` | `1.55e−2` / `0.85` | `2.6e−2` | `33.6` / `12.2` | 677 214 | `1.4` | `0.9966` / `2.9e−6` | `5776 s` |
+| `:frozen`, tracked | † `1.0 M` | `0.360` / `178` at `1 M` | `3.8e−3` / `0.22` | `0.174` | `345` / `15.8` | 0 | — | `1.001` | `744 s` |
+| `:fitted`, box `5/2`, adaptive (820–1464 blocks) | `5 M` | `0.391` / `29.2` | `2.35e−2` / `0.59` | `6.6e−2` | `25.3` / `12.7` | 0 | `7.3` | `0.9993` / `6.7e−6` | `1840 s` |
+| `:fitted`, box `5/2`, uniform `5/128` (4096 blocks of `8³`) | `5 M` | `0.434` / `36.9` | `1.66e−2` / `0.77` | `5.1e−2` | `27.4` / `11.4` | 0 | — | — | `4693 s` |
+
+`†` a degenerate metric (`metric_quantities`' `DomainError`) in the evolved
+shell, the frozen core's stale data released on the trailing side.
+40 regrids in 52 chunks, 1128–1912 blocks; the track within `0.022` (`:fitted`)
+and `0.028` (`:damped`) cells of the analytic center; the found horizon's
+extent along the boost over its extent across it `0.9542` and `0.9533`
+against the contraction `√(1 − v²) = 0.95394` at `13 M`.
+
+**The frozen hierarchy on the `a = 0` hole (`moving=conv`, measured in step
+8).** The analytic sphere about the moving analytic center at `20/M`, `r_1 =
+r_h,min − m h`, `m = N` and a ramp of `12 N/8` cells — the same surfaces at
+every `N` — on a capsule of fine blocks around the trajectory to `1/2 M`
+(1492 blocks), `N = 8, 12, 16` (finest `5/128`, `5/192`, `5/256`):
+
+| `t` | masked L2 (`N = 8, 12, 16`) | rates | error outside `r_h,max + 3h₈`, L2 | rates |
+|---|---|---|---|---|
+| `M/8` | `3.20e−2`, `1.33e−2`, `7.26e−3` | `2.17`, `2.10` | `1.05e−3`, `5.50e−4`, `2.51e−4` | `1.59`, `2.73` |
+| `M/2` | `0.106`, `4.46e−2`, `2.45e−2` | `2.14`, `2.08` | `3.60e−3`, `1.89e−3`, `8.55e−4` | `1.59`, `2.76` |
+
+— order `q = 2` in the masked norm over the crossing's first `0.15 M` of
+travel, and on average in the far field (whose `N = 8` row has the coarse
+levels' error in it). The projection fired in the frozen core (4820, 10 208
+and 2896 hits at `N = 8, 12, 16`), never outside it.
+
+**G5's chart moving: what the layer needed (the screens, measured in step
+8).** Box `5/2 M` on a `2³` root brick, from `x = 0.3`, adaptive
+(3536 blocks at `t = 0`, 4880 after the first regrid), masked L2 / L∞ at
+`M/4` and `M/2`, and the largest error off the truth in the outer quarter of
+the layer on the trailing side (where the moving core releases points):
+
+| row | masked at `M/4` | at `M/2` | error outside `r_h,max + 3h` at `M/2`, L2 / L∞ | trailing outer quarter at `M/4` |
+|---|---|---|---|---|
+| static, the step at the core surface | `3.23e−2` / `2.36` | `9.32e−2` / `13.5` | `9.4e−3` / `0.53` | — |
+| static, blended | `7.47e−2` / `9.55` | `0.157` / `20.1` | `9.4e−3` / `0.54` | — |
+| moving, the step (step 8f's data), rate on | `0.492` / `334` | `1.48` / `533` | `1.2e−2` / `5.5` (`0.116` / `41.5` at `M`) | `1425` |
+| moving, the step, rate off | `0.494` / `334` | `1.51` / `544` | `1.2e−2` / `5.6` | `1417` |
+| moving, the step, `w_ramp = 1` | `0.132` / `54.5` | `2.37` / `1087` | `1.1e−2` / `2.5` | `544` |
+| moving, the step, `w_ramp = 1`, rate off | `0.172` / `64.9` | `2.51` / `1137` | `1.1e−2` / `2.6` | `518` |
+| moving, the step, `w_ramp = 1`, `20/M` | `0.136` / `60.8` | `0.363` / `98.6` | `1.1e−2` / `1.6` | `191` |
+| moving, the step, `w_ramp = 1`, `n_L = 16` | `0.309` / `225` | `1.24` / `707` | `1.1e−2` / `3.0` | `1973` |
+| moving, the step, `w_ramp = 1`, `m = 6` (fit from `6h`) | `2.11` / `1413` | `5.40` / `2347` | `1.1e−2` / `4.6` | `2692` |
+| moving, the fit from the offset surface, `m = 8` | `1.66` / `151` | `1.64` / `169` | `1.1e−2` / `0.76` | `953` |
+| **moving, blended** (G5's rows) | **`0.115` / `18.1`** | **`0.351` / `121`** | `1.1e−2` / `0.98` | **`53`** |
+| moving, blended, `w_ramp = 1` | `0.321` / `110` | `1.26` / `278` | `1.0e−2` / `1.7` | `170` |
+| moving, blended, `ρ_ramp = 1/2` | `0.162` / `19.3` | `0.295` / `34.5` | `1.2e−2` / `1.2` | `78` |
+| static, blended, `ρ_ramp = 1/2` | `0.110` / `10.0` | `0.214` / `16.4` | `9.3e−3` / `0.51` | — |
+| moving, blended, `20/M` (`n_L = 12`, fit from `8h`) | `0.204` / `46.2` | `0.541` / `108` | `1.1e−2` / `1.5` | `297` |
+| moving, blended, `m = 6` (fit from `6h`) | `0.478` / `112` | `0.864` / `243` | `1.0e−2` / `0.58` | `247` |
+
+What it says (**measured in step 8**): the moving `:fitted` layer on G5's
+chart is dominated by what its **initial data** carry through the trailing
+side, not by the target's lag — the target's rate changes the first chunk by
+`0.2 %` on the default ramp; the step at the core surface, where the data
+jump from the analytic solution to the fit by `25×` the solution, is what
+moves outward in depth with the hole into the evolved part of the layer
+(`Π_xx = +2650` four cells deep on the trailing equator at `M/4` against a
+solution of `1100` and a fit `580` below it). Blending the data into the fit
+across the layer takes the first chunk from `0.49` / `334` to `0.115` / `18`
+and the trailing layer from `1425` to `53` off the truth; the step's cost on
+the static hole is a factor two in the first chunk. The wider margins lose,
+because their initial data have to switch to the fit where the ring is
+close: the analytic solution is singular on a core surface deeper than
+`7h` on the equator at `5/256`. `ρ_ramp = 1/2` trades the first chunk for a
+slower growth, `0.162` → `0.295` against `0.115` → `0.351`, and costs the
+static hole more; G5's rows keep step 8c's ramps.
+
+**G5's crossing (`moving=g5`, measured in step 8).** Harmonic Kerr `a =
+7/10` boosted at `0.3` from `x = 2` toward `x = −1.9`, box `5 M` on a `4³`
+root brick, the indicator's mesh chosen by the `:fitted` cycle and
+re-chosen at every chunk boundary (3956–5216 blocks, two passes to 4040 at
+`t = 0`), against the same hole **at rest** at the center on the same
+machinery (3872 blocks throughout). The rows are read from the workers'
+per-chunk lines; the jobs were still running when this was written (the
+tunnel to Symmetry closed at `7 M` and `8.25 M`, see the end of this entry):
+
+| `t` | moving: masked L2 / L∞ | error outside `r_h,max + 3h`, L2 / L∞ | at rest: masked L2 / L∞ | outside, L2 / L∞ |
+|---|---|---|---|---|
+| `M/2` | `0.121` / `126` | `4.4e−3` / `1.2` | `5.5e−2` / `20.1` | `3.3e−3` / `0.54` |
+| `1.25 M` | `0.385` / `153` | `1.7e−2` / `13.4` | `0.139` / `45.1` | `5.5e−3` / `0.73` |
+| `1.75 M` | `0.462` / `190` | `3.4e−2` / `12.7` | `0.181` / `55.5` | `6.4e−3` / `1.2` |
+| `2.5 M` | `0.610` / `227` | `4.0e−2` / `16.7` | `0.228` / `64.0` | `9.0e−3` / `3.2` |
+| `6.25 M` | `1.107` / `478` | `7.3e−2` / `22.0` | `0.347` / `89.8` | `2.1e−2` / `4.8` |
+| `7 M` | `1.229` / `547` | `7.6e−2` / `23.2` | `0.368` / `95.9` | `2.3e−2` / `4.9` |
+
+The moving run's first chunk is `4.05e−2` / `17.5` (outside `2.5e−3` /
+`0.48`). No projection hit, no
+failed find; the horizon along the trajectory at `1.5 M`: `M_irr = 0.9254`
+(Kerr `0.92580`), `J = 0.6979` (`0.7`), `M_ch = 0.9993`, the found
+surface's extent along the boost over its extent across it **`0.9534`
+against `√(1 − v²) = 0.95394`** (`0.9539` in the first chunks); at rest
+`M_irr = 0.9255`, `J = 0.6980`, `M_ch = 0.9994` at `1.75 M`, extent ratio
+`1.000`. The refinement centroid of this mesh at `t = 0`, before anything
+moves, is **`0.13 M` = 6.7 finest spacings** behind the center along the
+boost (`0.29` on the boosted `a = 0` hole, `0.08` on the hole at rest): the
+boosted horizon-penetrating chart is not symmetric along the boost, and a
+spinning one much less so, so the Löhner field the centroid weights is
+displaced, at the coarse levels' spacing (step 6's bias note).
+
+What it says (**measured in step 8**): **the moving hole's masked error is
+not at the static run's level.** It is `3.3×` it in L2 and `5.7×` in L∞ at
+`7 M`, and grows at `0.14` a `M` against the static `0.03` from `2 M` on; the
+far field outside the horizon, `3.3×` and `4.7×`. At `M/2` it is `2.2×`,
+so the excess is made during the crossing, and the trailing side of the
+layer says where: the error off the truth in the layer's outer quarter is `52` / `57`
+(trailing / leading) at `M/4`, `148` / `104` at `1.5 M`, `196` / `107` at
+`2.5 M`, where the static hole's is `50`–`60` — **points released by the
+moving layer are not relaxed within `1/ρ_max`** at `4/M`: a point crosses
+the eight-cell ramp at `v = 0.3` in `0.52 M`, two e-folds at `4/M`, and
+`20/M` (the `g5z` screen, which also needs a thicker ramp and fits its data
+from `8h`) did not do better in the first `M/2`.
+
+**The adaptive run against the uniform mesh (`moving=g5u`, measured in step
+8).** The crossing in a box of `5/2 M` from `x = 0.3`, adaptive (3536–5020
+blocks of `8³`, `1.8–2.6 × 10⁶` points) against a uniform mesh at the finest
+spacing `5/256` (4096 blocks of `16³`, `1.68 × 10⁷` points):
+
+| `t` | adaptive: masked L2 / L∞ | uniform | adaptive: outside `r_h,max + 3h` L2 | uniform |
+|---|---|---|---|---|
+| `M/4` | `0.1152` / `18.12` | `0.1152` / `18.12` | `5.9e−3` | `2.5e−3` |
+| `M/2` | `0.3505` / `121.2` | `0.3504` / `121.2` | `1.1e−2` | `4.7e−3` |
+| `3M/4` | `0.6773` / `161.0` | `0.6772` / `161.0` | `2.0e−2` | `6.2e−3` |
+| `M` | `0.9462` / `156.9` | `0.9471` / `156.9` | `3.0e−2` | `8.0e−3` |
+
+— the adaptive run is the uniform one to three digits where the error is,
+at the hole, with **6.5–9.3 times fewer points**; outside the horizon its
+error is 2.3–3.7 times the uniform run's, the coarse levels' truncation
+(the `a = 0` pair to `5 M` above: `1.4×` outside, the masked error within
+`10 %`). **The uniform run did not reach `2 M`**: both attempts ended at
+`0.75 M` and `1.0 M` with a `SIGBUS` inside Julia's allocator at 76–88 GB of
+resident memory (240 GB allowed), a failure of the process and not of the
+evolution; the `N = 16` row of the frozen hierarchy (`2 × 10⁷` points) met
+the same once. Not diagnosed; the comparison stands to `1 M`, `0.3 M` = 15
+finest cells of travel.
+
+**The frozen hierarchy on G5's chart (`moving=conv`, measured in step 8).**
+The capsule around the trajectory to `M/2` (4908 blocks), `N = 8, 12, 16`
+(finest `5/256`, `5/384`, `5/512`), `m = N/2` and `n_L = N` so that the
+offset and core surfaces are the same surfaces, the data blended:
+
+| `t` | masked L2 (`N = 8, 12, 16`) | rates | outside `r_h,max + 3h₈`, L2 | rates |
+|---|---|---|---|---|
+| `M/8` | `5.13e−2`, `2.02e−2`, `1.02e−2` | `2.30`, `2.37` | `2.81e−3`, `1.48e−3`, `6.65e−4` | `1.59`, `2.77` |
+| `M/4` | `0.114`, `5.34e−2`, `2.19e−2` | `1.87`, `3.10` | `5.31e−3`, `2.79e−3`, `1.25e−3` | `1.59`, `2.80` |
+| `3M/8` | `0.202`, `7.48e−2` | `2.44` | `7.53e−3`, `3.98e−3` | `1.57` |
+| `M/2` | `0.351`, `9.00e−2` | `3.36` | `1.01e−2`, `5.04e−3` | `1.71` |
+
+— **order `q = 2` over the first `0.15 M` of travel**, in the masked norm
+(`2.3` over both intervals at `M/8`) and averaged over the three
+resolutions outside the horizon (`2.1`), the `N = 8` row's far field
+carrying the coarse levels' error as on the `a = 0` hole. The `N = 16`
+row's last two chunks are the Symmetry job that was still running.
+
+**Where the runs stood (2026-09-24, 19:30).** The tunnel to Symmetry
+closed while `g5-adaptive` (`7 M`), `g5-static` (`8.25 M`) and
+`conv-h7-N16` (`M/4`) were running; their logs and the full reports, with
+the per-chunk refinement centroid, track offset, fit validity and block
+counts from the record, are in
+`/mnt/beegfs/eschnetter/claude/TreeGeneralizedHarmonic/step-8/out/`
+(`moving/g5-2`, `moving/g5a-solo` — the same crossing alone on a node —
+and `hole-moving=conv-h7-N16_tag=n16-solo2.log`), to be read and recorded
+here.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -5785,3 +6021,18 @@ first touch them:
    of that decision: it is the case's `r_0`, `r_1` and `ρ_ramp`, and the
    suite's fixture keeps step 5's layer, a ramp of `4.8` cells, on which
    step 8c measured the exact target at `4/M` to `50 M`.
+
+**The moving layer's trailing side (opened in step 8).** On G5's chart the
+`:fitted` layer moving at `0.3` holds the hole but exports error through
+the side it leaves: the masked error is `3.3×` the static hole's at `7 M`
+and grows four times as fast, the layer's outer quarter on the trailing
+side twice the leading side's. Step 8 found and removed the largest source
+(the initial data's step at the core surface, `fit_initial_blend`) and
+measured three levers that did not help within `M/2` — the target's rate,
+`20/M`, a thicker ramp or a wider margin (the analytic data then stop
+where the ring is close). What is untried: a ramp whose width depends on
+the side (`ρ` rising faster on the trailing side, where points leave), a
+refill of the target from each fit on a cadence finer than `h/(4|v|)`,
+and relaxing released points toward the fit's *evolved* continuation
+rather than its value (the target advected with `F` switched off). The
+proof-of-concept case needs one of them, or excision's price (step 8g).
