@@ -129,11 +129,11 @@ inherited documents live in `notes/`.
   arguably belongs upstream — point interpolation from a field set, for
   the horizon finder — is written as a stopgap and listed under
   [Upstream prerequisites](#upstream-prerequisites).
-- **No subcycling, one global `dt`** — TreeAMR's permanent commitment,
-  which suits a black-hole run badly in principle (the coarse outer
-  levels are advanced at the horizon's time step) and is accepted here
-  for the reasons TreeAMR gives: no time interpolation at interfaces,
-  one state vector for the integrator, simpler everything.
+- **No subcycling, one global `dt`**, which suits a black-hole run
+  badly in principle (the coarse outer levels are advanced at the
+  horizon's time step) and is accepted here for the reasons TreeAMR
+  gives: no time interpolation at interfaces, one state vector for the
+  integrator, simpler everything.
 
 ## Lineage: what is inherited and what changes
 
