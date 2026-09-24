@@ -2153,7 +2153,7 @@ if "fitted" in SECTIONS || haskey(OPTIONS, "fitted")
         u = statevector(fs)
         map_blocks!(TreeGeneralizedHarmonic.fitted_state_kernel!, fs, statearray(u, fs),
                     p.target.work, p.origins, p.spacings, bg, p.interior, zero(T), zero(T),
-                    zero(T))
+                    zero(T), false, true)
         A = statearray(u, fs)
         worst = (detγ=Inf, α=Inf, λ=Inf)
         nbad = 0
@@ -2800,7 +2800,7 @@ function gen_probe()
         u = statevector(fs)
         map_blocks!(TreeGeneralizedHarmonic.fitted_state_kernel!, fs, statearray(u, fs),
                     p.target.work, p.origins, p.spacings, bg, p.interior, zero(T),
-                    zero(T), zero(T))
+                    zero(T), zero(T), false, true)
         A = statearray(u, fs)
         worst = (detγ=Inf, α=Inf, λ=Inf)
         nbad = 0
@@ -3004,10 +3004,11 @@ const MV_G = MV_Q ÷ 2 + 1
 mv_spec(label; chart=:h7, geom=:fitted, x0=0 // 1, v=3 // 10, halfwidth=5 // 1,
         roots=4, N=8, cap=4, mesh=:adaptive, t_end, chunk=1 // 4,
         margin=nothing, n_L=0, radii=nothing, rate=nothing, workers=nothing,
-        kw=(;)) =
+        kw=(;), spec=(;)) =
     (label=label, chart=chart, geom=geom, x0=x0, v=v, halfwidth=halfwidth,
      roots=roots, N=N, cap=cap, mesh=mesh, t_end=t_end, chunk=chunk,
-     margin=margin, n_L=n_L, radii=radii, rate=rate, workers=workers, kw=kw)
+     margin=margin, n_L=n_L, radii=radii, rate=rate, workers=workers, kw=kw,
+     spec=spec)
 
 function mv_groups()
     d = Dict{String,Vector{Any}}()
@@ -3024,6 +3025,73 @@ function mv_groups()
                 workers=12),
         mv_spec("g5b-uniform"; x0=3 // 10, halfwidth=5 // 2, roots=16, N=16,
                 mesh=:uniform, t_end=2 // 1, workers=52)]
+    # The layer's parameters on the moving G5 hole, to 1/2 M (added after
+    # the first chunks of `g5`, whose error grew on the trailing side): a
+    # wider margin (with the fit's initial data from the offset surface, the
+    # analytic solution being singular on a layer that deep at the equator),
+    # the rate a moving analytic layer needed in step 8f, a thicker ramp.
+    d["g5v"] = Any[
+        mv_spec("g5v-m8"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                margin=8, kw=(fit_initial_depth=0,), workers=16),
+        mv_spec("g5v-r20"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                rate=20, workers=16),
+        mv_spec("g5v-n16"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                n_L=16, workers=16),
+        mv_spec("g5v-norate"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                kw=(target_rate=false,), workers=16)]
+    # `F` switched off over the whole ramp (`w_ramp = 1`), so that it acts at
+    # full strength only near the offset surface, where the fit is right —
+    # the diagnosis of `g5v`'s baseline: on the trailing side the layer's
+    # outer half receives the target's data from the inner half, and `F` of
+    # a fit that is not a solution moves it by thousands (|u − u_fit| 1350 at
+    # two cells deep, |u_fit − u| 79 against the truth).
+    d["g5w"] = Any[
+        mv_spec("g5w-w1"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                spec=(w_ramp=1,), workers=16),
+        mv_spec("g5w-w1-r20"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                spec=(w_ramp=1,), rate=20, workers=16),
+        mv_spec("g5w-w1-norate"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                spec=(w_ramp=1,), kw=(target_rate=false,), workers=16),
+        mv_spec("g5w-w1-static"; v=0 // 1, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                spec=(w_ramp=1,), workers=16)]
+    # And with `w_ramp = 1`: a faster rate, a thicker ramp, a wider margin —
+    # the analytic initial data stopping 8 (6) cells below the offset
+    # surface, since a deeper core surface cuts the ring at the equator.
+    h7 = T(5 // 256)
+    d["g5x"] = Any[
+        mv_spec("g5x-w1-r20"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                spec=(w_ramp=1,), rate=20, kw=(fit_initial_depth=8 * h7,), workers=16),
+        mv_spec("g5x-w1-n16"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                spec=(w_ramp=1,), n_L=16, kw=(fit_initial_depth=8 * h7,), workers=16),
+        mv_spec("g5x-w1-m6"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                spec=(w_ramp=1,), margin=6, kw=(fit_initial_depth=6 * h7,), workers=16),
+        mv_spec("g5x-w1-r20-n16"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                spec=(w_ramp=1,), rate=20, n_L=16, kw=(fit_initial_depth=8 * h7,),
+                workers=16)]
+    # The initial data blended from the analytic solution at the offset
+    # surface to the fit at the core surface, `C²`, instead of the step at the
+    # core surface (the diagnosis of the screens above: at t = 1/4 the worst
+    # error is Π_xx four cells deep on the trailing equator, +2650 against a
+    # solution of 1100, where the fit was −580 off — the step at the core
+    # surface, 1.5e4 against 600, carried into the layer's evolved part).
+    d["g5z"] = Any[
+        mv_spec("g5z-rho-half"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                spec=(ρ_ramp=1 // 2,), workers=16),
+        mv_spec("g5z-r20"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                rate=20, kw=(fit_initial_depth=8 * T(5 // 256),), workers=16),
+        mv_spec("g5z-m6"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                margin=6, kw=(fit_initial_depth=6 * T(5 // 256),), workers=16),
+        mv_spec("g5z-rho-half-static"; v=0 // 1, halfwidth=5 // 2, roots=2,
+                t_end=1 // 2, spec=(ρ_ramp=1 // 2,), workers=16)]
+    d["g5y"] = Any[
+        mv_spec("g5y-blend"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                kw=(fit_initial_blend=true,), workers=16),
+        mv_spec("g5y-blend-w1"; x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                spec=(w_ramp=1,), kw=(fit_initial_blend=true,), workers=16),
+        mv_spec("g5y-blend-static"; v=0 // 1, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                kw=(fit_initial_blend=true,), workers=16),
+        mv_spec("g5y-static"; v=0 // 1, halfwidth=5 // 2, roots=2, t_end=1 // 2,
+                workers=16)]
     # The frozen hierarchy: N = 8, 12, 16, the margin and the ramp in cells
     # scaled with N so that the offset surface and the core surface are the
     # same surfaces at every N; the capsule covers the trajectory to t_end.
@@ -3119,8 +3187,8 @@ function mv_setup(sp)
                           center=c0, interior=:damped, r_0=r_1 - nL * hf, r_1=r_1,
                           ρ_ramp=one(T), margin=m, horizon=hz, refinement=ref)
     else
-        spec = FittedSpec(T; variant=sp.geom, margin=m, n_L=sp.n_L,
-                          lmax_shape=L_shape, lmax_fit=L_fit)
+        spec = FittedSpec(T; merge((variant=sp.geom, margin=m, n_L=sp.n_L,
+                                    lmax_shape=L_shape, lmax_fit=L_fit), sp.spec)...)
         case0 = hole_case(T, bg; halfwidth=T(sp.halfwidth), chunk=T(sp.chunk),
                           center=c0, interior=spec, horizon=hz, refinement=ref)
     end
@@ -3150,7 +3218,11 @@ function mv_setup(sp)
         nL = sp.n_L > 0 ? sp.n_L :
              layer_cells(MV_G, sp.rate === nothing ? default_relaxation_rate(case) :
                                T(sp.rate), one(T))
-        kw = merge(kw, (fit_initial_depth=nL * hf,))
+        # G5's chart starts from the blend of the analytic solution into the
+        # fit across the layer (the `g5y` screen; the `g5`, `g5u` and `conv`
+        # logs before it, tagged without the suffix `-2`, are the step at the
+        # core surface, and the `ctl` rows are too).
+        kw = merge(kw, (fit_initial_depth=nL * hf, fit_initial_blend=h7))
     end
     sp.rate === nothing || (kw = merge(kw, (ρ_max_fixed=T(sp.rate),)))
     return case, forest, merge(kw, sp.kw)

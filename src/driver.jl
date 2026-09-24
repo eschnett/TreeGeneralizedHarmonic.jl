@@ -285,6 +285,11 @@ layer's, through the core rule.
 state itself at every refill instead of the fit — the snapshot control of
 step 8f's matrix ([`snapshot_target_kernel!`](@ref)).
 
+`fit_initial_blend = true` (added in step 8) replaces the step at
+`fit_initial_depth` by a `C²` blend in the fit's variables from the analytic
+solution at the offset surface to the fit at that depth
+([`fitted_state_kernel!`](@ref)).
+
 `target_rate = true` (added in step 8, the default) feeds the target's rate
 forward: the cache's slope includes the fit's translation with the track,
 and the kernel adds `(1 − w) ∂_t u_fit` to the layer and the core, so that a
@@ -323,7 +328,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                  ρ_max_factor=nothing, ρ_max_fixed=nothing,
                  find=find_gh_horizon, fit_initial_cont::Integer=1,
                  fit_initial_depth=0, handover=0,
-                 target_source::Symbol=:fit, target_rate::Bool=true) where {T}
+                 target_source::Symbol=:fit, target_rate::Bool=true,
+                 fit_initial_blend::Bool=false) where {T}
     # The tracked geometry (step 8d) is built from the horizon that was found,
     # so a case that asks for it must carry the finder's parameters.
     fitted = case.interior isa FittedSpec
@@ -477,7 +483,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         schedule, passes, converged, geom = adapt_fitted_initial_data!(
             U, ops, case, g -> geometry(g, zero(T), tr); G=G,
             buffer=bufferwidth, travel=travel, maxpasses=maxpasses,
-            cont=fit_initial_cont, depth=d_init, backend=backend)
+            cont=fit_initial_cont, depth=d_init, backend=backend,
+            blend=fit_initial_blend)
         converged || throw(ErrorException(
             "the initial-data cycle of this :fitted case had not converged " *
             "after $passes passes: the hierarchy was still changing when " *
@@ -544,7 +551,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     target0 = nothing
     if fitmode && handover_t == 0
         ff = fill_fitted_initial!(U, case, geom; cont=fit_initial_cont,
-                                  depth=d_init, backend=backend, rate=rate_on)
+                                  depth=d_init, backend=backend, rate=rate_on,
+                                  blend=fit_initial_blend)
         tbounds, fit_initial, target0 = ff.bounds, ff.fit, ff.target
         fits = (fit_initial, nothing)
     elseif fitmode
@@ -1016,7 +1024,7 @@ step 8, so that the two are one computation).
 function fill_fitted_initial!(U::FieldSet{T,3}, case::GHCase{T},
                               geom::FittedInterior; cont::Integer=1, depth=0,
                               backend=get_backend(U.work),
-                              rate::Bool=false) where {T}
+                              rate::Bool=false, blend::Bool=false) where {T}
     spec = case.interior
     spec isa FittedSpec || throw(ArgumentError(
         "fill_fitted_initial! fills a tracked :fitted case, whose interior is " *
@@ -1035,7 +1043,7 @@ function fill_fitted_initial!(U::FieldSet{T,3}, case::GHCase{T},
     u = statevector(U)
     map_blocks!(fitted_state_kernel!, U, statearray(u, U), target.work,
                 origins, spacings, case.background, geom, zero(T), zero(T),
-                T(depth))
+                T(depth), blend, spec.fit_tilde)
     scatter!(U, u)
     return (bounds=bounds, fit=fit, target=target)
 end
@@ -1078,7 +1086,8 @@ function adapt_fitted_initial_data!(U::FieldSet{T,3}, ops, case::GHCase{T},
                                     geometry; G::Integer, buffer::Integer,
                                     travel=zero(T), maxpasses::Integer=8,
                                     cont::Integer=1, depth=0,
-                                    backend=get_backend(U.work)) where {T}
+                                    backend=get_backend(U.work),
+                                    blend::Bool=false) where {T}
     forest = U.forest
     boundary = dirichlet(case, zero(T))
     fill!(fs, sched) = boundary === nothing ? fill_ghosts!(fs, sched) :
@@ -1086,7 +1095,7 @@ function adapt_fitted_initial_data!(U::FieldSet{T,3}, ops, case::GHCase{T},
     schedule = GhostSchedule(U, ops)
     geom = geometry(forest)
     fill_fitted_initial!(U, case, geom; cont=cont, depth=depth,
-                         backend=backend)
+                         backend=backend, blend=blend)
     for pass in 1:maxpasses
         fill!(U, schedule)
         flags = indicator_flags(U, case, zero(T); G=G, buffer=buffer,
@@ -1099,7 +1108,7 @@ function adapt_fitted_initial_data!(U::FieldSet{T,3}, ops, case::GHCase{T},
         schedule = GhostSchedule(U, ops)
         geom = geometry(forest)
         fill_fitted_initial!(U, case, geom; cont=cont, depth=depth,
-                             backend=backend)
+                             backend=backend, blend=blend)
         changed || return (schedule, pass, true, geom)
     end
     return (schedule, Int(maxpasses), false, geom)

@@ -1108,7 +1108,8 @@ function fill_snapshot!(target::FieldSet{T,3}, ua, origins, spacings,
 end
 
 """
-    fitted_state_kernel!(u, tw, origins, spacings, bg, interior, t, t_f, d_init)
+    fitted_state_kernel!(u, tw, origins, spacings, bg, interior, t, t_f, d_init,
+                         blend, tilde)
 
 The `:fitted` variant's initial data (decided in review, step 8e): the
 analytic state [`state_tuple`](@ref) outside the offset surface and the
@@ -1118,20 +1119,46 @@ evaluation inside the offset surface, so a chart whose interior is singular
 — harmonic Kerr's disk — gets regular data. `d_init` moves the switch to the
 depth `d_init` below the offset surface (at most the ramp's thickness): `0`
 is the decision; a positive depth is the study knob of `evolve!`'s
-`fit_initial_depth` (proposed in step 8e).
+`fit_initial_depth` (proposed in step 8e). With `blend` (added in step 8)
+the switch is not a step but a `C²` blend over `0 < d < d_init`, from the
+analytic solution at the offset surface to the fit at `d_init`, in the fit's
+variables (`tilde` says whether the momentum is `Π̃`): the step at `d_init`
+is a jump of the data by as much as the fit misses the solution there —
+twenty-five times the solution itself at the core surface of G5's chart,
+`1.5e4` against `600` in `Π_xx` — which a static hole relaxes away where
+`w = 0` and a moving one carries into the evolved part of the layer on its
+trailing side.
 """
 @kernel function fitted_state_kernel!(u, @Const(tw), @Const(origins),
                                       @Const(spacings), bg, interior, t, t_f,
-                                      d_init)
+                                      d_init, blend, tilde)
     I = @index(Global, NTuple)
     b = I[4]
     inner = ntuple(d -> I[d], Val(3))
+    T = eltype(u)
     x = point_position(origins, spacings, b, I)
     g = interior_point(interior, t, x)
-    if g.r ≥ g.r_1 - d_init
+    if g.r ≥ g.r_1 || (!blend && g.r ≥ g.r_1 - d_init)
         vals = state_tuple(bg, t, x)
         ntuple(Val(2NC)) do v
             u[inner..., v, b] = vals[v]
+            nothing
+        end
+    elseif blend && g.r > g.r_1 - d_init
+        # The blend (added in step 8): from the analytic solution at the
+        # offset surface to the fit at the depth `d_init`, `C²` in the depth
+        # (the package's quintic), and made in the fit's variables — never
+        # in `g_ab`, which is not convex.
+        β = smoothstep((g.r_1 - g.r) / d_init)
+        ua = SVector{2NC,T}(state_tuple(bg, t, x))
+        uf = SVector{2NC,T}(ntuple(v -> _cached_target(tw, inner, b, v, t, t_f),
+                                   Val(2NC)))
+        va = fit_variables(ua; tilde=tilde)
+        vf = fit_variables(uf; tilde=tilde)
+        hb, Πb = state_from_fit((one(T) - β) * va + β * vf, tilde)
+        ntuple(Val(NC)) do v
+            u[inner..., v, b] = hb[v]
+            u[inner..., NC + v, b] = Πb[v]
             nothing
         end
     else
