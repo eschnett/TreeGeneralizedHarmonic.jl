@@ -366,8 +366,9 @@ julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])'
 ```
 
 The clean-checkout check, which is what the `[sources]` pins exist for: a
-tree with no `Manifest.toml` resolves TreeAMR from the registry and the
-other three from GitHub, and passes. From 2026-09-21 it is a real check —
+tree with no `Manifest.toml` resolves all four pinned packages from
+GitHub (TreeAMR from the registry between 2026-09-21 and 2026-09-23), and
+passes. From 2026-09-21 it is a real check —
 every source is public, so it works anonymously, which is what CI does:
 
 ```bash
@@ -377,7 +378,7 @@ d=$(mktemp -d) && git archive HEAD | tar -x -C "$d" && \
 
 It runs from a git worktree as happily as from the checkout, which is how
 the per-step agents work; the `[sources]` pins mean every worktree
-resolves the same two branches.
+resolves the same branches.
 
 The thread workload runs on its own, which is how a digest mismatch is
 bisected — `test/threading_tests.jl` starts exactly this in a subprocess:
@@ -507,18 +508,20 @@ the cluster mechanics (modules, SLURM, NUMA, precompilation).
 Carried over from TreeAMR, TreeWave and TreeHydro where they apply, plus
 what is specific to a GR code. Each is in `CODE.md` with its reason.
 
-- **Three dependencies are pinned to GitHub `main`, not to the local
-  checkouts; TreeAMR is not one of them any more** (2026-09-21).
-  `SpacetimeMetrics`, `ApparentHorizonFinder` and `KorzynskiSpin` are what
-  `Project.toml`'s `[sources]` entries resolve, so `~/src/jl/…` is *not*
-  what the tests see; an unpushed change there is invisible here, and the
-  local SpacetimeMetrics checkout has been behind `main` before. Read what
-  Pkg installed under `~/.julia/packages/` when in doubt about an API. Say
-  so rather than editing a checkout and assuming the tests see it.
-  **TreeAMR now comes from the General registry at `0.1.1`**, so an
-  unreleased change there is invisible too — releasing is what publishes
-  it. `test/prerequisite_tests.jl` is what notices when a moving branch
-  drops a name.
+- **All four dependencies are pinned to GitHub `main`, not to the local
+  checkouts — TreeAMR included again** (Erik's `Project.toml` of
+  2026-09-23, which dropped the explanatory comment block; amended in step
+  8f). `TreeAMR`, `SpacetimeMetrics`, `ApparentHorizonFinder` and
+  `KorzynskiSpin` are what `Project.toml`'s `[sources]` entries resolve, so
+  `~/src/jl/…` is *not* what the tests see; an unpushed change there is
+  invisible here, and the local SpacetimeMetrics checkout has been behind
+  `main` before. Read what Pkg installed under `~/.julia/packages/` when in
+  doubt about an API. Say so rather than editing a checkout and assuming
+  the tests see it. A pushed change to TreeAMR's `main` is visible at the
+  next resolve without a release (from 2026-09-21 to 2026-09-23 it came from
+  the General registry at `0.1.1`, where only a release published it);
+  `test/prerequisite_tests.jl` is what notices when a moving branch drops a
+  name.
   **`KorzynskiSpin`'s repository became public on 2026-09-21**, so its URL
   is plain `https`, the read-only deploy key and the `ssh-agent` step and
   `JULIA_PKG_USE_CLI_GIT` are all gone from `CI.yml`, and an anonymous

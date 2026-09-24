@@ -2458,6 +2458,16 @@ function gen_setup(sp)
     return case, forest
 end
 
+# A run stopped at the job's deadline (`budget=<seconds>`, added so that a row
+# can use a one-hour queue to the end without being lost with it): the
+# observer throws this at the first row past the deadline, and the row is
+# reported as having reached that row's `t`, not as a failure.
+struct GenDeadline <: Exception
+    t::Float64
+end
+
+const GEN_DEADLINE = Ref(Inf)
+
 gen_fmt(x) = x === nothing ? "     —   " :
              x isa Bool ? string(x) : Printf.format(Printf.Format("%9.3e"), x)
 
@@ -2534,18 +2544,25 @@ function gen_run(sp; t_end=nothing)
             gen_fmt(row.M_irr), gen_fmt(row.J), gen_fmt(row.M_ch),
             String(row.variant), time() - tstart)
         flush(stdout)
+        time() > GEN_DEADLINE[] && throw(GenDeadline(row.t))
         return nothing
     end
     t0 = time()
     failure = nothing
+    stopped = false
     out = try
         evolve!(T, case; forest=forest, q=q,
                 ops=Operators(prolongation=q + 2, restriction=q + 2),
                 t_end=tend, observer=watch, find=finder, sp.kw...)
     catch err
         err isa InterruptException && rethrow()
-        failure = cal_root_cause(err)
-        err isa TrackLostError && (failure = "track lost: " * failure)
+        if err isa GenDeadline
+            stopped = true
+            say("   [%s] stopped at the deadline, t = %.3f M", sp.label, err.t)
+        else
+            failure = cal_root_cause(err)
+            err isa TrackLostError && (failure = "track lost: " * failure)
+        end
         nothing
     end
     wall = time() - t0
@@ -2564,7 +2581,7 @@ function gen_run(sp; t_end=nothing)
     out === nothing || say("   fits [%s]: %s", sp.label, string(out.fit_cost))
     flush(stdout)
     return (label=sp.label, spec=sp, reached=reached, t_end=Float64(tend),
-            failure=failure, wall=wall,
+            failure=failure, stopped=stopped, wall=wall,
             nsteps=out === nothing ? nothing : out.nsteps,
             nblocks=nleaves(forest), obs=obs, recs=recs)
 end
@@ -2583,9 +2600,10 @@ function gen_fanout(batches; tag, t_end)
         out = joinpath(dir, "worker-$n.jls")
         log = joinpath(dir, "worker-$n.log")
         te = t_end === nothing ? "" : "t_end=$(leak_spell(t_end))"
+        dl = isfinite(GEN_DEADLINE[]) ? "deadline=$(GEN_DEADLINE[])" : ""
         cmd = `$(Base.julia_cmd()) --project=$project --threads=$nt
                $(abspath(@__FILE__)) generic worker=1
-               runs=$(join(labels, ',')) out=$out $te`
+               runs=$(join(labels, ',')) out=$out $te $dl`
         # One BLAS thread a worker: a fit's QR is small, and OpenBLAS's
         # default pool of a thread per core, spinning after every call, put a
         # node's load at twice its cores with seven workers (measured in step
@@ -2630,7 +2648,8 @@ function gen_report(results)
                 isempty(v) ? nothing : maximum(v))
         say("| %s | %.2f | %s | %s | %s | %s | %s, %s, %s | %s | %s | %d (%s) | %s | %s " *
             "| %s | %s | %s | %s | %s | %.0f s |", r.label, r.reached,
-            r.failure === nothing ? "ok" : "threw", gen_fmt(l.err_l2),
+            r.failure !== nothing ? "threw" : r.stopped ? "deadline" : "ok",
+            gen_fmt(l.err_l2),
             gen_fmt(l.err_linf), gen_fmt(l.sh_l2), gen_fmt(l.hC[1]), gen_fmt(l.hC[2]),
             gen_fmt(l.hC[3]), gen_fmt(l.residual), gen_fmt(l.drift), l.hits,
             gen_fmt(rmax), gen_fmt(fv), gen_fmt(fr),
@@ -2883,6 +2902,9 @@ const GEN_DEFAULT = ["ks0", "ks9", "harm", "h7", "boost", "probe"]
 if "generic" in SECTIONS || haskey(OPTIONS, "generic")
     # One BLAS thread, as in the workers (`gen_fanout`).
     LinearAlgebra.BLAS.set_num_threads(1)
+    haskey(OPTIONS, "budget") &&
+        (GEN_DEADLINE[] = time() + parse(Float64, OPTIONS["budget"]))
+    haskey(OPTIONS, "deadline") && (GEN_DEADLINE[] = parse(Float64, OPTIONS["deadline"]))
     t_end_opt = haskey(OPTIONS, "t_end") ? only(leak_option("t_end", [1 // 1])) : nothing
     gen_specs = gen_all_specs()
     if haskey(OPTIONS, "worker")

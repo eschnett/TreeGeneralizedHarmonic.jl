@@ -5256,6 +5256,49 @@ against `30` on the axis) is not representable by a polynomial of degree
 `Π̃ = (α/√γ)Π` as the fitted momentum, `L ≥ 12`, a finer equator — is step
 8f's to measure, and `a = 7/10` and 8g's excision remain the fallbacks.
 
+**Closed in step 8f: G5 runs at `a = 7/10`, and harmonic Kerr at `a = 9/10`
+waits with its price written down (decided 2026-09-23** by the orchestrating
+session, with the decision delegated by Erik, before step 8f started; step
+8f's host-side probe, `hole_runs.jl generic=probe`, measured the numbers
+below**).** The chart is blocked by resolution before it is blocked by the
+interior:
+
+- **The measured spacing.** At `h = 5/256` and `m = 4` — the finest the
+  proof-of-concept mesh of 2472 blocks reaches, and the spacing at which the
+  offset surface's equator `r_1 = 0.921` first lies outside the ring at
+  `0.9` — the analytic solution's own second difference at the first evolved
+  point on the equator is `2.4e9` against `420` on the axis, its length scale
+  `0.008 M`, under half a cell (step 8e); a spacing that resolves it by five
+  cells is `h ≲ 5/1024` on the equator.
+- **What step 8f changed does not rescue `5/256`.** Fitting `Π̃ = (α/√γ)Π`
+  and `L = 12` brings the fit's kink at the first evolved point from `8.8e5`
+  to `366` on the axis — the analytic `420` — and from `2.0e7` to `2.5e4` at
+  45° (`3.1e3` at `L = 16`), against an analytic `107`: still 30–230 times
+  off the equator, and on the equator itself the data are not resolved by
+  any fit (`1.5e9` against `2.4e9`). The initial data at `L = 12`, `Π̃` is
+  finite and a metric at all 1 265 664 points (`min det γ = 1.6`, `min α =
+  0.219`), one right-hand side is finite (`max |du| = 7.9e8`, at the offset
+  surface over the ring, `|z| = 0.08`), and the run ends in its first chunk,
+  before `t = 1/400 M`, in a degenerate metric — as step 8e's did at `L = 8`
+  (measured in step 8f).
+- **The node run's price** (measured cost per point, `2.5 µs` a thread on
+  this machine and twice that on a Symmetry core; `dt = 5.4e−3 M` at
+  `5/256`, `λ_max = 0.906`, a quarter of it at `5/1024`): with `5/1024` on
+  an equatorial band (`0.75 ≤ ρ ≤ 1.05`, `|z| ≤ 0.2`) and `5/256` elsewhere,
+  **23 080 blocks, 1.2e7 points, 28 GB, one right-hand side `0.93 s` on 64
+  node threads, `0.76 h` a `M`, `38 h` for `50 M`**; with `5/1024` inside the
+  whole sphere `|x| ≤ 1`, 90 112 blocks, 111 GB, `3.0 h` a `M` and `149 h`
+  for `50 M` (measured in step 8f). No checkpointing exists (`Possible
+  extensions`), so either is one uninterrupted job longer than any queue's
+  day — and it presumes a fit good enough off the equator, which none of
+  step 8f's is, or a margin that depends on direction.
+
+So `a = 9/10` in the harmonic chart is a research item of its own — a
+direction-dependent margin or a finer equator, a fit that holds 45°, and
+checkpointing for a multi-day run — and not a row of the matrix. **G5 runs
+at `a = 7/10`** (`CODE.md`'s fallback since step 5: `√(M² − a²) = 0.714 >
+a`), measured by step 8f's `h7` row at `h = 5/256`.
+
 **The fitted target's host half is built (step 8e-i).** `src/fit.jl` fits
 `(log α, β^i, γ_ij, Π_ab)` on the offset surface with a polynomial of degree
 `L + 2 cont`, one QR for all twenty variables, and sweeps the result for
