@@ -1181,7 +1181,7 @@ analytic_horizon_radius(bg::AbstractMetric, n) = horizon_min_radius(bg)
     FittedSpec(T = Float64; variant = :damped, margin = 8, n_L = 0,
                core_min = 2, lmax_shape = 4, lmax_fit = 8, ρ_max = 0,
                w_ramp = 1//2, ρ_ramp = 1, max_misses = 3, α_trigger = 1//10,
-               target = nothing, target_bounds = nothing)
+               target = nothing, target_bounds = nothing, fit_tilde = true)
 
 What a [`GHCase`](@ref) holds as its `interior` for the **tracked**
 geometry (step 8d): not a layer, but the rule a layer is built by, once per
@@ -1223,6 +1223,13 @@ the hole; the geometry is a function of the run.
   at the start of a run from the analytic data on the seed's offset surface
   ([`derive_target_bounds`](@ref)), **decided in review, step 8e**, because
   `default_bounds` is Kerr-Schild's and harmonic Kerr's data exceeds it.
+- `fit_tilde` fits the momentum as `Π̃ = (α/√γ)Π` rather than `Π`
+  ([`fit_variables`](@ref), added in step 8f). **`true` is the default
+  (proposed in step 8f)**: on every chart step 8f probed it shrinks the
+  initial data's curvature kink at the first evolved point (1.5× on the
+  static holes, 2–40× off the equator of the spinning ones) and the value
+  residual by a third, at no cost — the cache holds the packed `Π` either
+  way.
 
 `isbits`: the numbers that have a "use the rule" value spell it `0`, since a
 `Union{Nothing, T}` field would not be; the two optional objects are type
@@ -1242,6 +1249,7 @@ struct FittedSpec{T,V,X,B}
     valvariant::Val{V}
     target::X
     target_bounds::B
+    fit_tilde::Bool
 end
 
 function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
@@ -1250,7 +1258,7 @@ function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
                     w_ramp=T(1 // 2),
                     ρ_ramp=one(T), max_misses::Integer=3,
                     α_trigger=T(1 // 10), target=nothing,
-                    target_bounds=nothing) where {T}
+                    target_bounds=nothing, fit_tilde::Bool=true) where {T}
     variant in INTERIOR_VARIANTS || throw(ArgumentError(
         "the interior variant must be one of $(INTERIOR_VARIANTS), got " *
         ":$variant; the tracked geometry runs CODE.md's three analytic " *
@@ -1298,10 +1306,31 @@ function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
     return FittedSpec{T,variant,typeof(target),typeof(tb)}(
         Int(margin), Int(n_L), Int(core_min), Int(lmax_shape), Int(lmax_fit),
         T(ρ_max), wr,
-        ρr, Int(max_misses), T(α_trigger), Val(variant), target, tb)
+        ρr, Int(max_misses), T(α_trigger), Val(variant), target, tb,
+        fit_tilde)
 end
 
 interior_variant(::FittedSpec{T,V}) where {T,V} = V
+
+"""
+    with_variant(spec::FittedSpec, variant) -> FittedSpec
+    with_variant(int::FittedInterior, variant) -> FittedInterior
+
+The same rule or geometry with another interior variant (added in step 8f):
+what the driver's hand-over (`evolve!`'s `handover`) runs before the
+`:fitted` target takes over — the analytic `:damped` layer on the *same*
+tracked geometry — and what the initial-data cycle of a `:fitted` case flags
+with. A `:fitted` result drops an analytic `target`, which it would refuse.
+"""
+function with_variant(spec::FittedSpec{T}, variant::Symbol) where {T}
+    variant in INTERIOR_VARIANTS || throw(ArgumentError(
+        "the interior variant must be one of $(INTERIOR_VARIANTS), got :$variant."))
+    target = variant === :fitted ? nothing : spec.target
+    return FittedSpec{T,variant,typeof(target),typeof(spec.target_bounds)}(
+        spec.margin, spec.n_L, spec.core_min, spec.lmax_shape, spec.lmax_fit,
+        spec.ρ_max, spec.w_ramp, spec.ρ_ramp, spec.max_misses, spec.α_trigger,
+        Val(variant), target, spec.target_bounds, spec.fit_tilde)
+end
 
 """
     layer_cells(G, ρ_max, M) -> Int
@@ -1424,6 +1453,16 @@ with_ρ_max(int::FittedInterior{T,V,NM,X}, ρ_max) where {T,V,NM,X} =
                              int.h, int.valvariant, int.target)
 
 interior_variant(::FittedInterior{T,V}) where {T,V} = V
+
+function with_variant(int::FittedInterior{T,V,NM,X}, variant::Symbol) where {T,V,NM,X}
+    variant in INTERIOR_VARIANTS || throw(ArgumentError(
+        "the interior variant must be one of $(INTERIOR_VARIANTS), got :$variant."))
+    return FittedInterior{T,variant,NM,X}(int.center, int.shape, int.lmax,
+                                          int.r_in, int.r_out, int.offset,
+                                          int.thickness, int.ρ_max, int.w_ramp,
+                                          int.ρ_ramp, int.margin, int.n_L,
+                                          int.h, Val(variant), int.target)
+end
 
 @inline layer_target(::FittedInterior{T,V,NM,Nothing}, bg) where {T,V,NM} = bg
 @inline layer_target(int::FittedInterior, bg) = int.target

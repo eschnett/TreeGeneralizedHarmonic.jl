@@ -95,7 +95,7 @@ export ConstantDamping, GaussianDamping, damping_rate, damping_bounds
 export HorizonDissipation, dissipation_rate, has_dissipation, dissipation_bounds
 
 # The interior: the damping layer and the frozen core
-export HoleCenter, center_at, Interior, with_ρ_max, interior_variant, layer_target
+export HoleCenter, center_at, Interior, with_ρ_max, with_variant, interior_variant, layer_target
 export interior_profiles, is_frozen, in_layer, core_position, smoothstep
 export InteriorMask, ShellMask, interior_mask
 export horizon_min_radius, horizon_max_radius, singular_radius, hole_mass

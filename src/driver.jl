@@ -136,7 +136,9 @@ horizon_shell(case::GHCase, ::FittedSpec) = throw(ArgumentError(
             cfl = 1//4, regrid = false, adapt = false, buffer = nothing,
             maxpasses = 8, adm_every = 0, backend = CPU(),
             observer = nothing, ρ_max_factor = nothing,
-            ρ_max_fixed = nothing)
+            ρ_max_fixed = nothing, find = find_gh_horizon,
+            fit_initial_cont = 1, fit_initial_depth = 0, handover = 0,
+            target_source = :fit)
 
 **The** time-stepping loop: fill the initial data on `forest`, then evolve
 in chunks of `chunk`, writing `CODE.md`'s analysis record at every chunk
@@ -263,6 +265,31 @@ TreeHydro's atmosphere reset, applied where TreeHydro applies it. One
 builds, and returned as `bounds`; for a case without bounds the limiter is
 a no-op and `bounds` is `nothing`. Where the projection never fires, the
 run is **bit for bit** the run without it.
+
+## The fitted target's switches (added in steps 8e and 8f)
+
+`fit_initial_cont` and `fit_initial_depth` are step 8e's study knobs for a
+`:fitted` case's initial data: the radial order of the analytic fit, and how
+far below the offset surface the analytic solution gives way to it (`0`, the
+decision, or down to the core surface `n_L h`, which needs the analytic
+solution regular on the whole layer).
+
+`handover > 0` runs a `:fitted` case on the analytic `:damped` layer of the
+*same* tracked geometry until the first chunk that starts at or after
+`handover`, fitting the evolved state at every row all the while, and on the
+`:fitted` target from then on: a newly found horizon's first fit made from
+evolved data (step 8f's hand-over row). Its initial data is the analytic
+layer's, through the core rule.
+
+`target_source = :snapshot` fills a `:fitted` case's target cache with the
+state itself at every refill instead of the fit — the snapshot control of
+step 8f's matrix ([`snapshot_target_kernel!`](@ref)).
+
+`adapt = true` on a `:fitted` case (added in step 8f) chooses the mesh on the
+analytic `:damped` data of the same geometry — the indicator masks the
+interior, so the two data flag the same blocks — and refuses a chart whose
+analytic core surface meets its singular set, since there is then no
+analytic data to flag on; the fitted data is filled on the settled mesh.
 """
 evolve!(case::GHCase{T}; kwargs...) where {T} = evolve!(T, case; kwargs...)
 
@@ -278,7 +305,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                  adm_every::Integer=0, backend=CPU(), observer=nothing,
                  ρ_max_factor=nothing, ρ_max_fixed=nothing,
                  find=find_gh_horizon, fit_initial_cont::Integer=1,
-                 fit_initial_depth=0) where {T}
+                 fit_initial_depth=0, handover=0,
+                 target_source::Symbol=:fit) where {T}
     # The tracked geometry (step 8d) is built from the horizon that was found,
     # so a case that asks for it must carry the finder's parameters.
     fitted = case.interior isa FittedSpec
@@ -373,24 +401,33 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     # whatever `T` is (both decided in review, step 8e): it is the initial
     # data inside the offset surface and the first chunk's target. After
     # that every record row fits the state it records (`refit!`, below).
+    # Both are built once the mesh is settled, after the initial-data cycle.
     fitmode = fitted && interior_variant(spec) === :fitted
-    fitmode && adapt && throw(ArgumentError(
-        "a :fitted case's initial data is filled from its target cache on the " *
-        "mesh (the analytic solution outside the offset surface, its fit " *
-        "inside), and the initial-data cycle re-evaluates a coordinate " *
-        "callback on every mesh it makes, which cannot read the cache. Adapt " *
-        "an analytic variant's mesh first and run :fitted on it, or run " *
-        "without adapt (not built in step 8e)."))
-    tbounds = !fitmode ? nothing :
-              spec.target_bounds !== nothing ? _bounds_in(T, spec.target_bounds) :
-              derive_target_bounds(T, case.background, geom; t=0,
-                                   L=spec.lmax_fit)
-    fit_initial = !fitmode ? nothing :
-                  build_fit(analytic_sampler(case.background, 0.0;
-                                             δ=tofloat64(geom.h) / 8),
-                            geom, spec; cont=fit_initial_cont, bounds=tbounds,
-                            backend=backend)
-    fits = fitmode ? (fit_initial, nothing) : nothing
+    # The hand-over (added in step 8f): a `:fitted` case that runs the
+    # analytic `:damped` layer on the same tracked geometry until `handover`,
+    # fitting the evolved state at every row all the while, and relaxes
+    # toward the fit from the first chunk that starts at or after it — a
+    # newly found horizon's first fit made from evolved data.
+    handover_t = T(handover)
+    handover_t ≥ 0 || throw(ArgumentError(
+        "handover is the time the :fitted target takes over, got $handover."))
+    handover_t > 0 && !fitmode && throw(ArgumentError(
+        "handover = $handover asks a :fitted case to start on the analytic " *
+        ":damped layer and hand over to its fit; this case's interior is " *
+        "not :fitted."))
+    target_source in (:fit, :snapshot) || throw(ArgumentError(
+        "target_source is :fit (the fitted target, step 8e) or :snapshot (the " *
+        "state at the chunk's start, step 8f's control), got :$target_source."))
+    target_source === :snapshot && !fitmode && throw(ArgumentError(
+        "target_source = :snapshot is the :fitted variant's cache filled with " *
+        "the state; this case's interior is not :fitted."))
+    # The layer the kernel runs at time `t`: the geometry, or before the
+    # hand-over the same geometry's analytic `:damped` layer.
+    kgeom(g, t) = handover_t > 0 && t < handover_t ? with_variant(g, :damped) : g
+    refilling(t) = fitmode && !(handover_t > 0 && t < handover_t)
+    tbounds = nothing
+    fit_initial = nothing
+    fits = nothing
     # What the fits and the cache cost, and how often the cache is refilled
     # (the numbers step 8e records).
     fitcost = (build_ns=Ref(0), nbuild=Ref(0), fill_ns=Ref(0), nfill=Ref(0),
@@ -409,13 +446,28 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         # what `refine_flags` means by "the caller passes zero". A tracked
         # geometry is rebuilt on each pass's mesh, since its offset and ramp
         # are stated in that mesh's spacings.
+        #
+        # **A `:fitted` case's mesh is chosen on the analytic `:damped` data
+        # of the same geometry (added in step 8f).** The cycle re-evaluates a
+        # coordinate callback on every mesh it makes, and the fitted initial
+        # data lives in a cache a callback cannot read; the indicator masks
+        # the whole interior, so the two data flag the same blocks wherever
+        # the core rule's data is finite. That needs the analytic solution
+        # regular on the core surface, which `check_interior_radii` asserts
+        # for the `:damped` geometry — it refuses harmonic Kerr's spinning
+        # charts by name — and the fitted data is then filled on the mesh the
+        # cycle settled at.
+        acycle(g) = fitmode ? with_variant(g, :damped) : g
+        fitmode && check_interior_radii(forest, acycle(geom), case.background,
+                                        G; t=zero(T), center=case.center)
         criterion(fs) = indicator_flags(fs, case, zero(T); G=G,
                                         buffer=bufferwidth,
                                         interior=fitted ?
-                                                 geometry(fs.forest, zero(T), tr) :
+                                                 acycle(geometry(fs.forest,
+                                                                 zero(T), tr)) :
                                                  case.interior).flags
         schedule, passes, converged = adapt_to_initial_data!(
-            U, ops; initial=state_callback(case, zero(T); interior=geom),
+            U, ops; initial=state_callback(case, zero(T); interior=acycle(geom)),
             flags=criterion, buffer=0, maxpasses=maxpasses,
             boundary=dirichlet(case, zero(T)))
         converged || throw(ErrorException(
@@ -433,10 +485,22 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         # interpolated, for the cycle's own reason.
         if fitted
             geom = geometry(forest, zero(T), tr)
-            fill_exact!(U, case, zero(T); interior=geom)
+            (fitmode && handover_t == 0) ||
+                fill_exact!(U, case, zero(T); interior=kgeom(geom, zero(T)))
         end
-    elseif !fitmode
-        fill_exact!(U, case, zero(T); interior=geom)
+    elseif !fitmode || handover_t > 0
+        fill_exact!(U, case, zero(T); interior=kgeom(geom, zero(T)))
+    end
+    if fitmode
+        tbounds = spec.target_bounds !== nothing ?
+                  _bounds_in(T, spec.target_bounds) :
+                  derive_target_bounds(T, case.background, geom; t=0,
+                                       L=spec.lmax_fit)
+        fit_initial = build_fit(analytic_sampler(case.background, 0.0;
+                                                 δ=tofloat64(geom.h) / 8),
+                                geom, spec; cont=fit_initial_cont,
+                                bounds=tbounds, backend=backend)
+        fits = (fit_initial, nothing)
     end
     u = statevector(U)
     # The fitted variant's initial data (decided in review, step 8e): the
@@ -445,7 +509,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     # inside it — no analytic evaluation below the surface, so a chart whose
     # interior is singular gets regular data.
     target0 = fitmode ? target_cache(U) : nothing
-    if fitmode
+    if fitmode && handover_t == 0
         origins0 = to_backend(backend, block_origins(forest, T))
         spacings0 = to_backend(backend, block_spacings(forest, T))
         fill_target!(target0, origins0, spacings0, geom, fits, zero(T))
@@ -481,8 +545,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     # projection's record is made once, here, and every problem the run
     # builds shares it (step 8b).
     acc = case.bounds === nothing ? nothing : BoundsAccounting()
-    p0 = GHProblem(U, schedule, case; q=q, t=zero(T), interior=geom,
-                   accounting=acc, target=target0, fits=fits)
+    p0 = GHProblem(U, schedule, case; q=q, t=zero(T),
+                   interior=kgeom(geom, zero(T)), accounting=acc,
+                   target=target0, fits=fits)
     # The geometry the gauge source was sampled with (step 8d): the sample
     # applies the core rule, so a tracked core that moves far from it asks
     # for a fresh sample — see the chunk loop.
@@ -571,10 +636,17 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         return rows
     end
 
-    # The cache, refilled from the current fits at `t` (step 8e), timed.
-    function refill(p, t)
+    # The cache, refilled from the current fits at `t` (step 8e), timed — or,
+    # for step 8f's snapshot control, from the state `u` itself.
+    function refill(p, t, u)
         t0 = time_ns()
-        p′ = refill_target(p, t; fits=fits)
+        p′ = if target_source === :snapshot
+            fill_snapshot!(p.target, statearray(u, p.U), p.origins, p.spacings,
+                           p.interior, T(t))
+            with_interior(p, p.interior; fits=fits, t_target=T(t))
+        else
+            refill_target(p, t; fits=fits)
+        end
         fitcost.fill_ns[] += time_ns() - t0
         fitcost.nfill[] += 1
         return p′
@@ -596,8 +668,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         end
         if lost === nothing
             geom = geometry(forest, t, tr)
-            check_interior_radii(forest, geom, case.background, G; t=T(t),
-                                 center=case.center)
+            check_interior_radii(forest, kgeom(geom, T(t)), case.background, G;
+                                 t=T(t), center=case.center)
             check_bounds_gate(forest, geom, case.bounds, q; t=T(t))
         end
         ct = center_at(track_center(tr), T(t))
@@ -683,6 +755,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                M_irr=hz.M_irr, J=hz.J, spin_axis=hz.spin_axis,
                M_ch=hz.M_ch, hlm=hz.hlm, horizon_note=hz.note,
                ρ_max=R(interior_ρ_max(p.interior)),
+               variant=interior_variant(p.interior),
                τ_max=ind === nothing ? nothing : R(ind.τ_max),
                centroid=centroid,
                centroid_offset=centroid === nothing ? nothing :
@@ -706,7 +779,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     dt0 = cfl * minimum_spacing(T, forest) / λ_initial
     p0 = with_interior(p0, chunk_interior(case, dt0, ρ_max_factor,
                                           ρ_max_fixed; default=ρ_max_default,
-                                          interior=geom))
+                                          interior=kgeom(geom, zero(T))))
     # The initial data has not been through a stage, so neither limiter
     # has seen it: the range projection first, in the order RK4 applies
     # the two (stage, then step), and the paste after it **(proposed in
@@ -733,13 +806,15 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         if fitted
             if p.Hsrc !== nothing &&
                surface_shift(geom_sampled, geom, tstart) > geom.h / 2
-                p = GHProblem(U, schedule, case; q=q, t=tstart, interior=geom,
-                              accounting=acc, target=p.target, fits=p.fits,
+                p = GHProblem(U, schedule, case; q=q, t=tstart,
+                              interior=kgeom(geom, tstart), accounting=acc,
+                              target=p.target, fits=p.fits,
                               t_target=p.t_target)
                 geom_sampled = geom
                 nresamples += 1
             end
-            p = with_interior(p, with_ρ_max(geom, interior_ρ_max(p.interior)))
+            p = with_interior(p, with_ρ_max(kgeom(geom, tstart),
+                                            interior_ρ_max(p.interior)))
         end
 
         # (1) the step, and with it this chunk's relaxation rate.
@@ -751,7 +826,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         p = with_interior(p, chunk_interior(case, dt_used, ρ_max_factor,
                                             ρ_max_fixed;
                                             default=ρ_max_default,
-                                            interior=geom))
+                                            interior=fitted ? kgeom(geom, tstart) :
+                                                     geom))
         # The fitted target for this chunk (step 8e): the cache refilled from
         # the fits the last row built, at the chunk's start — and, for a
         # geometry that moves, again whenever the tracked center would move
@@ -761,8 +837,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         # cadence stays the case's). A static hole's `v_est` is the finder's
         # noise, a ten-thousandth of a cell per `M`, and is one piece.
         npieces = 1
-        if fitmode
-            p = refill(p, tstart)
+        if refilling(tstart)
+            p = refill(p, tstart, u)
             speed = sqrt(sum(abs2, tr.v_est))
             npieces = speed > 0 ?
                       clamp(ceilint(speed * (stop - tstart) / (geom.h / 4)), 1,
@@ -782,7 +858,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
             nk = (steps * piece) ÷ npieces - (steps * (piece - 1)) ÷ npieces
             tnext = piece == npieces ? stop : tcur + nk * dt_used
             if piece > 1
-                p = refill(p, tcur)
+                p = refill(p, tcur, u)
                 fitcost.nrefills[] += 1
                 fitcost.chunk_refills[] += 1
             end
@@ -829,7 +905,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                 # at the next chunk's start from the same fits — a fit is a
                 # polynomial in `x` and does not know the mesh (proposed in
                 # step 8e).
-                p = GHProblem(U, schedule, case; q=q, t=stop, interior=geom,
+                p = GHProblem(U, schedule, case; q=q, t=stop,
+                              interior=fitted ? kgeom(geom, stop) : geom,
                               accounting=acc,
                               target=fitmode ? target_cache(U) : nothing,
                               fits=fits, t_target=stop)
@@ -856,7 +933,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
             interior=p.interior, problem=p, U=U, u=u, forest=forest,
             track=tr, geometry=fitted ? geom : nothing, n_L=n_L,
             nresamples=nresamples, fits=fits, fit_initial=fit_initial,
-            target_bounds=tbounds,
+            target_bounds=tbounds, handover=R(handover_t),
+            target_source=target_source,
             fit_cost=fitmode ?
                      (build_ms=fitcost.build_ns[] / 1e6, nbuild=fitcost.nbuild[],
                       fill_ms=fitcost.fill_ns[] / 1e6, nfill=fitcost.nfill[],

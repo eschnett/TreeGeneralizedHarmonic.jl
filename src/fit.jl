@@ -73,9 +73,9 @@ const FIT_GROUPS = (FIT_LAPSE:FIT_LAPSE, FIT_SHIFT, FIT_METRIC, FIT_MOMENTUM)
                   u[19], u[20])
 
 """
-    fit_variables(u) -> v
-    fit_variables(u, u′) -> (v, v′)
-    fit_variables(u, u′, u″) -> (v, v′, v″)
+    fit_variables(u; tilde = false) -> v
+    fit_variables(u, u′; tilde = false) -> (v, v′)
+    fit_variables(u, u′, u″; tilde = false) -> (v, v′, v″)
 
 The fit's twenty variables of the packed state `u = (h_ab, Π_ab)`
 (`SVector{20}`), and — given its first and second derivatives along a
@@ -97,68 +97,112 @@ the contravariant one is the 3+1 split's own shift and reassembles without
 an inverse: `β_i = γ_ij β^j` and `g_tt = −α² + β^iβ_i` are products, where
 `β_i` would need `γ^{ij}` at every layer point of every evaluation.
 
+**`tilde = true` fits `Π̃_ab = (α/√γ) Π_ab` in slots 11–20 instead of
+`Π_ab` (added in step 8f)** — the momentum as the first evolution equation
+adds it to `∂_t h`, and the quantity the range projection's `K_max` bounds.
+The densitised `Π` carries `√γ/α`, which on harmonic Kerr's equator grows
+by three orders of magnitude between the axis and the ring, and a polynomial
+of degree `L + 2` cannot follow it (`CODE.md`, "The fitted target", piece
+12). With `s = α/√γ`, `(log s)′ = (log α)′ − tr(γ⁻¹γ′)/2`,
+`(log s)″ = (log α)″ − (tr(γ⁻¹γ″) − tr(γ⁻¹γ′γ⁻¹γ′))/2`, `s′ = s (log s)′`,
+`s″ = s ((log s)″ + (log s)′²)`, and `Π̃′ = s′Π + sΠ′`,
+`Π̃″ = s″Π + 2s′Π′ + sΠ″`.
+
 Host-side and at fit cadence. The sample must be a metric (`α² > 0`,
 `γ ≻ 0`); [`build_fit`](@ref) checks that before it calls this.
 """
-function fit_variables(u::SVector{NFIT,T}) where {T}
-    γ = _spatial(u, Val(true))
-    β = inv(γ) * _lowered_shift(u)
-    α² = (one(T) - u[1]) + dot(_lowered_shift(u), β)
-    return _fit_vector(log(α²) / 2, β, u)
+function fit_variables(u::SVector{NFIT,T}; tilde::Bool=false) where {T}
+    v, _, _ = _fit_variables(u, nothing, nothing, tilde)
+    return v
 end
 
-function fit_variables(u::SVector{NFIT,T}, u1::SVector{NFIT,T}) where {T}
-    v, v1, _ = _fit_variables(u, u1, nothing)
+function fit_variables(u::SVector{NFIT,T}, u1::SVector{NFIT,T};
+                       tilde::Bool=false) where {T}
+    v, v1, _ = _fit_variables(u, u1, nothing, tilde)
     return v, v1
 end
 
-fit_variables(u::SVector{NFIT,T}, u1::SVector{NFIT,T}, u2::SVector{NFIT,T}) where {T} =
-    _fit_variables(u, u1, u2)
+fit_variables(u::SVector{NFIT,T}, u1::SVector{NFIT,T}, u2::SVector{NFIT,T};
+              tilde::Bool=false) where {T} = _fit_variables(u, u1, u2, tilde)
 
-function _fit_variables(u::SVector{NFIT,T}, u1, u2) where {T}
+# The momentum's ten components of a packed state or of its derivative.
+@inline _momentum(u) = SVector{NC}(ntuple(k -> u[NC + k], Val(NC)))
+
+# Replace the momentum slots of a fit vector.
+@inline _with_momentum(v::SVector{NFIT,T}, Π) where {T} =
+    SVector{NFIT,T}(ntuple(k -> k ≤ NC ? v[k] : Π[k - NC], Val(NFIT)))
+
+function _fit_variables(u::SVector{NFIT,T}, u1, u2, tilde::Bool) where {T}
     γ = _spatial(u, Val(true))
     γu = inv(γ)
     b = _lowered_shift(u)
     β = γu * b
     α² = (one(T) - u[1]) + dot(b, β)
     v = _fit_vector(log(α²) / 2, β, u)
+    s = tilde ? sqrt(α² / det(γ)) : one(T)
+    tilde && (v = _with_momentum(v, s * _momentum(u)))
+    u1 === nothing && return v, nothing, nothing
     γ1 = _spatial(u1, Val(false))
     b1 = _lowered_shift(u1)
     β1 = γu * (b1 - γ1 * β)
     α²1 = -u1[1] + (dot(b1, β) + dot(b, β1))
-    v1 = _fit_vector(α²1 / (2α²), β1, u1)
+    lα1 = α²1 / (2α²)
+    v1 = _fit_vector(lα1, β1, u1)
+    A1 = γu * γ1
+    ls1 = lα1 - tr(A1) / 2
+    s1 = s * ls1
+    tilde && (v1 = _with_momentum(v1, s1 * _momentum(u) + s * _momentum(u1)))
     u2 === nothing && return v, v1, nothing
     γ2 = _spatial(u2, Val(false))
     b2 = _lowered_shift(u2)
     β2 = γu * (b2 - γ2 * β - 2 * (γ1 * β1))
     α²2 = -u2[1] + (dot(b2, β) + 2 * dot(b1, β1) + dot(b, β2))
-    v2 = _fit_vector(α²2 / (2α²) - α²1 * α²1 / (2 * α² * α²), β2, u2)
+    lα2 = α²2 / (2α²) - α²1 * α²1 / (2 * α² * α²)
+    v2 = _fit_vector(lα2, β2, u2)
+    if tilde
+        ls2 = lα2 - (tr(γu * γ2) - tr(A1 * A1)) / 2
+        s2 = s * (ls2 + ls1 * ls1)
+        v2 = _with_momentum(v2, s2 * _momentum(u) + 2 * s1 * _momentum(u1) +
+                                s * _momentum(u2))
+    end
     return v, v1, v2
 end
 
 """
-    state_from_fit(v) -> (h, Π)
+    state_from_fit(v, tilde = false) -> (h, Π)
 
 The packed state of the fit's variables: `α² = exp(2 log α)`,
 `γ_ij = δ_ij + v_ij`, `β_i = γ_ij β^j`, `h_tt = (1 − α²) + β_iβ^i`,
-`h_ti = β_i`, `h_ij = v_ij`, and `Π_ab` as it is. The inverse of
-[`fit_variables`](@ref), inverse-free, explicit scalar arithmetic,
+`h_ti = β_i`, `h_ij = v_ij`, and `Π_ab` as it is — or, where the fit holds
+`Π̃ = (α/√γ)Π` (`tilde`, added in step 8f), `Π = (√det γ/α) Π̃`. The inverse
+of [`fit_variables`](@ref), inverse-free, explicit scalar arithmetic,
 `@inline`, allocation-free and generic in `T` — the reassembly step 8e-ii's
 kernel runs at every layer point.
 """
-@inline function state_from_fit(v::SVector{NFIT,T}) where {T}
+@inline function state_from_fit(v::SVector{NFIT,T}, tilde::Bool=false) where {T}
     o = one(T)
     α² = exp(2 * v[1])
     β1 = v[2]
     β2 = v[3]
     β3 = v[4]
-    b1 = (o + v[5]) * β1 + v[6] * β2 + v[7] * β3
-    b2 = v[6] * β1 + (o + v[8]) * β2 + v[9] * β3
-    b3 = v[7] * β1 + v[9] * β2 + (o + v[10]) * β3
+    g11 = o + v[5]
+    g12 = v[6]
+    g13 = v[7]
+    g22 = o + v[8]
+    g23 = v[9]
+    g33 = o + v[10]
+    b1 = g11 * β1 + g12 * β2 + g13 * β3
+    b2 = g12 * β1 + g22 * β2 + g23 * β3
+    b3 = g13 * β1 + g23 * β2 + g33 * β3
     bb = b1 * β1 + b2 * β2 + b3 * β3
     h = SVector{NC,T}((o - α²) + bb, b1, b2, b3, v[5], v[6], v[7], v[8], v[9],
                       v[10])
-    Π = SVector{NC,T}(ntuple(k -> v[NC + k], Val(NC)))
+    detγ = g11 * (g22 * g33 - g23 * g23) - g12 * (g12 * g33 - g23 * g13) +
+           g13 * (g12 * g23 - g22 * g13)
+    # A fit that is not a metric has no `√det γ`: its momentum comes back
+    # non-finite, which the validity sweep counts and `bounds_project` repairs.
+    f = !tilde ? o : detγ > zero(T) ? sqrt(detγ / α²) : zero(T) / zero(T)
+    Π = SVector{NC,T}(ntuple(k -> f * v[NC + k], Val(NC)))
     return h, Π
 end
 
@@ -374,13 +418,14 @@ end
 # --- the fit ---------------------------------------------------------------------
 
 """
-    FitParams{T}(lmax, cont, rbar, center, bounds)
+    FitParams{T}(lmax, cont, rbar, center, bounds[, tilde = false])
 
 The `isbits` half of an [`InteriorFit`](@ref): what an evaluation of the fit
 needs besides its coefficient array — the degree `lmax`, the radial order
 `cont`, the radius `r̄` the ansatz is scaled by, the [`HoleCenter`](@ref) it
-is about (the track's, so that the fit moves with the hole), and the
-[`StateBounds`](@ref) [`fit_state`](@ref) projects its result into. A kernel
+is about (the track's, so that the fit moves with the hole), the
+[`StateBounds`](@ref) [`fit_state`](@ref) projects its result into, and
+whether the momentum slots hold `Π̃ = (α/√γ)Π` (`tilde`, added in step 8f). A kernel
 argument in step 8e-ii, beside the coefficients.
 """
 struct FitParams{T}
@@ -389,7 +434,11 @@ struct FitParams{T}
     rbar::T
     center::HoleCenter{T}
     bounds::StateBounds{T}
+    tilde::Bool
 end
+
+FitParams{T}(lmax, cont, rbar, center, bounds) where {T} =
+    FitParams{T}(lmax, cont, rbar, center, bounds, false)
 
 """
     InteriorFit
@@ -637,7 +686,7 @@ bit ([`bounds_project`](@ref) returns an unfired state with its bits).
 coefficients.
 """
 @inline function fit_state(p::FitParams{T}, coeffs, x, t) where {T}
-    h, Π = state_from_fit(fit_variables_at(p, coeffs, x, t))
+    h, Π = state_from_fit(fit_variables_at(p, coeffs, x, t), p.tilde)
     h′, Π′, _, _ = bounds_project(h, Π, p.bounds)
     return h′, Π′
 end
@@ -682,7 +731,7 @@ function fit_sweep(p::FitParams{T}, coeffs, ns, r1s, t) where {T}
     hits = 0
     worst = nothing
     for x in pts
-        h, Π = state_from_fit(fit_variables_at(p, coeffs, x, t))
+        h, Π = state_from_fit(fit_variables_at(p, coeffs, x, t), p.tilde)
         finite = all(isfinite, h) & all(isfinite, Π)
         detγ, α, _, _ = state_validity(h, Π)
         λ, _ = sym_eigen3(SMatrix{3,3,T}(1 + h[5], h[6], h[7], h[6], 1 + h[8],
@@ -736,7 +785,8 @@ end
 """
     build_fit(sampler, int::FittedInterior, spec::FittedSpec; cont = 1,
               bounds, L = spec.lmax_fit, backend = CPU(), check = true,
-              weights = fit_row_weights(L, cont), shift_constant = true)
+              weights = fit_row_weights(L, cont), shift_constant = true,
+              tilde = spec.fit_tilde)
         -> InteriorFit
 
 The fitted target of step 8e, on the tracked geometry `int` at the
@@ -775,7 +825,8 @@ function build_fit(sampler, int::FittedInterior{T}, spec::FittedSpec;
                    cont::Integer=1, bounds::StateBounds, L::Integer=spec.lmax_fit,
                    backend=CPU(), check::Bool=true,
                    weights=fit_row_weights(L, cont),
-                   shift_constant::Bool=true) where {T}
+                   shift_constant::Bool=true,
+                   tilde::Bool=spec.fit_tilde) where {T}
     cont in (1, 2) || throw(ArgumentError(
         "cont is the fit's radial order, 1 (values and slopes, the evolved " *
         "state's fit) or 2 (and curvatures, the initial data's), got $cont."))
@@ -802,15 +853,15 @@ function build_fit(sampler, int::FittedInterior{T}, spec::FittedSpec;
         "sampler has only the interpolant's gradient and serves cont = 1; " *
         "cont = 2 (the initial data's fit) is the analytic sampler's."))
     vs = map(eachindex(xs)) do i
-        cont == 1 ? fit_variables(samples[1][i], samples[2][i]) :
-        fit_variables(samples[1][i], samples[2][i], samples[3][i])
+        cont == 1 ? fit_variables(samples[1][i], samples[2][i]; tilde=tilde) :
+        fit_variables(samples[1][i], samples[2][i], samples[3][i]; tilde=tilde)
     end
     fitted = ntuple(b -> [vs[i][b] for i in eachindex(xs)], nb)
     ξs = [(r1 / rbar) * n for (r1, n) in zip(r1s, ns)]
     coeffs, residual, conditioning, model = solve_fit(ξs, fitted, L, cont,
                                                       rbar; weights=weights,
                                                       shift_constant=shift_constant)
-    params = FitParams{T}(Int(L), Int(cont), rbar, int.center, bd)
+    params = FitParams{T}(Int(L), Int(cont), rbar, int.center, bd, tilde)
     sweep = fit_sweep(params, coeffs, ns, r1s, t)
     sweep.valid || !check || throw(ArgumentError(
         "the fitted target (L = $L, cont = $cont) is not a valid metric at " *
@@ -987,6 +1038,55 @@ function fill_target!(target::FieldSet{T,3}, origins, spacings,
     map_blocks!(fit_target_kernel!, target, target.work, origins, spacings,
                 interior, fa.params, fa.coeffs, pb, cb, T(fa.t), κ, T(t),
                 T(r_fill), Val(hasb))
+    return target
+end
+
+"""
+    snapshot_target_kernel!(out, ua, origins, spacings, interior, t_f, r_fill)
+
+The **snapshot target** (added in step 8f, `PLAN.md`'s idea 5, the control
+row of step 8f's matrix): the cache holds the *state itself* at the fill
+time — `A = u(t_f)`, `S = 0` — at every owned point with `r < r_fill`, and
+zero elsewhere, so that the `:fitted` branch relaxes the layer and the core
+toward the state as it was at the chunk's start. No fit, no regularisation:
+the question it answers is what the fit's regularity buys over holding the
+evolved state still. It is **not advected** with the track's velocity
+**(proposed in step 8f)**: the row that runs it is the static hole, where
+the velocity is the finder's noise.
+"""
+@kernel function snapshot_target_kernel!(out, @Const(ua), @Const(origins),
+                                         @Const(spacings), interior, t_f,
+                                         r_fill)
+    I = @index(Global, NTuple)
+    b = I[4]
+    inner = ntuple(d -> I[d], Val(3))
+    T = eltype(out)
+    x = point_position(origins, spacings, b, I)
+    if interior_radius(interior, t_f, x) < r_fill
+        ntuple(Val(2NC)) do v
+            out[inner..., v, b] = ua[inner..., v, b]
+            out[inner..., 2NC + v, b] = zero(T)
+            nothing
+        end
+    else
+        ntuple(Val(4NC)) do v
+            out[inner..., v, b] = zero(T)
+            nothing
+        end
+    end
+end
+
+"""
+    fill_snapshot!(target, ua, origins, spacings, interior, t) -> target
+
+Fill the cache `target` with the state array `ua` inside the offset
+surface's bounding sphere plus one cell ([`snapshot_target_kernel!`](@ref)).
+"""
+function fill_snapshot!(target::FieldSet{T,3}, ua, origins, spacings,
+                        interior::FittedInterior, t) where {T}
+    r_fill = (interior.r_out - interior.offset) + interior.h
+    map_blocks!(snapshot_target_kernel!, target, target.work, ua, origins,
+                spacings, interior, T(t), T(r_fill))
     return target
 end
 

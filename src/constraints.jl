@@ -267,9 +267,13 @@ owned points:
   * `DIAG_RES` — the same magnitude, nonzero only in the damping layer
     `r_0 ≤ r < r_1`: `CODE.md`'s "interior residual, the layer's own
     health", read in L∞;
-  * `DIAG_DRIFT` — `|h_tt − h_tt,exact|` in the shell
+  * `DIAG_DRIFT` — `|h_tt − h_tt,exact|` at the evolved points of the shell
     `r_shell_lo ≤ r ≤ r_shell_hi`, which the driver sets to a band around
-    the horizon. Its L∞ against time is the *gauge drift* GHSO2 measured at
+    the horizon. **Evolved points only (amended in step 8f)**: on an oblate
+    tracked horizon the band from `r_h,min` to `r_h,max` reaches below the
+    offset surface near the equator, where the drift would read the layer;
+    for a sphere, and for the static tracked hole, every point of the band
+    is evolved and nothing changes. Its L∞ against time is the *gauge drift* GHSO2 measured at
     `≈ 0.14/M` on the excised hole (`notes/methods-ghso2.md`), and `h_tt`
     is the component that carries it: the lapse is read off `g_tt`.
 
@@ -307,7 +311,7 @@ singular inside the offset surface **(proposed in step 8e)**.
         # residual is the layer's distance from its *target*, the cache.
         keep = is_evolved(mask, x)
         r = interior_radius(interior, t, x)
-        inshell = (r_shell_lo ≤ r) & (r ≤ r_shell_hi)
+        inshell = (r_shell_lo ≤ r) & (r ≤ r_shell_hi) & keep
         e = zero(T)
         d1 = zero(T)
         # Names of their own: a variable a closure captures and that is
@@ -348,7 +352,7 @@ singular inside the offset surface **(proposed in step 8e)**.
     diag[inner..., DIAG_ERR, b] = keep ? e : zero(T)
     diag[inner..., DIAG_RES, b] = in_layer(interior, t, x) ? e : zero(T)
     r = interior_radius(interior, t, x)
-    inshell = (r_shell_lo ≤ r) & (r ≤ r_shell_hi)
+    inshell = (r_shell_lo ≤ r) & (r ≤ r_shell_hi) & keep
     diag[inner..., DIAG_DRIFT, b] =
         inshell ? abs(work[c..., 1, b] - vals[1]) : zero(T)
     end
