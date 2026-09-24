@@ -63,6 +63,7 @@
 # much grid-scale content made inside the horizon crosses it — `PLAN.md`'s
 # finding 4 — against the predictions of `test/dispersion.jl`.
 
+import LinearAlgebra
 import Printf
 using Serialization: deserialize, serialize
 using TreeAMR
@@ -2880,6 +2881,8 @@ end
 const GEN_DEFAULT = ["ks0", "ks9", "harm", "h7", "boost", "probe"]
 
 if "generic" in SECTIONS || haskey(OPTIONS, "generic")
+    # One BLAS thread, as in the workers (`gen_fanout`).
+    LinearAlgebra.BLAS.set_num_threads(1)
     t_end_opt = haskey(OPTIONS, "t_end") ? only(leak_option("t_end", [1 // 1])) : nothing
     gen_specs = gen_all_specs()
     if haskey(OPTIONS, "worker")
