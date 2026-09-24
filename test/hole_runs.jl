@@ -2272,12 +2272,16 @@ function gen_groups()
     d["h7"] = Any[
         gen_spec("h7-fitted"; chart=:h7, kw=(fit_initial_depth=8 * T(5 // 256),),
                  t_end=10 // 1, chunk=1 // 4)]
+    # `cfl = 1/5` on the moving rows: the fastest speed grows by 0.1 % a
+    # chunk as the hole crosses the box, and at the default 1/4 the recheck
+    # stopped five of the seven rows at 1.5 M (measured in step 8f).
     bo = (t_end=5 // 1, chunk=1 // 4)
+    bc = (cfl=T(1 // 5),)
     d["boost"] = Any[
-        gen_spec("boost-fitted"; chart=:boost, kw=(fit_initial_depth=8 * T(5 // 128),), bo...),
-        gen_spec("boost-damped"; chart=:boost, variant=:damped, bo...),
-        gen_spec("boost-sphere"; chart=:boost_sphere, variant=:damped, bo...),
-        gen_spec("boost-coast"; chart=:boost, kw=(fit_initial_depth=8 * T(5 // 128),),
+        gen_spec("boost-fitted"; chart=:boost, kw=(fit_initial_depth=8 * T(5 // 128), bc...), bo...),
+        gen_spec("boost-damped"; chart=:boost, variant=:damped, kw=bc, bo...),
+        gen_spec("boost-sphere"; chart=:boost_sphere, variant=:damped, kw=bc, bo...),
+        gen_spec("boost-coast"; chart=:boost, kw=(fit_initial_depth=8 * T(5 // 128), bc...),
                  spec=(max_misses=6,), coast=(4, 9), bo...),
         # The rate a moving hole needs (added after the first local runs):
         # at 4/M a point crosses the eight-cell layer in about M at v = 0.3,
@@ -2285,11 +2289,11 @@ function gen_groups()
         # not by the grid rate's e^{−100} before it is released. The rule's
         # ramp at 20/M is twelve cells.
         gen_spec("boost-fitted-r20"; chart=:boost,
-                 kw=(fit_initial_depth=8 * T(5 // 128), ρ_max_fixed=20), bo...),
+                 kw=(fit_initial_depth=8 * T(5 // 128), ρ_max_fixed=20, bc...), bo...),
         gen_spec("boost-damped-r20"; chart=:boost, variant=:damped,
-                 kw=(ρ_max_fixed=20,), bo...),
+                 kw=(ρ_max_fixed=20, bc...), bo...),
         gen_spec("boost-damped-grid"; chart=:boost, variant=:damped,
-                 kw=(ρ_max_factor=1,), bo...)]
+                 kw=(ρ_max_factor=1, bc...), bo...)]
     return d
 end
 
