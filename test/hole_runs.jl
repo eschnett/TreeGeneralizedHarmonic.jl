@@ -2273,7 +2273,18 @@ function gen_groups()
         gen_spec("boost-damped"; chart=:boost, variant=:damped, bo...),
         gen_spec("boost-sphere"; chart=:boost_sphere, variant=:damped, bo...),
         gen_spec("boost-coast"; chart=:boost, kw=(fit_initial_depth=8 * T(5 // 128),),
-                 spec=(max_misses=6,), coast=(4, 9), bo...)]
+                 spec=(max_misses=6,), coast=(4, 9), bo...),
+        # The rate a moving hole needs (added after the first local runs):
+        # at 4/M a point crosses the eight-cell layer in about M at v = 0.3,
+        # so what the core and the inner ramp hold is relaxed by e^{−2} and
+        # not by the grid rate's e^{−100} before it is released. The rule's
+        # ramp at 20/M is twelve cells.
+        gen_spec("boost-fitted-r20"; chart=:boost,
+                 kw=(fit_initial_depth=8 * T(5 // 128), ρ_max_fixed=20), bo...),
+        gen_spec("boost-damped-r20"; chart=:boost, variant=:damped,
+                 kw=(ρ_max_fixed=20,), bo...),
+        gen_spec("boost-damped-grid"; chart=:boost, variant=:damped,
+                 kw=(ρ_max_factor=1,), bo...)]
     return d
 end
 
