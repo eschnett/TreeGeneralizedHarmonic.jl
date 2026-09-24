@@ -63,13 +63,21 @@ interior, and its spherical core cannot hold harmonic Kerr's singular
 disk at `a = 9/10`, which is G5's case. Steps 8a (the leakage margin),
 8b (the range projection), 8c (the calibration of the layer for an
 inexact target), 8c′ (`ρ_max = 4/M` the default, decided 2026-09-23) and
-8d (the tracked horizon geometry) and 8e (the fitted target and the
-`:fitted` variant, with the boost-sign fix) are done; step 8f, the
-measurement matrix, is next. The proof-of-concept chart — harmonic Kerr at
-`a = 9/10` — now has `:fitted` initial data that is finite and a metric
-everywhere, and its run ends in the first chunk: the offset surface's data
-is not representable by the fit at `h = 5/256` (`CODE.md`, "The fitted
-target", piece 12).**
+8d (the tracked horizon geometry), 8e (the fitted target and the
+`:fitted` variant, with the boost-sign fix) and 8f (the measurement matrix)
+are done, and the generic interior is marked *(Done.)* under G5: `:fitted`
+reaches `50 M` on the static Kerr-Schild hole at twice `:damped`'s error, so
+step 8g (excision) is not needed; the analytic layer stays the default where
+a chart admits it and `:fitted` is for G5's chart. **G5 runs at `a = 7/10`
+(decided 2026-09-23)**, which runs at `h = 5/256` (2472 blocks, a node-hour
+per six `M`) and not at `5/128`; harmonic `a = 9/10` waits with its price
+written down in `CODE.md`'s "Open questions" (`h ≲ 5/1024` on the equator,
+23 000 blocks, `38 h` a `50 M` run, and a fit that holds 45° first). Step 8,
+the moving hole, is next — and it inherits step 8f's findings that
+`:fitted` holds a boosted hole at `4/M` while the analytic `:damped` layer
+needs `ρ_max ≳ 20/M` (its frozen core is released on the trailing side
+after about `M` at `v = 0.3`), and that a moving hole's step is sized for
+the speed it will have.**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -240,6 +248,22 @@ and `driver.jl` builds the analytic `cont = 1` fit for the initial data,
 moving hole's chunk into pieces of `h/(4|v|)`. `evolve!` has the study knobs
 `fit_initial_cont` and `fit_initial_depth`. `hole_runs.jl` has a `fitted`
 section.
+
+From step 8f the fit holds **`Π̃ = (α/√γ)Π`** by default
+(`fit_variables(…; tilde)`, `state_from_fit(v, tilde)`, `FitParams.tilde`,
+`FittedSpec`'s `fit_tilde = true`); `interior.jl` has `with_variant` for a
+spec and a geometry; `evolve!` has `handover` (a `:fitted` case on the
+analytic `:damped` layer of the same geometry until then) and `target_source
+= :snapshot` (the cache filled with the state, `fill_snapshot!`), and
+`adapt = true` works for a `:fitted` case — the mesh chosen on the analytic
+data of the same geometry, refused by name where the analytic core meets the
+chart's singular set; the record has a `variant` row; the drift reads the
+evolved points of its band only. `hole_runs.jl` has the `generic` section,
+the matrix. `driver.jl` sizes a moving hole's step from `λ` times the
+square of the previous chunk's growth `λ_end/λ` (a static hole's step is
+unchanged bit for bit): the fastest speed of a hole crossing the box grows
+by 0.1–0.3 % a chunk, and the CFL recheck stopped every boosted row at
+`cfl = 1/4` and at `1/5` without it.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -466,6 +490,32 @@ the suite's tracked hole against step 5's sphere with the same layer, to
 ```bash
 julia --project=. --threads=4 test/hole_runs.jl tracked
 julia --project=. --threads=4 test/hole_runs.jl tracked=1/2
+```
+
+The `generic` section (added in step 8f) is the measurement matrix and is
+not in the default list: groups `ks0` (Kerr-Schild `a = 0` to `50 M`, seven
+rows), `ks9` (Kerr-Schild `a = 9/10` to `20 M` on 1632 blocks), `harm`
+(harmonic `a = 0`, and `a = 7/10` at `5/128`), `h7` (G5's chart at `5/256`,
+a node on its own), `boost` (a boosted hole crossing a fixed fine region,
+the rates, the coasting track) and `probe` (harmonic `a = 9/10`, host-side,
+three minutes at four threads). A row alone is `generic=<label>`;
+`t_end=<t>` shortens every row, `budget=<s>` stops them at a deadline and
+records how far they got, and `tag=<name>` names the workers' directory.
+With sixteen or more threads each row is a subprocess worker with one BLAS
+thread (seven OpenBLAS pools spinning put a node at twice its cores). The
+long groups ran on `amdq` (`ks0` about two hours, `ks9` about 2.3) and the
+rest in `amddebugq` hours with `budget=3300`. Step 8f ran them through a
+scratch copy of `.claude/orchestration/symmetry-run.sh` with three changes
+the orchestration's own script does not have: `PART` and `TLIM` for the
+partition and the limit, `~` for a space in a job
+(`'hole:generic=boost~budget=3300~tag=boost2'`), and **no precompile on the
+login node** — its Cascade Lake image made two jobs starting together on
+EPYC nodes race to rebuild the package and fail ("Unable to find compatible
+target in cached code image"):
+
+```bash
+julia --project=. --threads=4 test/hole_runs.jl generic=ks0-fitted t_end=1/2
+julia --project=. --threads=4 test/hole_runs.jl generic=probe
 ```
 
 The `fitted` section (added in step 8e) is not in the default list either:

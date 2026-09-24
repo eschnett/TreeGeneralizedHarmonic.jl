@@ -944,6 +944,63 @@ handing `fill_ghosts!` an argument whose type depends on the case.
 
 ### The interior: a pointwise damping layer
 
+#### The design, as steps 8a–8f leave it (rewritten in step 8f)
+
+Inside the horizon the right-hand side is modified point by point, and the
+modification is four independent choices; everything below this summary is
+the history that made each of them, kept because its numbers are the
+evidence (**rewritten in step 8f** around these four; step 5's design is
+the first row of each and stays as the analytic control):
+
+1. **The geometry — where the layer is.** Either step 5's **sphere** about
+   the analytic center, `r_1 ≤ r_h,min − m h` (`Interior`), or step 8d's
+   **tracked offset surface**, the depth `d = r_h(n̂) − m h − |x − c(t)|`
+   below the horizon the finder found about the center it found
+   (`FittedSpec` in the case, a `FittedInterior` rebuilt every chunk). The
+   sphere is the offset surface's `l = 0` case bit for bit. The tracked
+   surface is the only geometry for a hole whose center or shape is not
+   known in advance, and the only one whose offset surface can hold harmonic
+   Kerr's flat singular disk inside an oblate horizon.
+2. **The target — what the layer relaxes toward.** Either the **analytic**
+   solution (`:damped`, `:pasted`; an optional `target` metric for studies)
+   or step 8e's **fit** of the evolved state on the offset surface,
+   continued inward as a polynomial in `x` and cached on the grid
+   (`:fitted`). The analytic target needs the chart's singular set inside
+   the core surface; the fitted one needs nothing inside, and is the only
+   target for harmonic Kerr at `a = 7/10`, G5's chart (step 8f: the analytic
+   core there cuts the disk at every `h` the proof of concept can afford).
+   The fit is made in `(log α, β^i, γ_ij, Π̃_ab)`, `Π̃ = (α/√γ)Π` from step
+   8f (**proposed in step 8f**).
+3. **The ramp — how wide.** `ρ` rises from `0` at the offset surface to
+   `ρ_max` over `n_L = max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)` cells, `w` turning
+   over in the inner half (step 8c's rule, measured at `q = 2`, **proposed**
+   for other orders); a margin of `m ≥ G + 1` cells (the stencil margin)
+   and, for grid-scale leakage, as many more as step 8a's path integral asks.
+4. **The rate — how hard.** `ρ_max` is a physical rate, **`4/M` (decided
+   2026-09-23)**, not the grid rate `1/dt` step 5 started with, which only
+   an exact target survives. **A moving analytic layer wants more (measured
+   in step 8f)**: its core is frozen, a point crosses an eight-cell layer at
+   `v = 0.3` in about `M`, and at `4/M` what the core held is relaxed by
+   `e^{−2}` before the layer releases it on the trailing side — the boosted
+   `:damped` rows end at `1.0–1.5 M` at `4/M` and reach `5 M` at `20/M`
+   **(proposed in step 8f: `ρ_max ≳ 20/M` for a moving analytic layer)**;
+   the `:fitted` core relaxes toward a target that moves with the track and
+   reaches `5 M` at `4/M` ("The generic interior: the measurement matrix"
+   under [Measured results](#measured-results)).
+
+**What step 8f's matrix decides (proposed in step 8f).** The `:fitted`
+target on the tracked geometry holds every hole the package has that the
+mesh resolves — Kerr-Schild `a = 0` to `50 M`, `a = 9/10` and harmonic
+`a = 0` to the ends of their rows, harmonic `a = 7/10` at `h = 5/256` to the
+six `M` an hour bought — so **excision (step 8g) is not needed**. It is not
+free: where the analytic target exists it is the better one — `2×` the
+masked error and `2.8×` the shell's `C_a` on the static Kerr-Schild hole,
+`40×` on the spinning one — so **the analytic `:damped` layer stays the
+default wherever the chart's singular set fits inside the core, and
+`:fitted` is for the charts where it does not**, G5's included.
+
+#### Step 5's layer: the analytic control
+
 **No excision** (decided). Inside the horizon the solution is not left
 to the Einstein equations alone: in a layer well inside the horizon it
 is *driven to the analytic solution*, and around the singularity the
@@ -991,6 +1048,8 @@ spinning hole in harmonic coordinates `r_h,min` is small — about
 finest spacing the refinement must reach (about `0.02 M` there); the
 level floor under [Refinement](#refinement-and-regridding) is what
 guarantees it.
+
+#### The margin
 
 **The margin `m` does two jobs, and they have different sizes (proposed in
 step 8a).** Inside the horizon the continuum lets nothing out, but the
@@ -1090,6 +1149,8 @@ target](#the-interior-a-pointwise-damping-layer), whose smooth wrong targets
 leave the exterior indistinguishable from the exact one — and **the default
 `m = 8` stays (proposed in step 8c)**.
 
+#### The spinning harmonic chart
+
 **A ball cannot hide Kerr's singularity in the harmonic chart at
 `a = 9/10` (found in step 5, and this is the proof-of-concept case).**
 The frozen core is a *ball* of radius `r_0`, and what it has to contain is
@@ -1130,6 +1191,8 @@ in step 5)**:
    harmonic hole at `a = 0.7` admits a spherical core with room to spare
    and `a = 0.9` does not. G5 at `a = 0.7` is a weaker proof of concept
    and a true one.
+
+#### Why touch the interior, and why relax
 
 **Why it is correct to touch the interior at all.** Inside the horizon
 every characteristic points inward, so in the continuum nothing outside
@@ -1180,6 +1243,8 @@ over the ramp. Both are pointwise; the smooth one is what a
 finite-difference code should prefer, and `(INTERIOR)` keeps it inside
 the right-hand side, where the integrator sees a pure function of
 `(u, t)` and no limiter is needed.
+
+#### The profiles and the rate
 
 **The profiles and their parameters.** `w` and `ρ` are `C²` smoothstep
 polynomials of `r`, `isbits` closures over `(c(t), r_0, r_1, ρ_max)` and
@@ -1242,6 +1307,8 @@ order. The smoothstep **clamps its result as well as its argument
 its Horner form at `s = 1 − 2⁻⁵³` returns `1 + 1.3e−15`, so without the
 clamp `w` would exceed one just inside `r_1` and amplify `F` where this
 section says the equations are untouched.
+
+#### The layer for an inexact target
 
 **The layer for an inexact target (added in step 8c).** Step 8e's target is
 a fit of the evolved state, not a solution, so step 8c calibrated the layer
@@ -1383,6 +1450,8 @@ with a growing layer of compressed features at the freezing radius
 whose amplitude the dissipation may or may not saturate; on the moving
 hole `:frozen` fails and the other two agree.
 
+#### The range projection
+
 **The range projection: the third and last writer of the state (added in
 step 8b**, `src/bounds.jl`**).** Every interior treatment above is a
 *source* of states the equations cannot continue from — step 5 measured
@@ -1501,6 +1570,8 @@ bit where the runs without it do. The prediction that hits would start
 "deep, several `M` before the crash" is wrong; the failures are surface
 failures at `r_1`, which is step 8c's hypothesis about the layer's
 transition, measured from the other side.
+
+#### The tracked geometry
 
 **The tracked geometry (added in step 8d**, `src/tracking.jl` and the
 second half of `src/interior.jl`**).** Everything above is keyed on
@@ -1764,6 +1835,8 @@ against `3.110271e−3`**, the shell's `C_a` L2 **`1.0745462e−2` against
 projection hit on either, the track at most **`3.3e−4` cells** from the
 analytic center and its prediction error `1.2–1.8e−4` cells per find —
 the tracked hole is the analytic one to six digits.
+
+#### The fitted target
 
 **The fitted target (added in step 8e**, `src/fit.jl`, with its kernel half
 in `src/evolution.jl`, `src/constraints.jl` and `src/driver.jl`**).** The
@@ -2118,6 +2191,8 @@ toward it (step 8e-ii):
    0.02 M` inside it, and the solution varies on the scale of that distance.
    Whatever the interior does, the chart at `a = 9/10` wants `h ≲ 5/1024` on
    its equator, or a margin that depends on the direction.
+
+#### What the layer costs
 
 **What the layer costs.** `u_exact` is evaluated at every point of the
 layer at every RHS evaluation — one forward-mode dual pass through the
@@ -3205,11 +3280,21 @@ refinement level, short times.
   and fits inside the other. That is G5's case, and it is the open
   question step 5 leaves.
 - **G5 — A hole that moves.** Boosted (`|v| ≈ 0.3`), spinning
-  (`a = 0.9`) Kerr in harmonic coordinates crossing the box.
+  Kerr in harmonic coordinates crossing the box — **at `a = 7/10`
+  (decided 2026-09-23**; `a = 9/10` waits with its price written down,
+  [Open questions](#open-questions)**)**, on **the tracked geometry with
+  the `:fitted` target** (amended in step 8f: the analytic core cuts
+  harmonic Kerr's disk at `a = 7/10`, so the analytic layer is not
+  available on G5's own chart, and runs as the control on the boosted
+  `a = 0` hole).
   *Accept:* the indicator's refinement follows the hole, its centroid
   within a few finest spacings of the analytic center at every chunk;
-  the layer follows the analytic center with the radius assertions
-  holding at every regrid; the time-dependent Dirichlet data exact at
+  the layer follows the **tracked** center and shape — the found
+  horizon's offset surface, rebuilt every chunk from the track and
+  within a cell of the analytic center — with the radius assertions
+  holding at every regrid, the fit valid at every row, and the
+  initial-data cycle choosing the mesh on the analytic data of the same
+  geometry where the chart allows it; the time-dependent Dirichlet data exact at
   the boundary; the masked error stays at the static run's level over
   the crossing and converges at order `q` on the frozen hierarchy; the
   adaptive run matches the uniform-fine reference at fewer points; the
@@ -3217,6 +3302,20 @@ refinement level, short times.
   within `1/ρ_max`; `:frozen` measured to fail as predicted; the
   horizon found along the trajectory with its area, mass, spin and the
   boost's contraction recovered.
+  **The generic interior (steps 8a–8f) is *(Done.)*** — the leakage
+  margin (8a), the range projection and validity monitor (8b), the layer
+  rule for an inexact target and `ρ_max = 4/M` (8c, 8c′), the tracked
+  geometry (8d), the fitted target and the `:fitted` variant (8e), and the
+  measurement matrix (8f) under [Measured results](#measured-results);
+  excision (8g) is not needed, since `:fitted` reaches `50 M` on the
+  matrix's first row. What G5 inherits from 8f: G5's chart at `h = 5/256`
+  is 2472 blocks and a node-hour per six `M` when the hole sits still; at
+  `5/128` it does not survive; `:fitted` holds a boosted hole at `4/M`
+  across `1.5 M` of the box, while the analytic `:damped` control on the
+  boosted `a = 0` hole needs `ρ_max ≳ 20/M`, its frozen core released on the
+  trailing side after about `M` at `v = 0.3`; and a moving hole's step is
+  sized for the speed it will have, since the fastest speed grows by
+  0.1–0.3 % a chunk and the CFL recheck otherwise stops the run.
 - **G6 — Infrastructure and the H200.** `io.jl`, slice output and
   viewers, `bin/gh.jl`, the per-phase benchmark on threads (TreeWave's
   table, on Symmetry) and **on the H200 in `Float64`**, in-kernel metric
@@ -5105,6 +5204,196 @@ constant's two paths.
 | the same: the run | ends in its first chunk (`2.5e−3 M`), a degenerate metric at the equatorial offset surface |
 | the kink at the first evolved point, harmonic `a = 9/10`, `L = 8`: axis, 45°, equator (analytic second difference) | `9.5e5` (`416`), `1.8e7` (`111`), `9.4e7` (`6.4e8`); with `Π̃ = (α/√γ)Π`: `2.6e4`, `7.5e5`, `7.1e7`; with `Π̃` at `L = 12`: `39`, `1.3e4`, `7.4e7` |
 | the same kink, Kerr-Schild `a = 0` fixture, `a = 9/10` equator, harmonic `a = 7/10` 45° | `7.7` (`15.9`), `46` (`61`), `6000` (`334`) |
+
+### The generic interior: the measurement matrix (step 8f)
+
+`test/hole_runs.jl generic` (its header says how the rows are grouped and
+run), the decisions of the 8e hand-over it took (below), `fit_tilde` in
+`src/fit.jl`, and `handover`, `target_source` and the `:fitted` mesh cycle
+in `src/driver.jl`; the design it decides is the summary at the head of
+[The interior](#the-interior-a-pointwise-damping-layer). Every row is `q =
+2`, `cfl = 1/4` (`1/5` on the moving rows), `ε_KO = 1/2`, `ρ_max = 4/M`
+unless named, the ramp by step 8c's rule (`n_L = 8`), the finder every
+chunk with the Korzyński spin; five Symmetry jobs, measured once
+(2026-09-23), on `amdq` (`ks0`, `ks9`) and in `amddebugq` hours with a
+deadline (`harm`, `h7`, `boost`: `budget=3300`, a run stopped by it is
+marked "deadline").
+
+**The suite.** SUITE_PLACEHOLDER
+
+**The matrix** (the last row of each run: masked error L2 and L∞ over the
+evolved region, the `G`-point shell's `C_a` L2 above the offset surface,
+`C_a` L2 in step 8a's shells `[r_h + kh, r_h + (k+1)h)` outside the tracked
+horizon, the layer residual — against the truth for the analytic variants,
+against the target for `:fitted` — the drift of `h_tt` at the horizon's
+evolved points, the finder's `M_irr`, `J` and `M_ch`, the largest track
+offset from the analytic center in cells; no row fired the range projection
+unless its hits are given, and every fit of every `:fitted` row was valid):
+
+| case | row | reached | masked L2 / L∞ | shell `C_a` | `C_a` at `r_h` + 0, 2, 4 `h` | residual | drift | `M_irr` / `J` / `M_ch` | offset |
+|---|---|---|---|---|---|---|---|---|---|
+| Kerr-Schild `a = 0`, fixture, `m = 10` | `:damped` (control) | `50 M` | `2.36e−2` / `0.177` | `2.62e−2` | `4.2e−3`, `2.7e−3`, `1.9e−3` | `0.61` | `3.1e−3` | `0.99716` / `3.6e−6` / `0.99716` | `7.1e−3` |
+| | `:fitted`, analytic data to the core surface | `50 M` | `4.59e−2` / `0.562` | `7.45e−2` | `4.8e−3`, `3.1e−3`, `2.2e−3` | `5.7` | `3.4e−3` | `0.99676` / `3.1e−6` / `0.99676` | `8.3e−3` |
+| | `:fitted`, the decided data (fit below `r_1`) | `50 M` | `4.59e−2` / `0.562` | `7.45e−2` | the same | `5.7` | `3.4e−3` | `0.99676` | `7.8e−3` |
+| | `:fitted`, fitting `Π` (not `Π̃`) | `50 M` | `4.53e−2` / `0.553` | `7.34e−2` | the same | `5.8` | `3.5e−3` | `0.99676` | `8.2e−3` |
+| | the snapshot target | † `8 M` | `0.230` / `4.56` at `8 M` | `0.456` | `6.8e−3`, … | `190` | | `0.99805` | |
+| | the finder's Kerr target (`M_ch = 1.00029`, `J = 2e−6`) | `50 M` | `2.36e−2` / `0.177` | `2.62e−2` | as `:damped` | `0.62` | `3.1e−3` | `0.99716` | `7.1e−3` |
+| | hand-over: `:damped` to `5 M`, then `:fitted` | `50 M` | `4.59e−2` / `0.562` | `7.45e−2` | as `:fitted` | `5.7` | `3.4e−3` | `0.99676` | `1.0e−2` |
+| Kerr-Schild `a = 9/10`, `h = 5/128`, 1632 blocks | `:damped`, `m = 5` (control) | `20 M` | `4.77e−3` / `4.54e−2` | `2.49e−3` | `1.1e−3`, `8.8e−4`, `9.5e−4` | `0.52` | `3.8e−3` | `0.84744` / `0.8978` / `0.9994` | `1.7e−3` |
+| | `:fitted`, `m = 5`, `L = 12` | `20 M` | `0.196` / `2.46` | `0.100` | `2.5e−2`, `2.4e−2`, `1.5e−2` | `6.1` | `4.6e−2` | `0.8436` / `0.840` / `0.980` | `7.6e−3` |
+| | `:fitted`, `m = 8`, `L = 12` | `20 M` | `0.258` / `4.32` | `0.109` | `9.7e−3`, `8.4e−3`, `8.4e−3` | `12.9` | `6.7e−2` | `0.8481` / `0.906` / `1.002` | `6.1e−3` |
+| harmonic `a = 0`, `h = 5/128`, 960 blocks | `:damped` (control) | `10 M` | `0.234` / `7.9` | `7.5e−3` | `1.4e−3`, `9.5e−4`, `7.4e−4` | `41` | `1.3e−3` | `0.99754` | `2.6e−3` |
+| | `:fitted` | `10 M` | `0.247` / `7.3` | `7.5e−3` | `1.8e−3`, `8.3e−4`, `5.9e−4` | `95` | `1.3e−3` | `0.99741` | `2.6e−3` |
+| harmonic `a = 7/10`, `m = 4`, `lmax_shape = L = 12` | `:fitted`, `h = 5/256`, 2472 blocks | `6 M` (deadline) | `2.88` / `86` | `0.148` | `2.7e−2`, `2.5e−2`, `2.0e−2` | `256` | `1.6e−2` | `0.9236` / `0.7056` / `0.9995` | |
+| | `:fitted`, `h = 5/128`, 512 blocks, analytic data to `3h` | † `0.5 M` | `20` / `846` | `0.38` | | | | | |
+| | `:fitted`, `h = 5/128`, the decided data | † `3.5 M` | `55` / `2570` | `2.35` | | | | `0.9187` | |
+| `boost(Harmonic(1, 0), 0.3 x̂)` from `x = 0.75`, `h = 5/128`, 1128 blocks, `cfl = 1/5` | `:fitted`, tracked | `5 M` | `0.390` / `29` | `6.6e−2` | `1.8e−2`, `4.7e−3`, `4.8e−3` | `319` | `9.9e−3` | `0.99916` / `7e−6` / `0.99916` | `2.2e−2` |
+| | `:fitted` at `20/M` (`n_L = 12`) | `5 M` | `0.428` / `20` | `7.1e−2` | `1.9e−2`, `1.4e−2`, `5.8e−3` | `125` | `7.3e−3` | `0.99934` | `1.8e−2` |
+| | `:damped`, tracked, `4/M` | † `1.5 M` | `0.454` / `72` | `8.2e−2` | | `4.0e4` | | `1.0008` | |
+| | `:damped`, tracked, `20/M` | `5 M` | `0.362` / `33` | `3.2e−2` | `3.5e−3`, `2.5e−3`, `1.1e−3` | `3.3e4` | `9.2e−3` | `0.99932` | `1.9e−2` |
+| | `:damped`, tracked, the grid rate | `5 M` | `0.432` / `25` | `4.4e−2` | `7.7e−3`, `2.4e−3`, `2.7e−3` | `971` | `7.1e−3` | `0.99939` | `1.9e−2` |
+| | `:damped`, step 5's sphere about the analytic center, `4/M` | † `1.0 M` | `0.288` / `52` | `4.4e−2` | | `8.6e4` | | `1.0009` | |
+| | coasting: `:fitted`, the finder off from chunk 4 (`t = 1 M`), `max_misses = 6` | lost at `2.25 M` | `0.278` / `20` | `2.9e−2` | | `284` | | — | |
+
+`†` a degenerate metric (`metric_quantities`' `DomainError`) in the evolved
+shell. Kerr's values: `M_irr = 1`, `J = 0` for `a = 0`; `M_irr = 0.84744`,
+`J = 0.9`, `M_ch = 1` for Kerr-Schild `a = 9/10`; `M_irr = 0.92580`, `J =
+0.7`, `M_ch = 1` for harmonic `a = 7/10`.
+
+What it says, row by row (**all measured in step 8f**):
+
+- **The generic layer on the case that needs nothing costs a factor two.**
+  On the static Kerr-Schild hole every `:fitted` row reaches `50 M` flat
+  from `10 M` on, at `1.94×` the control's masked error and `2.8×` its shell
+  `C_a`, with `M_irr` `4e−4` lower; the horizon shells outside it are
+  within 15 %. The four `:fitted` rows — the analytic data to the core
+  surface, the decided data, `Π` for `Π̃`, and the hand-over — all end on
+  **the same state to three digits**: the steady error is the target's, not
+  the initial data's and not the momentum variable's, and a fit that starts
+  from evolved data at `5 M` (the hand-over; its projection fired 1764 times
+  at the switch, at `r ≤ 0.175`, in the core, and never again) arrives at it
+  within `5 M`. Step 8c's wrong-but-smooth analytic targets left the
+  exterior at the exact target's error; a fit of the evolved state does not,
+  because it is not a solution anywhere inside the offset surface and is
+  wrong by `5.7` there against the analytic layer's `0.6`.
+- **The finder's Kerr target is the analytic target** to four digits: the
+  finder's `M_ch` and origin are `M` and the center to its truncation, so
+  idea 4 is the analytic control by another road — useful after a merger,
+  not here.
+- **The snapshot target fails, at `8 M`.** Holding the evolved state still
+  as the target (no fit, no regularity) grows the shell's error from the
+  first chunk — `2.5e−2`, `0.11`, `0.24`, `0.46` at `2, 4, 6, 8 M` — until a
+  degenerate metric ends the run: what the fit buys is its regularity, and
+  a target that carries the state's own grid-scale content feeds it back.
+- **On the spinning Kerr-Schild hole the fit is the error.** At `L = 12`
+  the target's value residual is `2.5e−2` of the data (8e measured `L = 8`
+  at 3–5 %), and the run carries it out: the masked error `41×` the
+  control's, `J` `7 %` low and `M_ch` `2 %` low at `m = 5`, still slowly
+  rising at `20 M`; a wider margin (`m = 8`) keeps the horizon's numbers at
+  Kerr's (`0.906`, `1.002`) and the horizon shells 2.5× cleaner while the
+  masked error, which includes the points between the offset surface and
+  the horizon, is larger. The analytic target is the one to use on this
+  chart, which admits it.
+- **The harmonic chart at `a = 0` does not see the target**: `:fitted` and
+  `:damped` agree to 5 % in the masked error and to 1 % in the shell. Both
+  errors are the chart's: harmonic Schwarzschild at `h = 5/128` is steep
+  between the offset surface and the horizon (the masked L∞ `7–8` sits
+  there), and grows slowly to `10 M`.
+- **G5's chart, harmonic `a = 7/10`, runs at `h = 5/256` and not at
+  `5/128`.** At `5/128` the offset surface's equator is `3.6` cells from the
+  ring and the run ends at `0.5 M` (analytic data to `3h`) or `3.5 M` (the
+  decided data); at `5/256` it runs to the six `M` a node-hour bought, with
+  the horizon at Kerr's values (`M_irr` `0.24 %` low, `J` `0.8 %` high,
+  `M_ch` `5e−4` low) and the masked error growing and slowing (`0.75`,
+  `1.53`, `2.03`, `2.38`, `2.65`, `2.88` at `1 … 6 M`) — there is no
+  analytic control on this chart to split the target's share from the
+  chart's.
+
+- **The moving hole: the fitted target holds it at `4/M`, and the analytic
+  layer does not.** The boosted harmonic hole crosses `1.5 M` of the box in
+  `5 M`; its track stays within `0.022` cells of the analytic center, every
+  find succeeds, every fit is valid, `M_irr` within `8e−4` of `1`. The
+  analytic `:damped` layer at the default rate ends at `1.5 M` on the
+  tracked geometry and at `1.0 M` on step 5's sphere, with the masked L∞
+  growing from the first chunk at the layer's *trailing* edge (measured
+  locally: `3.9`, `10.5`, `36.5` at `1/4`, `1/2`, `3/4 M`, at the first
+  evolved point on the `+x` side): its core is frozen (`w = ρ = 0`), a point
+  crosses the eight-cell layer at `v = 0.3` in about `M`, and at `4/M` the
+  ramp relaxes what the core held by only `e^{−2}` before releasing it —
+  CODE.md's "points the core releases are relaxed within `1/ρ_max`" was
+  written for the grid rate. At `20/M` (the rule's ramp, twelve cells) or
+  at the grid rate the same layer reaches `5 M`, with the projection firing
+  in the core throughout (`2.2e5` and `4.0e4` hits, at `r ≤ 0.37`). The
+  `:fitted` core is not frozen — it relaxes toward the fit, which moves with
+  the track — and reaches `5 M` at `4/M` without a hit, at the masked error
+  of the rescued analytic rows (`0.39` against `0.36`–`0.43`) and `1.5–2×`
+  their shell. **So a moving analytic layer needs `ρ_max ≳ 20/M` (proposed
+  in step 8f); the fitted one does not.** Every row's masked error grows
+  with the crossing, `≈ 0.08/M`, the same in all five survivors: the chart's
+  truncation at `5/128` near the moving hole, as on the static harmonic
+  hole.
+- **Coasting costs nothing for five chunks.** With the finder off from
+  `t = 1 M` the geometry is carried on the track's `v_est` for `1.25 M`,
+  and the masked error is the tracked run's to 1 % (`0.2585` against
+  `0.2608` at `2 M`); the sixth miss ends the run with its record by
+  `TrackLostError` at `max_misses = 6`, as designed (the row was meant to
+  coast five chunks and ran the window one chunk long).
+
+The kink table and the price of harmonic `a = 9/10` are the probe's
+(`generic=probe`, four threads here, three minutes), recorded under [Open
+questions](#open-questions); the kink at the first evolved point,
+`|Δ²(composite) − Δ²(analytic)|` against `|Δ²(analytic)|`, maximum over the
+twenty components, the fit of the analytic solution (`cont = 1`):
+
+| chart | `L = 8`, `Π` | `8`, `Π̃` | `12`, `Π` | `12`, `Π̃` (axis / 45° / equator) |
+|---|---|---|---|---|
+| harmonic `a = 9/10`, `5/256` (analytic `420`, `107`, `2.4e9`) | `8.8e5`, `2.0e7`, `1.6e9` | `2.3e4`, `8.7e5`, `1.5e9` | `1.1e4`, `8.9e5`, `1.6e9` | `366`, `2.5e4`, `1.5e9` (`L = 16`: `552`, `3.1e3`, `1.4e9`) |
+| harmonic `a = 7/10`, `5/256` (`232`, `334`, `4.7e4`) | `7.9e3`, `3.7e4`, `1.3e4` | `2.2e3`, `1.3e4`, `1.0e4` | `727`, `5.0e3`, `1.4e4` | `193`, `1.4e3`, `1.0e4` |
+| harmonic `a = 7/10`, `5/128` (`300`, `305`, `2.8e5`) | `8.1e3`, `4.8e4`, `1.0e5` | `1.7e3`, `1.3e4`, `8.4e4` | `1.2e3`, `8.5e3`, `1.1e5` | `241`, `1.9e3`, `9.2e4` |
+| Kerr-Schild `a = 9/10`, `5/128` (`3.5`, `6.8`, `103`) | `17`, `27`, `55` | `8.9`, `16`, `46` | `3.4`, `2.6`, `42` | `2.2`, `2.1`, `35` |
+| harmonic `a = 0`, `5/128` (`4050`) | `865` | `561` | `865` | `561` |
+| Kerr-Schild `a = 0`, fixture (`15.4`) | `5.3`, `3.3`, `5.3` | `3.7`, `2.4`, `3.7` | as `L = 8` | as `L = 8` |
+
+(The point is `r_1 + h/2`, half a cell out of step 8e's probe, whose
+numbers it reproduces to a factor of two off the equator.) `Π̃` shrinks
+every kink, 1.5× on the static holes and 2–40× off the spinning holes'
+equators, and `L = 12` another 3–30× on the spinning ones; neither touches
+a static hole's, which is radial. In the evolution `Π̃` changes nothing
+measurable (the Kerr-Schild `a = 0` rows above).
+
+**The decisions of the 8e hand-over (proposed in step 8f):**
+
+- **`Π̃ = (α/√γ)Π` is the fitted momentum by default** (`FittedSpec`'s
+  `fit_tilde = true`): the table above, and `fit_tests.jl`'s chain rule
+  (`8.1e−8`, `1.2e−8` against the differenced `Π̃`, the stencil's `δ⁴`).
+- **`lmax_fit` stays `8` by default and the spinning rows carry `12`**, as
+  `lmax_shape` does: a static hole's fit is `l ≤ 2`, and the evaluator's
+  cost doubles from `8` to `12` (`2.2` to `4.3 µs` a point, once a chunk
+  in the cache fill: `17 s` of fills over the `ks9` row's 40 chunks against
+  its `7300 s`).
+- **The regrid path is built, and the moving rows use a wider fine region
+  instead.** `adapt = true` on a `:fitted` case chooses the mesh on the
+  analytic `:damped` data of the same geometry and fills the fitted data on
+  the settled mesh (one pass to 288 blocks on the adaptive fixture, and a
+  regridding chunk, in the suite), and refuses a chart whose analytic core
+  surface meets its singular set — G5's own, where step 8 needs the
+  indicator to flag on something else (the fitted data through a callback
+  that reads the cache, or the state after the first chunk). The boosted
+  rows cross a fixed capsule of fine blocks, which measures the layer and
+  not the regrid.
+- **The hand-over row is built** (`evolve!(…; handover)`) and measured
+  above; **coasting** is the boosted row with the finder off for chunks
+  4–9.
+
+**What the matrix costs.** On a Symmetry node shared by seven rows of nine
+threads, the Kerr-Schild fixture is `140 s` a `M` a row (seven `50 M` rows
+in `7057 s`); Kerr-Schild `a = 9/10` on 1632 blocks `360–410 s` a `M` at 21
+threads; harmonic `a = 0` on 960 blocks `195 s` a `M` at 16 threads; G5's
+chart on 2472 blocks `560 s` a `M` at 64 threads. The fits are `16 ms` and
+a cache fill `47 ms` on the fixture (101 and 100 of them in a `50 M` row),
+and `46 ms` and `420 ms` on the `ks9` mesh. Before the workers were given
+one BLAS thread each, OpenBLAS's pools spinning after every fit put a node
+at twice its cores and the rows at ten times this machine's time per `M`.
 
 ## Possible extensions
 
