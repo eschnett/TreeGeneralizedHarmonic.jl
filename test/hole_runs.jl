@@ -2251,7 +2251,9 @@ function gen_groups()
         gen_spec("ks0-snapshot"; chart=:ks0, kw=(dn..., target_source=:snapshot), ks...),
         gen_spec("ks0-kerr"; chart=:ks0, variant=:damped, kerr=true, ks...),
         gen_spec("handover"; chart=:ks0, kw=(handover=5 // 1,), ks...)]
-    k9 = (t_end=50 // 1, chunk=1 // 2)
+    # 20 M and not 50: at 1632 blocks and h = 5/128 a row is about 27 times
+    # the fixture's cost per M, and 50 M would not fit amdq's day (step 8f).
+    k9 = (t_end=20 // 1, chunk=1 // 2)
     d["ks9"] = Any[
         gen_spec("ks9-damped"; chart=:ks9, variant=:damped, spec=(margin=5,), k9...),
         gen_spec("ks9-fitted"; chart=:ks9, spec=(margin=5,),
@@ -2262,11 +2264,13 @@ function gen_groups()
         gen_spec("h0-fitted"; chart=:h0, kw=(fit_initial_depth=8 * T(5 // 128),),
                  t_end=10 // 1, chunk=1 // 4),
         gen_spec("h0-damped"; chart=:h0, variant=:damped, t_end=10 // 1, chunk=1 // 4),
-        gen_spec("h7-fitted"; chart=:h7, kw=(fit_initial_depth=8 * T(5 // 256),),
-                 t_end=10 // 1, chunk=1 // 4),
         gen_spec("h7c-fitted"; chart=:h7c, kw=(fit_initial_depth=3 * T(5 // 128),),
                  t_end=10 // 1, chunk=1 // 4),
         gen_spec("h7c-fitted-r1"; chart=:h7c, t_end=10 // 1, chunk=1 // 4)]
+    # G5's chart on its own: 2472 blocks at h = 5/256, a node's worth.
+    d["h7"] = Any[
+        gen_spec("h7-fitted"; chart=:h7, kw=(fit_initial_depth=8 * T(5 // 256),),
+                 t_end=10 // 1, chunk=1 // 4)]
     bo = (t_end=5 // 1, chunk=1 // 4)
     d["boost"] = Any[
         gen_spec("boost-fitted"; chart=:boost, kw=(fit_initial_depth=8 * T(5 // 128),), bo...),
@@ -2873,7 +2877,7 @@ function gen_probe()
         "%.2f s at %d threads)", c_pt * 1e6, trhs_best, Threads.nthreads())
 end
 
-const GEN_DEFAULT = ["ks0", "ks9", "harm", "boost", "probe"]
+const GEN_DEFAULT = ["ks0", "ks9", "harm", "h7", "boost", "probe"]
 
 if "generic" in SECTIONS || haskey(OPTIONS, "generic")
     t_end_opt = haskey(OPTIONS, "t_end") ? only(leak_option("t_end", [1 // 1])) : nothing
