@@ -790,6 +790,18 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
 
     nchunks = ceilint(t_end / chunk)
     p = p0
+    # **A moving hole's step is sized for the speed it will have (proposed in
+    # step 8f).** `λ_max` is measured at the chunk's start and the recheck
+    # throws if the speed at its end asks for a smaller step; a hole crossing
+    # the box raises the fastest speed monotonically, by 0.1–0.3 % a chunk of
+    # `M/4` on step 8f's boosted rows, and a step that rounds to within that
+    # of the requested one then fails the recheck at any `cfl` (measured:
+    # chunk 7 at `cfl = 1/4`, chunk 5 at `1/5`). So for a case whose hole
+    # moves, the step is sized from `λ` times the square of the growth the
+    # previous chunk measured, `(λ_end/λ)²` when that is above one — a
+    # static hole's step is unchanged, bit for bit. The recheck stays.
+    moving = sum(abs2, case.center.v) > 0
+    growth = one(T)
     for c in 1:nchunks
         tstart = min((c - 1) * chunk, t_end)
         stop = min(c * chunk, t_end)
@@ -820,7 +832,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         # (1) the step, and with it this chunk's relaxation rate.
         λ = max_speed_of(p, u, tstart)
         h_min = minimum_spacing(T, forest)
-        dt = cfl * h_min / λ
+        dt = cfl * h_min / (moving ? λ * growth * growth : λ)
         steps = max(1, ceilint((stop - tstart) / dt))
         dt_used = (stop - tstart) / steps
         p = with_interior(p, chunk_interior(case, dt_used, ρ_max_factor,
@@ -873,6 +885,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
 
         # (2) the recheck. It throws, and it is meant to.
         λ_end = max_speed_of(p, u, stop)
+        growth = max(one(T), λ_end / λ)
         cflnum = check_cfl(dt_used, h_min, cfl, λ_end; chunk=c, λ=λ)
 
         # (3) the record, and whatever is watching — before the regrid that
