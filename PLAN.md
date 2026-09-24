@@ -9,8 +9,11 @@ last milestone is marked *(Done.)* in `CODE.md`.
 
 **Steps 0–7, 8a–8f and 8c′ are done; the generic interior is *(Done.)*
 and step 8g is not needed (`:fitted` reaches `50 M` on 8f's first row).
-Step 8, the moving hole at `a = 7/10` (decided 2026-09-23), is running
-(started 2026-09-24 in a fresh session).**
+Step 8, the moving hole at `a = 7/10` (decided 2026-09-23), ran on
+2026-09-24 and is merged with G5 *not* marked done: seven of its ten items
+hold, and the moving layer exports error through its trailing side on G5's
+chart (`CODE.md`, "Open questions"). A second, bounded round on the
+trailing side (step 8′, below) is running; step 9 follows it.**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1128,6 +1131,37 @@ points; the interior residual at truncation, with points the core
 releases relaxed within `1/ρ_max`; `:frozen` measured and its failure
 recorded; the horizon found along the trajectory with `J` and the
 boost's contraction recovered. Mark G5 *(Done.)*.
+
+## Step 8′ — The trailing side (added 2026-09-24, after step 8's report)
+
+`CODE.md`: "Open questions", "The moving layer's trailing side"; "Measured
+results", "The moving hole (step 8)" (the screens and G5's crossing);
+"The interior", piece 13. One bounded round by step 8's agent on its own
+branch, with the reviewer's finding: G5's items 5 and 8 are not met, and
+the three levers `CODE.md` names are untried.
+
+Changes: the three levers, each behind a switch that leaves a run without
+it bit for bit — a ramp whose width depends on the side (`ρ` rising faster
+where the depth *decreases* along `v`, the trailing side), a target refill
+on a cadence finer than `h/(4|v|)`, and relaxing released points toward
+the target's evolved continuation (the cache advected with `F` off) — and
+`hole_runs.jl moving`'s screens extended by them. Screen on the boosted
+`a = 0` hole in the `5/2 M` box to `M/2` first, where a row is minutes at
+four threads and where the analytic `:damped` control at `20/M` gives the
+truth of what the layer should export; then the surviving lever(s) on G5's
+chart to `M/2` and, if one halves the trailing side's excess there, the
+crossing to whatever `t_end` a node-day allows. Read and record the three
+step-8 jobs that were unread when the tunnel closed (`moving/g5-2`,
+`moving/g5a-solo`, `conv-h7-N16`) as soon as Symmetry answers. Diagnose the
+`SIGBUS` only as far as one attempt with `--heap-size-hint` and one with
+`OPENBLAS_NUM_THREADS=1`/`JULIA_NUM_GC_THREADS` on the uniform control;
+record the outcome either way.
+
+Accept: G5's items 5 and 8 re-measured with each lever, and either met —
+then G5 *(Done.)* — or not, with the trailing side's excess per lever in
+`CODE.md`'s open question and a recommendation between the interior and
+excision's price (step 8g); the suite green at one and four threads; the
+step-8 record completed from the unread jobs.
 
 ## Step 9 — Infrastructure and the H200 (G6)
 
