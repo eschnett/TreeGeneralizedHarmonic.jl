@@ -12,8 +12,14 @@ and step 8g is not needed (`:fitted` reaches `50 M` on 8f's first row).
 Step 8, the moving hole at `a = 7/10` (decided 2026-09-23), ran on
 2026-09-24 and is merged with G5 *not* marked done: seven of its ten items
 hold, and the moving layer exports error through its trailing side on G5's
-chart (`CODE.md`, "Open questions"). A second, bounded round on the
-trailing side (step 8′, below) is running; step 9 follows it.**
+chart (`CODE.md`, "Open questions"). Step 8′, the bounded round on the
+trailing side, ran 2026-09-24/25 and is merged: the side-dependent ramp
+(`trail_ramp = 9/10`) removes the trailing side's export, and what is left
+— a uniform growth and a drift of the moving spinning hole's `J` — keeps
+G5 open, with the recommendation "more interior work, the spin drift
+first, before excision" (proposed in step 8′) awaiting Erik's decision.
+Step 9 (G6), which does not depend on it, is running (started
+2026-09-25).**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1167,6 +1173,45 @@ step-8 record completed from the unread jobs.
 
 `CODE.md`: "I/O and viewers", "Precision, threads, devices", milestone
 G6; `notes/ghaccel-bench.jl` for the roofline format.
+
+**What steps 8 and 8′ hand over** (their reports' section 6; `CODE.md`,
+"The moving hole (step 8)", "The trailing side (step 8′)", milestone G5's
+status paragraphs, and the open question "The moving layer's trailing
+side"):
+
+- **G5 is open, and its case exists.** The G5 run this step's device rows
+  and CLI name is harmonic Kerr `a = 7/10` boosted at `0.3`, `:fitted` on
+  the tracked geometry, `m = 4`, `n_L = 8`, `lmax_shape = lmax_fit = 12`,
+  finest `h = 5/256`, `fit_initial_blend = true`, `trail_ramp = 9/10`
+  (`hole_runs.jl moving=g5t` is the row); the boosted `a = 0` hole
+  (`moving=ctl`) is the cheap stand-in with an analytic control at `20/M`.
+  Do not wait for G5 to be *(Done.)*: this step's acceptance is the
+  infrastructure and the measurements, and the device row asks for "the
+  same mesh, horizon and analysis record as the host", not for G5's
+  numbers to be good.
+- **Costs to plan the benchmark and the device rows with.** G5's chart is
+  3900–5600 blocks over a crossing and `630 s` of a node per `M` at rest;
+  the boosted `a = 0` hole 1128–1912 blocks at `5/128`, `13 M` in `5947 s`
+  on a node. A uniform `1.7e7`-point run needs about 80 GB, and long
+  Symmetry studies must each run from a **remote directory of their own**:
+  rsyncing changed sources into a directory with running jobs and
+  precompiling there rewrites the package image those jobs have mapped
+  (the likeliest cause of step 8's `SIGBUS`, proposed in step 8′) — bake
+  that into the batch job this step writes. Give workers
+  `OPENBLAS_NUM_THREADS=1`; do not precompile on the login node.
+- **The record's rows this step's I/O must carry**: everything step 8f's
+  matrix and step 8's crossing tables read — the masked error L2/L∞, the
+  shell `C_a` and 8a's horizon shells, the residual against the truth or
+  the target, the drift (evolved points only), the projection hits and
+  `bounds_r_max`, `fit_valid`/`fit_residual`, the horizon's `A`, `M_irr`,
+  `J`, `M_ch`, its extent ratio along the boost, the track's center and
+  offset, the refinement centroid and its offset, block counts, `variant`,
+  `ρ_max`, the wall clock per chunk. `hole_runs.jl`'s sections and
+  `out/readjls.jl` on Symmetry read them from `.jls` today; the time series
+  replaces that.
+- **The viewers' slices** should show the tracked offset surface and the
+  core surface (the shape series, not a sphere) and the found horizon's
+  cross-section, since G5's layer is not spherical.
 
 Changes: `src/io.jl` — the analysis time series (one dataset per
 recorded quantity, appended and flushed at every chunk boundary), slice
