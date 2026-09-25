@@ -5729,17 +5729,37 @@ spacing `5/256` (4096 blocks of `16³`, `1.68 × 10⁷` points):
 | `M/2` | `0.3505` / `121.2` | `0.3504` / `121.2` | `1.1e−2` | `4.7e−3` |
 | `3M/4` | `0.6773` / `161.0` | `0.6772` / `161.0` | `2.0e−2` | `6.2e−3` |
 | `M` | `0.9462` / `156.9` | `0.9471` / `156.9` | `3.0e−2` | `8.0e−3` |
+| `1.25 M` | `1.101` / `153.7` | `1.102` / `153.8` | `4.7e−2` | `1.8e−2` |
+| `1.5 M` | `1.185` / `162.2` | `1.193` / `164.4` | `7.7e−2` | `3.1e−2` |
+| `1.75 M` | `1.314` / `187.6` | `1.323` / `188.2` | `9.7e−2` | `3.9e−2` |
+| `2 M` | `1.478` / `207.9` | `1.483` / `212.4` | `0.104` | `5.3e−2` |
 
 — the adaptive run is the uniform one to three digits where the error is,
 at the hole, with **6.5–9.3 times fewer points**; outside the horizon its
 error is 2.3–3.7 times the uniform run's, the coarse levels' truncation
 (the `a = 0` pair to `5 M` above: `1.4×` outside, the masked error within
-`10 %`). **The uniform run did not reach `2 M`**: both attempts ended at
-`0.75 M` and `1.0 M` with a `SIGBUS` inside Julia's allocator at 76–88 GB of
-resident memory (240 GB allowed), a failure of the process and not of the
-evolution; the `N = 16` row of the frozen hierarchy (`2 × 10⁷` points) met
-the same once. Not diagnosed; the comparison stands to `1 M`, `0.3 M` = 15
-finest cells of travel.
+`10 %`). **The uniform run reached `2 M` in step 8′** (rows `1.25`–`2 M`), in
+`17 739 s` on 64 threads against the adaptive run's `5707 s` on 12: within
+`0.3 %` in the masked L2 and `2 %` in L∞ to the end, the far field twice the
+uniform run's by then. In step 8 both attempts ended at `0.75 M` and
+`1.0 M` with a `SIGBUS` inside Julia's allocator at 76–88 GB of resident
+memory (240 GB allowed), and the `N = 16` row of the frozen hierarchy
+(`2 × 10⁷` points) met the same once. **The `SIGBUS` diagnosis (step 8′,
+PLAN.md's two attempts)**: both attempts — `--heap-size-hint=160G`, and
+`OPENBLAS_NUM_THREADS=1` with `JULIA_NUM_GC_THREADS=8` — were run from a
+remote directory of their own (`step-8-sigbus`), and the first reached
+`2 M` (the second too, the same numbers to the last digit printed). Neither setting is therefore
+shown to matter; what changed is the directory. Julia's package images on
+Symmetry are cached in one slot per package and project path, and an rsync
+of changed sources into a running study's directory followed by another
+job's precompile rewrites that slot's `.so` in place — the `.so` for the
+step-8 path was rewritten at 09:15 and 19:46 on 2026-09-24 and none of the
+day's other compiles survives — so a long-running process that pages in its
+image after that can take a `SIGBUS`. **Proposed in step 8′**: a batch study
+that runs for hours gets a remote directory of its own
+(`symmetry-run.sh <worktree> <unique name>`); the kill times are not all
+explained by an rsync (the 18:20 pair followed none), so this is the likely
+mechanism and not a proof.
 
 **The frozen hierarchy on G5's chart (`moving=conv`, measured in step 8).**
 The capsule around the trajectory to `M/2` (4908 blocks), `N = 8, 12, 16`
@@ -5797,6 +5817,81 @@ table above stops at `7 M`; its time series every `M`: masked L2 `0.333`,
 `1.733`, `1.961`, `2.233`, `2.586` against `0.115`, `0.199`, `0.248`,
 `0.284`, `0.316`, `0.340`, `0.368`, `0.392`, `0.421`, `0.449`, `0.474`,
 `0.498`, `0.517` at rest (recorded in step 8′).
+### The trailing side (step 8′)
+
+`PLAN.md`'s step 8′: three levers on the side a moving `:fitted` layer
+leaves, each an `evolve!` keyword that is the unchanged code path when off
+(the kernel branches on `trail = 0` and on the exact target's argument being
+`nothing` before it touches anything, so a run without them is bit for bit
+the run before them; `test/moving_tests.jl` asserts that the ramp narrows
+only behind a moving layer and that the exact target moves the layer and
+nothing outside the offset surface) — **all proposed in step 8′**:
+
+- **`trail_ramp = σ`**: `ρ`'s ramp fraction narrowed to `ρ_ramp (1 − σ ζ)`,
+  `ζ = max(0, −n̂ · v̂)` about the tracked center, so that on the trailing
+  side — where the depth of a grid point decreases at `|n̂ · v|` and points
+  leave the layer — `ρ` reaches `ρ_max` nearer the offset surface; `w` is
+  unchanged.
+- **`refill_cells = f`**: the target refilled every `f` cells of the track's
+  travel instead of step 8e's `1/4`.
+- **`target_exact = true`**: the target in the layer and the core is the
+  latest fit evaluated in the kernel at `(x, t)` — carried by its tracked
+  center exactly — instead of the cache's linear continuation between
+  refills (my reading of "the target's evolved continuation, the cache
+  advected with `F` off", **proposed in step 8′**: the cache advected
+  exactly is the fit evaluated where the hole has moved it).
+
+**The screen on the boosted `a = 0` hole (`moving=l0`, measured in step
+8′**, locally at four threads, `3.7 min` a row: box `5/2 M`, from
+`x = 3/4`, adaptive, finest `5/128`, to `M/2`; masked L2 / L∞, the excess
+of the masked L2 over the hole at rest, and the largest error off the truth
+in the layer's outer quarter on the trailing and the leading side**)**:
+
+| row | masked L2 / L∞ | excess over rest | trailing / leading outer quarter |
+|---|---|---|---|
+| at rest | `5.70e−2` / `1.90` | — | — / `4.4` |
+| `:damped` at `20/M` (the analytic control) | `8.30e−2` / `6.11` | `2.6e−2` | `15.8` / `6.4` |
+| `:fitted` | `0.1296` / `24.4` | `7.3e−2` | `88.6` / `5.0` |
+| `trail_ramp = 1/2` | `0.1119` / `21.2` | `5.5e−2` | `71.9` / `5.0` |
+| **`trail_ramp = 3/4`** | **`8.92e−2` / `12.0`** | **`3.2e−2`** | `69.0` / `5.0` |
+| **`trail_ramp = 9/10`** | **`8.60e−2` / `8.99`** | **`2.9e−2`** | `67.6` / `5.0` |
+| `trail_ramp = 3/4` at `8/M` | `0.1117` / `5.83` | `5.5e−2` | `42.0` / `9.7` |
+| `refill_cells = 1/16` | `0.1295` / `24.4` | `7.2e−2` | `88.5` / `5.0` |
+| `target_exact` | `0.1296` / `24.4` | `7.3e−2` | `88.5` / `5.0` |
+| `trail_ramp = 3/4` and `target_exact` | `8.77e−2` / `11.3` | `3.1e−2` | `66.1` / `4.9` |
+
+**On G5's chart (`moving=l7`, measured in step 8′**, the `g5y` screen's
+configuration: box `5/2 M`, from `x = 0.3`, finest `5/256`, the data
+blended, to `M/2`, four workers of 16 threads in one `amddebugq` hour**)**:
+
+| row | masked at `M/4` | at `M/2` | excess over rest at `M/2` | trailing / leading outer quarter at `M/2` |
+|---|---|---|---|---|
+| at rest (blended, `g5y`) | `7.47e−2` / `9.55` | `0.157` / `20.1` | — | — / `32.9` |
+| `:fitted` (`g5y`) | `0.115` / `18.1` | `0.351` / `121` | `0.194` | `157` / `80` |
+| `trail_ramp = 3/4` | `0.139` / `24.7` | `0.225` / `22.9` | `0.068` | `113` / `80` |
+| **`trail_ramp = 9/10`** | `0.129` / `24.3` | **`0.216` / `22.5`** | **`0.059`** | `104` / `80` |
+| `target_exact` | `0.115` / `18.1` | `0.352` / `122` | `0.195` | `157` / `80` |
+| `trail_ramp = 3/4` and `target_exact` | `0.139` / `24.8` | `0.224` / `23.0` | `0.067` | `95` / `80` |
+
+What they say (**measured in step 8′**): **the side-dependent ramp is the
+lever, and the other two are nothing.** On both holes it cuts the masked
+excess over the hole at rest by more than half at `M/2` — `a = 0` from
+`7.3e−2` to `2.9e−2`, the analytic control's `2.6e−2`; G5's chart from
+`0.194` to `0.059`, the L∞ from `121` to `22.5` against the resting hole's
+`20.1` — at the price of a larger first chunk on G5's chart (`0.129`
+against `0.115` at `M/4`: a steeper ramp behind the hole is a harder paste
+there). The trailing side's outer quarter is still `1.3×` the leading
+side's on G5's chart (`104` against `80`) and `13×` on `a = 0` (`68`
+against `5`), where the analytic layer at `20/M` has `2.5×`; so points
+released behind the hole are relaxed better and not yet as well as ahead of
+it. Refilling sixteen times as often, or evaluating the fit exactly in the
+kernel, changes the fourth digit: the target's representation between
+refills is not what the trailing side suffers from — what the layer does to
+the points that cross it is. A faster rate with the narrow ramp (`8/M`)
+trades L2 for L∞.
+
+G5T_PLACEHOLDER
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
