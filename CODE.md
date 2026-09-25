@@ -5781,11 +5781,22 @@ moving chunk on (**measured in step 8′**). The indicator fires on what the
 moving layer exports — the fitted `a = 0` row is five times the analytic
 one's offset for the same reason — and the centroid measures the refined
 region's asymmetry, not a failure to follow: the track stays within `0.06`
-cells, every find succeeds and every fit is valid. The crossing in the
-`5 M` box (`g5-2`) was at `9 M` when this was written: masked
-`1.540` / `720`, and the horizon drifting from Kerr's values after `7 M`
-(`J = 0.793`, `M_ch = 1.016`, extent ratio `0.949` at `8.75 M`; the hole at
-rest `0.7125`, `0.9994`, `1.000` at `10.25 M`).
+cells, every find succeeds and every fit is valid. **The crossing in the `5 M` box completed (`g5-2`, `28 434 s` on 40
+threads, 51 regrids, 3886–5580 blocks)**: every fit valid (53 of 53
+rows), every find successful, the track within `0.215` cells of the analytic
+center; the refinement centroid `27.5`–`32.3` finest spacings off from the
+first moving chunk on (`0.12` on the hole at rest, whose track stays within
+`0.0067` cells). The masked error at `13 M` is `2.59` / `1328` against the
+resting hole's `0.517` / `142` — `5.0×`, and still growing faster
+(`0.35` a `M` over the last two against `0.022`) — and **the horizon
+degrades after `4 M`**: `J = 0.852`, `M_ch = 1.030`, `M_irr = 0.9199` at
+`13 M` (Kerr `0.7`, `1`, `0.92580`; the resting hole `0.7102`, `0.9985`,
+`0.9211`), the extent ratio `0.949` from `8 M` against `0.954`. Step 8's
+table above stops at `7 M`; its time series every `M`: masked L2 `0.333`,
+`0.517`, `0.678`, `0.811`, `0.949`, `1.079`, `1.229`, `1.358`, `1.540`,
+`1.733`, `1.961`, `2.233`, `2.586` against `0.115`, `0.199`, `0.248`,
+`0.284`, `0.316`, `0.340`, `0.368`, `0.392`, `0.421`, `0.449`, `0.474`,
+`0.498`, `0.517` at rest (recorded in step 8′).
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
