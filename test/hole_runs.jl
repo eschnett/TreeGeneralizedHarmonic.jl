@@ -3108,6 +3108,10 @@ function mv_groups()
         mv_spec("l0-all"; l0..., kw=(trail_ramp=3 // 4, target_exact=true)),
         mv_spec("l0-trail-9"; l0..., kw=(trail_ramp=9 // 10,)),
         mv_spec("l0-trail-r8"; l0..., rate=8, kw=(trail_ramp=3 // 4,))]
+    # The surviving lever on G5's crossing (step 8′): the trailing ramp at
+    # 9/10, the l7 screen's best, alone on a node.
+    d["g5t"] = Any[mv_spec("g5-trail"; x0=2 // 1, t_end=13 // 1,
+                           kw=(trail_ramp=9 // 10,), workers=64)]
     # The same levers on G5's chart to M/2 (the g5y screen's configuration).
     l7 = (x0=3 // 10, halfwidth=5 // 2, roots=2, t_end=1 // 2, workers=16)
     d["l7"] = Any[
