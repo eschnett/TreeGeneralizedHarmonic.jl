@@ -5750,25 +5750,42 @@ offset and core surfaces are the same surfaces, the data blended:
 |---|---|---|---|---|
 | `M/8` | `5.13e−2`, `2.02e−2`, `1.02e−2` | `2.30`, `2.37` | `2.81e−3`, `1.48e−3`, `6.65e−4` | `1.59`, `2.77` |
 | `M/4` | `0.114`, `5.34e−2`, `2.19e−2` | `1.87`, `3.10` | `5.31e−3`, `2.79e−3`, `1.25e−3` | `1.59`, `2.80` |
-| `3M/8` | `0.202`, `7.48e−2` | `2.44` | `7.53e−3`, `3.98e−3` | `1.57` |
-| `M/2` | `0.351`, `9.00e−2` | `3.36` | `1.01e−2`, `5.04e−3` | `1.71` |
+| `3M/8` | `0.202`, `7.48e−2`, `4.59e−2` | `2.44`, `1.70` | `7.53e−3`, `3.98e−3`, `1.78e−3` | `1.57`, `2.80` |
+| `M/2` | `0.351`, `9.00e−2`, `8.44e−2` | `3.36`, `0.22` | `1.01e−2`, `5.04e−3`, `2.29e−3` | `1.71`, `2.74` |
 
-— **order `q = 2` over the first `0.15 M` of travel**, in the masked norm
-(`2.3` over both intervals at `M/8`) and averaged over the three
-resolutions outside the horizon (`2.1`), the `N = 8` row's far field
-carrying the coarse levels' error as on the `a = 0` hole. The `N = 16`
-row's last two chunks are the Symmetry job that was still running.
+— **order `q = 2` over the first `0.15 M` of travel** in the masked norm
+(`2.3` over both intervals at `M/8`), and outside the horizon at every row
+(`2.1` averaged over the three resolutions, the `N = 8` row's far field
+carrying the coarse levels' error as on the `a = 0` hole); **but the masked
+norm stops converging by `M/2`** (`N = 12` to `16`: `0.22`, the L∞ `13.7`
+against `24.5`): the moving layer's excess is not truncation error and does
+not shrink with `h` (the `N = 16` row, completed after the tunnel returned;
+recorded in step 8′).
 
-**Where the runs stood (2026-09-24, 18:50).** The tunnel to Symmetry
-closed while `g5-adaptive` (`7 M`), `g5-static` (`8.25 M`) and
-`conv-h7-N16` (`M/4`) were running; their logs and the full reports, with
-the per-chunk refinement centroid, track offset, fit validity and block
-counts from the record, are in
-`/mnt/beegfs/eschnetter/claude/TreeGeneralizedHarmonic/step-8/out/`
-(`moving/g5-2`, `moving/g5a-solo` — the same crossing alone on a node —
-and `hole-moving=conv-h7-N16_tag=n16-solo2.log`), to be read and recorded
-here.
+**Where the runs stood (2026-09-24, 18:50), and what they recorded
+(read in step 8′).** The tunnel to Symmetry closed while `g5-adaptive`,
+`g5-static` and `conv-h7-N16` were running; it returned at 19:40. The
+per-chunk record of the finished adaptive G5 row (`g5b-adaptive`, the `5/2`
+box, 9 rows to `2 M`) and of the `a = 0` rows:
 
+| row | centroid offset from the analytic center, finest `h`: `t = 0` / median / max | track offset, max (cells) | fits valid | finds | blocks |
+|---|---|---|---|---|---|
+| G5's chart, `g5b-adaptive` | `6.8` / `27.5` / `29.8` | `0.060` | 9 of 9 | 9 of 9 | 3536–5020 |
+| `a = 0`, `:fitted`, box `5 M` | `0.29` / `4.8` / `7.3` | `0.022` | 53 of 53 | 53 of 53 | 1128–1912 |
+| `a = 0`, `:damped` at `20/M` | `0.29` / `0.49` / `1.4` | `0.028` | 53 of 53 | 53 of 53 | 1128–1912 |
+| `a = 0`, `:fitted`, box `5/2` | `0.29` / `3.3` / `7.3` | `0.022` | 21 of 21 | 21 of 21 | 820–1464 |
+
+So on G5's chart **the refinement centroid is not within a few finest
+spacings** once the hole moves: `28` of them, `0.55 M`, from the first
+moving chunk on (**measured in step 8′**). The indicator fires on what the
+moving layer exports — the fitted `a = 0` row is five times the analytic
+one's offset for the same reason — and the centroid measures the refined
+region's asymmetry, not a failure to follow: the track stays within `0.06`
+cells, every find succeeds and every fit is valid. The crossing in the
+`5 M` box (`g5-2`) was at `9 M` when this was written: masked
+`1.540` / `720`, and the horizon drifting from Kerr's values after `7 M`
+(`J = 0.793`, `M_ch = 1.016`, extent ratio `0.949` at `8.75 M`; the hole at
+rest `0.7125`, `0.9994`, `1.000` at `10.25 M`).
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
