@@ -3472,6 +3472,24 @@ refinement level, short times.
   trajectory* — done, `M_irr` `0.04 %`, `J` `0.3 %`, `M_ch` `7e−4` from
   Kerr's and the contraction `0.9534` against `0.95394`. What remains is
   the moving layer's trailing side on G5's chart.
+  **Step 8′ (2026-09-25): G5 is still not done.** The side-dependent ramp
+  (`trail_ramp = 9/10`) removes the trailing side's excess — the layer's
+  outer quarter off the truth `268` behind the hole against `277` ahead at
+  `13 M` — so *points released by the core relaxed* holds in the sense of
+  "as well behind the hole as ahead of it", though the layer's residual is
+  `1.7×` the resting hole's (**item 8 partly met**); *the masked error at
+  the static run's level* is **still not met**: `2.05×` at `13 M` (without
+  the ramp `5.0×`), growing on both sides; the centroid, with the ramp,
+  `5.3`–`14.5` finest spacings off (without it `27`–`32`; **item 1 not
+  met** on G5's chart); the track, the fits and the finds hold at every one
+  of 53 rows (**item 2 met**); and **item 10 degrades over the crossing**:
+  `J` drifts to `0.846` and `M_ch` to `1.030` by `13 M` with and without the
+  ramp, the extent ratio to `0.948`, where the resting hole keeps `0.710`,
+  `0.9985`, `1.000`. The adaptive run matches the uniform one to `2 M`
+  (**item 7 met**); the frozen hierarchy converges at order 2 to `M/4` and
+  not at `M/2` in the masked norm (**item 6 partly met**). The open question
+  records what is left and the recommendation (more interior work — the
+  spin drift first — before excision's price).
 - **G6 — Infrastructure and the H200.** `io.jl`, slice output and
   viewers, `bin/gh.jl`, the per-phase benchmark on threads (TreeWave's
   table, on Symmetry) and **on the H200 in `Float64`**, in-kernel metric
@@ -5890,7 +5908,36 @@ refills is not what the trailing side suffers from — what the layer does to
 the points that cross it is. A faster rate with the narrow ramp (`8/M`)
 trades L2 for L∞.
 
-G5T_PLACEHOLDER
+**G5's crossing with the trailing ramp (`moving=g5t`, measured in step
+8′**: `trail_ramp = 9/10`, otherwise `g5-adaptive`'s row — box `5 M`, from
+`x = 2`, `13 M`, alone on an `amdq` node, `39 183 s`, 51 regrids, 3872–5356
+blocks**)**, against the same crossing without it and the hole at rest:
+
+| `t` | with the ramp: masked L2 / L∞ | without | at rest | with / at rest |
+|---|---|---|---|---|
+| `M` | `0.138` / `41.8` | `0.333` / — | `0.115` / `39.6` | `1.20` |
+| `2 M` | `0.245` / `60.0` | `0.517` / `208` | `0.199` / — | `1.23` |
+| `4 M` | `0.380` / `75.0` | `0.811` / `327` | `0.284` / `71.7` | `1.34` |
+| `7 M` | `0.540` / `104` | `1.229` / `547` | `0.368` / `95.9` | `1.47` |
+| `10 M` | `0.757` / `156` | `1.733` / — | `0.449` / — | `1.69` |
+| `13 M` | `1.062` / `262` | `2.586` / `1328` | `0.517` / `142` | `2.05` |
+
+The excess of the masked L2 over the resting hole is **`0.545` against
+`2.069` at `13 M`** (`0.096` against `0.527` at `4 M`); the error outside
+`r_h,max + 3h` is `0.105` / `19.1` against `0.120` / `30.0` (the resting hole
+`3.4e−2` / `5.8`). **The trailing side's excess is gone**: the layer's outer
+quarter off the truth is `268` behind the hole and `277` ahead of it at
+`13 M` (`2729` / `2942` without the ramp, where both sides had grown; `1.6`
+and `1.3` at `M` and `7 M`, `1.0` from `9 M` on), against the resting hole's
+`157`. The refinement centroid is `5.3`–`14.5` finest spacings off (without
+the ramp `27`–`32`), every fit valid, every find successful, the track
+within `0.40` cells. **What the ramp does not touch is the horizon's
+drift**: `J = 0.846`, `M_ch = 1.030`, `M_irr = 0.9227` and the extent ratio
+`0.948` at `13 M`, as without it (`0.852`, `1.030`, `0.9199`, `0.949`) —
+`J` rises by `0.013` a `M` from `2 M` on in both runs and not at rest
+(`0.710`). That is a second, separate failure of the moving spinning hole,
+and not the layer's export: on the boosted `a = 0` hole `J` stays at
+`10⁻⁵`.
 
 ## Possible extensions
 
@@ -6145,17 +6192,35 @@ first touch them:
    suite's fixture keeps step 5's layer, a ramp of `4.8` cells, on which
    step 8c measured the exact target at `4/M` to `50 M`.
 
-**The moving layer's trailing side (opened in step 8).** On G5's chart the
-`:fitted` layer moving at `0.3` holds the hole but exports error through
-the side it leaves: the masked error is `3.3×` the static hole's at `7 M`
-and grows four times as fast, the layer's outer quarter on the trailing
-side twice the leading side's. Step 8 found and removed the largest source
-(the initial data's step at the core surface, `fit_initial_blend`) and
-measured three levers that did not help within `M/2` — the target's rate,
-`20/M`, a thicker ramp or a wider margin (the analytic data then stop
-where the ring is close). What is untried: a ramp whose width depends on
-the side (`ρ` rising faster on the trailing side, where points leave), a
-refill of the target from each fit on a cadence finer than `h/(4|v|)`,
-and relaxing released points toward the fit's *evolved* continuation
-rather than its value (the target advected with `F` switched off). The
-proof-of-concept case needs one of them, or excision's price (step 8g).
+**The moving layer's trailing side (opened in step 8, answered in step
+8′).** On G5's chart the `:fitted` layer moving at `0.3` exported error
+through the side it leaves. Step 8′ tried the three levers step 8 named,
+each measured as the masked L2's excess over the hole at rest (`a = 0` at
+`M/2`; G5's chart at `M/2` and on the crossing):
+
+| lever | `a = 0`, `M/2` | G5, `M/2` | G5, `13 M` |
+|---|---|---|---|
+| none | `7.3e−2` | `0.194` | `2.069` |
+| the side-dependent ramp, `trail_ramp = 9/10` | `2.9e−2` | `0.059` | `0.545` |
+| the refill every `1/16` cell | `7.2e−2` | (not run: no effect on `a = 0`) | — |
+| the exact target (the fit in the kernel) | `7.3e−2` | `0.195` | — |
+| the analytic `:damped` layer at `20/M` (control) | `2.6e−2` | (no analytic layer) | — |
+
+**The ramp answers it** (proposed in step 8′: `trail_ramp = 9/10` for every
+moving `:fitted` run, off by default so that a static one is unchanged): it
+takes the `a = 0` excess to the analytic control's, and on G5's chart
+removes the side asymmetry entirely and cuts the crossing's excess by
+`3.8×`. **It does not make G5's error the static run's**: at `13 M` the
+moving hole is `2.05×` the resting one and still growing faster (`0.11` a
+`M` against `0.02`), symmetrically on both sides of the layer, and the
+horizon's `J` drifts by `0.013` a `M` with and without the ramp. So the
+remaining problem is not an export through the trailing side, and excision
+(step 8g) — which replaces the layer, not a side of it — is not indicated
+by it. **Recommendation (proposed in step 8′): more interior work before
+excision's price**, in this order: the spin drift of the moving spinning
+hole (it is absent on `a = 0` and at rest; the fit's `L = 12` and the
+target's rate are the first suspects, and a boosted hole at rest in its
+own frame is the cheapest test), then the uniform growth — which the
+resting `:fitted` hole shows too at a fifth of the rate. Step 8g's
+host-side test is the right next step only if the spin drift turns out to
+be the layer's.

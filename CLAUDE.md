@@ -81,7 +81,14 @@ at the hole with 6–9× fewer points, the horizon is found along the
 trajectory with Kerr's numbers and the boost's contraction, `:frozen` fails
 — but on G5's chart the moving layer's error is `3.3×` the static hole's
 at `7 M` and growing, carried out through the layer's trailing side
-(`CODE.md`, G5 and "The moving hole (step 8)").**
+(`CODE.md`, G5 and "The moving hole (step 8)"). Step 8′ (2026-09-25) found
+the lever for the trailing side — `evolve!(…; trail_ramp = 9/10)`, `ρ`'s ramp
+narrowed where grid points leave the layer — which takes the crossing's
+excess over the resting hole from `5.0×` to `2.05×` at `13 M` and makes the
+two sides of the layer equal; G5 is still open on the uniform growth that is
+left and on a drift of the horizon's `J` (`0.846` at `13 M`) that the moving
+spinning hole shows with and without it (`CODE.md`, "The trailing side (step
+8′)" and "Open questions").**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -348,8 +355,10 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4659 assertions in 17m16** at one thread and **11m36** at
-four after step 8 (load 7–13): its 28 new claims are `moving_tests.jl`,
+The suite is **4670 assertions in 16m33** at one thread and **10m57** at
+four after step 8′ (load 3–9): its 11 new claims are `moving_tests.jl`'s
+levers, the file `20.8 s` / `18.6 s`. After step 8 it was **4659 assertions
+in 17m16** at one thread and **11m36** at four (load 7–13): its 28 new claims are `moving_tests.jl`,
 `19.9 s` / `16.9 s`, most of it the compilation of the target's rate in the
 cache fill, and one of step 8f's claims — the refusal of G5's chart by the
 `:fitted` cycle — is gone with the refusal. After step 8f it was **4632
@@ -588,6 +597,17 @@ julia --project=. --threads=4 test/hole_runs.jl moving=mesh
 julia --project=. --threads=4 test/hole_runs.jl moving=ctl-a0-fitted t_end=1/2
 ```
 
+Step 8′ added the groups `l0` (the trailing-side levers on the boosted
+`a = 0` hole in the `5/2 M` box to `M/2`, ten rows of about four minutes at
+four threads here — run them three at a time), `l7` (the same on G5's chart,
+one `amddebugq` hour) and `g5t` (G5's crossing with `trail_ramp = 9/10`,
+eleven hours alone on an `amdq` node). **Give every long Symmetry study a
+remote directory of its own** (`symmetry-run.sh <worktree> <unique name>`):
+the package image of a project path is one cache slot, and rsyncing changed
+sources into a directory whose jobs are running, then precompiling, rewrites
+the `.so` they have mapped — the likely cause of step 8's `SIGBUS`es, which
+did not recur from `step-8-sigbus` and `step-8-t`.
+
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a
 64-core EPYC node, which is what makes them parallel — a node *core* is
@@ -797,6 +817,13 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   (`target_rate`, the lag of a point relaxing toward a moving target) is
   not what matters there: `0.2 %`. Read the `moving` rows' trailing-side
   layer error before suspecting the target.
+- **Behind a moving layer, narrow the ramp** (measured in step 8′):
+  `trail_ramp = 9/10` makes `ρ` rise where points leave the layer and is
+  what removed the trailing side's excess; refilling the target more often
+  and evaluating the fit exactly in the kernel changed the fourth digit.
+  It is off by default (a static run is unchanged bit for bit); pass it for
+  every moving `:fitted` run. The horizon's `J` of a moving spinning hole
+  drifts with or without it — read it before trusting a long crossing.
 - **`horizon_min_radius` of a boosted hole is a bound, not the radius**
   (found in step 8): the rest frame's smallest radius times `√(1 − v²)`,
   exact only when that radius lies along the boost. A moving seed takes
