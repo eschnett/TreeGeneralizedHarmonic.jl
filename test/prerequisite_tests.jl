@@ -218,6 +218,14 @@ const TREEAMR_NAMES = (
     :firing_boxes,
 )
 
+# The one TreeAMR helper this package calls that TreeAMR does not export:
+# `threaded_foreach`, the owner-mapped host loop (chunk `c` on thread `c`
+# every call) behind the horizon interpolator's batch. TreeAMR documents it
+# as an internal, so a rename on `main` is possible and would surface as an
+# `UndefVarError` only in the first horizon find — named here instead
+# (added with TreeAMR's owner-based threading, 2026-09-25).
+const TREEAMR_INTERNAL = (:threaded_foreach,)
+
 # The backgrounds of `CODE.md`'s "Initial data and backgrounds" table, the
 # two derivative passes the pointwise algebra is tested against, the ADM
 # decomposition it is compared to, and the gauge source the non-harmonic
@@ -259,6 +267,8 @@ const KORZYNSKI_NAMES = (:horizon_spin, :SpinResult, :shape_embedding)
     # `[sources]` pins are moving branches, which is exactly why this test
     # exists — see `CLAUDE.md`, "Things that will bite".
     @test setdiff(TREEAMR_NAMES, names(TreeAMR)) == Symbol[]
+    @test filter(n -> !isdefined(TreeAMR, n),
+                 collect(TREEAMR_INTERNAL)) == Symbol[]
     @test setdiff(SPACETIMEMETRICS_NAMES, names(SpacetimeMetrics)) == Symbol[]
     @test filter(n -> !isdefined(SpacetimeMetrics, n),
                  collect(SPACETIMEMETRICS_INTERNAL)) == Symbol[]

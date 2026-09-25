@@ -476,27 +476,26 @@ function _interpolate(fs::FieldSet{T,3}, xs::AbstractArray, ::Val{NV},
     # thread count (`CLAUDE.md`: bit-identity across thread counts is the
     # invariant). `CODE.md` asks for the batched form for exactly this.
     #
-    # The `try` is not caution, it is the message: a query that reaches the
-    # layer *must* say so, and `Threads.@threads` wraps whatever a task
-    # threw in a `TaskFailedException` whose own message is the words
-    # "TaskFailedException" and nothing else. Unwrapping it is what keeps
-    # the refusal readable at more than one thread — and it is what a
-    # caller catches on, since the driver records the message.
-    try
-        Threads.@threads for i in eachindex(xs)
-            v, g = interpolate_point(fs, xs[i], Val(NV), Val(n), mask,
-                                     Val(DG))
-            @inbounds vals[i] = v
-            @inbounds grads[i] = g
-        end
-    catch e
-        throw(unwrap_task_failure(e))
+    # TreeAMR's `threaded_foreach` rather than `Threads.@threads` (amended
+    # with TreeAMR's owner-based threading, 2026-09-25): chunk `c` of the
+    # query points runs on thread `c` every call, it nests inside a caller's
+    # own parallel loop where `@threads` would not, and it rethrows the
+    # exception the body threw rather than a `TaskFailedException` — the
+    # refusal of a query that reaches the layer *must* reach the caller
+    # readable, since the driver records its message.
+    TreeAMR.threaded_foreach(length(xs)) do j
+        i = eachindex(xs)[j]
+        v, g = interpolate_point(fs, xs[i], Val(NV), Val(n), mask, Val(DG))
+        @inbounds vals[i] = v
+        @inbounds grads[i] = g
     end
     return vals, grads
 end
 
 # The first real exception inside a `TaskFailedException` or a
-# `CompositeException`, or the thing itself when it is neither.
+# `CompositeException`, or the thing itself when it is neither. What a
+# kernel throws on the CPU backend arrives wrapped (the `DomainError` of a
+# degenerate metric, `hole_runs.jl`), which is what this is still for.
 unwrap_task_failure(e) = e
 unwrap_task_failure(e::TaskFailedException) =
     e.task.exception isa Exception ? unwrap_task_failure(e.task.exception) : e

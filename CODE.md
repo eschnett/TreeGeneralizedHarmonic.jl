@@ -3051,6 +3051,44 @@ break it:
   test runs, for a claim the existing lines already make. The right time
   to reconsider is G5, where the hole *moves* and the refinement follows
   it — that is a new flagging pass, which is new parallel structure.**)**
+- **Every per-block pass runs on the block's owner thread, and this
+  package adds none of its own** (added 2026-09-25, with TreeAMR's
+  owner-based threading of 2026-09-23, `4be726e`). TreeAMR now gives
+  block `b` to the thread whose chunk of `threadchunks(nblocks)` holds it,
+  in every `map_blocks!`, `scatter!`/`gather!`, `fill_by_coordinates!`,
+  ghost fill, interface fixup, regrid transfer and host loop over blocks,
+  because a block that changes core between launches streams at up to
+  `1/2.4` the rate on a 64-core EPYC (TreeAMR's `CODE.md`, "What one
+  process loses"). Every kernel here — the right-hand side, the limiters,
+  the monitors, the indicator, the target cache — already goes through
+  `map_blocks!`, and every state vector and field set is allocated by
+  TreeAMR, so all of that is inherited with no change to `src/`; `[compat]`
+  asks for TreeAMR `0.1.2`. The one parallel loop this package wrote
+  itself, the horizon interpolator's batch over query points, was
+  `Threads.@threads` and is TreeAMR's `threaded_foreach` now: the same
+  chunk on the same thread every call, nestable, and it rethrows the
+  body's own exception, so the footprint guard's refusal still reaches
+  the record readable. **What is not owner-based is RK4's stage
+  arithmetic.** OrdinaryDiffEq's `RK4()` forms `uprev + (dt/2) k` and the
+  final combination with a serial broadcast (`thread = Serial()`), on the
+  calling thread, over the whole state. **(Measured 2026-09-25** on the
+  development machine, the gauge wave at `q = 4`, 64 blocks of `16³`:**)**
+  the four broadcasts of a step are `5.7 ms` against `4 × 519 ms` of
+  right-hand side at one thread (0.3 %) and `4 × 143 ms` at four (1.0 %).
+  On a 64-core Symmetry node it is not measured, and is expected to
+  matter more for two reasons: a single core's bandwidth is a small share
+  of the node's, and the broadcast reads every block from one core
+  between launches, which is exactly the migration TreeAMR removed. It
+  also first-touches the vectors the integrator allocates (its copy of
+  `u`, the stage vector `tmp`, the saved end state) from that one core, so
+  TreeAMR's advice — pin the threads, then let first touch place the
+  pages — makes the field sets domain-local and leaves the state vectors
+  on one domain. Today's Symmetry jobs neither pin nor interleave; pinned,
+  with and without `numactl --interleave=all`, is the comparison to make
+  before choosing. The
+  ways out are `RK4(; thread = True())` (Polyester, whose chunk-to-thread
+  map is its own) or an integrator whose stage update is a `map_blocks!`
+  — a change to "RK4 from OrdinaryDiffEq", and G6's to measure.
 - **`Float64` on Symmetry's H200 is the requirement** (decided in
   review). It is the machine the proof of concept runs on, and the
   precision it runs in; every device claim below is made there first.

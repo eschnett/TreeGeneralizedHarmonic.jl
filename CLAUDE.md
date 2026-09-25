@@ -1122,6 +1122,18 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   accumulate into shared state in a loop of your own: bit-identity
   across thread counts is the invariant, and `test/threading_tests.jl`
   is the only thing that will report a violation.
+- **A parallel loop of this package's own is TreeAMR's
+  `threaded_foreach`/`threaded_chunks`, never `Threads.@threads` or
+  `@spawn`, and a kernel is a `map_blocks!`** (from TreeAMR's owner-based
+  threading, 2026-09-25). TreeAMR runs every per-block pass on the
+  block's owner thread; a launch on whichever thread is free moves the
+  blocks between cores and cost TreeAMR's RHS `2.4×` on 64 cores. The two
+  helpers are unexported, so `prerequisite_tests.jl` names the one this
+  package calls. RK4's stage arithmetic is OrdinaryDiffEq's serial
+  broadcast and is *not* owner-based: 1 % of a step at four threads here,
+  unmeasured on Symmetry, and it first-touches the integrator's vectors
+  from one core, so TreeAMR's "pin, then drop the interleaving" is
+  unproven here (`CODE.md`, "Precision, threads, devices").
 - **`Base` is not generic even though the mesh is.** MultiFloats defines
   no `rem`, no conversion to `Integer`, no `Float64(::Float32x2)`. Use
   `wrap` / `ceilint` / `floorint` / `tofloat64` from `precision.jl`.
