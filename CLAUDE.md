@@ -364,12 +364,15 @@ predicts what the 3D runs measure — and a `leakage` section to
 Step 8c's `calibration` section is not in it either: about 150 runs of
 `5 M` and `50 M`, a dozen node-hours on Symmetry.
 `Project.toml` carries the `[sources]` pins and CI is in place — but
-**the CI matrix is temporarily reduced** (2026-09-19): Julia 1.11 and code
-coverage are both dropped, each with the removed lines and the reason in a
-comment at its site in `CI.yml`. 1.11 fails only
-`pointwise_tests.jl:480` (176 bytes where zero is claimed); coverage
-computes *wrong numbers* on GitHub's runners while the identical
-instrumented suite passes on Symmetry. Both are owed back. There is
+**the CI matrix is temporarily reduced** (2026-09-19): Julia 1.11 is
+dropped, with the removed lines and the reason in a comment at its site in
+`CI.yml`; it fails only `pointwise_tests.jl:480` (176 bytes where zero is
+claimed), and is owed back. Code coverage was dropped then too, and is back
+on **the macOS cell only** (2026-09-26): instrumented runs compute *wrong
+numbers* on GitHub's Linux runners (207 failures on the threaded Linux
+cell at Julia 1.13.1, which the removed gate had left instrumented), while
+the instrumented macOS cell and the instrumented suite on Symmetry pass.
+Keep coverage off the Linux cells until that is understood. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
