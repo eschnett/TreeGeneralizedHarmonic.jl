@@ -4,17 +4,17 @@
 # prerequisites" (point interpolation). Three things live here, in the
 # order the numbers are produced:
 #
-#   1. **Point interpolation from a field set** — `find_leaf` to locate
-#      the containing block, then tensor-product Lagrange interpolation of
-#      order `q + 2` over that block's *stored* points, batched over a host
-#      array of query points. This is the one piece of mesh machinery this
-#      package writes, and it is a **stopgap**: TreeAMR's `TODO.md` lists
-#      "generic interpolation", and when it grows it this file loses
-#      [`interpolate`](@ref) and keeps everything else (`CLAUDE.md`, "No
-#      mesh machinery"; `CODE.md`, "Upstream prerequisites", item 1).
+#   1. **Point interpolation from a field set** — TreeAMR's `interpolate`
+#      (its M11) with a `Lagrange(q + 2)` basis, batched over an array of
+#      query points and run on the field set's backend. This package adds
+#      only the order and the guard below ([`gh_interpolate`](@ref)). Until
+#      2026-09-26 this was a stopgap of this package's own — `locate_block`
+#      and a host-side window contraction — carried until TreeAMR grew it
+#      (`CLAUDE.md`, "No mesh machinery"; `CODE.md`, "Upstream
+#      prerequisites", item 1, amended then).
 #   2. **The ADM provider** `ApparentHorizonFinder` consumes, in its
 #      *batched* form — all surface points at once, so the interpolation
-#      runs threaded — built out of `pointwise.jl`'s
+#      is one launch — built out of `pointwise.jl`'s
 #      [`adm_vars_from_state`](@ref): `γ_ij` and `∂_kγ_ij` from the
 #      interpolated `h` and its interpolated gradient, `K_ij` from `Π`
 #      through the evolution relation.
@@ -33,10 +33,11 @@
 #     stale by design, so an interpolant that reaches either would report a
 #     horizon of data the equations never produced. The provider *throws*
 #     (`CODE.md`: "the provider throws if a query point's interpolation
-#     footprint reaches `r_1`"), and the check is exact rather than
-#     conservative: the footprint is a tensor-product lattice, so the
-#     nearest of its points to the hole's center is the per-axis nearest in
-#     each direction.
+#     footprint reaches `r_1`"). TreeAMR *flags* a query whose stencil
+#     reaches an excluded region; the region is the mask's complement,
+#     [`UnevolvedRegion`](@ref), and the check is exact: TreeAMR places a
+#     stencil point where `coordinates` does, and the region asks the same
+#     `is_evolved` the norms ask.
 #   * **Ghosts must be filled first.** The window of `q + 2` points around
 #     a query near a block face reaches `G` points into the neighbour, and
 #     `G = q/2 + 1 = (q + 2)/2` is exactly half the window — which is why a
@@ -135,175 +136,103 @@ function Horizon(::Type{T}=Float64; every::Integer=1, N::Integer=16,
                       Int(verbosity))
 end
 
-# --- point location ---------------------------------------------------------
+# --- the guard, as a TreeAMR region -----------------------------------------
 
 """
-    locate_block(forest, x) -> Int or nothing
+    UnevolvedRegion(mask)
 
-The index into `forest.leaves` of the leaf whose interior contains `x`, or
-`nothing` when `x` is outside the domain.
+The region `mask` does **not** evolve — the damping layer and the frozen
+core — as a TreeAMR `Region`, which is how the footprint guard reaches
+TreeAMR's `interpolate`: its `exclude` flags every query whose stencil has a
+point inside the region, and [`gh_interpolate`](@ref) turns a flag into a
+refusal (added 2026-09-26, with the port to TreeAMR's M11).
 
-The descent TreeAMR does not (yet) export: the root brick from the domain
-extents, the cell coordinates at the finest level present, then
-[`find_leaf`](@ref) on that node and on each of its ancestors in turn —
-the first that is a leaf is the one that covers `x`. `O(maxlevel · log
-nleaves)`, host-side, and called once per query point.
+A point is inside exactly when `is_evolved(mask, x)` is false — the same
+predicate every masked norm, the indicator and the speed kernel ask — and
+TreeAMR evaluates a stencil point at the position `coordinates` gives, which
+is [`point_position`](@ref)'s expression in the same order. So the guard
+refuses **exactly** what the norms mask, bit for bit: a footprint is refused
+iff one of the `(q + 2)³` points it reads is a point the norms do not count.
 
-A periodic dimension is wrapped, a non-periodic one refuses: a point one
-cell outside a Dirichlet boundary is not in the mesh, and interpolating it
-from the nearest block would quietly extrapolate. Points exactly on the
-upper face belong to the last cell, which is where the shared plane's data
-lives.
+It is not TreeAMR's `Ellipsoid` for the round mask, although that is a ball
+and its test is as cheap: `Σ((x − c)/r₁)² < 1` rounds differently from
+`is_evolved`'s `Σ(x − c)² ≥ r₁²`, so the two disagree on points within
+roundoff of `r₁`, and a separable test of our own costs the same (measured
+2026-09-26, `CODE.md`, "Analysis quantities").
 """
-function locate_block(forest::Forest{3,R}, x) where {R}
-    root = 0
-    stride = 1
-    cell = ntuple(_ -> 0, Val(3))
-    L = maxlevel(forest)
-    n = 1 << L
+struct UnevolvedRegion{M} <: Region
+    mask::M
+end
+
+@inline TreeAMR.inside(r::UnevolvedRegion, x) = !is_evolved(r.mask, x)
+
+# The guard's region for a mask: none where every point is evolved.
+exclude_region(::AllPoints) = nothing
+exclude_region(mask) = UnevolvedRegion(mask)
+
+# The squared distance from `c` to the nearest point of a stencil lattice,
+# with each stencil point where TreeAMR puts it (`stencil_position`, the
+# expression `coordinates` evaluates). The lattice is a tensor product, so
+# the nearest point is the per-axis nearest, and its squared distance is
+# formed from the same differences, squares and left-to-right sum as
+# `is_evolved`'s: this *is* that point's `r²`, bit for bit, and every other
+# stencil point's is at least as large, because floating-point addition is
+# monotone.
+@inline function nearest_r2(c, origin, h, base, off, ::Val{n}) where {n}
+    r² = zero(h)
     for d in 1:3
-        lo, hi = forest.extents[d]
-        s = (R(x[d]) - lo) / (hi - lo)
-        if forest.periodic[d]
-            s = s - floor(s)
-        elseif s < 0 || s > 1
-            return nothing
+        best = zero(h)
+        for k in 0:(n - 1)
+            y = TreeAMR.stencil_position(origin, h, base, off, d, k) - c[d]
+            best = k == 0 ? y * y : min(best, y * y)
         end
-        # The cell index across the whole brick at the finest level, then
-        # split into (root brick, coordinate within it).
-        u = min(floorint(s * forest.roots[d] * n), forest.roots[d] * n - 1)
-        rp = u ÷ n
-        root += rp * stride
-        stride *= forest.roots[d]
-        cell = Base.setindex(cell, u - rp * n, d)
+        r² += best
     end
-    for l in L:-1:0
-        b = find_leaf(forest, root, l, cell)
-        b === nothing || return b
-        cell = ntuple(d -> cell[d] >> 1, Val(3))
-    end
-    return nothing
+    return r²
 end
 
-# --- the interpolation weights ----------------------------------------------
-
-# The Lagrange basis of `n` equispaced nodes `0, 1, …, n−1`, evaluated at
-# `ξ` together with its derivative — value weights and derivative weights
-# in *node units*, so the physical gradient is `d / h`.
-#
-# Written as the plain products rather than in barycentric form on purpose:
-# the barycentric weight `∏(ξ − j)/(ξ − k)` is `0/0` when the query sits
-# exactly on a node, which is the *first* thing a test of "exact on
-# polynomials" does. These products are `O(n³)` per axis per point and the
-# find is dominated by the `n³ · nvars` loads of the contraction below.
-@inline function lagrange_point_weights(::Val{n}, ξ::T) where {n,T}
-    dx = ntuple(j -> ξ - T(j - 1), Val(n))
-    den = ntuple(Val(n)) do k
-        p = one(T)
-        for j in 1:n
-            j == k && continue
-            p *= T(k - j)
-        end
-        p
-    end
-    w = ntuple(Val(n)) do k
-        p = one(T)
-        for j in 1:n
-            j == k && continue
-            p *= dx[j]
-        end
-        p / den[k]
-    end
-    d = ntuple(Val(n)) do k
-        s = zero(T)
-        for m in 1:n
-            m == k && continue
-            p = one(T)
-            for j in 1:n
-                (j == k || j == m) && continue
-                p *= dx[j]
-            end
-            s += p
-        end
-        s / den[k]
-    end
-    return SVector{n,T}(w), SVector{n,T}(d)
+# TreeAMR's default `stencil_hits` enumerates the `n³` stencil points; these
+# are the cheaper methods its `Region` docstring invites, and each agrees
+# with the enumeration exactly. The round mask: the nearest point decides.
+@inline function TreeAMR.stencil_hits(r::UnevolvedRegion{<:InteriorMask},
+                                      origin::NTuple{3}, h, base, off,
+                                      ::Val{n}) where {n}
+    m = r.mask
+    return nearest_r2(m.center, origin, h, base, off, Val(n)) < m.r_1 * m.r_1
 end
 
-# The stored-index window of `n` points along one axis, and the query's
-# position in it. `s` is the query in cell units from the block's lower
-# corner; the containing cell is clamped into `0 … N−1` so that a point on
-# the upper face is interpolated from the last cell's window rather than
-# from one that runs past the array.
-#
-# The window's first *stored* index is `c + G − n/2 + 2`, which for this
-# package's `G = q/2 + 1` and `n = q + 2` is `c + 2`: it never reaches
-# index 1 and never reaches `N + 2G + 1`, the shared upper plane that no
-# kernel writes (`CLAUDE.md`).
-@inline function interpolation_span(::Val{n}, s::T, N::Int, G::Int) where {n,T}
-    c = clamp(floorint(s), 0, N - 1)
-    i0 = c + G - (n ÷ 2) + 2
-    ξ = s - T(c - (n ÷ 2) + 1)
-    return i0, ξ
-end
-
-# The lower corner of the footprint along one axis, as a position.
-@inline footprint_origin(origin::T, h::T, i0::Int, G::Int) where {T} =
-    origin + T(i0 - G - 1) * h
-
-# Whether every point of the footprint lattice is evolved. Exact rather
-# than conservative: the lattice is a tensor product, so the nearest of its
-# points to the center is the per-axis nearest, and the distance is the
-# root of the sum of those three squares.
-@inline footprint_evolved(::AllPoints, x0, h, ::Val{n}) where {n} = true
-
-@inline function footprint_evolved(m::InteriorMask{T}, x0, h::T,
-                                   ::Val{n}) where {T,n}
-    r² = zero(T)
-    for d in 1:3
-        # The nearest node index, as `floor(s + 1/2)` rather than `round`:
-        # `round` closes through a conversion MultiFloats does not have,
-        # and this package spells that `floorint` (`precision.jl`).
-        k = clamp(floorint((m.center[d] - x0[d]) / h + T(1 // 2)), 0, n - 1)
-        δ = x0[d] + T(k) * h - m.center[d]
-        r² += δ * δ
+# The tracked geometry (step 8d): the evolved region is `r ≥ r_1(n̂)`, which
+# is not a sphere, so the nearest point decides only outside the offset
+# surface's two bounding spheres — compared as `sqrt(r²)` against the radii,
+# which is `is_evolved`'s own comparison, so both fast paths are exact by
+# the monotonicity of `sqrt` — and in between every stencil point is
+# classified by `is_evolved` **(proposed in step 8d** over `PLAN.md`'s
+# conservative "use the bounding sphere `r_in − offset`", which would refuse
+# a footprint wherever the horizon is farther out than its smallest radius —
+# on harmonic Kerr's equator, by more than the whole margin**)**.
+@inline function TreeAMR.stencil_hits(r::UnevolvedRegion{<:ShapeMask},
+                                      origin::NTuple{3}, h, base, off,
+                                      ::Val{n}) where {n}
+    m = r.mask
+    ρ = sqrt(nearest_r2(m.center, origin, h, base, off, Val(n)))
+    ρ ≥ m.r_out - m.offset && return false
+    ρ < m.r_in - m.offset && return true
+    for J in CartesianIndices(ntuple(_ -> n, Val(3)))
+        x = ntuple(d -> TreeAMR.stencil_position(origin, h, base, off, d,
+                                                 J[d] - 1), Val(3))
+        is_evolved(m, x) || return true
     end
-    return r² ≥ m.r_1 * m.r_1
-end
-
-# On the tracked geometry (step 8d) the evolved region is `r ≥ r_1(n̂)`, and
-# the per-axis nearest lattice point is no longer the one that decides: the
-# surface is not a sphere. So the guard is exact **by enumeration** where the
-# shape can matter — the nearest point outside the offset surface's bounding
-# sphere `r_out − offset` passes the whole footprint, one inside `r_in −
-# offset` refuses it, and in between every one of the `n³` lattice points is
-# classified by the same `is_evolved` the norms use **(proposed in step 8d**,
-# over `PLAN.md`'s conservative "use the bounding sphere `r_in − offset`",
-# which would let a footprint read the layer's outer part wherever the
-# horizon is farther out than its smallest radius — on harmonic Kerr's
-# equator, by more than the whole margin**)**.
-@inline function footprint_evolved(m::ShapeMask{T}, x0, h::T,
-                                   ::Val{n}) where {T,n}
-    r² = zero(T)
-    for d in 1:3
-        k = clamp(floorint((m.center[d] - x0[d]) / h + T(1 // 2)), 0, n - 1)
-        δ = x0[d] + T(k) * h - m.center[d]
-        r² += δ * δ
-    end
-    lo = m.r_in - m.offset
-    hi = m.r_out - m.offset
-    r² ≥ hi * hi && return true
-    r² < lo * lo && return false
-    for k3 in 0:(n - 1), k2 in 0:(n - 1), k1 in 0:(n - 1)
-        p = (x0[1] + T(k1) * h, x0[2] + T(k2) * h, x0[3] + T(k3) * h)
-        is_evolved(m, p) || return false
-    end
-    return true
+    return false
 end
 
 # The refusal, dispatched on the mask so that the trivial one carries no
 # message about a radius it does not have.
 footprint_error(::AllPoints, x, n) = ErrorException("unreachable")
+
+footprint_error(m, x, n) = ArgumentError(
+    "the interpolation footprint of $(Tuple(x)) reaches a point the mask " *
+    "$(nameof(typeof(m))) does not evolve: the $(n)³ points this query " *
+    "would read are not all in the evolved region.")
 
 footprint_error(m::ShapeMask, x, n) = ArgumentError(
     "the interpolation footprint of $(Tuple(x)) reaches below the tracked " *
@@ -324,172 +253,107 @@ footprint_error(m::InteriorMask, x, n) = ArgumentError(
     "everything that is interpolated from the state — raise the margin, " *
     "shrink r_1, or stop asking for a surface inside the hole.")
 
-# The tensor-product contraction, formed and consumed in place: the value
-# of every variable at the query point and, when `DG` says so, its three
-# spatial derivatives. Nothing of size `n³` is materialised.
-@inline function interpolate_window(work, base::Int, st, sv::Int,
-                                    ::Val{NV}, wx::SVector{n,T},
-                                    wy::SVector{n,T}, wz::SVector{n,T},
-                                    dx::SVector{n,T}, dy::SVector{n,T},
-                                    dz::SVector{n,T}, inv_h::T,
-                                    ::Val{DG}) where {NV,n,T,DG}
-    val = zero(SVector{NV,T})
-    gx = zero(SVector{NV,T})
-    gy = zero(SVector{NV,T})
-    gz = zero(SVector{NV,T})
-    for k3 in 1:n, k2 in 1:n
-        base23 = base + (k2 - 1) * st[2] + (k3 - 1) * st[3]
-        for k1 in 1:n
-            idx = base23 + (k1 - 1) * st[1]
-            u = SVector{NV,T}(ntuple(v -> (@inbounds work[idx + (v - 1) * sv]),
-                                     Val(NV)))
-            val += (wx[k1] * wy[k2] * wz[k3]) * u
-            if DG
-                gx += (dx[k1] * wy[k2] * wz[k3]) * u
-                gy += (wx[k1] * dy[k2] * wz[k3]) * u
-                gz += (wx[k1] * wy[k2] * dz[k3]) * u
-            end
-        end
-    end
-    return val, (inv_h * gx, inv_h * gy, inv_h * gz)
-end
+# --- the interpolation -------------------------------------------------------
 
-# One query: locate, check the footprint, contract. The whole of the
-# stopgap interpolator, and the only function in this file that indexes a
-# working array.
-function interpolate_point(fs::FieldSet{T,3}, x, ::Val{NV}, ::Val{n},
-                           mask, ::Val{DG}) where {T,NV,n,DG}
-    b = locate_block(fs.forest, x)
-    b === nothing && throw(ArgumentError(
-        "the point $(Tuple(x)) is outside the mesh: no leaf of the forest " *
-        "covers it, so there is nothing to interpolate from. The horizon " *
-        "finder queries the surface it is iterating toward, so a seed " *
-        "sphere larger than the box — or a flow that has run away — " *
-        "arrives here."))
-    k = blockkey(fs, b)
-    origin = block_origin(T, fs.forest, k)
-    h = spacing(T, fs.forest, k)
-    N = fs.forest.N
-    spans = ntuple(Val(3)) do d
-        interpolation_span(Val(n), (T(x[d]) - origin[d]) / h, N, fs.G[d])
-    end
-    x0 = ntuple(d -> footprint_origin(origin[d], h, spans[d][1], fs.G[d]),
-                Val(3))
-    footprint_evolved(mask, x0, h, Val(n)) ||
-        throw(footprint_error(mask, x, n))
-    st, sv, sb = work_strides(fs.work)
-    base = 1 + (b - 1) * sb + sum(ntuple(d -> (spans[d][1] - 1) * st[d],
-                                         Val(3)))
-    wx, dx = lagrange_point_weights(Val(n), spans[1][2])
-    wy, dy = lagrange_point_weights(Val(n), spans[2][2])
-    wz, dz = lagrange_point_weights(Val(n), spans[3][2])
-    return interpolate_window(fs.work, base, st, sv, Val(NV), wx, wy, wz,
-                              dx, dy, dz, inv(h), Val(DG))
-end
+# The multi-indices TreeAMR's `interpolate` takes: the value alone, and the
+# value with the three first derivatives, in that order.
+const INTERP_VALUE = ((0, 0, 0),)
+const INTERP_VALUE_GRAD = ((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1))
 
-# The window is `n = q + 2` wide and half of it sits on each side of the
-# query's cell, so the ghosts have to be at least `n/2 = G` deep — which
-# they are, by `CODE.md`'s `G = q/2 + 1`. Checked once per batch rather
-# than assumed, because this is the invariant that makes "interpolated
-# without crossing into another block's array" true.
-function check_interpolation_width(fs::FieldSet{T,3}, n::Int) where {T}
-    all(g -> 2g ≥ n, fs.G) || throw(ArgumentError(
-        "interpolation of order $n needs $(n ÷ 2) points on each side of " *
-        "the query's cell, so the field set's ghosts must be at least " *
-        "that deep, but G = $(fs.G). CODE.md's G = q/2 + 1 and order " *
-        "q + 2 are exactly matched; a narrower halo would have to read a " *
-        "neighbouring block's array, which is what this interpolator " *
-        "exists not to do."))
-    all(c -> c === :vertex, fs.centering) || throw(ArgumentError(
-        "this interpolator assumes vertex-centered storage — the stored " *
-        "point `j` of a block sits at `origin + (j − G − 1)·h`, which is " *
-        "where `coordinates` puts it — but this field set is " *
-        "$(fs.centering)."))
-    # Nothing else is needed: with `G ≥ n/2` the window of the *clamped*
-    # containing cell runs from stored index `c + G − n/2 + 2 ≥ 2` to
-    # `c + G + n/2 + 1 ≤ N + 2G`, for every `c` in `0 … N−1` and every
-    # `N ≥ 1` — so it never reaches index 1's ghost corner and never
-    # reaches `N + 2G + 1`, the shared upper plane no kernel writes.
+function check_interpolation_order(q::Integer)
+    q ≥ 2 && iseven(q) || throw(ArgumentError(
+        "the interpolation order follows the scheme's q, which is even and " *
+        "at least 2 (CODE.md, \"The interface-order rule\"), but q=$q"))
     return nothing
 end
 
+# The one call into TreeAMR: `Lagrange(q + 2)` over the containing block's
+# stored points, on the field set's backend, with the mask's region as
+# `exclude`; the flags turned into the refusal on the host. Returns the host
+# array `vals[v, k, j]` — variable `v`, derivative `derivs[k]`, point `j`
+# (linear index of `xs`).
+#
+# The points are converted to `SVector{3,T}` and moved to the field set's
+# backend first: TreeAMR interpolates where the data is and wants the points
+# there too, and a device without `Float64` could not hold the finder's
+# `Float64` points. `T(x[d])` is the conversion TreeAMR would make itself.
+function interpolate_state(fs::FieldSet{T,3}, xs::AbstractArray, q::Integer,
+                           mask, derivs) where {T}
+    check_interpolation_order(q)
+    n = Int(q) + 2
+    xv = vec(xs)
+    pts = to_backend(get_backend(fs.work),
+                     [SVector{3,T}(T(x[1]), T(x[2]), T(x[3])) for x in xv])
+    res = TreeAMR.interpolate(fs, pts, Lagrange(n); derivs=derivs,
+                              exclude=exclude_region(mask))
+    vals = res.values isa Array ? res.values : Array(res.values)
+    excluded = res.excluded isa Array ? res.excluded : Array(res.excluded)
+    j = findfirst(excluded)
+    j === nothing || throw(footprint_error(mask, xv[j], n))
+    return vals
+end
+
+# `vals[:, k, j]` as one `SVector` per point, in the shape of the query.
+function unpack_values(vals::AbstractArray{T,3}, k::Int, ::Val{NV},
+                       sz) where {T,NV}
+    return reshape([SVector{NV,T}(ntuple(v -> vals[v, k, j], Val(NV)))
+                    for j in axes(vals, 3)], sz)
+end
+
 """
-    interpolate(fs::FieldSet{T,3}, xs; q, mask = AllPoints())
-    interpolate_grad(fs::FieldSet{T,3}, xs; q, mask = AllPoints())
+    gh_interpolate(fs::FieldSet{T,3}, xs; q, mask = AllPoints())
+    gh_interpolate_grad(fs::FieldSet{T,3}, xs; q, mask = AllPoints())
 
-Every variable of `fs` at each point of `xs`, by tensor-product Lagrange
-interpolation of order `q + 2` over the containing block's stored points —
-and, for `interpolate_grad`, the three spatial gradients as well.
+Every variable of `fs` at each point of `xs`, by TreeAMR's tensor-product
+[`Lagrange`](@ref)`(q + 2)` interpolation over the containing block's stored
+points — and, for `gh_interpolate_grad`, the three spatial gradients as
+well. What this package adds to TreeAMR's `interpolate` is the order and the
+guard; the location, the weights, the contraction and the batch are
+TreeAMR's M11 (amended 2026-09-26: these were `interpolate` and
+`interpolate_grad`, a stopgap of this package's own, and the name collided
+with TreeAMR's once it grew one).
 
-`xs` is a host array of points of any shape; the result is an array of the
+`xs` is an array of points of any shape; the result is a host array of the
 same shape holding `SVector{nvars,T}` (and, for the gradient form, a second
-array of `NTuple{3,SVector{nvars,T}}`). The batch is what makes the
-interpolation *threaded*: each point is located, checked and contracted
-independently and written to its own slot, so the answer does not depend on
-the thread count.
-
-**This is a stopgap** (`CODE.md`, "Upstream prerequisites", item 1):
-point interpolation from a field set belongs in TreeAMR, whose `TODO.md`
-lists it, and this package carries it only because the horizon finder
-cannot wait for it. It is written as the horizon finder needs it — on the
-host, at analysis cadence, over a whole batch — and not as a general
-facility.
+array of `NTuple{3,SVector{nvars,T}}`). The field set may live on a device:
+the interpolation runs there, one launch per call, and only the points and
+the answers cross. Every query writes its own slot, so the result does not
+depend on the thread count.
 
 Order `q + 2` and not `q`: the interpolant is exact on polynomials of
 degree `≤ q + 1` and converges at `O(h^{q+2})`, one order better than the
 scheme, so the horizon's location is the *solution's* error and not the
 interpolation's. Its gradient is one order behind, `O(h^{q+1})`, which is
 what makes `K_ij` one order behind `γ_ij` in the ADM data below
-(`notes/methods-ghso2.md` measures exactly that).
+(`notes/methods-ghso2.md` measures exactly that). At this package's
+`G = q/2 + 1` the window is centred everywhere but on the domain's upper
+face.
 
-`mask` is the guard: an [`InteriorMask`](@ref) makes every query whose
-footprint reaches inside `r_1` **throw** rather than interpolate data the
-equations never produced. Ghosts must be filled before either function is
-called; [`find_gh_horizon`](@ref) does that.
+`mask` is the guard: an [`InteriorMask`](@ref) or a `ShapeMask` makes every
+query whose footprint reaches a point the mask does not evolve **throw**
+rather than interpolate data the equations never produced
+([`UnevolvedRegion`](@ref); TreeAMR only flags, and the refusal is this
+package's). A point outside the domain is TreeAMR's `ArgumentError`. Ghosts
+must be filled before either function is called; [`find_gh_horizon`](@ref)
+does that.
 """
-function interpolate(fs::FieldSet{T,3}, xs::AbstractArray; q::Integer,
-                     mask=AllPoints()) where {T}
-    return first(_interpolate(fs, xs, q, mask, Val(false)))
+function gh_interpolate(fs::FieldSet{T,3}, xs::AbstractArray; q::Integer,
+                        mask=AllPoints()) where {T}
+    vals = interpolate_state(fs, xs, q, mask, INTERP_VALUE)
+    return unpack_values(vals, 1, Val(fs.nvars), size(xs))
 end
 
-function interpolate_grad(fs::FieldSet{T,3}, xs::AbstractArray; q::Integer,
-                          mask=AllPoints()) where {T}
-    return _interpolate(fs, xs, q, mask, Val(true))
+function gh_interpolate_grad(fs::FieldSet{T,3}, xs::AbstractArray; q::Integer,
+                             mask=AllPoints()) where {T}
+    vals = interpolate_state(fs, xs, q, mask, INTERP_VALUE_GRAD)
+    return _unpack_grad(vals, Val(fs.nvars), size(xs))
 end
 
-function _interpolate(fs::FieldSet{T,3}, xs::AbstractArray, q::Integer, mask,
-                      ::Val{DG}) where {T,DG}
-    q ≥ 2 && iseven(q) || throw(ArgumentError(
-        "the interpolation order follows the scheme's q, which is even and " *
-        "at least 2 (CODE.md, \"The interface-order rule\"), but q=$q"))
-    check_interpolation_width(fs, Int(q) + 2)
-    return _interpolate(fs, xs, Val(fs.nvars), Val(Int(q) + 2), mask,
-                        Val(DG))
-end
-
-function _interpolate(fs::FieldSet{T,3}, xs::AbstractArray, ::Val{NV},
-                      ::Val{n}, mask, ::Val{DG}) where {T,NV,n,DG}
-    vals = similar(xs, SVector{NV,T})
-    grads = similar(xs, NTuple{3,SVector{NV,T}})
-    # One output slot per input point and no accumulation anywhere, which
-    # is what makes this safe to thread and its result independent of the
-    # thread count (`CLAUDE.md`: bit-identity across thread counts is the
-    # invariant). `CODE.md` asks for the batched form for exactly this.
-    #
-    # TreeAMR's `threaded_foreach` rather than `Threads.@threads` (amended
-    # with TreeAMR's owner-based threading, 2026-09-25): chunk `c` of the
-    # query points runs on thread `c` every call, it nests inside a caller's
-    # own parallel loop where `@threads` would not, and it rethrows the
-    # exception the body threw rather than a `TaskFailedException` — the
-    # refusal of a query that reaches the layer *must* reach the caller
-    # readable, since the driver records its message.
-    TreeAMR.threaded_foreach(length(xs)) do j
-        i = eachindex(xs)[j]
-        v, g = interpolate_point(fs, xs[i], Val(NV), Val(n), mask, Val(DG))
-        @inbounds vals[i] = v
-        @inbounds grads[i] = g
-    end
-    return vals, grads
+function _unpack_grad(vals::AbstractArray{T,3}, ::Val{NV}, sz) where {T,NV}
+    grads = reshape([ntuple(d -> SVector{NV,T}(ntuple(v -> vals[v, d + 1, j],
+                                                      Val(NV))), Val(3))
+                     for j in axes(vals, 3)], sz)
+    return unpack_values(vals, 1, Val(NV), sz), grads
 end
 
 # The first real exception inside a `TaskFailedException` or a
@@ -511,7 +375,7 @@ The batched ADM-variable provider `ApparentHorizonFinder` and
 `KorzynskiSpin` consume: called with an array of Cartesian points, it
 returns an array of `ADMVars(γ, ∂γ, K)` of the same shape.
 
-Each point is [`interpolate_grad`](@ref)ed out of the state — `h` and `Π`
+Each point is [`gh_interpolate_grad`](@ref)ed out of the state — `h` and `Π`
 and the three `∂_i h` — and handed to [`adm_vars_from_state`](@ref), which
 is GHSO2's pointwise extraction: `γ_ij = g_ij`, `∂_kγ_ij` from the
 interpolated gradient, and `K_ij` from `∂_t g = β^i ∂_i g + (α/√γ)Π` and
@@ -534,22 +398,25 @@ mutable struct GHADMProvider{T,F,M}
 end
 
 function GHADMProvider(fs::FieldSet{T,3}, q::Integer, mask) where {T}
-    check_interpolation_width(fs, Int(q) + 2)
+    check_interpolation_order(q)
+    fs.nvars == 2NC || throw(ArgumentError(
+        "the ADM provider reads the packed state (h, Π), $(2NC) variables, " *
+        "but this field set holds $(fs.nvars)."))
     return GHADMProvider{T,typeof(fs),typeof(mask)}(fs, Int(q), mask,
                                                     nothing, nothing)
 end
 
 function (p::GHADMProvider{T})(xs::AbstractArray) where {T}
     p.lastxs === xs && return p.lastvals
-    vals, grads = _interpolate(p.fs, xs, Val(2NC), Val(p.q + 2), p.mask,
-                               Val(true))
+    # `vals[v, k, j]`: variable `v`, the value (`k = 1`) or `∂_{k−1}`, point
+    # `j` — read straight into the pointwise algebra's arguments.
+    vals = interpolate_state(p.fs, xs, p.q, p.mask, INTERP_VALUE_GRAD)
     out = similar(xs, ADMVars{Float64})
-    for i in eachindex(xs)
-        u = vals[i]
-        g = grads[i]
-        hv = SVector{NC,T}(ntuple(v -> u[v], Val(NC)))
-        Πv = SVector{NC,T}(ntuple(v -> u[NC + v], Val(NC)))
-        dh = ntuple(d -> SVector{NC,T}(ntuple(v -> g[d][v], Val(NC))), Val(3))
+    for (j, i) in enumerate(eachindex(xs))
+        hv = SVector{NC,T}(ntuple(v -> vals[v, 1, j], Val(NC)))
+        Πv = SVector{NC,T}(ntuple(v -> vals[NC + v, 1, j], Val(NC)))
+        dh = ntuple(d -> SVector{NC,T}(ntuple(v -> vals[v, d + 1, j], Val(NC))),
+                    Val(3))
         γ, ∂γ, K = adm_vars_from_state(hv, Πv, dh[1], dh[2], dh[3])
         out[i] = ADMVars(SMatrix{3,3,Float64}(tofloat64.(γ)),
                          SArray{Tuple{3,3,3},Float64}(tofloat64.(∂γ)),
@@ -561,16 +428,19 @@ function (p::GHADMProvider{T})(xs::AbstractArray) where {T}
 end
 
 # The `q + 2` of the provider's window is a *number* and not a `Val`, so
-# `p.q + 2` above would be a dynamic dispatch once per batch. It is: one
-# per horizon find, against `n³ · 20` loads per point, and making it a type
-# parameter would put the interpolation order in the record's type.
+# `Lagrange(q + 2)` in `interpolate_state` is a dynamic dispatch once per
+# batch. It is: one per batch, against `n³ · 20` loads per point, and making
+# it a type parameter would put the interpolation order in the record's type.
 
 """
     gh_adm_provider(p::GHProblem, t) -> GHADMProvider
 
-The provider for *this* problem at *this* time: the state field set brought
-to the host ([`hostcopy`](@ref)), the scheme's `q`, and the interior's mask
-at `t` as the guard.
+The provider for *this* problem at *this* time: the state field set where
+it lives, the scheme's `q`, and the interior's mask at `t` as the guard.
+TreeAMR interpolates on the field set's backend, so a device-resident state
+is read where it is and only the surface points and their answers cross —
+not the whole state, which `hostcopy` copied once per find until the port
+to TreeAMR's M11 (amended 2026-09-26).
 
 The mask is the one every norm takes, [`interior_mask`](@ref), so "the
 horizon finder reads only the evolved region" and "the norms count only the
@@ -579,7 +449,7 @@ moves with the hole, because it is built at this call's `t` like every
 other hook (`CLAUDE.md`, "Hooks depend on time").
 """
 function gh_adm_provider(p::GHProblem{T,G,q}, t) where {T,G,q}
-    return GHADMProvider(hostcopy(p.U), q, interior_mask(p.interior, T(t)))
+    return GHADMProvider(p.U, q, interior_mask(p.interior, T(t)))
 end
 
 # --- the find ---------------------------------------------------------------

@@ -23,9 +23,10 @@ jobs:
         # where", has the measurements and this comment is the checklist.
         #
         #   * `version: ["1.11", "1"]` -- 1.11 is the floor, because
-        #     neither TreeAMR nor SpacetimeMetrics is registered and
-        #     `Project.toml` locates both through `[sources]` entries,
-        #     which 1.11 introduced. It is dropped only because
+        #     `Project.toml` locates SpacetimeMetrics,
+        #     ApparentHorizonFinder, KorzynskiSpin and IMEXRungeKutta
+        #     through `[sources]` entries, which 1.11 introduced (TreeAMR comes from General
+        #     from 2026-09-26, at 0.1.3). It is dropped only because
         #     `pointwise_tests.jl:480` reports 176 bytes there where it
         #     claims zero -- 8 failures, identical on both architectures,
         #     uninstrumented, and *not* reproducible in isolation. Nothing

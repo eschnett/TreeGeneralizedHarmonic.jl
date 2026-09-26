@@ -212,30 +212,41 @@ end
     # The guard's reason to exist is that a query *outside* the layer can
     # read *inside* it; on a surface that is not a sphere the per-axis
     # nearest lattice point is not the one that decides, so the guard is
-    # checked against the definition — every lattice point classified.
+    # checked against the definition — every stencil point, placed where
+    # TreeAMR places it, classified by the norms' own `is_evolved`. The
+    # round mask's separable test is checked the same way, on footprints
+    # straddling `r_1` (amended 2026-09-26: the guard is a TreeAMR `Region`
+    # now, `UnevolvedRegion`, and what is tested is its `stencil_hits`).
     @testset "the footprint guard is exact on a surface that is not a sphere" begin
         T = Float64
         bg = SM.KerrSchild(1.0, 0.9)
         int = FittedInterior(T; center=(0.1, -0.2, 0.05),
                              shape=analytic_shape(bg, 4), lmax=4,
                              offset=0.2, thickness=0.3)
-        m = interior_mask(int, zero(T))
+        round = TreeGeneralizedHarmonic.InteriorMask(SVector{3,T}(0.1, -0.2, 0.05),
+                                                     T(1.1))
+        off = (1.0, 1.0, 1.0)
         rng = MersenneTwister(11)
-        h = 0.05
         n = 4
-        disagree = 0
-        nrefused = 0
-        for _ in 1:2000
-            x0 = (0.1 + (2 * rand(rng) - 1) * 1.8, -0.2 + (2 * rand(rng) - 1) * 1.8,
-                  0.05 + (2 * rand(rng) - 1) * 1.8)
-            want = all(is_evolved(m, (x0[1] + i * h, x0[2] + j * h, x0[3] + k * h))
-                       for i in 0:(n - 1), j in 0:(n - 1), k in 0:(n - 1))
-            got = TreeGeneralizedHarmonic.footprint_evolved(m, x0, h, Val(n))
-            disagree += got != want
-            nrefused += !got
+        for (m, spread) in ((interior_mask(int, zero(T)), 1.8), (round, 1.3))
+            region = UnevolvedRegion(m)
+            disagree = 0
+            nrefused = 0
+            for _ in 1:2000
+                h = 0.05 * (1 + rand(rng))
+                origin = ntuple(d -> m.center[d] + (2 * rand(rng) - 1) * spread, 3)
+                base = ntuple(_ -> rand(rng, -3:3), 3)
+                want = any(!is_evolved(m, ntuple(d -> TreeAMR.stencil_position(
+                                                     origin, h, base, off, d,
+                                                     J[d] - 1), 3))
+                           for J in CartesianIndices((n, n, n)))
+                got = TreeAMR.stencil_hits(region, origin, h, base, off, Val(n))
+                disagree += got != want
+                nrefused += got
+            end
+            @test disagree == 0
+            @test 0 < nrefused < 2000
         end
-        @test disagree == 0
-        @test 0 < nrefused < 2000
     end
 
     # A margin is worth what it attenuates, not what it measures; the

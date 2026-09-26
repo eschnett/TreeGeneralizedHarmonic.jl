@@ -149,8 +149,10 @@ export gh_tau!, tau_max, gh_indicator!, indicator_flags, refine_flags
 export LevelBounds, level_bounds, block_level_bounds, horizon_floor_level
 export refinement_buffer, refinement_centroid
 
-# The horizon: the stopgap interpolator, the ADM provider, the find
-export Horizon, locate_block, interpolate, interpolate_grad
+# The horizon: TreeAMR's interpolation with the guard, the ADM provider, the
+# find (the stopgap `locate_block`/`interpolate`/`interpolate_grad` went
+# upstream on 2026-09-26, TreeAMR 0.1.3's M11)
+export Horizon, gh_interpolate, gh_interpolate_grad, UnevolvedRegion
 export GHADMProvider, gh_adm_provider, find_gh_horizon, horizon_radii
 
 # The driver
@@ -184,7 +186,7 @@ include("refinement.jl")
 # interior) and before `driver.jl`, which calls it once every `k`-th chunk.
 include("horizon.jl")
 # After `horizon.jl` (the track is updated from a find, and its geometry's
-# leakage is read through `locate_block`) and before `driver.jl`, which
+# leakage is read through TreeAMR's `locate_point`) and before `driver.jl`, which
 # builds a geometry from it once per chunk (added in step 8d).
 include("tracking.jl")
 # After `tracking.jl` (a fit is built on a tracked geometry) and before

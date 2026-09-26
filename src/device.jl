@@ -49,14 +49,16 @@ end
 there, a new field set over the same forest otherwise.
 
 This is for the consumers that cannot be moved onto a device rather than
-for ones that have not been. Two of them are in this package: the horizon
-finder, which interpolates the state at a host array of points through
-`find_leaf` and a host solve (see "Analysis quantities" in `CODE.md`), and
-the viewers in `bin/`, which read single points through `blockview` and
-`coordinates` and hand them to CairoMakie. One copy at the top of a find or
-a snapshot buys that, and every line below it is unchanged.
+for ones that have not been: the viewers in `bin/`, which read single
+points through `blockview` and `coordinates` and hand them to CairoMakie.
+One copy at the top of a snapshot buys that, and every line below it is
+unchanged. **(Amended 2026-09-26:** the horizon finder and the fit's state
+sampler were its other two consumers while this package interpolated on the
+host; TreeAMR's `interpolate` (M11) runs on the field set's backend, and
+both now read the state where it is — see "Analysis quantities" in
+`CODE.md`.**)**
 
-**On the CPU it returns `fs` itself, not a copy.** Both consumers only
+**On the CPU it returns `fs` itself, not a copy.** Its consumers only
 read, so a copy would be pure cost on the host path — which is the common
 one — and returning the same object makes that explicit rather than leaving
 it to a caller's `===` check. A caller that means to *write* to the result

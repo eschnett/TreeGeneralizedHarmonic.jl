@@ -317,7 +317,7 @@ end
 The state on the mesh as the fit reads it: called as `sampler(xs, ns)` with
 points `xs` and the unit radial vectors `ns` there, it returns `(u, ∂_r u)`
 — two vectors of `SVector{20}`, the packed `(h, Π)` and its derivative
-`n̂·∇u` along the ray — by [`interpolate_grad`](@ref) at order `q + 2`. `t`
+`n̂·∇u` along the ray — by [`gh_interpolate_grad`](@ref) at order `q + 2`. `t`
 is the time the field set holds; [`build_fit`](@ref) reads it.
 
 **The footprint guard is off for this call, and that is safe (proposed in
@@ -352,7 +352,7 @@ function state_sampler(fs::FieldSet{T,3}, q::Integer; t) where {T}
 end
 
 function (s::StateSampler{F,T})(xs::AbstractVector, ns::AbstractVector) where {F,T}
-    vals, grads = interpolate_grad(s.fs, xs; q=s.q, mask=AllPoints())
+    vals, grads = gh_interpolate_grad(s.fs, xs; q=s.q, mask=AllPoints())
     u = [SVector{NFIT,T}(vals[i]) for i in eachindex(xs)]
     u1 = map(eachindex(xs)) do i
         n = ns[i]

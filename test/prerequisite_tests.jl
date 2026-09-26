@@ -200,7 +200,7 @@ end
 # indicator and the analysis record go through.
 const TREEAMR_NAMES = (
     # Forest and geometry
-    :Forest, :nleaves, :maxlevel, :generation, :find_leaf, :refine!, :coarsen!,
+    :Forest, :nleaves, :maxlevel, :generation, :refine!, :coarsen!,
     :balance!, :spacing, :minimum_spacing, :block_origin, :block_origins,
     :block_spacings,
     # Field sets and coordinate callbacks
@@ -216,17 +216,25 @@ const TREEAMR_NAMES = (
     :regrid!, :adapt_to_initial_data!,
     # Device-side flagging
     :firing_boxes,
+    # Point interpolation (M11): the horizon finder and the fit's sampler
+    # (from 2026-09-26; `find_leaf` was the stopgap's and is no longer called)
+    :locate_point, :interpolate, :Lagrange, :Region,
 )
 
-# The TreeAMR helpers this package calls that TreeAMR does not export:
-# `threaded_foreach`, the owner-mapped host loop (chunk `c` on thread `c`
-# every call) behind the horizon interpolator's batch, and `threadchunks`,
-# the ownership partition itself, which `state_partition` turns into the
-# integrator's partition of the state vector (added 2026-09-26). TreeAMR
-# documents both as internals, so a rename on `main` is possible and would
-# surface as an `UndefVarError` in the middle of a run — named here instead
-# (added with TreeAMR's owner-based threading, 2026-09-25).
-const TREEAMR_INTERNAL = (:threaded_foreach, :threadchunks)
+# The TreeAMR internals this package reaches for. `threadchunks`, the
+# ownership partition, which `state_partition` turns into the integrator's
+# partition of the state vector (added 2026-09-26); and the extension points
+# of TreeAMR's `Region` (M11), of which the footprint guard,
+# `UnevolvedRegion`, is one: `inside` (a point of the region — a point the
+# mask does not evolve), `stencil_hits` (the cheaper exact test of a whole
+# stencil, which `horizon.jl` overrides for the two interior masks) and
+# `stencil_position` (where TreeAMR puts a stencil point, which that override
+# must read so that its positions are TreeAMR's own). TreeAMR documents all
+# four as internals, so a rename on a release is possible and would surface
+# in the middle of a run, or as a silently unguarded interpolation — named
+# here instead (amended 2026-09-26: `threaded_foreach`, the stopgap
+# interpolator's batch loop, left with the stopgap).
+const TREEAMR_INTERNAL = (:threadchunks, :inside, :stencil_hits, :stencil_position)
 
 # The backgrounds of `CODE.md`'s "Initial data and backgrounds" table, the
 # two derivative passes the pointwise algebra is tested against, the ADM

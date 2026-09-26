@@ -1,14 +1,18 @@
-# The horizon: the stopgap interpolator, the guard that keeps it out of the
-# layer, and the find with its area, mass and spin.
+# The horizon: TreeAMR's interpolation as this package uses it, the guard
+# that keeps it out of the layer, and the find with its area, mass and spin.
 #
 # `CODE.md`, "Analysis quantities" (the horizon rows) and "Upstream
 # prerequisites" (point interpolation);
 # `notes/methods-ghso2.md`, "Apparent horizons and spin".
 #
-# The file is in two halves. The first is about the *interpolator* and is
+# The file is in two halves. The first is about the *interpolation* and is
 # cheap: it evaluates no background at all where it can help it, and its
 # claims are exactness on polynomials, a rate on the analytic metric, and
-# the refusal of a query that would read the layer. The second finds the
+# the refusal of a query that would read the layer. The interpolation
+# itself is TreeAMR's `interpolate` (M11, from 2026-09-26), whose own suite
+# makes the general claims; these are about what this package chooses —
+# the order `q + 2`, the unpacking into `SVector`s and the throwing guard —
+# on the meshes it builds. The second finds the
 # horizon of the suite's static hole and checks it against Kerr — and then
 # against the analysis record, which is where `CODE.md` says these numbers
 # belong. The `a = 9/10` chart and the `t = 50 M` trace are in
@@ -18,12 +22,6 @@
 using Test
 using TreeAMR
 using TreeGeneralizedHarmonic
-# TreeAMR 0.1.3 exports an `interpolate` of its own (its M11 point
-# interpolation, the upstream answer to this package's stopgap), so with both
-# modules `using`'d the bare name is ambiguous. The claims below are about the
-# stopgap, which is still what `find_gh_horizon` calls; name it explicitly
-# (added 2026-09-26) until the stopgap is retired in TreeAMR's favour.
-using TreeGeneralizedHarmonic: interpolate
 using KernelAbstractions: CPU
 using StaticArrays: SVector
 import SpacetimeMetrics as SM
@@ -55,29 +53,20 @@ import SpacetimeMetrics as SM
         return forest, fs
     end
 
-    # A point located in the wrong block is interpolated from data that is
-    # merely *near* it, and on a refined mesh the wrong block is a level
-    # away — an error that looks like a plausible interpolation error and
-    # is not one.
-    @testset "locate_block finds the leaf whose extent contains the point" begin
-        forest, _ = poly_fieldset(polys[1]; N=8, roots=2, refined=true)
-        @test maxlevel(forest) == 1              # the two-level mesh
-        pts = [SVector{3,T}(x, y, z)
-               for x in (-2.4, -1.1, 0.0, 0.7, 2.49),
-                   y in (-2.3, -0.6, 1.9), z in (-1.7, 0.3, 2.2)]
-        for x in pts
-            b = locate_block(forest, x)
-            @test b !== nothing
-            ext = block_extent(T, forest, forest.leaves[b])
-            @test all(d -> ext[d][1] ≤ x[d] < ext[d][2], 1:3)
-        end
-        # Outside the box there is no leaf, and the interpolator says so
-        # rather than extrapolating from the nearest one.
-        @test locate_block(forest, SVector{3,T}(2.51, 0, 0)) === nothing
-        @test locate_block(forest, SVector{3,T}(0, -2.6, 0)) === nothing
+    # A point outside the box has no block, and interpolating it from the
+    # nearest one would extrapolate without saying so; the refusal is
+    # TreeAMR's and has to reach the caller as itself.
+    @testset "a point outside the box is refused, not extrapolated" begin
         _, fs = poly_fieldset(polys[1]; N=8, roots=2, refined=true)
-        @test_throws ArgumentError interpolate(fs, [SVector{3,T}(0, 0, 3)];
-                                               q=q)
+        @test_throws ArgumentError gh_interpolate(fs, [SVector{3,T}(0, 0, 3)];
+                                                  q=q)
+        @test_throws ArgumentError gh_interpolate(fs, [SVector{3,T}(2.51, 0, 0)];
+                                                  q=q)
+        # One point inside and one outside: the batch still refuses.
+        @test_throws ArgumentError gh_interpolate_grad(fs,
+                                                       [SVector{3,T}(0, 0, 0),
+                                                        SVector{3,T}(0, -2.6, 0)];
+                                                       q=q)
     end
 
     # Order `q + 2` interpolation reproduces a polynomial of degree `q + 1`
@@ -90,14 +79,17 @@ import SpacetimeMetrics as SM
             xs = [SVector{3,T}(x, y, z)
                   for x in (-1.93, -0.37, 0.61, 1.49),
                       y in (-1.11, 0.23, 1.77), z in (-0.89, 0.05, 2.13)]
-            vals = interpolate(fs, xs; q=q)
+            vals = gh_interpolate(fs, xs; q=q)
+            @test size(vals) == size(xs)
             exact = [polys[2](x) for x in xs]
             @test maximum(abs.(getindex.(vals, 1) .- exact)) < 1e-12
             @test maximum(abs.(getindex.(vals, 2) .-
                                (2 .* exact .- 1))) < 1e-12
             # The gradient of the same interpolant, one order behind and
             # still exact on this degree.
-            _, grads = interpolate_grad(fs, xs; q=q)
+            vals2, grads = gh_interpolate_grad(fs, xs; q=q)
+            @test vals2 == vals
+            @test size(grads) == size(xs)
             δ = 1e-5
             for (i, x) in enumerate(xs), d in 1:3
                 e = SVector{3,T}(ntuple(k -> k == d ? δ : zero(T), 3))
@@ -113,7 +105,7 @@ import SpacetimeMetrics as SM
     @testset "and not on one of degree q + 2" begin
         _, fs = poly_fieldset(x -> x[1]^4, N=8, roots=2)
         xs = [SVector{3,T}(0.61, -1.11, 0.05)]
-        v = interpolate(fs, xs; q=q)[1][1]
+        v = gh_interpolate(fs, xs; q=q)[1][1]
         @test abs(v - 0.61^4) > 1e-6
     end
 
@@ -146,9 +138,9 @@ import SpacetimeMetrics as SM
             fill_exact!(fs, case, zero(T))
             sched = GhostSchedule(fs, ops)
             fill_ghosts!(fs, sched; boundary=dirichlet(case, zero(T)))
-            vals, grads = interpolate_grad(fs, xs; q=q,
-                                           mask=interior_mask(case.interior,
-                                                              zero(T)))
+            vals, grads = gh_interpolate_grad(fs, xs; q=q,
+                                              mask=interior_mask(case.interior,
+                                                                 zero(T)))
             push!(hs, minimum_spacing(T, forest))
             push!(ev, maximum(i -> maximum(abs.(vals[i][1:10] .- exact[i][1])),
                               eachindex(xs)))
@@ -185,17 +177,17 @@ import SpacetimeMetrics as SM
         # Far outside: answered, and with the analytic value.
         far = SVector{3,T}(1.9, 0, 0)
         hexact, _, _ = background_state(case.background, zero(T), Tuple(far))
-        @test maximum(abs.(interpolate(fs, [far]; q=q,
-                                       mask=mask)[1][1:10] .- hexact)) < 1e-4
+        @test maximum(abs.(gh_interpolate(fs, [far]; q=q,
+                                          mask=mask)[1][1:10] .- hexact)) < 1e-4
         # Just outside `r_1` by less than the window's reach: refused,
         # although the point itself is evolved.
         near = SVector{3,T}(r_1 + h / 2, 0, 0)
-        @test_throws ArgumentError interpolate(fs, [near]; q=q, mask=mask)
-        @test_throws ArgumentError interpolate(fs, [SVector{3,T}(0, 0, 0)];
-                                               q=q, mask=mask)
+        @test_throws ArgumentError gh_interpolate(fs, [near]; q=q, mask=mask)
+        @test_throws ArgumentError gh_interpolate(fs, [SVector{3,T}(0, 0, 0)];
+                                                  q=q, mask=mask)
         # And with no guard the same query is answered, so the refusal is
         # the mask's and not the mesh's.
-        @test all(isfinite, interpolate(fs, [near]; q=q)[1])
+        @test all(isfinite, gh_interpolate(fs, [near]; q=q)[1])
         # A seed sphere inside the layer is refused by the same guard,
         # through the provider.
         @test_throws ArgumentError find_gh_horizon(p, u, zero(T); N=8,
@@ -288,7 +280,7 @@ import SpacetimeMetrics as SM
     # `PLAN.md` asks for the horizon of the step-5 *and* step-6 runs: this
     # is the second, the mesh the indicator chose for itself rather than
     # one written down by hand. Nothing about the find changes — which is
-    # the claim: the interpolator asks `find_leaf` where a point is, so a
+    # the claim: the interpolation asks `locate_point` where a point is, so a
     # mesh of two levels chosen by `τ` is the same mesh to it as three
     # shells chosen by a fixture.
     @testset "the horizon is found on the mesh the indicator chose" begin

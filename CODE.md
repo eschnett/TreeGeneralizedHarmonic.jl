@@ -138,7 +138,10 @@ inherited documents live in `notes/`.
   and reductions are TreeAMR's. The one thing this package writes that
   arguably belongs upstream — point interpolation from a field set, for
   the horizon finder — is written as a stopgap and listed under
-  [Upstream prerequisites](#upstream-prerequisites).
+  [Upstream prerequisites](#upstream-prerequisites). **(Amended
+  2026-09-26:** it went upstream — TreeAMR 0.1.3's M11 — and the stopgap
+  is gone; what this package keeps is the order `q + 2` and the footprint
+  guard, as a TreeAMR `Region`.**)**
 - **No subcycling, one global `dt`**, which suits a black-hole run
   badly in principle (the coarse outer levels are advanced at the
   horizon's time step) and is accepted here for the reasons TreeAMR
@@ -3094,9 +3097,15 @@ containing block's stored points (which reach `G` into the neighbors,
 so a point near a block face is interpolated without crossing it), on
 the host at analysis cadence — a stopgap for TreeAMR's "generic
 interpolation" to-do, and the first item under
-[Upstream prerequisites](#upstream-prerequisites). The horizon lies
-outside the layer by the margin `m`, and the provider throws if a query
-point's interpolation footprint reaches `r_1`. Each find is seeded with
+[Upstream prerequisites](#upstream-prerequisites). **(Amended
+2026-09-26:** it is TreeAMR's `interpolate` (M11) now, with the basis
+`Lagrange(q + 2)` — the same stencil, located by one binary search rather
+than an ancestor walk, one launch on the field set's backend rather than a
+host loop, so a device-resident state is no longer copied to the host per
+find (`hostcopy`); `gh_interpolate`/`gh_interpolate_grad` are the thin
+wrapper, and the provider and the fit's `state_sampler` call it.**)** The
+horizon lies outside the layer by the margin `m`, and the provider throws
+if a query point's interpolation footprint reaches `r_1`. Each find is seeded with
 the previous result, recentred on `c(t)`. **Spin and mass** follow
 GHSO2's `find_gh_horizon` verbatim (`notes/methods-ghso2.md`, "Apparent
 horizons and spin"): `horizon_spin` gives `J` and its coordinate-space
@@ -3129,6 +3138,33 @@ things the writing settled, each stated where it is made in that file:
   squares — exact, rather than the bounding box's conservative
   `√3·(q+2)h/2`. It fires on a query that is *outside* `r_1` and reads
   inside it, which is the whole point of putting it on the footprint.
+  **(Amended 2026-09-26**, with the port to TreeAMR's M11:**)** TreeAMR's
+  `interpolate` takes an `exclude::Region` and *flags* a query whose
+  stencil has a point inside it; the guard is the region
+  `UnevolvedRegion(mask)` — inside where `is_evolved(mask, x)` is false —
+  and `gh_interpolate` throws the same `ArgumentError` for the first
+  flagged query. The test is now exact **bit for bit against the norms'
+  mask**, which the stopgap's was not quite: TreeAMR evaluates a stencil
+  point at `origin + ((base + k) − off)·h`, the expression `coordinates`
+  and `point_position` evaluate in the same order (the stopgap stepped from
+  the footprint's corner, `x₀ + k·h`, which rounds differently), and the
+  region asks the norms' own predicate. The two masks carry cheaper
+  `stencil_hits` methods that agree with enumerating the stencil exactly —
+  the round one by the per-axis nearest point, whose `r²` is formed by the
+  same arithmetic as `is_evolved`'s and is the lattice minimum because
+  floating-point addition is monotone; the tracked `ShapeMask` by the same
+  point against its two bounding spheres, compared through `sqrt` as
+  `is_evolved` compares, and by enumeration between them. TreeAMR's own
+  `Ellipsoid` is not used for the round mask: `Σ((x − c)/r₁)² < 1` rounds
+  differently from `Σ(x − c)² ≥ r₁²`, and it buys nothing — on the 496-point
+  batch below, `nothing`, an `Ellipsoid` of radius `r₁(1 + 8ε)` and
+  `UnevolvedRegion` cost `0.1068`, `0.1090` and `0.1084 ms` at four threads
+  and `0.369`, `0.368`, `0.368 ms` at one, all within the noise: the test is
+  `3n` subtractions against the `20 n³ · 4` multiply-adds of the
+  contraction, and it reads no field data at all. On a `ShapeMask` whose
+  offset surface the footprints straddle, the override and plain
+  enumeration are `0.160` and `0.162 ms` (the band is enumerated either
+  way); outside the band `0.108` against `0.120`.
 - **The radii are measured from the analytic center (proposed in step
   7).** `CODE.md` says "the coordinate radii of the surface points" and
   not from where. The two claims made on them — that the horizon encloses
@@ -3231,7 +3267,12 @@ break it:
   `Threads.@threads` and is TreeAMR's `threaded_foreach` now: the same
   chunk on the same thread every call, nestable, and it rethrows the
   body's own exception, so the footprint guard's refusal still reaches
-  the record readable. **What is not owner-based is RK4's stage
+  the record readable. **(Amended 2026-09-26:** that loop is gone with the
+  stopgap. The batch is TreeAMR's `interpolate`, one KernelAbstractions
+  launch over the points — not a by-owner launch, since points are not
+  blocks — which flags rather than throws, so the guard's refusal is raised
+  on the host after it; this package has no parallel loop of its own
+  now.**)** **What is not owner-based is RK4's stage
   arithmetic.** OrdinaryDiffEq's `RK4()` forms `uprev + (dt/2) k` and the
   final combination with a serial broadcast (`thread = Serial()`), on the
   calling thread, over the whole state. **(Measured 2026-09-25** on the
@@ -3353,6 +3394,20 @@ What this package needs from TreeAMR. None blocks G0–G3.
    array at `G = q/2 + 1`; and the batch is what makes it threaded, with
    one output slot per input point and no accumulation, so the answer does
    not depend on the thread count.**)**
+   **(Done upstream, 2026-09-26:** TreeAMR 0.1.3's M11 — `locate_point`,
+   `interpolate`/`interpolate!` with a `Lagrange(n)` basis, `derivs` as
+   multi-indices, an `exclude::Region` that flags, one launch on the field
+   set's backend — kept both properties above and adds the ones the stopgap
+   lacked: one binary search per point instead of `maxlevel` `find_leaf`s,
+   device execution, periodic and reflecting faces. TreeAMR 0.1.3 is
+   registered, and `Project.toml` takes it from General (`[compat]`
+   `0.1.3`, no `[sources]` entry). The port removed `locate_block` and the
+   exported `interpolate`/`interpolate_grad`, whose name collided with
+   TreeAMR's; what stays in `src/horizon.jl` is the wrapper
+   `gh_interpolate`/`gh_interpolate_grad` (the order `q + 2`, the unpacking
+   into `SVector`s, the refusal) and the guard as a `Region` — see
+   [Analysis quantities](#analysis-quantities), where the guard's exactness
+   and the measured costs are.**)**
 2. **A device reduce-to-scalar** (TreeAMR `TODO.md`) would let the
    per-chunk norms stay on the device; today `block_mapreduce` copies
    one value per block back, which is fine at chunk frequency.
@@ -3388,7 +3443,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4), or `hole_forest`'s nested shells around a hole (added in step 5, **here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
 | `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate step 5's interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` (added in step 4) |
-| `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
+| `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`; **amended 2026-09-26**: `gh_interpolate`/`gh_interpolate_grad` over TreeAMR's `interpolate`, and the guard as the `Region` `UnevolvedRegion`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
 | `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl` |
 | `src/fit.jl` | the fitted target (added in step 8e, after `tracking.jl` and before `driver.jl`): the fit's variables (`fit_variables`, `state_from_fit`), the real solid harmonics (`_solid_harmonic_fold`, `real_solid_harmonics`, `fit_directions`), the two samplers (`state_sampler`, `analytic_sampler`), the least squares (`solve_fit`, `fit_row_weights`), the validity sweep (`fit_sweep`), `FitParams` and `InteriorFit` with `build_fit`, `fit_residual` and `fit_valid`, the kernel-callable evaluator `fit_variables_at`/`fit_state`, and the kernel half (8e-ii): `derive_target_bounds`, the 40-variable cache (`target_cache`, `fit_target_kernel!`, `fill_target!`) and the initial data's `fitted_state_kernel!`. The variant's branch is in `evolution.jl` (`GHProblem`'s `target`/`fits`/`t_target`, `refill_target`), its residual in `constraints.jl`'s error kernel, its flow in `driver.jl` (`refit!`, the refill and the pieces of a moving chunk) |
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written (added in step 8c′) — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
@@ -4653,6 +4708,39 @@ reach for before `N_ah` is lowered. The uniformization's residual floor on
 interpolated data is **`2.2e−5`** at `h = 5/64`, which is what the
 `unif_tol` decision under [Analysis quantities](#analysis-quantities) is
 about.
+
+**The port to TreeAMR's interpolation (measured 2026-09-26).** The same
+fixture, `q = 2`, 120 leaves at `h = 5/64`, 496 points of
+`EquiangularGrid(15)` at `r = 2 M`, value and gradient of all twenty
+variables with the guard on, the best of 200 calls, on the development
+machine at a load of 3–5; the stopgap measured the same day against the
+same TreeAMR 0.1.3:
+
+| | stopgap, 4 threads | M11, 4 threads | stopgap, 1 thread | M11, 1 thread |
+|---|---|---|---|---|
+| batch (`interpolate_grad` → `gh_interpolate_grad`) | 0.198 ms | 0.139 ms | 0.739 ms | 0.401 ms |
+| provider batch (496 `ADMVars`) | 0.235 ms | 0.162 ms | 0.770 ms | 0.422 ms |
+| TreeAMR's `interpolate` alone | | 0.107 ms | | 0.369 ms |
+| find, `N_ah = 16`, no spin | 0.083 s | 0.073 s | 0.149 s | 0.121 s |
+| find with spin | 1.90 s | 1.78 s | 1.87 s | 1.79 s |
+
+A batch is **1.4× cheaper at four threads and 1.8× at one**; the
+difference between the wrapper and TreeAMR's call alone (`0.03 ms`) is the
+unpacking into `SVector`s and the host-side flag scan. A find is
+10–20 % cheaper without the spin and unchanged with it, which is the
+paragraph above again: the interpolation was never what a find costs. The
+answers are the stopgap's to roundoff — the same stencil, different weight
+arithmetic (truncated Taylor products against plain products) and a
+sum-factorised contraction: over 1984 points about `r = 2 M` the values
+differ by at most `1.2e−15` (of values of order one) and the gradients by
+`8.8e−15`; none is bitwise equal. A find from the displaced guess gives the
+same area `50.26326183407128` and `M_irr` to every digit, `r_min` and
+`r_mean` differing in the sixteenth, and converges in 48 iterations
+against 49 — the fast flow's stall detector, not the surface. The
+interpolation's rates are unchanged, `4.19` and `2.81` (`horizon_tests.jl`).
+**Not measured: the device path.** `gh_adm_provider` and the fit's sampler
+no longer `hostcopy` the state, and TreeAMR's `interpolate` runs on the
+field set's backend, but this package has no device test until step 9.
 
 **Step 8a, the expectations: what crosses the horizon from inside it.** No
 `src` change. The suite is **3463 assertions in 13m01** at one thread and

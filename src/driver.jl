@@ -689,7 +689,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
             fill_ghosts!(p.U, p.schedule; boundary=bnd)
         end
         t0 = time_ns()
-        f = build_fit(state_sampler(hostcopy(p.U), q; t=T(t)), geom, spec;
+        f = build_fit(state_sampler(p.U, q; t=T(t)), geom, spec;
                       cont=1, bounds=tbounds, backend=backend, check=false)
         fitcost.build_ns[] += time_ns() - t0
         fitcost.nbuild[] += 1
@@ -744,7 +744,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         end
         ct = center_at(track_center(tr), T(t))
         ca = center_at(case.center, T(t))
-        leaf_h(x) = (b = locate_block(forest, x);
+        leaf_h(x) = (b = locate_point(forest, x);
                      b === nothing ? h_fine : spacing(T, forest, forest.leaves[b]))
         efolds = margin_efolds(case.background, geom, q; t=T(t),
                                ε_KO=case.ε_KO, spacing=leaf_h).min

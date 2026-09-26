@@ -27,9 +27,11 @@ Three rules follow from `CODE.md` and govern every change here:
 
 - **No mesh machinery.** If a change is about trees, ghost cells,
   interpolation or reductions, it belongs upstream in TreeAMR. The one
-  stopgap this package carries — point interpolation for the horizon
-  finder — is marked as such in `CODE.md` and goes upstream when
-  TreeAMR grows it.
+  stopgap this package carried — point interpolation for the horizon
+  finder — went upstream on 2026-09-26 (TreeAMR 0.1.3's M11,
+  `interpolate` with `Lagrange(q + 2)`); what `src/horizon.jl` keeps is the
+  order, the footprint guard as a TreeAMR `Region` and the refusal
+  (amended 2026-09-26).
 - **The interior is pointwise and generic, and there is no excision.**
   Inside the horizon the right-hand side is modified by smooth profiles
   of the *depth* below a surface `m` cells inside the horizon — the
@@ -153,10 +155,12 @@ the last), and the record grew `τ_max`, the centroid and its distance from
 the analytic center.
 
 From step 7 the code **knows where the horizon is**: `horizon.jl` —
-`locate_block` and `interpolate`/`interpolate_grad` (the *stopgap* point
-interpolator, `find_leaf` then a tensor-product Lagrange window of
-`q + 2` points, batched and threaded over a host array, with the
-footprint guard that refuses a query reading inside `r_1`),
+`gh_interpolate`/`gh_interpolate_grad` (TreeAMR's `interpolate` with a
+`Lagrange(q + 2)` basis, one launch on the field set's backend, unpacked
+into `SVector`s, with the footprint guard `UnevolvedRegion` — a TreeAMR
+`Region` — that makes a query reading inside `r_1` throw; until
+2026-09-26 these were the *stopgap* `locate_block`/`interpolate`/
+`interpolate_grad`, whose exported `interpolate` collided with TreeAMR's),
 `GHADMProvider` (the batched `ADMVars` provider, `Float64` out whatever
 the run computes in, with a one-entry cache because `KorzynskiSpin` asks
 for `γ` and `K` in two calls with the same points), `find_gh_horizon`
@@ -370,7 +374,11 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4684 assertions in 13m34** at one thread and **4692 in
+The suite is **4601 assertions in 15m19** at one thread and **4609 in
+11m24** at four after the port to TreeAMR's interpolation (2026-09-26, load
+6–9): 83 fewer, almost all the retired `locate_block` testset's per-point
+claims, which are TreeAMR's own now; `horizon_tests.jl` is `20.5 s` at one
+thread. It was **4684 assertions in 13m34** at one thread and **4692 in
 10m04** at four after the IMEXRungeKutta driver (2026-09-26; the eight extra
 at four threads are `stepping_tests.jl`'s per-block owner checks, which have
 nothing to say at one thread): `stepping_tests.jl` is 13 or 21 new claims in
@@ -452,9 +460,9 @@ julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])'
 ```
 
 The clean-checkout check, which is what the `[sources]` pins exist for: a
-tree with no `Manifest.toml` resolves all four pinned packages from
-GitHub (TreeAMR from the registry between 2026-09-21 and 2026-09-23), and
-passes. From 2026-09-21 it is a real check —
+tree with no `Manifest.toml` resolves the four pinned packages from
+GitHub and TreeAMR from the General registry (from 2026-09-26, at `0.1.3`;
+also between 2026-09-21 and 2026-09-23), and passes. From 2026-09-21 it is a real check —
 every source is public, so it works anonymously, which is what CI does:
 
 ```bash
@@ -668,20 +676,21 @@ the cluster mechanics (modules, SLURM, NUMA, precompilation).
 Carried over from TreeAMR, TreeWave and TreeHydro where they apply, plus
 what is specific to a GR code. Each is in `CODE.md` with its reason.
 
-- **All four dependencies are pinned to GitHub `main`, not to the local
-  checkouts — TreeAMR included again** (Erik's `Project.toml` of
-  2026-09-23, which dropped the explanatory comment block; amended in step
-  8f). `TreeAMR`, `SpacetimeMetrics`, `ApparentHorizonFinder` and
-  `KorzynskiSpin` are what `Project.toml`'s `[sources]` entries resolve, so
-  `~/src/jl/…` is *not* what the tests see; an unpushed change there is
-  invisible here, and the local SpacetimeMetrics checkout has been behind
-  `main` before. Read what Pkg installed under `~/.julia/packages/` when in
-  doubt about an API. Say so rather than editing a checkout and assuming
-  the tests see it. A pushed change to TreeAMR's `main` is visible at the
-  next resolve without a release (from 2026-09-21 to 2026-09-23 it came from
-  the General registry at `0.1.1`, where only a release published it);
-  `test/prerequisite_tests.jl` is what notices when a moving branch drops a
-  name.
+- **Four dependencies are pinned to GitHub `main`, and TreeAMR comes
+  from the registry** (amended 2026-09-26, when Erik registered TreeAMR
+  0.1.3 for its M11 interpolation; from 2026-09-23 to then TreeAMR was
+  pinned too). `SpacetimeMetrics`, `ApparentHorizonFinder`,
+  `KorzynskiSpin` and `IMEXRungeKutta` are what `Project.toml`'s `[sources]` entries resolve, and TreeAMR is
+  General's release under `[compat]` `0.1.3` — so `~/src/jl/…` is *not*
+  what the tests see; an unpushed change there is invisible here, a pushed
+  change to TreeAMR's `main` is invisible too until it is *released*, and
+  the local SpacetimeMetrics checkout has been behind `main` before. Read
+  what Pkg installed under `~/.julia/packages/` when in doubt about an API.
+  Say so rather than editing a checkout and assuming the tests see it. A
+  local `Manifest.toml` resolved while TreeAMR was pinned needs
+  `Pkg.update("TreeAMR")` (a plain `resolve` refuses the old version);
+  `test/prerequisite_tests.jl` is what notices when a moving branch or a
+  release drops a name.
   **`KorzynskiSpin`'s repository became public on 2026-09-21**, so its URL
   is plain `https`, the read-only deploy key and the `ssh-agent` step and
   `JULIA_PKG_USE_CLI_GIT` are all gone from `CI.yml`, and an anonymous
@@ -1065,8 +1074,15 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   throwing.** The interpolation window is `q + 2` points per axis, `G` of
   them on each side of the query's cell, so a query *outside* `r_1` can
   still read *inside* it. The guard is on the footprint and not on the
-  query point, and it is exact (the footprint is a lattice, so the nearest
-  of its points to the center is the per-axis nearest). A find that fails
+  query point, and it is exact — bit for bit against the norms' mask,
+  since 2026-09-26: the guard is `UnevolvedRegion(mask)`, TreeAMR's
+  `interpolate` flags a query whose stencil reaches it at the positions
+  `coordinates` gives, the region asks the norms' own `is_evolved`, and
+  `gh_interpolate` throws for the first flagged query. Its `stencil_hits`
+  overrides (the per-axis nearest point, then enumeration on a tracked
+  surface) are exact by construction and `tracking_tests.jl` checks them
+  against enumeration; do not swap in TreeAMR's `Ellipsoid`, which rounds
+  differently from `is_evolved` and measured no cheaper. A find that fails
   because of it is recorded in the run's record as
   `horizon_success = false` with the message in `horizon_note`, never
   thrown out of `evolve!`: the horizon is a diagnostic. If a find fails,
@@ -1080,13 +1096,15 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   norms mask.
 - **Ghosts must be filled before anything is interpolated**, with that
   call's hook. `find_gh_horizon` scatters and fills; `gh_adm_provider` and
-  `interpolate` do not, and an unfilled halo makes the metric garbage
+  `gh_interpolate` do not, and an unfilled halo makes the metric garbage
   exactly at the block faces — which the fast flow then walks into the
   layer to escape.
 - **The Korzyński spin is what a find costs**, not the interpolation:
   `16×`, `45×` and `105×` a right-hand-side evaluation at
   `N_ah = 12, 16, 20`, against `1.7×`, `2.7×` and `3.6×` for the find
-  itself — one batch of 496 interpolated `ADMVars` is 0.26 ms. Lower the
+  itself — one batch of 496 interpolated `ADMVars` is 0.16 ms at four
+  threads through TreeAMR's `interpolate` (0.23 ms through the stopgap on
+  the day of the port, 0.26 ms in step 7). Lower the
   cadence or pass `spin = false` before lowering `N_ah`. Its `unif_tol` is
   `1e-8` here and not the library's `1e-13`, because interpolated data has
   a residual floor of its own (`2.2e−5` at `h = 5/64`): the tighter
@@ -1200,12 +1218,15 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   threading, 2026-09-25). TreeAMR runs every per-block pass on the
   block's owner thread; a launch on whichever thread is free moves the
   blocks between cores and cost TreeAMR's RHS `2.4×` on 64 cores. The two
-  helpers are unexported, so `prerequisite_tests.jl` names the ones this
-  package calls (`threaded_foreach`, and `threadchunks` for the
-  integrator's partition). RK4's stage arithmetic is owner-based too from
-  2026-09-26 (IMEXRungeKutta by `state_partition`; it was OrdinaryDiffEq's
-  serial broadcast, 12–14 % of a step at 64 threads — `CODE.md`, "Time
-  integration").
+  helpers are unexported, so `prerequisite_tests.jl` names the one this
+  package calls (`threadchunks`, for the integrator's partition;
+  `threaded_foreach` went with the stopgap interpolator's batch on
+  2026-09-26, and the batch is TreeAMR's `interpolate`, one launch over
+  points), beside the `Region` extension points the footprint guard
+  reaches (`inside`, `stencil_hits`, `stencil_position`). RK4's stage
+  arithmetic is owner-based too from 2026-09-26 (IMEXRungeKutta by
+  `state_partition`; it was OrdinaryDiffEq's serial broadcast, 12–14 % of a
+  step at 64 threads — `CODE.md`, "Time integration").
 - **`Base` is not generic even though the mesh is.** MultiFloats defines
   no `rem`, no conversion to `Integer`, no `Float64(::Float32x2)`. Use
   `wrap` / `ceilint` / `floorint` / `tofloat64` from `precision.jl`.
