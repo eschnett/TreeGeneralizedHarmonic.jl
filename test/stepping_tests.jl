@@ -113,17 +113,47 @@ end
         @test integ2.u != gh_solve(p, copy(u0), (zero(T), 2dt); dt=dt)
     end
 
+    # Guards the scratch reuse (IMEXRungeKutta 1.2's `reuse`): an integrator
+    # that takes over the previous one's scratch must not allocate it again —
+    # the point of passing it — and must step exactly as one with fresh
+    # scratch does, since no scratch value carries over between steps.
+    @testset "the next chunk takes the previous chunk's scratch" begin
+        w1 = copy(u0)
+        i1 = gh_integrator(p, w1, (zero(T), 2dt); dt=dt, alias_u0=true)
+        IRK.solve!(i1)
+        fresh = gh_solve(p, copy(w1), (2dt, 4dt); dt=dt)
+        nbytes = sizeof(u0)
+        mk() = gh_integrator(p, w1, (2dt, 4dt); dt=dt, alias_u0=true, reuse=i1)
+        mk()
+        @test @allocated(mk()) < nbytes
+        @test @allocated(gh_integrator(p, w1, (2dt, 4dt); dt=dt, alias_u0=true)) >
+              4nbytes
+        i2 = mk()
+        IRK.solve!(i2)
+        @test isequal(i2.u, fresh)
+        # Another mesh's state does not fit, and says so rather than
+        # allocating behind the caller's back.
+        forest2, fs2, p2 = gh_setup(T, case; N=8, roots=1, q=q)
+        v2 = statevector(fs2)
+        @test_throws ArgumentError gh_integrator(p2, v2, (zero(T), dt); dt=dt,
+                                                 alias_u0=true, reuse=i1)
+    end
+
     # Guards the driver's use of the integrator against the plain one: the
-    # same case, the same step, through `evolve!` (one chunk, no regrid, no
-    # interior) and through `gh_solve` on the same mesh.
+    # same case, the same steps, through `evolve!` (two chunks, so that the
+    # second takes over the first's scratch; no regrid, no interior) and
+    # through `gh_solve` chunk by chunk on the same mesh.
     @testset "evolve! steps the state as gh_solve does" begin
         out = evolve!(T, case; forest=deepcopy(forest), q=q,
                       ops=Operators(prolongation=q + 2, restriction=q + 2),
-                      t_end=4dt, chunk=4dt)
-        r = out.records[end]
-        @test out.nsteps ≥ 1
-        dt_run = r.dt
-        u_plain = gh_solve(p, copy(u0), (zero(T), 4dt); dt=T(dt_run))
+                      t_end=8dt, chunk=4dt)
+        @test out.nchunks == 2
+        u_plain = copy(u0)
+        for c in 1:2
+            r = out.records[c + 1]
+            u_plain = gh_solve(p, u_plain, (T(out.records[c].t), T(r.t));
+                               dt=T(r.dt), alias_u0=true)
+        end
         @test maximum(abs, out.u .- u_plain) ≤ 100 * eps(T) * maximum(abs, u_plain)
     end
 end

@@ -16,7 +16,8 @@
 #
 # step: one right-hand side; IMEXRungeKutta's RK4 by owner and by broadcast,
 # each integrator built once and stepped; `gh_solve` over four steps (`init`
-# included); `init` alone; and, when the environment has
+# included); `init` alone, and with the previous integrator's scratch
+# (`reuse`, IMEXRungeKutta 1.2); and, when the environment has
 # `OrdinaryDiffEqLowOrderRK` and `SciMLBase` (the package does not — add them
 # to a scratch copy), OrdinaryDiffEq's RK4 stepped and its `solve` per four
 # steps (the driver's pattern until 2026-09-26) — *last*, and the owner step
@@ -127,6 +128,9 @@ function step_mode(CASE)
         row("gh_solve4_per_step", (min=t4.min / 4, med=t4.med / 4))
         row("init_only", timeit(() -> gh_integrator(p, w, (zero(T), 4dt); dt=dt,
                                                    alias_u0=true); n=3))
+        prev = gh_integrator(p, w, (zero(T), 4dt); dt=dt, alias_u0=true)
+        row("init_reuse", timeit(() -> gh_integrator(p, w, (zero(T), 4dt); dt=dt,
+                                                    alias_u0=true, reuse=prev); n=3))
     end
     if HAVE_ODE
         oi = SciMLBase.init(SciMLBase.ODEProblem(gh_rhs!, copy(u), (zero(T), far), p),

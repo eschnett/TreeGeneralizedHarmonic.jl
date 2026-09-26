@@ -751,8 +751,12 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   threads on 320 MB, measured 2026-09-26 — so `evolve!` builds **one per
   chunk** and swaps a moving hole's refilled problem in between pieces
   (`swappable = true`: the integrator's `p` is a `ProblemRef`, `integ.p.p =
-  p′`), rather than one per piece. IMEXRungeKutta has no scratch reuse
-  across chunks; ask for it there rather than reaching into its plan. Its
+  p′`), rather than one per piece — and **each chunk's integrator takes
+  over the previous chunk's scratch** (`reuse = integ_prev`, IMEXRungeKutta
+  1.2), so the allocation is once per mesh. A regrid that moves the mesh
+  sets `integ_prev = nothing`: its state vector is a new one, usually of
+  another length, whose scratch IMEXRungeKutta would refuse by name (it
+  checks the length, the array type and the partition). Its
   `RK4` clashes with OrdinaryDiffEq's by name: the package `import`s it
   `as IRK`.
 - **The RHS never mutates `u`, and the state has exactly three writers**

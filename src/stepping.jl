@@ -81,11 +81,10 @@ with `swappable = true` ([`gh_integrator`](@ref)): the integrator's own `p`
 is a constant, and a moving hole's chunk refills its target — a new
 `GHProblem` — between pieces of the same chunk (`CODE.md`, "The fitted
 target"). Assigning `integ.p.p = p′` between steps is how the refilled
-problem reaches the remaining steps without a new integrator, whose `init`
-allocates and first-touches four state-sized scratch vectors (0.1–0.4 s at
-64 threads on 320 MB, measured 2026-09-26). The field is untyped, since a
-refill can change the problem's type (its `fits`), which costs one dynamic
-dispatch per right-hand side and per limiter call.
+problem reaches the remaining steps on the same integrator — its step count,
+its time and its scratch — instead of a new one per piece. The field is untyped, since a refill can
+change the problem's type (its `fits`), which costs one dynamic dispatch per
+right-hand side and per limiter call.
 """
 mutable struct ProblemRef
     p::Any
@@ -120,8 +119,16 @@ the unpasted result; on a static hole the difference is nothing (see
 **`alias_u0 = true`** makes the integrator step `u` itself, in place, which
 is what [`evolve!`](@ref) does: `u` is the run's state vector, first-touched
 by owner, and no copy of it is made. The scratch — four state-sized arrays
-for RK4 — is allocated and first-touched through the partition at every
-call.
+for RK4 — is allocated and first-touched through the partition, unless
+`reuse` is given.
+
+**`reuse = integ′`**, an earlier integrator on the same mesh, makes this one
+take over `integ′`'s scratch instead (IMEXRungeKutta 1.2's `init(…; reuse)`,
+used from 2026-09-26): no allocation and no first touch, which was 0.13–0.36 s
+at 64 threads on 320 MB. IMEXRungeKutta refuses, by name, scratch that does
+not fit — another length, array type or partition — so a caller passes it
+only while the mesh is the one `integ′` was built on, and `nothing` after a
+regrid. The two share the scratch and must not step at the same time.
 
 **`swappable = true`** gives the integrator a [`ProblemRef`](@ref) as its
 `p` instead of `p` itself, so that a caller may replace the problem between
@@ -130,7 +137,7 @@ target within one chunk on one integrator. `p′` must be a problem on the
 same field set.
 """
 function gh_integrator(p::GHProblem{T}, u, tspan; dt, alias_u0::Bool=false,
-                       swappable::Bool=false) where {T}
+                       swappable::Bool=false, reuse=nothing) where {T}
     t0, t1 = T(tspan[1]), T(tspan[2])
     part = state_partition(p.U, u)
     if swappable
@@ -138,11 +145,11 @@ function gh_integrator(p::GHProblem{T}, u, tspan; dt, alias_u0::Bool=false,
                                         ProblemRef(p)), IRK.RK4();
                         dt=T(dt), stage_limiter=_gh_limiter_ref!,
                         step_limiter=_gh_limiter_ref!, partition=part,
-                        alias_u0=alias_u0)
+                        alias_u0=alias_u0, reuse=reuse)
     end
     return IRK.init(IRK.IMEXProblem(gh_rhs!, nothing, u, (t0, t1), p), IRK.RK4();
                     dt=T(dt), stage_limiter=gh_limiter!, step_limiter=gh_limiter!,
-                    partition=part, alias_u0=alias_u0)
+                    partition=part, alias_u0=alias_u0, reuse=reuse)
 end
 
 """

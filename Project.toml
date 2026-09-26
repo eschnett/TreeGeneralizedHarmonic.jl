@@ -24,7 +24,7 @@ TreeAMR = {rev = "main", url = "https://github.com/eschnett/TreeAMR.jl"}
 [compat]
 AbstractSphericalHarmonics = "1.2"
 ApparentHorizonFinder = "2.1"
-IMEXRungeKutta = "1.1"
+IMEXRungeKutta = "1.2"
 KernelAbstractions = "0.9.42, 1"
 KorzynskiSpin = "1.1"
 LinearAlgebra = "1.11"

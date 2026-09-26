@@ -877,6 +877,10 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     # number of `0.20003` against `0.2`. A 1 % margin costs 1 % of the steps.
     moving = sum(abs2, case.center.v) > 0
     growth = one(T)
+    # The previous chunk's integrator, whose scratch the next one takes over
+    # while the mesh is unchanged (`reuse`); `nothing` before the first chunk
+    # and after a regrid that moved the mesh.
+    integ_prev = nothing
     for c in 1:nchunks
         tstart = min((c - 1) * chunk, t_end)
         stop = min(c * chunk, t_end)
@@ -943,10 +947,15 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         # and span are the chunk's; a moving hole's pieces refill the target
         # into a new problem, which is swapped into the same integrator
         # between steps (`swappable`, a `ProblemRef`) rather than built into
-        # a new one, whose `init` allocates four state-sized scratch vectors
-        # (0.1–0.4 s at 64 threads on 320 MB).
+        # a new one. **The scratch is the previous chunk's** while the mesh
+        # is unchanged (`reuse`, IMEXRungeKutta 1.2; amended 2026-09-26):
+        # an `init` would otherwise allocate and first-touch four
+        # state-sized vectors, 0.13–0.36 s at 64 threads on 320 MB, once a
+        # chunk. A regrid that moves the mesh drops it (`integ_prev =
+        # nothing` below), and the next chunk allocates on the new mesh.
         integ = gh_integrator(p, u, (tstart, stop); dt=dt_used, alias_u0=true,
-                              swappable=npieces > 1)
+                              swappable=npieces > 1, reuse=integ_prev)
+        integ_prev = integ
         integ.nsteps == steps || error(
             "internal error: the integrator counts $(integ.nsteps) steps over " *
             "this chunk where the driver sized $steps; the step would not be " *
@@ -991,6 +1000,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                             boundary=dirichlet(case, stop))
             if moved
                 nregrids += 1
+                integ_prev = nothing        # its scratch is the old mesh's
                 schedule = GhostSchedule(U, ops)
                 # A tracked geometry is rebuilt on the new mesh from the same
                 # track — its offset and ramp are stated in the mesh's

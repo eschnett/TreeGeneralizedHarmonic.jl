@@ -2727,7 +2727,10 @@ stage_limiter = gh_limiter!, step_limiter = gh_limiter!, partition)`, and `gh_so
 integrator per chunk**, stepping the run's own state vector in place
 (`alias_u0 = true`); a moving hole's refilled target is swapped into it
 between pieces through a `ProblemRef` (`swappable = true`) instead of a new
-`init`. What changed with it:
+`init`, and each chunk's integrator takes over the previous chunk's scratch
+while the mesh is unchanged (`reuse`, IMEXRungeKutta 1.2, from 2026-09-26),
+so the scratch is allocated once per mesh and not once per chunk. What
+changed with it:
 
 - **The limiters: one, on every state vector** (decided 2026-09-26 by
   Erik). IMEXRungeKutta calls its stage limiter only on the three stage
@@ -2755,7 +2758,12 @@ between pieces through a `ProblemRef` (`swappable = true`) instead of a new
   `solve`, serially; IMEXRungeKutta allocates four scratch vectors per
   `init`, first-touched through the partition — still 0.13–0.36 s at 64
   threads on 320 MB (first touch dearer than interleaved pages), which is
-  why a chunk has one integrator and not one per piece.
+  why a chunk has one integrator and not one per piece. **(Amended
+  2026-09-26.)** With IMEXRungeKutta 1.2's `reuse` the next chunk's `init`
+  takes those four arrays over and allocates nothing: 0.05 ms against 13–35
+  ms at four threads on the development machine (40–75 MB states), so the
+  cost is paid once after the initial data and once after every regrid that
+  moves the mesh.
 
 **(Measured 2026-09-26 on Symmetry** with `bench/stepping.jl`, one exclusive
 64-core EPYC 7543 node, cn096, jobs 563975 and 563982; 512 blocks of `16³` at `q = 4`, a 320 MB
