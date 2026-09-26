@@ -270,8 +270,23 @@ import SpacetimeMetrics as SM
     # would put its layer, its damping profile and its tracked seed a distance
     # `2|v|t` from the hole — on the singular point of the chart after a
     # crossing time — and nothing in G4 moves, so nothing else would notice.
+    #
+    # Where the metric is singular is asked *next to* the singular point, not
+    # on it (amended 2026-09-26): at the point itself `H = 2M/r` is infinite
+    # and `l = x/r` is `0/0`, and whether the boost's rounding leaves `r` at
+    # `2e−17` (a huge `g_tt`, Apple silicon) or at exactly zero (`NaN`, the
+    # x86 CI runners) is not what the test is about. At a transverse offset
+    # `δ e` — perpendicular to the boost, so not Lorentz-contracted — the
+    # boosted Schwarzschild metric is exactly `g_tt = −1 + 2γ²M/δ`, and
+    # asking for that at two `δ` says the `1/r` singularity of the right
+    # strength sits at `x`.
     @testset "a boosted hole moves at −v, and a case that says otherwise is refused" begin
         v = SVector{3,T}(T(3 // 10), 0, 0)
+        γ² = 1 / (1 - v[1]^2)
+        singular_at(m, x, e) = all((T(1 // 100), T(1 // 1000))) do δ
+            gtt = SM.metric(m, SVector{4,T}(1, (x + δ * e)...))[1, 1]
+            isapprox(gtt, -1 + 2γ² / δ; rtol=1e-10)
+        end
         ks = SM.KerrSchild(one(T), zero(T))
         @test hole_velocity(ks) == zero(SVector{3,T})
         @test hole_velocity(SM.Harmonic(one(T), T(9 // 10))) == zero(SVector{3,T})
@@ -281,7 +296,7 @@ import SpacetimeMetrics as SM
         # at `+v`, where the former convention put it.
         c = center_at(HoleCenter(T, (0, 0, 0), hole_velocity(bks)), one(T))
         @test c == -v
-        @test abs(SM.metric(bks, SVector{4,T}(1, c...))[1, 1]) > 1e10
+        @test singular_at(bks, c, SVector{3,T}(0, 1, 0))
         @test abs(SM.metric(bks, SVector{4,T}(1, v...))[1, 1]) < 10
         # Through the wrappers: a translation keeps it, a rotation turns it
         # (the metric at `x` is the unrotated one at `Rᵀx`, so the velocity
@@ -292,7 +307,7 @@ import SpacetimeMetrics as SM
         @test hole_velocity(rot) ≈ R3 * (-v) atol = 4 * eps(T)
         rotated_hole = center_at(HoleCenter(T, (0, 0, 0), hole_velocity(rot)),
                                  one(T))
-        @test abs(SM.metric(rot, SVector{4,T}(1, rotated_hole...))[1, 1]) > 1e10
+        @test singular_at(rot, rotated_hole, R3 * SVector{3,T}(0, 1, 0))
         w = SVector{3,T}(T(1 // 5), 0, 0)
         @test hole_velocity(SM.boost(bks, w))[1] ≈ -(v[1] + w[1]) / (1 + v[1] * w[1])
         @test_throws "no hole whose velocity" hole_velocity(SM.Minkowski())
@@ -310,7 +325,7 @@ import SpacetimeMetrics as SM
         @test case.γ0.center == case.center
         seed = center_at(track_center(seed_track(case, 0)), one(T))
         @test seed == -v
-        @test abs(SM.metric(bks, SVector{4,T}(1, seed...))[1, 1]) > 1e10
+        @test singular_at(bks, seed, SVector{3,T}(0, 1, 0))
         # A keyword that agrees is accepted; one with the former sign is
         # refused, saying both and why.
         box = ntuple(_ -> (T(-8), T(8)), 3)

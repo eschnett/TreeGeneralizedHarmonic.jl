@@ -1147,7 +1147,11 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `hole_velocity(background)` is the one place the sign is written; `GHCase`
   derives the case's velocity from it when the keyword is left unset and
   refuses a keyword that disagrees. Do not pass `velocity = v` for a boost
-  by `v` — leave it unset.
+  by `v` — leave it unset. **Never test a metric *on* its singular point**
+  (amended 2026-09-26): whether rounding leaves `r` at `2e−17` or at zero —
+  a huge `g_tt` on Apple silicon, `NaN` on the x86 CI runners — is the
+  platform's, not the physics'. `interior_tests.jl` asks for
+  `g_tt = −1 + 2γ²M/δ` at a transverse offset `δ` instead.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
   dissipation" and — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in
