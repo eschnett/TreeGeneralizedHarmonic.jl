@@ -374,11 +374,11 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4601 assertions in 15m19** at one thread and **4609 in
-11m24** at four after the port to TreeAMR's interpolation (2026-09-26, load
-6–9): 83 fewer, almost all the retired `locate_block` testset's per-point
-claims, which are TreeAMR's own now; `horizon_tests.jl` is `20.5 s` at one
-thread. It was **4684 assertions in 13m34** at one thread and **4692 in
+The suite is **4610 assertions in 14m03** at one thread and **4618 in
+10m04** at four after the port to TreeAMR's interpolation and the
+16-variable provider (2026-09-26, load 5–7): 78 fewer than before it — the
+retired `locate_block` testset's 93 per-point claims, which are TreeAMR's
+own now, against the port's and the provider's new ones. It was **4684 assertions in 13m34** at one thread and **4692 in
 10m04** at four after the IMEXRungeKutta driver (2026-09-26; the eight extra
 at four threads are `stepping_tests.jl`'s per-block owner checks, which have
 nothing to say at one thread): `stepping_tests.jl` is 13 or 21 new claims in
@@ -1102,9 +1102,11 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
 - **The Korzyński spin is what a find costs**, not the interpolation:
   `16×`, `45×` and `105×` a right-hand-side evaluation at
   `N_ah = 12, 16, 20`, against `1.7×`, `2.7×` and `3.6×` for the find
-  itself — one batch of 496 interpolated `ADMVars` is 0.16 ms at four
-  threads through TreeAMR's `interpolate` (0.23 ms through the stopgap on
-  the day of the port, 0.26 ms in step 7). Lower the
+  itself — one batch of 496 interpolated `ADMVars` is 0.14 ms at four
+  threads through TreeAMR's `interpolate` of the 16 variables the ADM data
+  reads (`ADM_VARS`; `Π_tt` and `Π_ti` are `NaN`, and `horizon_tests.jl`
+  says why that is safe) — 0.16 ms with all 20, 0.23 ms through the
+  stopgap on the day of the port, 0.26 ms in step 7. Lower the
   cadence or pass `spin = false` before lowering `N_ah`. Its `unif_tol` is
   `1e-8` here and not the library's `1e-13`, because interpolated data has
   a residual floor of its own (`2.2e−5` at `h = 5/64`): the tighter

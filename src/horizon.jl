@@ -270,21 +270,21 @@ end
 # The one call into TreeAMR: `Lagrange(q + 2)` over the containing block's
 # stored points, on the field set's backend, with the mask's region as
 # `exclude`; the flags turned into the refusal on the host. Returns the host
-# array `vals[v, k, j]` — variable `v`, derivative `derivs[k]`, point `j`
-# (linear index of `xs`).
+# array `vals[iv, k, j]` — variable `vars[iv]`, derivative `derivs[k]`,
+# point `j` (linear index of `xs`).
 #
 # The points are converted to `SVector{3,T}` and moved to the field set's
 # backend first: TreeAMR interpolates where the data is and wants the points
 # there too, and a device without `Float64` could not hold the finder's
 # `Float64` points. `T(x[d])` is the conversion TreeAMR would make itself.
 function interpolate_state(fs::FieldSet{T,3}, xs::AbstractArray, q::Integer,
-                           mask, derivs) where {T}
+                           mask, derivs; vars=1:fs.nvars) where {T}
     check_interpolation_order(q)
     n = Int(q) + 2
     xv = vec(xs)
     pts = to_backend(get_backend(fs.work),
                      [SVector{3,T}(T(x[1]), T(x[2]), T(x[3])) for x in xv])
-    res = TreeAMR.interpolate(fs, pts, Lagrange(n); derivs=derivs,
+    res = TreeAMR.interpolate(fs, pts, Lagrange(n); derivs=derivs, vars=vars,
                               exclude=exclude_region(mask))
     vals = res.values isa Array ? res.values : Array(res.values)
     excluded = res.excluded isa Array ? res.excluded : Array(res.excluded)
@@ -375,12 +375,24 @@ The batched ADM-variable provider `ApparentHorizonFinder` and
 `KorzynskiSpin` consume: called with an array of Cartesian points, it
 returns an array of `ADMVars(γ, ∂γ, K)` of the same shape.
 
-Each point is [`gh_interpolate_grad`](@ref)ed out of the state — `h` and `Π`
-and the three `∂_i h` — and handed to [`adm_vars_from_state`](@ref), which
-is GHSO2's pointwise extraction: `γ_ij = g_ij`, `∂_kγ_ij` from the
-interpolated gradient, and `K_ij` from `∂_t g = β^i ∂_i g + (α/√γ)Π` and
-the 3-Christoffels. The result is `Float64` whatever the run computes in,
-because the finder's grid, origin and flow are.
+Each point is interpolated out of the state as [`gh_interpolate_grad`](@ref)
+does — `h` and `Π` and the three `∂_i h` — and handed to
+[`adm_vars_from_state`](@ref), which is GHSO2's pointwise extraction:
+`γ_ij = g_ij`, `∂_kγ_ij` from the interpolated gradient, and `K_ij` from
+`∂_t g = β^i ∂_i g + (α/√γ)Π` and the 3-Christoffels. The result is
+`Float64` whatever the run computes in, because the finder's grid, origin
+and flow are.
+
+**Only the variables the extraction reads are interpolated** (`ADM_VARS`;
+added 2026-09-26): all of `h` and the spatial block `Π_ij`, 16 of the 20.
+`Π_tt` and `Π_ti` enter only the `tt` and `ti` components of `∂_t g`, which
+`K_ij` never reads, so they are filled with `NaN` rather than
+interpolated — a `NaN`, unlike a zero, would show if a change to
+`adm_vars_from_state` ever read them. `horizon_tests.jl` asserts the result
+bit for bit against the full 20-variable path. It is 14 % of a batch
+(`CODE.md`, "Analysis quantities"); the six `Π_ij` still carry gradients
+nobody reads, because TreeAMR's `derivs` applies to every variable of a
+call, and a second call for them costs more than it saves.
 
 **It holds a one-entry cache keyed on the identity of the query array.**
 `KorzynskiSpin.surface_geometry` asks for `γ_ij` and `K_ij` in two separate
@@ -389,6 +401,11 @@ whole interpolation; the cache makes the second free. It is keyed on `===`
 and not on the contents, so a different array — the next iteration's
 surface — misses it and is recomputed, and nothing stale can be returned.
 """
+# The variables `adm_vars_from_state` reads, in the order the provider
+# unpacks them: all of `h` (1:10), and `Π`'s spatial block `Π_xx … Π_zz`
+# (15:20). `Π_tt` and `Π_ti` (11:14) are not interpolated.
+const ADM_VARS = [1:NC; (NC + 5):(2NC)]
+
 mutable struct GHADMProvider{T,F,M}
     const fs::F
     const q::Int
@@ -408,13 +425,18 @@ end
 
 function (p::GHADMProvider{T})(xs::AbstractArray) where {T}
     p.lastxs === xs && return p.lastvals
-    # `vals[v, k, j]`: variable `v`, the value (`k = 1`) or `∂_{k−1}`, point
-    # `j` — read straight into the pointwise algebra's arguments.
-    vals = interpolate_state(p.fs, xs, p.q, p.mask, INTERP_VALUE_GRAD)
+    # `vals[iv, k, j]`: variable `ADM_VARS[iv]`, the value (`k = 1`) or
+    # `∂_{k−1}`, point `j` — read straight into the pointwise algebra's
+    # arguments.
+    vals = interpolate_state(p.fs, xs, p.q, p.mask, INTERP_VALUE_GRAD;
+                             vars=ADM_VARS)
     out = similar(xs, ADMVars{Float64})
     for (j, i) in enumerate(eachindex(xs))
         hv = SVector{NC,T}(ntuple(v -> vals[v, 1, j], Val(NC)))
-        Πv = SVector{NC,T}(ntuple(v -> vals[NC + v, 1, j], Val(NC)))
+        # `Π_tt` and `Π_ti` were not interpolated (`ADM_VARS`); a `NaN` there
+        # is what would surface if the extraction ever read them.
+        Πv = SVector{NC,T}(ntuple(v -> v ≤ 4 ? T(NaN) : vals[NC + v - 4, 1, j],
+                                  Val(NC)))
         dh = ntuple(d -> SVector{NC,T}(ntuple(v -> vals[v, d + 1, j], Val(NC))),
                     Val(3))
         γ, ∂γ, K = adm_vars_from_state(hv, Πv, dh[1], dh[2], dh[3])

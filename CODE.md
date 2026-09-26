@@ -4738,6 +4738,28 @@ same area `50.26326183407128` and `M_irr` to every digit, `r_min` and
 `r_mean` differing in the sixteenth, and converges in 48 iterations
 against 49 — the fast flow's stall detector, not the surface. The
 interpolation's rates are unchanged, `4.19` and `2.81` (`horizon_tests.jl`).
+**The provider interpolates 16 variables, not 20 (added 2026-09-26, in
+review).** `adm_vars_from_state` reads all of `h`, the gradients of `h_ti`
+and `h_ij`, and `Π_ij`: `Π_tt` and `Π_ti` enter only the `tt` and `ti`
+components of `∂_t g`, which `K_ij` never uses, and no gradient of `Π` is
+read at all — 43 of the 80 numbers per point a 20-variable value-and-gradient
+call produces. The provider now asks TreeAMR for `ADM_VARS = [1:10; 15:20]`
+and fills `Π_tt` and `Π_ti` with `NaN`, which would surface where a zero
+would pass for a number if the extraction ever read them. On the batch above
+TreeAMR's call alone goes from `0.35` to `0.30 ms` at one thread and from
+`0.105` to `0.091 ms` at four; the provider batch from `0.422` to `0.366 ms`
+and from `0.162` to `0.144 ms`. The rest of what is unused is `Π_ij`'s
+gradients, which TreeAMR cannot skip — `derivs` applies to every variable of
+a call — and splitting it into two calls (nine variables with gradients,
+seven without) measured `0.335` and `0.108 ms`, no better than twenty in
+one, because the second call repeats the location and the weights (`0.070`
+and `0.026 ms` for one variable alone). A per-variable `derivs` in TreeAMR
+would be worth about another 10 % of the batch, a percent of a find without
+the spin; not asked for. `horizon_tests.jl` holds the 16 variables to the
+full call bit for bit and the `NaN` slots to the true values bit for bit at
+one call site of the extraction; the provider against the 20-variable path
+is `2.8e−16` in `K`, the two call sites of `adm_vars_from_state` fusing
+differently.
 **Not measured: the device path.** `gh_adm_provider` and the fit's sampler
 no longer `hostcopy` the state, and TreeAMR's `interpolate` runs on the
 field set's backend, but this package has no device test until step 9.

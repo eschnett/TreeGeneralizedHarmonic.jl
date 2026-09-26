@@ -194,6 +194,50 @@ import SpacetimeMetrics as SM
                                                    r_seed=0.8, spin=false)
     end
 
+    # The provider interpolates only the 16 variables the ADM extraction
+    # reads and puts `NaN` in `Π_tt` and `Π_ti`, which is correct only as
+    # long as `adm_vars_from_state` never reads them; a change that did would
+    # turn `K_ij` into `NaN` — or, had the slots been zeros, into a wrong
+    # number that looks right (added 2026-09-26). Each link is claimed where
+    # it can be exact: the 16 variables are the full call's bit for bit
+    # (TreeAMR contracts every variable on its own), and one call site of the
+    # extraction returns the same bits with `NaN` there as with the true
+    # values. The provider against the 20-variable path is then roundoff and
+    # not bits, because the extraction compiled at two call sites fuses
+    # differently (`CLAUDE.md`, "Two spellings of one expression"): measured
+    # `2.8e−16` in `K` on 11 of these 27 points.
+    @testset "the provider's 16 variables give the 20-variable answer" begin
+        TGH = TreeGeneralizedHarmonic
+        case = hole_fixture(T; q=q)
+        forest = hole_fixture_forest(T, case; N=8)
+        fs = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3))
+        fill_exact!(fs, case, zero(T))
+        fill_ghosts!(fs, GhostSchedule(fs, ops); boundary=dirichlet(case, zero(T)))
+        mask = interior_mask(case.interior, zero(T))
+        @test TGH.ADM_VARS == [1:10; 15:20]
+        xs = [SVector{3,T}(r * sin(θ) * cos(φ), r * sin(θ) * sin(φ), r * cos(θ))
+              for r in (1.8, 2.0, 2.3), θ in (0.3, 1.2, 2.5), φ in (0.1, 2.0, 4.4)]
+        full = TGH.interpolate_state(fs, xs, q, mask, TGH.INTERP_VALUE_GRAD)
+        part = TGH.interpolate_state(fs, xs, q, mask, TGH.INTERP_VALUE_GRAD;
+                                     vars=TGH.ADM_VARS)
+        @test isequal(part, full[TGH.ADM_VARS, :, :])
+        # One call site, two inputs that differ only in `Π_tt` and `Π_ti`.
+        extract(j, fill) = TGH.adm_vars_from_state(
+            SVector{10,T}(ntuple(v -> full[v, 1, j], 10)),
+            SVector{10,T}(ntuple(v -> v ≤ 4 && fill ? T(NaN) : full[10 + v, 1, j], 10)),
+            ntuple(d -> SVector{10,T}(ntuple(v -> full[v, d + 1, j], 10)), 3)...)
+        @test all(j -> isequal(extract(j, true), extract(j, false)), eachindex(xs))
+        out = GHADMProvider(fs, q, mask)(xs)
+        @test size(out) == size(xs)
+        @test all(eachindex(xs)) do j
+            γ, ∂γ, K = extract(j, false)
+            all(isfinite, out[j].K) &&
+                maximum(abs.(out[j].γ - γ)) ≤ 8eps(T) &&
+                maximum(abs.(out[j].∂γ - ∂γ)) ≤ 8eps(T) &&
+                maximum(abs.(out[j].K - K)) ≤ 8eps(T)
+        end
+    end
+
     # The measurement `CODE.md` and GHSO2 both state: Kerr's horizon
     # recovered from sampled data, from a *displaced* guess, with the
     # surface enclosing the layer by the margin `m`. The reference values
