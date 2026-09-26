@@ -41,7 +41,8 @@ no excision — inside the horizon the solution is *driven to the analytic
 one* by a pointwise damping layer and frozen around the singularity,
 with nothing in that decision knowing about blocks or levels; the
 proof-of-concept target is a **single black hole with nonzero boost and
-spin**; time integration through OrdinaryDiffEq; the analysis quantities
+spin**; time integration through IMEXRungeKutta's RK4 by block owner
+(through OrdinaryDiffEq until 2026-09-26); the analysis quantities
 (constraints, horizon location, area, mass and spin) are part of the
 deliverable; refinement is driven by an **error indicator**, not by
 prescribed spheres; `Float64` on Symmetry's H200 is the device
@@ -168,7 +169,8 @@ From **GHSO2**, verbatim, with the text in `notes/`:
   (`notes/ghaccel-bench.jl`).
 
 From **TreeWave and TreeHydro**: the right-hand-side contract, fixed-step
-RK4 from OrdinaryDiffEq, the chunked regrid-and-restart driver with
+RK4 (from OrdinaryDiffEq, and from IMEXRungeKutta since 2026-09-26, as in
+TreeAMR's own examples), the chunked regrid-and-restart driver with
 cases as data, the `observer` hook, `precision.jl` and `device.jl`, the
 Löhner refinement indicator with its global noise floor and two
 thresholds, the thread-workload digest test, the `[sources]` pin to
@@ -184,7 +186,7 @@ What **changes** because the mesh changes:
 | SAT penalties for boundaries; excision faces | ghost-filling boundary hooks; a pointwise damping layer inside the horizon instead of excision |
 | `ε μ⁻⁵ D⁶` dissipation normalised by the SBP spectral radius | the standard Kreiss–Oliger operator of order `q + 2` on a uniform block |
 | one mesh for the whole run | error-driven regridding that follows the hole; a fresh problem per chunk |
-| Tsit5 / Vern6–9 matched to the element order; a native stepper | RK4 from OrdinaryDiffEq, fixed step (decided) |
+| Tsit5 / Vern6–9 matched to the element order; a native stepper | RK4, fixed step (decided): OrdinaryDiffEq's until 2026-09-26, IMEXRungeKutta's by block owner since |
 | `Float32`/`Float64`/`Float64x2`, CPU/Metal/CUDA | `Float64` on CUDA as the requirement; the rest inherited from TreeAMR |
 
 ## The equations
@@ -1519,8 +1521,13 @@ substance, for two reasons that are both findings of the design review:
 (the integrator's arithmetic is the first writer); the `:pasted` paste of
 the ball `r < r_1`, from the step limiter, is the second; the range
 projection, from the stage limiter, is the third. Both limiters are
-`solve` keywords (`stage_limiter`, `step_limiter`), not `RK4(; …)`
-arguments, whose constructor form is deprecated. The projection also runs
+integrator keywords (`stage_limiter`, `step_limiter`); under
+IMEXRungeKutta (from 2026-09-26) **both writers are one limiter,
+`gh_limiter!` — the projection, then the paste — passed as the stage and
+the step limiter alike** (decided 2026-09-26 by Erik: the limiter applies to
+every state vector), so every stage value the right-hand side reads and
+every step's result is projected and pasted — see [Time
+integration](#time-integration). The projection also runs
 once on the initial data and once after every regrid transfer, before the
 paste, which is the order RK4 applies the two — neither state went
 through a stage, and a prolongation into a fresh fine block is unlimited
@@ -1533,6 +1540,10 @@ stage is a `NaN` in the next stage's `F` at every point whose stencil
 reads it. Read against `OrdinaryDiffEqLowOrderRK` 2.2.5, RK4 calls the
 stage limiter on its three intermediate stages and then on `u`, before
 the FSAL evaluation and before the step limiter: four calls per step.
+**(Amended 2026-09-26.)** Under IMEXRungeKutta's RK4 the same four
+projections happen, each followed by the paste: three as the stage limiter,
+on the stage values the right-hand side reads, and the fourth as the step
+limiter, on the result.
 
 **Where: the gate.** The projection's output is a clamp, and a clamp is a
 kink wherever it fires; a kink an evolved stencil reads is an `O(1)`
@@ -2544,7 +2555,7 @@ shells with it, one block ring per chunk at the finest level.
     p = GHProblem(U, Hsrc, ops, case; q, ε_KO, γ0, γ2, interior, …)
     while t < t_end
         λ = max_speed(p); dt = cfl · minimum_spacing(forest) / λ
-        solve(ODEProblem(gh_rhs!, u, (t, stop), p), RK4(); dt, adaptive = false)
+        gh_solve(p, u, (t, stop); dt, alias_u0 = true)  # IMEXRungeKutta's RK4 by owner
         assert the CFL bound held; record the analysis quantities
         observer(p, t, u)                               # before the regrid
         scatter!(U, u); fill_ghosts!(U, p.schedule; boundary = dirichlet(case, t))
@@ -2703,6 +2714,150 @@ to score; the static configuration's centroid is `0.29` spacings off at
 `t = 0`. The travelling hole is tracked within `0.028` cells.
 
 ## Time integration
+
+**IMEXRungeKutta's classical RK4, its stage arithmetic by block owner**
+(amended 2026-09-26, at Erik's direction, as TreeAMR's own examples now
+use it; OrdinaryDiffEq until then, whose decision and measurements follow
+as history). `src/stepping.jl` is the whole coupling: `state_partition`
+turns TreeAMR's `threadchunks(nblocks)` into IMEXRungeKutta's `partition`,
+so that each block's entries are combined on the thread `map_blocks!` runs
+the block on (`nothing` on a device: the fused broadcast); `gh_integrator`
+builds `init(IMEXProblem(gh_rhs!, nothing, u, tspan, p), RK4(); dt,
+stage_limiter = gh_limiter!, step_limiter = gh_limiter!, partition)`, and `gh_solve` runs one to its end. The driver builds **one
+integrator per chunk**, stepping the run's own state vector in place
+(`alias_u0 = true`); a moving hole's refilled target is swapped into it
+between pieces through a `ProblemRef` (`swappable = true`) instead of a new
+`init`. What changed with it:
+
+- **The limiters: one, on every state vector** (decided 2026-09-26 by
+  Erik). IMEXRungeKutta calls its stage limiter only on the three stage
+  values of a step that `f_exp!` reads and its step limiter once on the
+  result, so `gh_limiter!` — the projection, then the paste — is passed as
+  both, IMEXRungeKutta's own rule for a correction that must reach every
+  right-hand-side input. Under OrdinaryDiffEq only the projection reached
+  the stage values, the paste was a step limiter alone, and the FSAL
+  tendency was evaluated on the result before the paste. On a static hole
+  pasting a stage value changes no bit (inside `r_1` the `:pasted`
+  right-hand side is zero and the analytic solution does not depend on the
+  stage's time); on a moving one the ball is the analytic solution at every
+  stage's time.
+- **The result agrees to roundoff, not bitwise.** The stages are summed in
+  a different order: the gauge wave's `L2` error at `q = 4`, `N = 16` is
+  `2.2860177409713e−5` against OrdinaryDiffEq's `…409697e−5`, and the
+  suite's hole fixture agrees to twelve digits at `t = 1/5`; a moving
+  `:fitted` hole (`hole_runs.jl moving=l0-base t_end=1/4`, seven refills
+  swapped into its chunks' integrators) prints the same row as `main` to
+  every digit. By owner it is
+  bitwise its own broadcast and bitwise across thread counts, which
+  `test/thread_workload.jl` now digests (its hand-written RK4 is gone).
+- **One right-hand side fewer per `solve`** (no FSAL start) and no copy of
+  the state: OrdinaryDiffEq allocated about fifteen state-sized vectors per
+  `solve`, serially; IMEXRungeKutta allocates four scratch vectors per
+  `init`, first-touched through the partition — still 0.13–0.36 s at 64
+  threads on 320 MB (first touch dearer than interleaved pages), which is
+  why a chunk has one integrator and not one per piece.
+
+**(Measured 2026-09-26 on Symmetry** with `bench/stepping.jl`, one exclusive
+64-core EPYC 7543 node, cn096, jobs 563975 and 563982; 512 blocks of `16³` at `q = 4`, a 320 MB
+state; the gauge wave and the suite's Kerr-Schild fixture at `halfwidth =
+5` with `hole_forest(…; roots = 2, radii = (6, 3, 3/2))`, whose finest
+spacing is the fixture's; minimum ms per call, each configuration twice, in
+agreement to a few percent**)**:
+
+| per call, pinned, first touch | gauge wave | hole |
+|---|---|---|
+| RHS, `main` (the boxed kernel, below) | 482–530 | 755–786 |
+| RHS, from 2026-09-26 | 120–136 | 252–266 |
+| OrdinaryDiffEq RK4 step, `main` | 3146–3180 | 4354–4504 |
+| OrdinaryDiffEq RK4 step, fixed kernel | 920–947 | 1605–1665 |
+| IMEXRungeKutta RK4 step, broadcast | 770–793 | 1304–1330 |
+| IMEXRungeKutta RK4 step, by owner | 553–603 | 1077–1106 |
+| `solve` per 4 steps, per step: OrdinaryDiffEq on `main` (the old driver) | 3825–3924 | 5118–5160 |
+| `gh_solve` per 4 steps, per step (`init` included) | 643–706 | 1157–1200 |
+
+So at 64 threads a step of the old driver was **5.6×** (wave) and **4.3×**
+(hole) today's. About 3–4× of that was the right-hand-side kernel itself
+(the `Core.Box` of "Precision, threads, devices": ~570 bytes allocated per
+point, 1.2 GB per evaluation, which 64 threads turn into garbage-collector
+contention — the same bug cost 7–15 % at four threads on the development
+machine), and 1.5–1.6× the integrator (its serial stage arithmetic and its
+per-`solve` buffers). A step by owner is now `4.2–4.9` right-hand sides.
+**Placement** (the four configurations on cn096): pinned (`JULIA_EXCLUSIVE =
+1`, `srun --cpu-bind = none`) with first touch is the fastest for the
+right-hand side (133 ms against 151 unpinned on the wave, 257 against 318 on
+the hole) and for the step; interleaving (`numactl --interleave = all`)
+helps only `init`'s allocation. Job 563749's anomaly — the owner-mapped
+update 3–5× slower under first touch, suspected NUMA balancing — did not
+reproduce: after a process's OrdinaryDiffEq rows (every one a serial pass)
+the owner-mapped step was no slower than before them. **The driver end to
+end** (`evolve!`, three chunks, the record included; jobs 563976 on cn112 —
+an 8×8-core AVX-512 node with one NUMA domain, pinned — and 563977 on
+cn079, an EPYC 7543, unpinned): per step, `main` against today, **4111 →
+544 ms** and **5297 → 1140 ms** pinned, **3460 → 843** and **4547 → 1516**
+unpinned, with the records equal to every printed digit.
+
+**On a device (measured 2026-09-26**, the first device runs of this
+package**)**. With the box gone the right-hand-side kernel compiles for a
+GPU: on the development machine's Metal at `Float32`, and on one H200 (job
+563978, cn113) at `Float64` and `Float32`, with `evolve!` end to end — the
+record's monitors on the device, the broadcast stage arithmetic, `hostcopy`
+only for a horizon find (none here). The `Float64` hole's record equals the
+CPU run's to every printed digit (`err_l2 = 1.690514e−6`).
+
+| H200, ms | wave `16³` | hole `16³` | wave `32³` | hole `32³` |
+|---|---|---|---|---|
+| RHS, `Float64` | 20.7 | 28.8 | 151.2 | 170.5 |
+| RK4 step, `Float64` | 84.3 | 116.2 | 613.8 | 691.7 |
+| `evolve!` per step, `Float64` | 85.2 | 120.2 | | |
+| RHS, `Float32` | 13.0 | 20.6 | | |
+| `evolve!` per step, `Float32` | 53.3 | 86.9 | | |
+
+At the same 2.1 M points one H200 runs the right-hand side **6.4×** (wave)
+and **8.9×** (hole) as fast as a pinned 64-core node, and the hole's
+`evolve!` step **9.5×** as fast as the 1140 ms it takes on cn112; `32³`
+blocks, 16.8 M points, cost about 10 ns a point. `Float32` is 1.4–1.6×
+faster than `Float64` (not investigated), and its error is
+roundoff-dominated (`1.9e−5` against
+`1.7e−6` on the hole). None of this is tuned: G6's kernel efficiency is
+still a research project, and these are the numbers it starts from.
+
+**Block size and block count (measured 2026-09-26**, `bench/stepping.jl`'s
+`scan` mode, `q = 4` throughout — fourth-order centred differences, sixth-order
+prolongation, `G = 3`; H200 jobs 564111 and 564114, the CPU on cn079, an EPYC
+7543, pinned at 64 threads, job 564112; the hole's rows need two roots or more,
+since one root at `N ≤ 12` fails the interior's radius checks**)**. The
+right-hand side in nanoseconds per point:
+
+| wave, `N` \ blocks | 8 | 64 | 512 | 1728 |
+|---|---|---|---|---|
+| 8, H200 / CPU | 137 / 834 | 19.7 / 119 | 12.9 / 84 | 12.3 / 99 |
+| 16 | 18.9 / 468 | 10.7 / 68 | 9.9 / 71 | 9.7 / 66 |
+| 24 | 13.6 / 449 | 10.7 / 62 | 10.4 / 60 | 10.4 / 59 |
+| 32 | 10.1 / 433 | 9.1 / 58 | 9.0 / 57 | |
+
+| hole, `N` \ blocks | 512 | 1112 | 2416 |
+|---|---|---|---|
+| 8, H200 / CPU | 33.8 / 337 | 24.5 / 301 | 19.0 / 290 |
+| 12 | 21.0 / 193 | 17.9 / 171 | 16.3 / 172 |
+| 16 | 13.7 / 138 | 12.4 / 128 | 11.6 / 128 |
+| 24 | 12.4 / 103 | 11.9 / 96 | 11.6 / 96 |
+| 32 | 10.2 / 85 | 9.9 / 83 | |
+
+The H200 saturates at about a million points and 9–10 ns a point from
+`N = 16` up; `N = 8` costs a third more there (its ghosted block is `6.6×`
+its owned points) and the hole at `N = 8` twice as much. The CPU needs a block
+per thread before anything else matters (8 blocks on 64 threads is
+6–8× the per-point cost), and then gains from larger blocks all the way to
+`N = 32` (57 ns against 71 at `N = 16` on the wave). The hole costs 1.5–3.5×
+the wave's per point on the CPU and 1.1–2.7× on the H200, the ratio falling as
+`N` grows — the layer's analytic target, a forward-mode dual pass per point,
+is relatively cheaper on the device — so from 64 blocks up the H200's advantage
+is **5.7–8× on the wave and 8–15× on the hole**. A
+step is 4.0–4.1 right-hand sides on the H200 at every size and 4.2–4.5 on the
+CPU from 512 blocks up (7.6 at 64 blocks of `8³`, where the stage
+arithmetic's per-call overhead shows). For G5-sized meshes this says `N ≥ 16`
+on either machine, and `N = 24`–`32` where the refinement's granularity
+allows it.
 
 **Fixed-step RK4 from `OrdinaryDiffEqLowOrderRK`** (decided), as
 TreeWave uses it: four stages for a fourth-order spatial scheme, the
@@ -3089,6 +3244,14 @@ break it:
   ways out are `RK4(; thread = True())` (Polyester, whose chunk-to-thread
   map is its own) or an integrator whose stage update is a `map_blocks!`
   — a change to "RK4 from OrdinaryDiffEq", and G6's to measure.
+  **(Resolved 2026-09-26.)** Measured on Symmetry (job 563749), the serial
+  updates were 12–14 % of a step at 64 threads, and every `solve` added
+  the serial allocation of about fifteen state-sized vectors; the
+  integrator is IMEXRungeKutta's RK4 by block owner since, which removes
+  both — [Time integration](#time-integration) has the numbers. The
+  placement question is answered there too: pinned with first touch is
+  the fastest configuration, and the 3–5× first-touch anomaly of job
+  563749 did not reproduce once nothing serial touched the state.
 - **`Float64` on Symmetry's H200 is the requirement** (decided in
   review). It is the machine the proof of concept runs on, and the
   precision it runs in; every device claim below is made there first.
@@ -3230,7 +3393,9 @@ Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
 pinned to GitHub `main` by `[sources]`, which puts the Julia floor at
 1.11 as in the siblings), `KernelAbstractions`, `StaticArrays`
 (kernel-safe, and what `SpacetimeMetrics` speaks),
-`OrdinaryDiffEqLowOrderRK` and `SciMLBase`, `LinearAlgebra` (`det`, `dot`
+`IMEXRungeKutta` (unregistered, pinned to GitHub `main` by `[sources]`; it
+replaced `OrdinaryDiffEqLowOrderRK` and `SciMLBase` on 2026-09-26, and
+neither is a dependency of the package or of its tests since), `LinearAlgebra` (`det`, `dot`
 and `tr` on `StaticArrays`, which the pointwise algebra uses; a standard
 library, added in step 1 and not listed when `PLAN.md` enumerated step 0's
 `Project.toml` **(proposed in step 1)**), `HDF5` (from G6),
@@ -6059,7 +6224,8 @@ Settled in review on 2026-09-16: the expanded form (the flux form is not
 implemented on the mesh); three dimensions only; no excision, the
 interior treated pointwise by profiles of the distance to the center;
 the proof-of-concept target a single boosted, spinning hole;
-OrdinaryDiffEq's RK4 for time integration; the analysis quantities as
+OrdinaryDiffEq's RK4 for time integration (amended 2026-09-26:
+IMEXRungeKutta's RK4, by block owner); the analysis quantities as
 part of the deliverable; an error indicator for refinement; `Float64`
 on the H200 as the device requirement; no checkpointing; the inherited
 documents copied into `notes/`.

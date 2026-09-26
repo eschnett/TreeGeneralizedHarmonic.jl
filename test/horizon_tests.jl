@@ -18,6 +18,12 @@
 using Test
 using TreeAMR
 using TreeGeneralizedHarmonic
+# TreeAMR 0.1.3 exports an `interpolate` of its own (its M11 point
+# interpolation, the upstream answer to this package's stopgap), so with both
+# modules `using`'d the bare name is ambiguous. The claims below are about the
+# stopgap, which is still what `find_gh_horizon` calls; name it explicitly
+# (added 2026-09-26) until the stopgap is retired in TreeAMR's favour.
+using TreeGeneralizedHarmonic: interpolate
 using KernelAbstractions: CPU
 using StaticArrays: SVector
 import SpacetimeMetrics as SM

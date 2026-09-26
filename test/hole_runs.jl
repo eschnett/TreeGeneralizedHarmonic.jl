@@ -999,9 +999,9 @@ const BOUNDS_ROWS = haskey(OPTIONS, "bounds") ?
 # `t_end` is `50 M`, the length of step 5's table; `TREEGH_BOUNDS_TEND`
 # overrides it for a smoke test of the section itself.
 const BOUNDS_TEND = T(parse(Float64, get(ENV, "TREEGH_BOUNDS_TEND", "50")))
-# Its autopsy steps the integrator by hand, which `evolution_cases.jl` does
-# not import.
-using SciMLBase: init, step!
+# Its autopsy steps the integrator by hand: the driver's own
+# (`gh_integrator`, IMEXRungeKutta's RK4 by owner; amended 2026-09-26).
+import IMEXRungeKutta
 
 # The section is a function rather than a top-level block: it defines
 # closures that assign to its own locals, which a script's soft scope makes
@@ -1334,15 +1334,12 @@ function bounds_section(rows)
             p = with_interior(p, TreeGeneralizedHarmonic.chunk_interior(case0,
                                                                         dt_used,
                                                                         one(T)))
-            integ = init(ODEProblem(gh_rhs!, u, (tc, tc + 1), p), RK4();
-                         dt=dt_used, adaptive=false, save_everystep=false,
-                         stage_limiter=gh_stage_limiter!,
-                         step_limiter=gh_step_limiter!)
+            integ = gh_integrator(p, u, (tc, tc + 1); dt=dt_used)
             history = Any[]
             fatal = nothing
             for s in 1:steps
                 try
-                    step!(integ)
+                    IMEXRungeKutta.step!(integ)
                 catch e
                     e isa InterruptException && rethrow()
                     fatal = (step=s, what=describe_failure(e, catch_backtrace()))

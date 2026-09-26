@@ -92,7 +92,8 @@ spinning hole shows with and without it (`CODE.md`, "The trailing side (step
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
-proof-of-concept target, RK4 from OrdinaryDiffEq, the analysis quantities
+proof-of-concept target, RK4 from OrdinaryDiffEq (IMEXRungeKutta's RK4 by
+block owner since 2026-09-26), the analysis quantities
 as part of the deliverable, an error indicator for refinement, `Float64`
 on Symmetry's H200 as the device requirement, no checkpointing, GPU
 kernel efficiency deferred to a research project. `PLAN.md` breaks the
@@ -170,8 +171,8 @@ ranges of `α`, `γ`'s spectrum, `|β|` and `Π`'s scale, and the gate radius;
 `default_bounds` and `default_gate` are the named proposals, and a
 `GHCase` carries one as `bounds`, default `nothing`), the pointwise
 `bounds_project` in ADM variables, `gh_bounds_kernel!` behind
-`gh_stage_limiter!` — the state's third writer, a `solve` keyword beside
-`step_limiter` — `BoundsAccounting`, the validity monitor
+`gh_stage_limiter!` — the state's third writer, the integrator's stage
+limiter beside the paste — `BoundsAccounting`, the validity monitor
 (`validity_rows`) and `evolved_nonfinite`, which is what `max_speed_of`
 and the record's `finite` now read. `diag` has 22 slots; the record grew
 `bounds_hits`, `bounds_nonfinite`, `bounds_r_max` and the eight
@@ -294,6 +295,20 @@ geometry starts at its **core** surface and is widened by the travel
 a 1 % margin. `test/moving_tests.jl` is its file and `hole_runs.jl`'s
 `moving` section its runs.
 
+From 2026-09-26 the **integrator is IMEXRungeKutta's RK4 by block owner**:
+`stepping.jl` — `state_partition` (TreeAMR's `threadchunks` as the state
+vector's partition, `nothing` on a device), `gh_limiter!` (the
+projection, then the paste, passed as both the stage and the step limiter), `ProblemRef`, `gh_integrator` and `gh_solve` —
+and `evolve!` builds one integrator per chunk, stepping its own state in
+place. OrdinaryDiffEq and SciMLBase are gone from both environments. The
+same change removed a `Core.Box` from `gh_rhs_kernel!` (see "Things that
+will bite"), which made the right-hand side 3–4× faster at 64 threads and
+let it compile for a **device for the first time**: `evolve!` runs end to
+end on Metal at `Float32` and on an H200 at both precisions, the `Float64`
+record equal to the CPU's. `bench/stepping.jl` measures a step by
+integrator and backend; `CODE.md`, "Time integration", has its numbers.
+There are still no device *tests* (step 9).
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -355,7 +370,13 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4670 assertions in 16m33** at one thread and **10m57** at
+The suite is **4684 assertions in 13m34** at one thread and **4692 in
+10m04** at four after the IMEXRungeKutta driver (2026-09-26; the eight extra
+at four threads are `stepping_tests.jl`'s per-block owner checks, which have
+nothing to say at one thread): `stepping_tests.jl` is 13 or 21 new claims in
+about 37 s, and the three minutes the one-thread run lost are OrdinaryDiffEq's
+compilation and the right-hand side's allocation, both gone. It was **4670
+assertions in 16m33** at one thread and **10m57** at
 four after step 8′ (load 3–9): its 11 new claims are `moving_tests.jl`'s
 levers, the file `20.8 s` / `18.6 s`. After step 8 it was **4659 assertions
 in 17m16** at one thread and **11m36** at four (load 7–13): its 28 new claims are `moving_tests.jl`,
@@ -608,6 +629,17 @@ sources into a directory whose jobs are running, then precompiling, rewrites
 the `.so` they have mapped — the likely cause of step 8's `SIGBUS`es, which
 did not recur from `step-8-sigbus` and `step-8-t`.
 
+The step benchmark (added 2026-09-26) is `bench/stepping.jl`, driven by
+environment variables its header lists; on Symmetry it ran pinned
+(`JULIA_EXCLUSIVE=1`, `srun --cpu-bind=none`, the fastest of the four
+placements) in a scratch copy with `OrdinaryDiffEqLowOrderRK` and
+`SciMLBase` added for its comparison rows, and on an H200 in a copy with
+`CUDA` added — never in the package's own environment:
+
+```bash
+BENCH_MODE=step BENCH_CASE=wave,hole julia --project=. -t 4 bench/stepping.jl
+```
+
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a
 64-core EPYC node, which is what makes them parallel — a node *core* is
@@ -688,11 +720,41 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   is `N ≥ 2G + 2`, so `q = 4, 6, 8` need `N ≥ 8, 10, 12`. The tests use
   `N = 10` at `q = 6`; `PLAN.md`'s "`N = 8`, `q = 2, 4, 6`" was one row
   wider than the mesh allows, and `FieldSet` says so rather than running.
+- **A closure in a kernel must not capture a name assigned twice in that
+  body** (found 2026-09-26). Lowering boxes such a variable — even when the
+  two assignments are in branches a `Val` compiles away — and a `Core.Box`
+  is untyped: `gh_rhs_kernel!`'s `:none` branch and its layer branch both
+  assigned `∂ₜh, ∂ₜΠ`, which the `ntuple(Val(NC)) do v … end` store
+  captured, so every right-hand side on the CPU allocated ~570 bytes a
+  point (7–15 % of its time at four threads, and 3–4× at 64, where the
+  threads contend for the garbage collector) and no device would compile
+  the kernel at all ("unsupported dynamic function invocation (call to
+  getindex)"). Give each branch its own names. The symptom on the CPU is
+  `@allocated gh_rhs!(…)` growing with the block count; the ghost fill's
+  13 kB is fixed. `Profile.Allocs` names the line.
 - **KernelAbstractions refuses a `return` in a kernel** — anywhere in the
   body, closures included, which is what `ntuple(Val(10)) do v … end` is.
   End the block with the value instead. The error names the kernel and
   arrives at precompilation, so it is cheap; it is here because the
   package's own convention asks for an explicit `return` everywhere else.
+- **The time integrator is IMEXRungeKutta's `RK4()`, by block owner, and
+  every run goes through `gh_integrator`/`gh_solve`** (`src/stepping.jl`,
+  from 2026-09-26; OrdinaryDiffEq and SciMLBase are no longer dependencies
+  of the package or its tests). `state_partition` hands IMEXRungeKutta the
+  entries of TreeAMR's `threadchunks(nblocks)` per thread, so each block's
+  stage arithmetic runs on the thread `map_blocks!` runs the block on; on a
+  device it is `nothing`, the broadcast path. `evolve!` passes `alias_u0 =
+  true`: the integrator steps the run's own state vector in place, so an
+  observer that keeps `u` keeps a vector that changes (none does). The
+  integrator's `p` and `dt` are constants and each `init` allocates and
+  first-touches four state-sized scratch vectors — 0.13–0.36 s at 64
+  threads on 320 MB, measured 2026-09-26 — so `evolve!` builds **one per
+  chunk** and swaps a moving hole's refilled problem in between pieces
+  (`swappable = true`: the integrator's `p` is a `ProblemRef`, `integ.p.p =
+  p′`), rather than one per piece. IMEXRungeKutta has no scratch reuse
+  across chunks; ask for it there rather than reaching into its plan. Its
+  `RK4` clashes with OrdinaryDiffEq's by name: the package `import`s it
+  `as IRK`.
 - **The RHS never mutates `u`, and the state has exactly three writers**
   (amended in step 8b). The interior layer is a term of the right-hand
   side, `du = w F(u) − ρ (u − u_exact)`, so the integrator's arithmetic is
@@ -700,8 +762,14 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `step_limiter!`, is the second; step 8b's range projection
   (`src/bounds.jl`), from the `stage_limiter!` on every stage vector and
   once after the initial fill and every regrid, is the third. Both limiters
-  are **`solve` keywords**, not `RK4(; …)` arguments — the constructor form
-  is deprecated and will be silently unread. Do not add a fourth writer.
+  are **integrator keywords**, passed by `gh_integrator` (`src/stepping.jl`)
+  and nowhere else. **Under IMEXRungeKutta (from 2026-09-26) the two are
+  one limiter on every state vector** (Erik's decision): `gh_limiter!`, the
+  projection and then the paste, is passed as both the stage limiter (the
+  stage values `f_exp!` reads) and the step limiter (the result, which the
+  next step's first stage reads), because IMEXRungeKutta's stage limiter
+  never sees the result. Do not split them again, and do not add a fourth
+  writer.
 - **A limiter writes back only where it fired, and a run on which nothing
   fires is bit for bit the run without it.** The range projection keeps a
   healthy quantity's bits — it reassembles `h_tt`, `h_ti` or the spatial
@@ -1128,12 +1196,12 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   threading, 2026-09-25). TreeAMR runs every per-block pass on the
   block's owner thread; a launch on whichever thread is free moves the
   blocks between cores and cost TreeAMR's RHS `2.4×` on 64 cores. The two
-  helpers are unexported, so `prerequisite_tests.jl` names the one this
-  package calls. RK4's stage arithmetic is OrdinaryDiffEq's serial
-  broadcast and is *not* owner-based: 1 % of a step at four threads here,
-  unmeasured on Symmetry, and it first-touches the integrator's vectors
-  from one core, so TreeAMR's "pin, then drop the interleaving" is
-  unproven here (`CODE.md`, "Precision, threads, devices").
+  helpers are unexported, so `prerequisite_tests.jl` names the ones this
+  package calls (`threaded_foreach`, and `threadchunks` for the
+  integrator's partition). RK4's stage arithmetic is owner-based too from
+  2026-09-26 (IMEXRungeKutta by `state_partition`; it was OrdinaryDiffEq's
+  serial broadcast, 12–14 % of a step at 64 threads — `CODE.md`, "Time
+  integration").
 - **`Base` is not generic even though the mesh is.** MultiFloats defines
   no `rem`, no conversion to `Integer`, no `Float64(::Float32x2)`. Use
   `wrap` / `ceilint` / `floorint` / `tofloat64` from `precision.jl`.

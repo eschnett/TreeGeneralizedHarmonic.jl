@@ -783,15 +783,13 @@ a case whose `bounds` is `nothing`.
 **A stage limiter and not a step limiter**, because what it guards against
 is a right-hand side evaluated on a state that is not a metric: a `NaN` or a
 degenerate `γ` in a stage vector is an `F` of `NaN` at every point whose
-stencil reads it, one stage later. It is passed to `solve` as the
-`stage_limiter` keyword beside `step_limiter = gh_step_limiter!` — a `solve`
-keyword and not an `RK4(; …)` argument, the constructor form being
-deprecated and, once the deprecation completes, silently unread
-(TreeHydro's "Floors and the atmosphere", amended in its step 8). Read
-against the installed `OrdinaryDiffEqLowOrderRK` 2.2.5: RK4 calls it on the
-three stage vectors and then on `u`, *before* the FSAL evaluation and
-before the step limiter, so the `:pasted` overwrite still has the last word
-on the ball it owns.
+stencil reads it, one stage later. It is the first half of
+[`gh_limiter!`](@ref), which [`gh_integrator`](@ref) passes as both
+IMEXRungeKutta's stage and step limiter (amended 2026-09-26; it was
+OrdinaryDiffEq's `stage_limiter` alone): the three stage values of an RK4
+step that the right-hand side reads, and the step's result — four
+projections a step, as before. The paste follows it in every call, so the
+`:pasted` overwrite still has the last word on the ball it owns.
 
 `integrator` is not read and may be `nothing`. This is the second of the
 package's two limiters and the third and last writer of the state

@@ -376,13 +376,22 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
     # ([`dissipation_rate`](@ref), the `γ0` pattern).
     εh = dissipation_rate(ε_KO, t, x) * inv_h
 
+    # **Every name a closure below captures is assigned once in this body**
+    # (amended 2026-09-26). Lowering boxes a captured variable that is
+    # assigned twice — in two branches, even when a `Val` compiles one of
+    # them away — and a `Core.Box` is untyped: the `:none` branch's `∂ₜh`,
+    # captured by its store, shared its name with the layer's, and every
+    # right-hand side on the CPU allocated ~570 bytes a point through the
+    # box while no device would compile it at all ("unsupported dynamic
+    # function invocation"). Hence `Fh`/`FΠ` here, `ρk`/`tk` in the levered
+    # core, and the `w`/`ρ` renaming below.
     if INT === :none
-        ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
-                                   inv_h, γ0, γ2, εh, Val(q), Val(HASH),
-                                   Val(DISS))
+        Fh, FΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
+                                 inv_h, γ0, γ2, εh, Val(q), Val(HASH),
+                                 Val(DISS))
         ntuple(Val(NC)) do v
-            du[inner..., v, b] = ∂ₜh[v]
-            du[inner..., NC + v, b] = ∂ₜΠ[v]
+            du[inner..., v, b] = Fh[v]
+            du[inner..., NC + v, b] = FΠ[v]
             nothing
         end
     else
@@ -400,12 +409,12 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
             if INT === :fitted && (fitp !== nothing || !iszero(trail))
                 # Step 8′'s levers (the side-dependent ramp does not touch
                 # the core, where `ρ = ρ_max` already; the exact target does).
-                ρc = interior.ρ_max
-                tg = _lever_target(tw, inner, b, t, t_f, fitp, x)
+                ρk = interior.ρ_max
+                tk = _lever_target(tw, inner, b, t, t_f, fitp, x)
                 ntuple(Val(2 * NC)) do v
                     du[inner..., v, b] = (rate ? _cached_rate(tw, inner, b, v) :
                                           zero(T)) -
-                                         ρc * (work[var + (v - 1) * sv] - tg[v])
+                                         ρk * (work[var + (v - 1) * sv] - tk[v])
                     nothing
                 end
             elseif INT === :fitted
@@ -903,8 +912,9 @@ state outside the integrator — the other is the range projection of step
 8b, [`gh_stage_limiter!`](@ref) — and `CLAUDE.md`'s "The RHS never mutates
 `u`" names exactly these three writers. The dispatch below keeps this one
 to the variant that needs it: the `:none`, `:damped` and `:frozen` methods
-are empty and compile away, so the same `solve(…; step_limiter =
-gh_step_limiter!)` serves every run.
+are empty and compile away, so the same limiter serves every run
+([`gh_limiter!`](@ref), which projects and then calls this on every stage
+value and every step's result; amended 2026-09-26).
 
 `u` arrives in state layout and `statearray(u, p.U)` is the block view, as
 `PLAN.md`'s "Sharp edges" says.

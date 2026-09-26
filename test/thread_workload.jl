@@ -18,9 +18,10 @@
 # command-line argument to Julia and cannot be changed from inside a
 # running session. Three rules keep it usable as one:
 #
-#   * **Nothing outside `Base` and the two packages.** No ODE package —
-#     `rk4!` below is fifteen lines — so a subprocess starts in seconds
-#     rather than compiling `OrdinaryDiffEq`; `hash` rather than a
+#   * **Nothing outside `Base` and the two packages.** The steps are the
+#     package's own integrator (`gh_solve`, IMEXRungeKutta's RK4 with its
+#     stage arithmetic by block owner — a dependency of the package, so the
+#     subprocess compiles nothing it would not anyway); `hash` rather than a
 #     cryptographic digest; `repr`, which round-trips a `Float64` exactly,
 #     so that a difference in the last bit shows as different characters.
 #   * **Everything that threads is on the path.** The initial-data cycle
@@ -43,25 +44,16 @@ using TreeGeneralizedHarmonic
 digest(u::Vector{<:Real}) = string(hash(u); base=16, pad=16)
 digest(s::AbstractString) = string(hash(s); base=16, pad=16)
 
-# Plain fixed-step RK4, so the workload needs no ODE package. The same
-# four stages `OrdinaryDiffEqLowOrderRK`'s `RK4()` takes, which is what
-# the rest of the suite integrates with; what is being compared here is
-# the *mesh's* determinism, and a stepper of our own keeps the subprocess
-# cheap.
+# The driver's own integrator, `nsteps` fixed steps of RK4 through
+# `gh_solve` (amended 2026-09-26: this was a hand-written RK4 while the
+# driver used OrdinaryDiffEq). Its stage arithmetic runs by block owner, a
+# threaded path of its own, so it belongs on the path this workload
+# digests: the by-owner combination must give the same bits at every
+# thread count, as every other parallel pass here does.
 function rk4!(u, problem, t, dt, nsteps)
-    k1, k2, k3, k4, tmp = (similar(u) for _ in 1:5)
-    for _ in 1:nsteps
-        gh_rhs!(k1, u, problem, t)
-        @. tmp = u + (dt / 2) * k1
-        gh_rhs!(k2, tmp, problem, t + dt / 2)
-        @. tmp = u + (dt / 2) * k2
-        gh_rhs!(k3, tmp, problem, t + dt / 2)
-        @. tmp = u + dt * k3
-        gh_rhs!(k4, tmp, problem, t + dt)
-        @. u += (dt / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
-        t += dt
-    end
-    return u, t
+    t1 = t + nsteps * dt
+    u = gh_solve(problem, u, (t, t1); dt=dt, alias_u0=true)
+    return u, t1
 end
 
 """

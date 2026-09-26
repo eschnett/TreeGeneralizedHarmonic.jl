@@ -59,8 +59,7 @@ using KernelAbstractions: @Const, @index, @kernel
 using KernelAbstractions: Backend, CPU, allocate, get_backend
 using KorzynskiSpin: horizon_spin
 using LinearAlgebra: UpperTriangular, cond, det, dot, qr, tr
-using OrdinaryDiffEqLowOrderRK: RK4
-using SciMLBase: ODEProblem, solve
+import IMEXRungeKutta as IRK
 using SpacetimeMetrics: AbstractMetric, GaugeWave, Harmonic, KerrSchild,
                         Minkowski, ShiftedMinkowski, dmetric, gauge_source_grad
 using StaticArrays: SArray, SMatrix, SVector
@@ -136,6 +135,9 @@ export dirichlet
 export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate
 export gh_step_limiter!, paste_interior!
 
+# The time integrator (IMEXRungeKutta's RK4 by block owner, 2026-09-26)
+export state_partition, gh_limiter!, gh_integrator, gh_solve, ProblemRef
+
 # Constraints and the masks their norms take
 export AllPoints, is_evolved, adm_constraints_at_node
 export gh_constraint!, adm_constraint!, gh_error!
@@ -170,6 +172,9 @@ include("gauge.jl")
 include("initialdata.jl")
 include("boundaries.jl")
 include("evolution.jl")
+# After `evolution.jl` and `bounds.jl`: the integrator couples `gh_rhs!` to
+# the two limiters (added 2026-09-26, replacing OrdinaryDiffEq's RK4).
+include("stepping.jl")
 include("constraints.jl")
 # After `constraints.jl` and before `driver.jl`: the indicator dispatches on
 # `GHCase` and `GHProblem` and reuses the monitors' scatter-and-fill

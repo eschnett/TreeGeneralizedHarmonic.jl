@@ -218,13 +218,15 @@ const TREEAMR_NAMES = (
     :firing_boxes,
 )
 
-# The one TreeAMR helper this package calls that TreeAMR does not export:
+# The TreeAMR helpers this package calls that TreeAMR does not export:
 # `threaded_foreach`, the owner-mapped host loop (chunk `c` on thread `c`
-# every call) behind the horizon interpolator's batch. TreeAMR documents it
-# as an internal, so a rename on `main` is possible and would surface as an
-# `UndefVarError` only in the first horizon find — named here instead
+# every call) behind the horizon interpolator's batch, and `threadchunks`,
+# the ownership partition itself, which `state_partition` turns into the
+# integrator's partition of the state vector (added 2026-09-26). TreeAMR
+# documents both as internals, so a rename on `main` is possible and would
+# surface as an `UndefVarError` in the middle of a run — named here instead
 # (added with TreeAMR's owner-based threading, 2026-09-25).
-const TREEAMR_INTERNAL = (:threaded_foreach,)
+const TREEAMR_INTERNAL = (:threaded_foreach, :threadchunks)
 
 # The backgrounds of `CODE.md`'s "Initial data and backgrounds" table, the
 # two derivative passes the pointwise algebra is tested against, the ADM

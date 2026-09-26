@@ -26,6 +26,10 @@ using TreeGeneralizedHarmonic
     include("evolution_cases.jl")
     include("convergence_tests.jl")
     include("noise_tests.jl")
+    # The integrator itself (added 2026-09-26): the ownership partition, owner
+    # against broadcast, and the swap `evolve!` refills a moving hole's
+    # target through, which no run in the suite reaches.
+    include("stepping_tests.jl")
     # Step 4's four. They come after `evolution_cases.jl` because all of
     # them are runs; `threading_tests.jl` is last because it starts a
     # subprocess, and a failure anywhere above is cheaper to read than a

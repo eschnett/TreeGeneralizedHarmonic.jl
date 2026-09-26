@@ -256,9 +256,10 @@ own.
 ## The range projection (added in step 8b)
 
 A case with [`StateBounds`](@ref) gets `CODE.md`'s third state writer:
-[`gh_stage_limiter!`](@ref) is passed to `solve` as its `stage_limiter`,
-beside the `:pasted` variant's `step_limiter`, and runs on every stage
-vector; the same projection is applied once to the initial data and once to
+[`gh_stage_limiter!`](@ref) is the integrator's stage limiter and the first
+half of its step limiter, beside the `:pasted` variant's paste
+([`gh_integrator`](@ref)), and runs on every stage vector and every step's
+result; the same projection is applied once to the initial data and once to
 every freshly regridded state, neither of which went through a stage —
 TreeHydro's atmosphere reset, applied where TreeHydro applies it. One
 [`BoundsAccounting`](@ref) is made per run, handed to every problem the run
@@ -933,30 +934,39 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                                      geom.h * refill_frac)), 1, steps) : 1
         end
 
-        # `step_limiter` on `solve` and not `RK4(; step_limiter! = …)`:
-        # the constructor form is deprecated in the resolved
-        # `OrdinaryDiffEqCore` and warns once per solve, which is once per
-        # chunk (noted in step 5; `PLAN.md`'s sharp edge named the older
-        # spelling). The hook and its signature are unchanged. The
-        # `stage_limiter` beside it is step 8b's range projection, a no-op
-        # for a case without bounds; both are `solve` keywords for the same
-        # reason.
-        tcur = tstart
+        # The steps, through IMEXRungeKutta's RK4 by block owner
+        # (`gh_integrator`; amended 2026-09-26, replacing OrdinaryDiffEq's
+        # `solve`). **One integrator per chunk.** It steps `u` in place
+        # (`alias_u0`), so the run's state vector — allocated and
+        # first-touched by owner — is the one every step writes, and the
+        # stage arithmetic runs on the threads that own the blocks. Its step
+        # and span are the chunk's; a moving hole's pieces refill the target
+        # into a new problem, which is swapped into the same integrator
+        # between steps (`swappable`, a `ProblemRef`) rather than built into
+        # a new one, whose `init` allocates four state-sized scratch vectors
+        # (0.1–0.4 s at 64 threads on 320 MB).
+        integ = gh_integrator(p, u, (tstart, stop); dt=dt_used, alias_u0=true,
+                              swappable=npieces > 1)
+        integ.nsteps == steps || error(
+            "internal error: the integrator counts $(integ.nsteps) steps over " *
+            "this chunk where the driver sized $steps; the step would not be " *
+            "the one the CFL check and the relaxation rate were computed for.")
         for piece in 1:npieces
             nk = (steps * piece) ÷ npieces - (steps * (piece - 1)) ÷ npieces
-            tnext = piece == npieces ? stop : tcur + nk * dt_used
             if piece > 1
-                p = refill(p, tcur, u)
+                p = refill(p, integ.t, u)
+                integ.p.p = p
                 fitcost.nrefills[] += 1
                 fitcost.chunk_refills[] += 1
             end
-            sol = solve(ODEProblem(gh_rhs!, u, (tcur, tnext), p), RK4();
-                        dt=dt_used, adaptive=false, save_everystep=false,
-                        stage_limiter=gh_stage_limiter!,
-                        step_limiter=gh_step_limiter!)
-            u = sol.u[end]
-            tcur = tnext
+            for _ in 1:nk
+                IRK.step!(integ)
+            end
         end
+        integ.t == stop || error(
+            "internal error: the chunk's integrator ended at t = $(integ.t), " *
+            "not at the chunk's end $stop.")
+        u = integ.u
         nsteps += steps
 
         # (2) the recheck. It throws, and it is meant to.

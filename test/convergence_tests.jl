@@ -119,7 +119,7 @@ end
 
 @testset "Minkowski does not move under the integrator either" begin
     # Guards the end-to-end path the convergence studies run through —
-    # `gh_dt`, `ODEProblem`, four RK4 stages per step, the ghost fill
+    # `gh_dt`, `gh_solve`, four RK4 stages per step, the ghost fill
     # between them — on the one solution whose right-hand side is *exactly*
     # zero. Anything that leaked a term anywhere in that loop shows here as
     # a state vector that is no longer identically zero, with no tolerance

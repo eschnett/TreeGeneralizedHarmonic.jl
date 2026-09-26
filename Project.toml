@@ -6,17 +6,17 @@ authors = ["Erik Schnetter <schnetter@gmail.com>"]
 [deps]
 AbstractSphericalHarmonics = "ee470b23-2871-4f3a-b920-8523874a9e46"
 ApparentHorizonFinder = "2326d305-03d0-4260-ba27-fc7d1edfc55d"
+IMEXRungeKutta = "6f46d5f7-e15e-41aa-a098-eed9d1a63ad8"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 KorzynskiSpin = "dddeb715-7fc8-4947-8935-98683755b697"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-OrdinaryDiffEqLowOrderRK = "1344f307-1e59-4825-a18e-ace9aa3fa4c6"
-SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 SpacetimeMetrics = "77e61b41-605e-43a6-b70f-04b7dcd1f572"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TreeAMR = "91bc416d-811c-44c1-9bc4-b9c8bbdbbd08"
 
 [sources]
 ApparentHorizonFinder = {rev = "main", url = "https://github.com/eschnett/ApparentHorizonFinder.jl"}
+IMEXRungeKutta = {rev = "main", url = "https://github.com/eschnett/IMEXRungeKutta.jl"}
 KorzynskiSpin = {rev = "main", url = "https://github.com/eschnett/KorzynskiSpin.jl"}
 SpacetimeMetrics = {rev = "main", url = "https://github.com/eschnett/SpacetimeMetrics.jl"}
 TreeAMR = {rev = "main", url = "https://github.com/eschnett/TreeAMR.jl"}
@@ -24,11 +24,10 @@ TreeAMR = {rev = "main", url = "https://github.com/eschnett/TreeAMR.jl"}
 [compat]
 AbstractSphericalHarmonics = "1.2"
 ApparentHorizonFinder = "2.1"
+IMEXRungeKutta = "1.1"
 KernelAbstractions = "0.9.42, 1"
 KorzynskiSpin = "1.1"
 LinearAlgebra = "1.11"
-OrdinaryDiffEqLowOrderRK = "2.2.5"
-SciMLBase = "3.50.1"
 SpacetimeMetrics = "1.6"
 StaticArrays = "1"
 TreeAMR = "0.1.2"

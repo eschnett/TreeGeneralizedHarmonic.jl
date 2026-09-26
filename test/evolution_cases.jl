@@ -16,9 +16,7 @@
 # property.
 
 using KernelAbstractions: CPU
-using OrdinaryDiffEqLowOrderRK: RK4
 using Random: MersenneTwister
-using SciMLBase: ODEProblem, solve
 using StaticArrays: SMatrix, SVector
 import SpacetimeMetrics
 using TreeGeneralizedHarmonic: ceilint
@@ -74,8 +72,7 @@ function gh_errors(::Type{T}, case::GHCase{T}; N, roots, q, t_end,
     nsteps = max(1, ceilint(t_end / dt))
     dt = t_end / nsteps
 
-    sol = solve(ODEProblem(gh_rhs!, u0, (zero(T), t_end), problem), RK4();
-                dt=dt, adaptive=false, save_everystep=false)
+    u1 = gh_solve(problem, u0, (zero(T), t_end); dt=dt)
 
     exact = FieldSet{T}(forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3),
                         backend=backend)
@@ -83,7 +80,7 @@ function gh_errors(::Type{T}, case::GHCase{T}; N, roots, q, t_end,
     uexact = statevector(exact)
     gather!(uexact, exact)
 
-    err = sol.u[end] .- uexact
+    err = u1 .- uexact
     return (l2=volume_weighted_norm(fs, err),
             linf=volume_weighted_norm(fs, err; p=Inf),
             h=minimum_spacing(T, forest), nsteps=nsteps,
@@ -171,9 +168,7 @@ function gh_noise_growth(::Type{T}, case::GHCase{T}; N, roots, q, nsteps,
     u0 = gh_noisy_state(T, fs, case; amplitude=amplitude, seed=seed)
     dt = gh_dt(problem, u0; cfl=cfl)
     t_end = nsteps * dt
-    sol = solve(ODEProblem(gh_rhs!, u0, (zero(T), t_end), problem), RK4();
-                dt=dt, adaptive=false, save_everystep=false)
-    u1 = sol.u[end]
+    u1 = gh_solve(problem, u0, (zero(T), t_end); dt=dt)
     l2_0 = volume_weighted_norm(fs, u0)
     l2_1 = volume_weighted_norm(fs, u1)
     linf_0 = volume_weighted_norm(fs, u0; p=Inf)
