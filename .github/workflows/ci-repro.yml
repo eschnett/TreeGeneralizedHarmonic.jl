@@ -39,22 +39,6 @@ jobs:
           for flags in "--code-coverage=@$PWD --check-bounds=yes" "" "--code-coverage=@$PWD" "--check-bounds=yes"; do
             julia --project=. $flags repro.jl || true
           done
-      - name: stage 2 environment
-        if: steps.host.outputs.affected == 'true'
-        run: |
-          julia --project=probeenv -e '
-            using Pkg
-            Pkg.add([PackageSpec(url="https://github.com/eschnett/ApparentHorizonFinder.jl", rev="main"),
-                     PackageSpec(url="https://github.com/eschnett/KorzynskiSpin.jl", rev="main"),
-                     PackageSpec(url="https://github.com/eschnett/SpacetimeMetrics.jl", rev="main"),
-                     PackageSpec(url="https://github.com/eschnett/IMEXRungeKutta.jl", rev="main")])
-            Pkg.develop(path=pwd())
-            Pkg.add(["ForwardDiff", "Random", "StaticArrays", "TreeAMR"])'
-      - name: stage 2, pointwise_tests.jl:97 alone
-        if: steps.host.outputs.affected == 'true'
-        working-directory: test
-        run: |
-          W="${{ github.workspace }}"
-          for flags in "--code-coverage=@$W --check-bounds=yes" ""; do
-            julia --project=../probeenv $flags ../.github/ci-repro/stage2.jl 2>&1 | grep -E "STAGE2|ERROR" || true
+          for flags in "--code-coverage=@$PWD --check-bounds=yes" ""; do
+            julia --project=. $flags repro2.jl || true
           done
