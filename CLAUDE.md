@@ -372,7 +372,11 @@ on **the macOS cell only** (2026-09-26): instrumented runs compute *wrong
 numbers* on GitHub's Linux runners (207 failures on the threaded Linux
 cell at Julia 1.13.1, which the removed gate had left instrumented), while
 the instrumented macOS cell and the instrumented suite on Symmetry pass.
-Keep coverage off the Linux cells until that is understood. There is
+A probe of eighteen GitHub runners found the trigger: `--code-coverage`
+together with `--check-bounds=yes` (what `julia-runtest` passes; either
+alone is fine) on some AMD Zen 4/Zen 5 runners (EPYC 9V45, 9V74),
+deterministically — a miscompilation, not a bad machine; EPYC 7763 and
+Xeon 8573C runners pass. Keep coverage off the Linux cells. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
@@ -1216,7 +1220,11 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   these to roundoff against the scale that produced the number, never with
   `isequal`. The bit-identity that *is* an invariant is the same compiled
   code, at the same call site, at a different thread count, which is what
-  `test/threading_tests.jl` will assert.
+  `test/threading_tests.jl` will assert. Two tests claimed more and were
+  relaxed to roundoff on 2026-09-27, when x86-64 stopped giving it:
+  `interior_tests.jl`'s `:damped` against `:none` outside `r_1` (two kernel
+  specialisations, 120 eps on `znver3`) and `moving_tests.jl`'s fill
+  against a host `state_tuple` (under coverage on Linux).
 - **Never thread anything a TreeAMR callback can reach**, and never
   accumulate into shared state in a loop of your own: bit-identity
   across thread counts is the invariant, and `test/threading_tests.jl`

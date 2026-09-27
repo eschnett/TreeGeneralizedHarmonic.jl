@@ -5044,6 +5044,21 @@ invariant was being met by the bug** — both paths were equally dynamic
 before. Three ways out, and the choice is a design decision: keep the
 identity and the allocations; keep the fix and weaken `out_identical` to
 roundoff (amending the claim here); or find a spelling that gives both.
+**(Decided 2026-09-27: the fix, and roundoff.** IMEXRungeKutta's
+integration of 2026-09-26 removed the box by giving each branch its own
+names, and the collision arrived as predicted — on x86-64 only: Apple
+silicon still fuses the two kernels alike, while on an EPYC 7543
+(`znver3`, Symmetry and GitHub's Linux runners) 241 914 of 962 780 values
+outside `r_1` differ, by at most **120 eps** of the variable's largest
+`|du|`. `interior_tests.jl` now bounds that at 512 eps and reports the
+ratio; an interior term leaking outside `r_1` would be of order `ρ_max`
+times the test's `10⁻³` perturbation. The same judgement relaxed
+`moving_tests.jl`'s "the analytic solution outside the offset surface bit
+for bit", a kernel's fill against a host `state_tuple`, which differed
+only under coverage on Linux: bounded at 64 eps of each variable's largest
+value, measured `0` plain and `1.4` eps under `--code-coverage
+--check-bounds=yes` on an EPYC 7532, where the interior's ratio is `120`
+and `96` eps.**)**
 
 **What allocation remains is TreeAMR's, and so is the `BigInt`.** With the
 `let` patch in place `evolution.jl` leaves the allocation profile

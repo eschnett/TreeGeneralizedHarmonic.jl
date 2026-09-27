@@ -621,7 +621,10 @@ end
     worst = zero(T)
     scale = zero(T)
     core_zero = true
-    out_identical = true
+    # Outside `r_1`, per variable: the largest `|du|` without an interior and
+    # the largest difference the interior makes.
+    out_scale = zeros(T, 20)
+    out_diff = zeros(T, 20)
     for b in 1:nblocks(fs), k in 1:forest.N, j in 1:forest.N, i in 1:forest.N
         x = coordinates(fs, b, (i + G, j + G, k + G))
         r = sqrt(sum(abs2, x))
@@ -630,8 +633,11 @@ end
             core_zero &= all(v -> A_i[i, j, k, v, b] === zero(T), 1:20)
         elseif r ≥ int.r_1
             nout += 1
-            out_identical &= all(v -> A_i[i, j, k, v, b] === A_n[i, j, k, v, b],
-                                 1:20)
+            for v in 1:20
+                out_scale[v] = max(out_scale[v], abs(A_n[i, j, k, v, b]))
+                out_diff[v] = max(out_diff[v],
+                                  abs(A_i[i, j, k, v, b] - A_n[i, j, k, v, b]))
+            end
         else
             nlayer += 1
             w, ρ = interior_profiles(int, r)
@@ -652,10 +658,21 @@ end
     end
 
     # `CODE.md`: `∂_t u = w(r) F(u) − ρ(r)(u − u_exact)`, with `w = 1` and
-    # `ρ = 0` outside `r_1` — which has to be the *same numbers* as a run
-    # with no interior at all, not merely close ones.
+    # `ρ = 0` outside `r_1` — `F` itself, the same arithmetic as a run with
+    # no interior at all. To roundoff and not bit for bit (amended
+    # 2026-09-27): the two are one `gh_rhs_at_point` inlined into two kernel
+    # specialisations (`Val(:damped)` and `Val(:none)`), and on x86-64 the
+    # compiler fuses them differently since the kernel's `Core.Box` fix —
+    # 241 914 of 962 780 values differ on an EPYC 7543 (`znver3`), by at
+    # most 120 eps of the variable's largest `|du|`, where Apple silicon
+    # agrees bit for bit (`CLAUDE.md`, "Two spellings of one expression").
+    # An interior term leaking outside `r_1` would be of order `ρ_max` times
+    # the `10⁻³` perturbation below, far above a bound of 512 eps.
     @testset "du is w F − ρ (u − u_exact), and F itself outside r_1" begin
-        @test out_identical
+        out_ratio = maximum(v -> iszero(out_diff[v]) ? zero(T) :
+                                    out_diff[v] / out_scale[v], 1:20) / eps(T)
+        @test out_ratio ≤ 512
+        @info "the interior outside r_1, in eps of each variable's largest |du|" out_ratio
         @test core_zero
         @test worst ≤ 1e-12 * scale
     end

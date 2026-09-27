@@ -232,8 +232,10 @@ const TGHm = TreeGeneralizedHarmonic
     # singular — harmonic Kerr at a = 7/10, the disk inside the offset
     # surface — the analytic `:damped` geometry is refused, and the `:fitted`
     # cycle must still converge on data that is finite everywhere, the
-    # analytic solution outside the offset surface bit for bit, the fit inside
-    # it, with the floor holding the layer at the level its geometry was built
+    # analytic solution outside the offset surface (to roundoff: the kernel's
+    # fill and the host's `state_tuple` are one function at two call sites,
+    # which x86-64 under coverage fuses differently — amended 2026-09-27), the
+    # fit inside it, with the floor holding the layer at the level its geometry was built
     # at.
     @testset "a :fitted case's cycle flags on its own data, on G5's chart" begin
         spec = FittedSpec(T; variant=:fitted, margin=4, lmax_shape=12)
@@ -261,7 +263,10 @@ const TGHm = TreeGeneralizedHarmonic
         gather!(u, U)
         @test all(isfinite, u)
         A = statearray(u, U)
-        exact = true
+        # Per variable: the analytic data's largest magnitude outside the
+        # offset surface, and the fill's largest difference from it.
+        scale = zeros(T, 20)
+        diff = zeros(T, 20)
         nout = nin = 0
         for b in 1:nblocks(U), k in 1:8, j in 1:8, i in 1:8
             x = coordinates(U, b, (i + G, j + G, k + G))
@@ -269,12 +274,18 @@ const TGHm = TreeGeneralizedHarmonic
             if g.r ≥ g.r_1
                 nout += 1
                 vals = state_tuple(c7.background, zero(T), x)
-                exact &= all(w -> A[i, j, k, w, b] === vals[w], 1:20)
+                for w in 1:20
+                    scale[w] = max(scale[w], abs(vals[w]))
+                    diff[w] = max(diff[w], abs(A[i, j, k, w, b] - vals[w]))
+                end
             else
                 nin += 1
             end
         end
-        @test exact && nout > 0 && nin > 0
+        ratio = maximum(w -> iszero(diff[w]) ? zero(T) : diff[w] / scale[w], 1:20) / eps(T)
+        @test nout > 0 && nin > 0
+        @test ratio ≤ 64
+        @info "G5's chart: the fill outside the offset surface, in eps of each variable's largest value" ratio
         check_interior_radii(f7, geom, c7.background, G; t=0, center=c7.center)
         lb = level_bounds(c7, f7, 0, G; interior=geom)
         @test all(k -> level(k) ≥ first(block_level_bounds(lb, k)), f7.leaves)

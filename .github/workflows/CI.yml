@@ -87,8 +87,14 @@ jobs:
           # left instrumented) -- `sqrt` of negative order-one arguments,
           # NaNs and errors of `1e-5`, not tolerances -- while the same
           # instrumented suite passes on macOS here and 3444/3444 on
-          # Symmetry. Until that is understood, coverage is measured where
-          # it computes the right answer.
+          # Symmetry. A probe of eighteen runners (2026-09-26) tied it down:
+          # it takes `--code-coverage` *and* `--check-bounds=yes` together
+          # (which is what `julia-runtest` passes; either alone is fine) on
+          # AMD Zen 4/Zen 5 runners -- both EPYC 9V45 jobs failed the same
+          # 139 pointwise claims twice, one of three EPYC 9V74 failed --
+          # while every EPYC 7763, Xeon 8573C and plain run passed. A
+          # deterministic miscompilation on some CPUs, not a faulty machine.
+          # Coverage is measured where it computes the right answer.
           coverage: ${{ matrix.coverage == true && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}
         env:
           # The suite must pass, with identical numbers, threaded as well
