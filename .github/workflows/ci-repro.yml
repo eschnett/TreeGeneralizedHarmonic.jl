@@ -1,0 +1,60 @@
+# TEMPORARY (2026-09-27): shrink the coverage + check-bounds miscompilation
+# on AMD Zen 4/5 with AVX-512 (Julia 1.13) to a standalone reproducer.
+# Jobs on unaffected hardware stop after recording it. On an affected one,
+# stage 1 runs .github/ci-repro/repro.jl (StaticArrays only) in four flag
+# variants; stage 2 runs pointwise_tests.jl:97 alone through the package.
+# Lives only on the branch claude/ci-repro; delete with it.
+name: CI repro
+on:
+  push:
+    branches: [claude/ci-repro]
+jobs:
+  repro:
+    name: ${{ matrix.version }} repro ${{ matrix.i }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["1.13.1"]
+        i: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+            17, 18, 19, 20, 21, 22, 23, 24]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.version }}
+      - name: host
+        id: host
+        run: |
+          target=$(julia -e 'print(Sys.CPU_NAME)')
+          avx512=$(grep -m1 '^flags' /proc/cpuinfo | grep -qw avx512f && echo yes || echo no)
+          echo "HOST julia=$(julia -e 'print(VERSION)') cpu=$(lscpu | sed -n 's/^Model name: *//p') target=$target avx512=$avx512"
+          case "$target" in znver4|znver5) [ $avx512 = yes ] && echo "affected=true" >> "$GITHUB_OUTPUT" ;; esac
+      - name: stage 1, standalone
+        if: steps.host.outputs.affected == 'true'
+        working-directory: .github/ci-repro
+        run: |
+          julia --project=. -e 'using Pkg; Pkg.instantiate()'
+          for flags in "--code-coverage=@$PWD --check-bounds=yes" "" "--code-coverage=@$PWD" "--check-bounds=yes"; do
+            julia --project=. $flags repro.jl || true
+          done
+      - name: stage 2 environment
+        if: steps.host.outputs.affected == 'true'
+        run: |
+          julia --project=probeenv -e '
+            using Pkg
+            Pkg.add([PackageSpec(url="https://github.com/eschnett/ApparentHorizonFinder.jl", rev="main"),
+                     PackageSpec(url="https://github.com/eschnett/KorzynskiSpin.jl", rev="main"),
+                     PackageSpec(url="https://github.com/eschnett/SpacetimeMetrics.jl", rev="main"),
+                     PackageSpec(url="https://github.com/eschnett/IMEXRungeKutta.jl", rev="main")])
+            Pkg.develop(path=pwd())
+            Pkg.add(["ForwardDiff", "Random", "StaticArrays", "TreeAMR"])'
+      - name: stage 2, pointwise_tests.jl:97 alone
+        if: steps.host.outputs.affected == 'true'
+        working-directory: test
+        run: |
+          W="${{ github.workspace }}"
+          for flags in "--code-coverage=@$W --check-bounds=yes" ""; do
+            julia --project=../probeenv $flags ../.github/ci-repro/stage2.jl 2>&1 | grep -E "STAGE2|ERROR" || true
+          done
