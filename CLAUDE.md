@@ -372,11 +372,16 @@ on **the macOS cell only** (2026-09-26): instrumented runs compute *wrong
 numbers* on GitHub's Linux runners (207 failures on the threaded Linux
 cell at Julia 1.13.1, which the removed gate had left instrumented), while
 the instrumented macOS cell and the instrumented suite on Symmetry pass.
-A probe of eighteen GitHub runners found the trigger: `--code-coverage`
+Probes of 146 GitHub runners found the trigger: `--code-coverage`
 together with `--check-bounds=yes` (what `julia-runtest` passes; either
-alone is fine) on some AMD Zen 4/Zen 5 runners (EPYC 9V45, 9V74),
-deterministically — a miscompilation, not a bad machine; EPYC 7763 and
-Xeon 8573C runners pass. Keep coverage off the Linux cells. There is
+alone is fine) on AMD Zen 4/Zen 5 **with AVX-512 exposed** (EPYC 9V45
+always, EPYC 9V74 only on the VMs that expose it), on Julia **1.13.0 and
+1.13.1**, deterministically — a miscompilation, not a bad machine. Zen 3,
+Intel with AVX-512, Julia 1.11.9 and nightly (1.14.0-DEV.3386) pass. Keep
+coverage off the Linux cells until 1.13 carries the fix. (Julia 1.12.7
+fails 59 pointwise identity claims of its own on every CPU under the same
+flags, and on some Zen 4/5 VMs plain: not investigated; CI does not run
+1.12.) There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
