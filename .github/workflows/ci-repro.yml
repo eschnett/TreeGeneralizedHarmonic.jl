@@ -31,14 +31,18 @@ jobs:
           avx512=$(grep -m1 '^flags' /proc/cpuinfo | grep -qw avx512f && echo yes || echo no)
           echo "HOST julia=$(julia -e 'print(VERSION)') cpu=$(lscpu | sed -n 's/^Model name: *//p') target=$target avx512=$avx512"
           case "$target" in znver4|znver5) [ $avx512 = yes ] && echo "affected=true" >> "$GITHUB_OUTPUT" ;; esac
-      - name: stage 1, standalone
+      - name: stage 1, standalone — which pass, which target
         if: steps.host.outputs.affected == 'true'
         working-directory: .github/ci-repro
         run: |
           julia --project=. -e 'using Pkg; Pkg.instantiate()'
-          for flags in "--code-coverage=@$PWD --check-bounds=yes" "" "--code-coverage=@$PWD" "--check-bounds=yes"; do
-            julia --project=. $flags repro.jl || true
-          done
-          for flags in "--code-coverage=@$PWD --check-bounds=yes" ""; do
-            julia --project=. $flags repro5.jl || true
-          done
+          CB="--code-coverage=@$PWD --check-bounds=yes"
+          run() { label=$1; shift; out=$("$@" 2>&1 | grep -E "REPRO|ERROR|Unknown" | head -2 | tr '\n' ' '); echo "VARIANT $label :: $out"; }
+          run baseline            julia --project=. $CB repro.jl
+          run plain               julia --project=. repro.jl
+          run no-slp              env JULIA_LLVM_ARGS=-vectorize-slp=false julia --project=. $CB repro.jl
+          run no-vector-combine   env JULIA_LLVM_ARGS=-disable-vector-combine julia --project=. $CB repro.jl
+          run no-loop-vectorize   env JULIA_LLVM_ARGS=-vectorize-loops=false julia --project=. $CB repro.jl
+          run target-x86-64-v3    julia --project=. -C x86-64-v3 $CB repro.jl
+          run target-skylake-avx512 julia --project=. -C skylake-avx512 $CB repro.jl
+          run target-znver3       julia --project=. -C znver3 $CB repro.jl
