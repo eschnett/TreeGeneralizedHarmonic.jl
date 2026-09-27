@@ -40,5 +40,5 @@ jobs:
             julia --project=. $flags repro.jl || true
           done
           for flags in "--code-coverage=@$PWD --check-bounds=yes" ""; do
-            julia --project=. $flags repro4.jl || true
+            julia --project=. $flags repro5.jl || true
           done
