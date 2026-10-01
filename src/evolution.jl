@@ -577,7 +577,7 @@ evolved**.
 
 It reads the point and nothing else — no stencil, no ghosts — so it is the
 cheapest kernel in the package and can be run at every chunk boundary
-without thinking about it. `block_mapreduce(max)` over its output is
+without thinking about it. `mesh_mapreduce(max)` over its output is
 [`max_speed`](@ref); see `CODE.md`, "The time step".
 
 **The mask is not optional (added in step 5.)** `CODE.md` lists the speed
@@ -955,10 +955,10 @@ paste_interior!(p::GHProblem, u, t) = gh_step_limiter!(u, nothing, p, t)
 The largest characteristic speed over every owned point, from the state
 currently in the working array.
 
-One launch of [`gh_speed_kernel!`](@ref) into `diag`, then
-`block_mapreduce(max)` and a fold over the per-block values **in block
-order**, so the answer does not depend on the thread count
-(`CODE.md`, "Analysis quantities").
+One launch of [`gh_speed_kernel!`](@ref) into `diag`, then TreeAMR's
+`mesh_mapreduce(max)`, whose per-block maxima are combined on the host, so
+the answer does not depend on the thread count (`CODE.md`, "Analysis
+quantities"; a host fold of this package's own until 2026-10-01).
 
 It reads the working array, not a state vector: call it after a
 `scatter!`, which is what [`gh_dt`](@ref) does.
@@ -972,8 +972,7 @@ function max_speed(p::GHProblem{T}; t=zero(T),
     # every type this package runs in. A `NaN` still propagates, which is
     # what makes a blown-up state visible here rather than as a `dt` of
     # zero two lines later.
-    return maximum(block_mapreduce(identity, max, zero(T), p.diag;
-                                   vars=DIAG_SPEED))
+    return mesh_mapreduce(identity, max, zero(T), p.diag; vars=DIAG_SPEED)
 end
 
 """

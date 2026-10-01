@@ -297,8 +297,8 @@ end
     # Three claims: under `AllPoints` the norm is the volume-weighted RMS a
     # host loop computes, which is also TreeAMR's `volume_weighted_norm`;
     # a mask that excludes a region writes exact zeros there and divides by
-    # the volume that is left; and both are combined in block order, so the
-    # answer does not move with the thread count (`threading_tests.jl` is
+    # the volume that is left; and both are TreeAMR's `mesh_mapreduce`,
+    # combined on the host, so the answer does not move with the thread count (`threading_tests.jl` is
     # what checks the last claim across processes).
     T = Float64
     q = 4

@@ -562,10 +562,10 @@ over a region the mask excludes would have to be divided by that region's
 own volume, and the number those rows are read for is the worst point.
 """
 function error_norms(p::GHProblem{T}) where {T}
-    counts = masked_counts(p)
-    err = masked_norms(p, DIAG_ERR; counts=counts)
-    res = masked_norms(p, DIAG_RES; counts=counts)
-    drift = masked_norms(p, DIAG_DRIFT; counts=counts)
+    volume = evolved_volume(p)
+    err = masked_norms(p, DIAG_ERR; volume=volume)
+    res = masked_norms(p, DIAG_RES; volume=volume)
+    drift = masked_norms(p, DIAG_DRIFT; volume=volume)
     return (err_l2=err.l2, err_linf=err.linf, residual=res.linf,
             drift=drift.linf)
 end
@@ -574,48 +574,61 @@ end
     masked_counts(p::GHProblem) -> Vector
 
 How many points of each block the mask counted, from the indicator the
-constraint kernels wrote into `DIAG_MASK`.
+constraint kernels wrote into `DIAG_MASK` — one value per block, the
+per-block half of TreeAMR's reductions. The norms read the volume those
+points cover, [`evolved_volume`](@ref), instead.
+"""
+masked_counts(p::GHProblem{T}) where {T} =
+    block_mapreduce(identity, +, zero(T), p.diag; vars=DIAG_MASK)
+
+"""
+    evolved_volume(p::GHProblem) -> T
+
+The volume of the points the mask counted: each block's count from
+`DIAG_MASK` times its cell volume `h³`, summed over the mesh by TreeAMR's
+`mesh_mapreduce`.
 
 It is the denominator of every masked norm, it is the same for all of
 them, and it is a full sweep of the `diag` array — so
 [`constraint_norms`](@ref) takes it once and hands it to the eight norms
 it assembles rather than letting each recompute it.
 """
-masked_counts(p::GHProblem{T}) where {T} =
-    block_mapreduce(identity, +, zero(T), p.diag; vars=DIAG_MASK)
+function evolved_volume(p::GHProblem{T}) where {T}
+    forest = p.U.forest
+    return mesh_mapreduce(identity, +, zero(T), p.diag; vars=DIAG_MASK,
+                          weight=k -> spacing(T, forest, k)^3)
+end
 
 """
-    masked_norms(p::GHProblem, v::Integer; counts) -> (l2, linf)
+    masked_norms(p::GHProblem, v::Integer; volume) -> (l2, linf)
 
 The volume-weighted L2 and L∞ norms of `diag` variable `v` over the
 **evolved** points — the mask's own definition of which those are.
 
-`CODE.md`, "Analysis quantities": the norms are `block_mapreduce`
-partials weighted by each block's `h³` and combined **in block order**, so
-they are bit-identical across thread counts. The L2 is normalized by the
-evolved volume rather than by the domain's, so that masking a region out
-does not make the number look smaller than it is; where nothing is masked
-that is TreeAMR's `volume_weighted_norm` exactly, which
-`test/constraints_tests.jl` asserts rather than assumes.
+`CODE.md`, "Analysis quantities": the norms are TreeAMR's `mesh_mapreduce`
+— per-block partials weighted by each block's `h³` and combined on the
+host, which is where TreeAMR's M7 will put the `Allreduce` — so they do not
+depend on the thread count, and are promised to roundoff across ranks and
+backends **(amended 2026-10-01**: until then this package combined the
+per-block partials itself, left to right, which `mesh_mapreduce`'s pairwise
+sum moves in the last place**)**. The L2 is normalized by the evolved
+volume rather than by the domain's, so that masking a region out does not
+make the number look smaller than it is; where nothing is masked that is
+TreeAMR's `volume_weighted_norm`, which `test/constraints_tests.jl` asserts
+rather than assumes.
 
 The masked points hold exactly zero — the kernels wrote it there — so the
 maximum is over the evolved points too, and `NaN` from a blown-up run
 still propagates.
 """
 function masked_norms(p::GHProblem{T}, v::Integer;
-                      counts=masked_counts(p)) where {T}
-    sq = block_mapreduce(x -> x * x, +, zero(T), p.diag; vars=v)
-    mx = block_mapreduce(abs, max, zero(T), p.diag; vars=v)
+                      volume=evolved_volume(p)) where {T}
     forest = p.U.forest
-    num = zero(T)
-    den = zero(T)
-    for b in 1:nblocks(p.diag)
-        cellvolume = spacing(T, forest, blockkey(p.diag, b))^3
-        num += cellvolume * sq[b]
-        den += cellvolume * counts[b]
-    end
-    l2 = iszero(den) ? zero(T) : sqrt(num / den)
-    return (l2=l2, linf=isempty(mx) ? zero(T) : maximum(mx))
+    num = mesh_mapreduce(x -> x * x, +, zero(T), p.diag; vars=v,
+                         weight=k -> spacing(T, forest, k)^3)
+    linf = mesh_mapreduce(abs, max, zero(T), p.diag; vars=v)
+    l2 = iszero(volume) ? zero(T) : sqrt(num / volume)
+    return (l2=l2, linf=linf)
 end
 
 """
@@ -632,10 +645,10 @@ holding whatever the last ADM pass wrote, which is why the record names
 them separately and `CODE.md` gives them different cadences.
 """
 function constraint_norms(p::GHProblem{T}) where {T}
-    counts = masked_counts(p)
-    gauge = ntuple(a -> masked_norms(p, DIAG_CGH + a - 1; counts=counts), Val(4))
-    ham = masked_norms(p, DIAG_HAM; counts=counts)
-    mom = ntuple(i -> masked_norms(p, DIAG_MOM + i - 1; counts=counts), Val(3))
+    volume = evolved_volume(p)
+    gauge = ntuple(a -> masked_norms(p, DIAG_CGH + a - 1; volume=volume), Val(4))
+    ham = masked_norms(p, DIAG_HAM; volume=volume)
+    mom = ntuple(i -> masked_norms(p, DIAG_MOM + i - 1; volume=volume), Val(3))
     return (gauge_l2=SVector{4,T}(ntuple(a -> gauge[a].l2, Val(4))),
             gauge_linf=SVector{4,T}(ntuple(a -> gauge[a].linf, Val(4))),
             ham_l2=ham.l2, ham_linf=ham.linf,

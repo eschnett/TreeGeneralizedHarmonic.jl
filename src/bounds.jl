@@ -747,16 +747,16 @@ function _apply_bounds!(bd::StateBounds, int::Union{Interior,FittedInterior}, p,
     map_blocks!(gh_bounds_kernel!, p.U, statearray(u, p.U), p.diag.work,
                 p.origins, p.spacings, bd, int, T(t))
     # Exact integers in `T`: a block holds at most `N³` points.
-    n = round(Int, tofloat64(sum(block_mapreduce(identity, +, zero(T),
-                                                 p.diag; vars=DIAG_BOUNDS))))
+    n = round(Int, tofloat64(mesh_mapreduce(identity, +, zero(T), p.diag;
+                                            vars=DIAG_BOUNDS)))
     acc = p.accounting
     if acc !== nothing
         acc.calls += 1
         if n > 0
-            nf = round(Int, tofloat64(sum(block_mapreduce(
-                identity, +, zero(T), p.diag; vars=DIAG_BOUNDS_NF))))
-            rmax = tofloat64(maximum(block_mapreduce(
-                identity, max, zero(T), p.diag; vars=DIAG_BOUNDS_R)))
+            nf = round(Int, tofloat64(mesh_mapreduce(
+                identity, +, zero(T), p.diag; vars=DIAG_BOUNDS_NF)))
+            rmax = tofloat64(mesh_mapreduce(identity, max, zero(T), p.diag;
+                                            vars=DIAG_BOUNDS_R))
             acc.hits += n
             acc.nonfinite += nf
             acc.r_max = max(acc.r_max, rmax)
@@ -847,9 +847,8 @@ function _validity(p, u, region)
     T = eltype(p.U.work)
     map_blocks!(gh_validity_kernel!, p.U, p.diag.work, statearray(u, p.U),
                 p.origins, p.spacings, region)
-    mn(v) = minimum(block_mapreduce(identity, min, floatmax(T), p.diag;
-                                    vars=v))
-    mx(v) = maximum(block_mapreduce(identity, max, zero(T), p.diag; vars=v))
+    mn(v) = mesh_mapreduce(identity, min, floatmax(T), p.diag; vars=v)
+    mx(v) = mesh_mapreduce(identity, max, zero(T), p.diag; vars=v)
     report(x) = x == floatmax(T) ? nothing : tofloat64(x)
     return (detγ=report(mn(DIAG_DETG)), α=report(mn(DIAG_LAPSE)),
             h=tofloat64(mx(DIAG_HMAX)), Π=tofloat64(mx(DIAG_PIMAX)))
@@ -938,7 +937,6 @@ function evolved_nonfinite(p, u, t; mask=interior_mask(p.interior,
     T = eltype(p.U.work)
     map_blocks!(gh_nonfinite_kernel!, p.U, p.diag.work, statearray(u, p.U),
                 p.origins, p.spacings, mask)
-    return round(Int, tofloat64(sum(block_mapreduce(identity, +, zero(T),
-                                                    p.diag;
-                                                    vars=DIAG_NONFINITE))))
+    return round(Int, tofloat64(mesh_mapreduce(identity, +, zero(T), p.diag;
+                                               vars=DIAG_NONFINITE)))
 end

@@ -49,14 +49,16 @@ include("thread_workload.jl")
     @test split(chomp(out), '\n') == reference
 end
 
-@testset "The masked norms are a fold in block order" begin
+@testset "The masked norms are TreeAMR's host combine of per-block partials" begin
     # The cheap, local half of the claim above, and the one that fails
     # legibly: the subprocess test says only that two long outputs differ,
-    # while this names the function. `masked_norms` is the one reduction
-    # this package writes itself — `block_mapreduce` returns the per-block
-    # partials and the *combination* is ours — so it is the one place a
-    # running total split across tasks could appear. Checked against a
-    # serial loop over blocks, with exact equality.
+    # while this names the function. The norms are `mesh_mapreduce` (amended
+    # 2026-10-01; until then the combination was this package's own loop):
+    # per-block partials, each weighted by its block's `h³`, combined on the
+    # host by `mapreduce(identity, +, ·)` — so a running total split across
+    # tasks could only appear inside a block, which is what this checks,
+    # against a serial loop over each block's points and Base's pairwise sum
+    # over the blocks, with exact equality.
     T = Float64
     q = 4
     case = shifted_minkowski_case(T; ε_KO=zero(T), γ0=one(T), γ2=T(-1 // 2))
@@ -68,19 +70,19 @@ end
 
     for v in (TreeGeneralizedHarmonic.DIAG_CGH,
               TreeGeneralizedHarmonic.DIAG_CGH + 2)
-        num = zero(T)
-        den = zero(T)
+        nums = T[]
+        dens = T[]
         peak = zero(T)
         for b in 1:nblocks(prob.diag)
             cellvolume = spacing(T, forest, blockkey(prob.diag, b))^3
             block = interiorview(prob.diag, b, v)
-            num += cellvolume * sum(x -> x * x, block)
-            den += cellvolume * length(block)
+            push!(nums, sum(x -> x * x, block) * cellvolume)
+            push!(dens, T(length(block)) * cellvolume)
             peak = max(peak, maximum(abs, block))
         end
         n = masked_norms(prob, v)
         @test n.linf === peak
-        @test n.l2 === sqrt(num / den)
+        @test n.l2 === sqrt(sum(nums) / sum(dens))
     end
 
     # And `max_speed`, the other reduction on the per-chunk path.

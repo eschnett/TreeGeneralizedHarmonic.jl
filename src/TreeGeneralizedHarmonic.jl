@@ -145,7 +145,7 @@ export state_partition, gh_limiter!, gh_integrator, gh_solve, ProblemRef
 # Constraints and the masks their norms take
 export AllPoints, is_evolved, adm_constraints_at_node
 export gh_constraint!, adm_constraint!, gh_error!
-export masked_counts, masked_norms, constraint_norms, error_norms
+export masked_counts, evolved_volume, masked_norms, constraint_norms, error_norms
 
 # Refinement: the masked Löhner indicator, its marks and its bounds
 export Refinement, lohner, cell_tau, field_scales, field_scale
