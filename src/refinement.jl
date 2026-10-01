@@ -290,12 +290,12 @@ function field_scales(U::FieldSet{T,3}, mask, origins, spacings) where {T}
                           backend=backend)
     map_blocks!(gh_scale_kernel!, U, scratch.work, U.work, origins, spacings,
                 mask, Val(U.G))
-    # One reduction per component: `block_mapreduce` takes a contiguous
-    # variable range and reduces it to one value per block, so a single
-    # launch over `1:NC` would give the maximum over all ten and lose the
-    # per-component numbers the calibration table reports.
-    return ntuple(v -> maximum(block_mapreduce(identity, max, zero(T), scratch;
-                                               vars=v)), Val(NC))
+    # One reduction per component: `mesh_mapreduce` takes a contiguous
+    # variable range and reduces it to one value, so a single launch over
+    # `1:NC` would give the maximum over all ten and lose the per-component
+    # numbers the calibration table reports.
+    return ntuple(v -> mesh_mapreduce(identity, max, zero(T), scratch; vars=v),
+                  Val(NC))
 end
 
 field_scale(U::FieldSet{T,3}, mask, origins, spacings) where {T} =
@@ -386,11 +386,11 @@ The largest indicator value over the whole mesh — the `τ_max` of
 `CODE.md`'s mesh statistics, and the number the calibration table is a
 column of.
 
-`block_mapreduce` partials combined in block order, so it is bit-identical
-whatever the thread count.
+TreeAMR's `mesh_mapreduce`: per-block maxima combined on the host, so it is
+bit-identical whatever the thread count.
 """
 tau_max(τfs::FieldSet{T,3}; slot::Integer=DIAG_TAU) where {T} =
-    maximum(block_mapreduce(identity, max, zero(T), τfs; vars=slot))
+    mesh_mapreduce(identity, max, zero(T), τfs; vars=slot)
 
 # --- the level floor and the level ceiling ----------------------------------
 #

@@ -68,7 +68,7 @@ It is deliberately *not* how the numeric diagnostics work. The masked
 constraint norms, the error norms and the maximum speed run once per chunk
 against the whole state, and a copy of the whole state per chunk is
 hundreds of megabytes on a run worth putting on a device at all; those go
-through `block_mapreduce` and stay where the data is.
+through TreeAMR's `mesh_mapreduce` and stay where the data is.
 """
 function hostcopy(fs::FieldSet{T}) where {T}
     get_backend(fs.work) isa CPU && return fs
