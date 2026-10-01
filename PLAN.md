@@ -985,7 +985,9 @@ fitted target", pieces 8–12):
   ingredients (`Π̃` as the fitted momentum, `L ≥ 12`, an equator four times
   finer or a direction-dependent margin) followed by a run whose time step
   is a quarter of today's on a mesh with tens of thousands of blocks and no
-  checkpointing — a multi-node-day research item, not a row. The matrix
+  checkpointing — a multi-node-day research item, not a row. **(Amended
+  2026-10-01:** `evolve!` checkpoints and restarts now, so such a run is a
+  chain of jobs; the other ingredients stand.**)** The matrix
   below therefore runs the `a = 7/10` rows as G5's chart. Its `a = 9/10`
   row is **reduced to a host-side probe** that costs minutes and no node:
   the initial data and one right-hand side at `h = 5/256` as 8e measured
@@ -1212,6 +1214,14 @@ side"):
 - **The viewers' slices** should show the tracked offset surface and the
   core surface (the shape series, not a sphere) and the found horizon's
   cross-section, since G5's layer is not spherical.
+
+**Checkpointing exists (added 2026-10-01)**: `evolve!`'s
+`checkpoint_path_prefix`, `max_walltime_seconds` and `restart_file` with
+`latest_checkpoint` (`CODE.md`, "Checkpoint and restart"), so the Symmetry
+batch job this step writes is a job chain — resubmitted until `finished` —
+and `bin/gh.jl` passes the checkpoint keywords through. The time series is
+not the checkpoint's record: the record a restart brings back is in the
+checkpoint, and the time series is appended from the restart on.
 
 Changes: `src/io.jl` — the analysis time series (one dataset per
 recorded quantity, appended and flushed at every chunk boundary), slice

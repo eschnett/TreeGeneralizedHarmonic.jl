@@ -313,6 +313,30 @@ record equal to the CPU's. `bench/stepping.jl` measures a step by
 integrator and backend; `CODE.md`, "Time integration", has its numbers.
 There are still no device *tests* (step 9).
 
+From 2026-10-01 the package is on **TreeAMR 0.1.4**, and two of its
+features are in use. **Every reduction that crosses blocks is
+`mesh_mapreduce`** — the masked norms (whose denominator is
+`evolved_volume`), the speed, the indicator's scales and `τ_max`, the
+projection's counts and the validity monitor's extremes — rather than a host
+fold of this package's own over `block_mapreduce`'s per-block vector; the L2
+norms moved in the last place. And **a run checkpoints and restarts**
+(Erik's decision of 2026-10-01, reversing `CODE.md`'s "no checkpointing"):
+`checkpoint.jl` — TreeHydro's file names, rotation, `latest_checkpoint`,
+exact reals and recipe refusal, plus `to_plain`/`from_plain` for the run
+state's own structs, `fit_from_plain`, `run_criterion` and `save_run`/
+`load_run` over TreeAMR's M9a — and `evolve!`'s keywords
+`checkpoint_path_prefix`, `checkpoint_every_chunks`,
+`checkpoint_interval_seconds`, `max_walltime_seconds`,
+`num_checkpoints_keep`, `checkpoint_hdf5_filters`,
+`checkpoint_sync_to_disk` and `restart_file`, TreeHydro's names. Two
+differences from TreeHydro, both Erik's: HDF5 is a **hard dependency**, and
+the checkpoint is written **before the regrid**, so that a restart may
+change the regridding criterion (the case's `Refinement`, `regrid`,
+`buffer`) and regrids with it first; everything else must match the
+recipe. `evolve!`'s regrid is a local `regrid_mesh` that the loop and a
+restart share. `test/checkpoint_tests.jl` is its file, and `hole_runs.jl`'s
+`generic` and `moving` workers take `checkpoint=<dir>` and `walltime=<s>`.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -386,7 +410,15 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4610 assertions in 14m03** at one thread and **4618 in
+The suite is **4690 assertions in 18m43** at one thread and **4698 in
+12m59** at four after TreeAMR 0.1.4's two features (2026-10-01, on a machine
+loaded 6–10 by other work — read the times against that): `mesh_mapreduce`
+changed no count, and `checkpoint_tests.jl` is 78 new claims in `2m02` /
+`1m02`, most of it its four chains — a static, an adaptive, a tracked
+`:fitted` with a regrid and a moving `:fitted` run, each run twice — and the
+compilation of the save and the load. It is over `PLAN.md`'s 30 s rule
+because a chain is the claim; the cheapest chains that still reach each
+carried piece of state are the ones there. It was **4610 assertions in 14m03** at one thread and **4618 in
 10m04** at four after the port to TreeAMR's interpolation and the
 16-variable provider (2026-09-26, load 5–7): 78 fewer than before it — the
 retired `locate_block` testset's 93 per-point claims, which are TreeAMR's
@@ -473,8 +505,9 @@ julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])'
 
 The clean-checkout check, which is what the `[sources]` pins exist for: a
 tree with no `Manifest.toml` resolves the four pinned packages from
-GitHub and TreeAMR from the General registry (from 2026-09-26, at `0.1.3`;
-also between 2026-09-21 and 2026-09-23), and passes. From 2026-09-21 it is a real check —
+GitHub and TreeAMR from the General registry (from 2026-09-26, at `0.1.3`,
+and from 2026-10-01 at `0.1.4`; also between 2026-09-21 and 2026-09-23),
+and HDF5 with its binary library from General too (2026-10-01), and passes. From 2026-09-21 it is a real check —
 every source is public, so it works anonymously, which is what CI does:
 
 ```bash
@@ -649,6 +682,19 @@ sources into a directory whose jobs are running, then precompiling, rewrites
 the `.so` they have mapped — the likely cause of step 8's `SIGBUS`es, which
 did not recur from `step-8-sigbus` and `step-8-t`.
 
+**A long row is a chain of jobs** (added 2026-10-01): `checkpoint=<dir>`
+makes every `generic` or `moving` row checkpoint each chunk to
+`<dir>/<label>.it….h5` and continue from the newest file there, and
+`walltime=<s>` stops it with a checkpoint before that many seconds of its
+`evolve!` (leave the job's startup and compilation as margin below the
+queue's limit). The same command resubmitted continues the row; a row that
+is finished refuses to restart ("nothing left to run"). Give each study its
+own `<dir>`, as its own remote directory:
+
+```bash
+julia --project=. --threads=4 test/hole_runs.jl moving=l0-trail-9 t_end=1/2 checkpoint=out/ck walltime=3000
+```
+
 The step benchmark (added 2026-09-26) is `bench/stepping.jl`, driven by
 environment variables its header lists; on Symmetry it ran pinned
 (`JULIA_EXCLUSIVE=1`, `srun --cpu-bind=none`, the fastest of the four
@@ -693,7 +739,8 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   0.1.3 for its M11 interpolation; from 2026-09-23 to then TreeAMR was
   pinned too). `SpacetimeMetrics`, `ApparentHorizonFinder`,
   `KorzynskiSpin` and `IMEXRungeKutta` are what `Project.toml`'s `[sources]` entries resolve, and TreeAMR is
-  General's release under `[compat]` `0.1.3` — so `~/src/jl/…` is *not*
+  General's release under `[compat]` `0.1.4` (from 2026-10-01, for M9a's
+  checkpoints; `0.1.3` before) — so `~/src/jl/…` is *not*
   what the tests see; an unpushed change there is invisible here, a pushed
   change to TreeAMR's `main` is invisible too until it is *released*, and
   the local SpacetimeMetrics checkout has been behind `main` before. Read
@@ -983,6 +1030,29 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   is a band — which is how the three interior variants are compared over
   "the `G` points outside `r_1`" and how the gauge drift is read at the
   horizon.
+- **A reduction that crosses blocks is TreeAMR's `mesh_mapreduce`, never a
+  host fold of ours** (from 2026-10-01). TreeAMR combines the per-block
+  partials on the host, and that is where its M7 will put the `Allreduce`;
+  a `sum`, `maximum` or weighted loop over `block_mapreduce`'s vector here
+  would be a per-rank answer under MPI. `mesh_mapreduce` combines pairwise,
+  so an L2 compared with a stored number is compared to roundoff;
+  `threading_tests.jl`'s exact claim names the combination.
+- **A checkpoint is written after the analysis row and before the regrid**
+  (decided 2026-10-01; TreeHydro writes after it). A restart recomputes the
+  flags with the criterion it is given and runs the loop's own
+  `regrid_mesh` before its first step, which is what makes a chain of jobs
+  the uninterrupted run bit for bit — keep the regrid one code path. Save
+  `(U, u)`, never `U` alone: the row's find, fit and indicator scatter into
+  `U.work`. The last chunk is written only when `t_end` is a whole number
+  of chunks in `T` (`3 · 1/20 ≠ 3/20`). A restart takes the forest from the
+  file and refuses one passed beside it, and refuses any changed recipe
+  field by name — only `t_end` and the criterion (`Refinement`, `regrid`,
+  `buffer`) may change. **Anything added to the loop's carried state goes
+  into the run state too** (`driver.jl`'s `state = (; …)` and the restore
+  branch), or restarts silently stop being the run;
+  `test/checkpoint_tests.jl`'s chains are what notice. HDF5 is a hard
+  dependency here (TreeHydro leaves it to the caller), so the extension is
+  always loaded.
 - **The `diag` slots are a contiguous-range interface.** `block_mapreduce`
   reduces an integer or a *contiguous* range of variables and refuses
   anything else — a device cannot be handed an arbitrary index vector cell

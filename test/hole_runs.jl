@@ -2469,6 +2469,33 @@ end
 
 const GEN_DEADLINE = Ref(Inf)
 
+# A row that checkpoints (`checkpoint=<dir>`, added 2026-10-01): every chunk
+# to `<dir>/<label>.it….h5`, continued from the newest file there when one
+# exists — so the same command, resubmitted, is a job chain — and stopped
+# with a checkpoint before `walltime=<s>` seconds of the row's `evolve!`
+# have passed (`max_walltime_seconds`; startup and compilation are the job
+# script's margin). A row that restarts is not handed its forest, and its
+# observer sees only the chunks it runs.
+const GEN_CHECKPOINT = Ref{Union{Nothing,String}}(nothing)
+const GEN_WALLTIME = Ref{Union{Nothing,Float64}}(nothing)
+
+function gen_checkpoint_kw(label)
+    dir = GEN_CHECKPOINT[]
+    dir === nothing && return (;)
+    pre = joinpath(mkpath(dir), label)
+    rf = latest_checkpoint(pre)
+    rf === nothing || say("   [%s] restarting from %s", label, rf)
+    return (checkpoint_path_prefix=pre, checkpoint_every_chunks=1, restart_file=rf,
+            max_walltime_seconds=GEN_WALLTIME[])
+end
+
+function gen_checkpoint_options!()
+    haskey(OPTIONS, "checkpoint") && (GEN_CHECKPOINT[] = abspath(OPTIONS["checkpoint"]))
+    haskey(OPTIONS, "walltime") &&
+        (GEN_WALLTIME[] = parse(Float64, OPTIONS["walltime"]))
+    return nothing
+end
+
 gen_fmt(x) = x === nothing ? "     —   " :
              x isa Bool ? string(x) : Printf.format(Printf.Format("%9.3e"), x)
 
@@ -2551,10 +2578,12 @@ function gen_run(sp; t_end=nothing)
     t0 = time()
     failure = nothing
     stopped = false
+    ckw = gen_checkpoint_kw(sp.label)
     out = try
-        evolve!(T, case; forest=forest, q=q,
+        evolve!(T, case; forest=get(ckw, :restart_file, nothing) === nothing ?
+                                forest : nothing, q=q,
                 ops=Operators(prolongation=q + 2, restriction=q + 2),
-                t_end=tend, observer=watch, find=finder, sp.kw...)
+                t_end=tend, observer=watch, find=finder, sp.kw..., ckw...)
     catch err
         err isa InterruptException && rethrow()
         if err isa GenDeadline
@@ -2567,6 +2596,11 @@ function gen_run(sp; t_end=nothing)
         nothing
     end
     wall = time() - t0
+    if out !== nothing && !out.finished
+        stopped = true
+        say("   [%s] stopped with a checkpoint before walltime, t = %.3f M", sp.label,
+            Float64(out.t))
+    end
     reached = isempty(obs) ? 0.0 : obs[end].t
     recs = out === nothing ? NamedTuple[] :
            [(t=r.t, dt=r.dt, fit_valid=r.fit_valid, fit_residual=r.fit_residual,
@@ -2602,9 +2636,12 @@ function gen_fanout(batches; tag, t_end, section="generic")
         log = joinpath(dir, "worker-$n.log")
         te = t_end === nothing ? "" : "t_end=$(leak_spell(t_end))"
         dl = isfinite(GEN_DEADLINE[]) ? "deadline=$(GEN_DEADLINE[])" : ""
+        ck = GEN_CHECKPOINT[] === nothing ? String[] :
+             ["checkpoint=$(GEN_CHECKPOINT[])"]
+        GEN_WALLTIME[] === nothing || push!(ck, "walltime=$(GEN_WALLTIME[])")
         cmd = `$(Base.julia_cmd()) --project=$project --threads=$nt
                $(abspath(@__FILE__)) $section worker=1
-               runs=$(join(labels, ',')) out=$out $te $dl`
+               runs=$(join(labels, ',')) out=$out $te $dl $ck`
         # One BLAS thread a worker: a fit's QR is small, and OpenBLAS's
         # default pool of a thread per core, spinning after every call, put a
         # node's load at twice its cores with seven workers (measured in step
@@ -2906,6 +2943,7 @@ if "generic" in SECTIONS || haskey(OPTIONS, "generic")
     haskey(OPTIONS, "budget") &&
         (GEN_DEADLINE[] = time() + parse(Float64, OPTIONS["budget"]))
     haskey(OPTIONS, "deadline") && (GEN_DEADLINE[] = parse(Float64, OPTIONS["deadline"]))
+    gen_checkpoint_options!()
     t_end_opt = haskey(OPTIONS, "t_end") ? only(leak_option("t_end", [1 // 1])) : nothing
     gen_specs = gen_all_specs()
     if haskey(OPTIONS, "worker")
@@ -2988,8 +3026,10 @@ end
 # refinement centroid against the analytic center in finest spacings, the
 # track, the blocks and levels per chunk. As in `generic`, with sixteen or
 # more threads the rows of a group are subprocess workers
-# (`moving=<group or label>,… threads=<n> tag=<name> t_end=<t> budget=<s>`),
-# and `moving=mesh` alone runs only the initial-data cycle of every
+# (`moving=<group or label>,… threads=<n> tag=<name> t_end=<t> budget=<s>`,
+# and `checkpoint=<dir> walltime=<s>` for a row that checkpoints every chunk
+# and continues from its newest file — `gen_checkpoint_kw`, added
+# 2026-10-01), and `moving=mesh` alone runs only the initial-data cycle of every
 # adaptive row and prints its mesh — a local check of what a row will cost:
 #
 #     julia --project=. --threads=4 test/hole_runs.jl moving=mesh
@@ -3384,10 +3424,12 @@ function mv_run(sp; t_end=nothing)
     t0 = time()
     failure = nothing
     stopped = false
+    ckw = gen_checkpoint_kw(sp.label)
     out = try
-        evolve!(T, case; forest=forest, q=q,
+        evolve!(T, case; forest=get(ckw, :restart_file, nothing) === nothing ?
+                                forest : nothing, q=q,
                 ops=Operators(prolongation=q + 2, restriction=q + 2),
-                t_end=tend, observer=watch, find=finder, kw...)
+                t_end=tend, observer=watch, find=finder, kw..., ckw...)
     catch err
         err isa InterruptException && rethrow()
         if err isa GenDeadline
@@ -3400,6 +3442,11 @@ function mv_run(sp; t_end=nothing)
         nothing
     end
     wall = time() - t0
+    if out !== nothing && !out.finished
+        stopped = true
+        say("   [%s] stopped with a checkpoint before walltime, t = %.3f M", sp.label,
+            Float64(out.t))
+    end
     reached = isempty(obs) ? 0.0 : obs[end].t
     recs = out === nothing ? NamedTuple[] :
            [(t=r.t, dt=r.dt, λ=r.λ, λ_end=r.λ_end, cfl=r.cfl, fit_valid=r.fit_valid,
@@ -3528,6 +3575,7 @@ if "moving" in SECTIONS || haskey(OPTIONS, "moving")
     haskey(OPTIONS, "budget") &&
         (GEN_DEADLINE[] = time() + parse(Float64, OPTIONS["budget"]))
     haskey(OPTIONS, "deadline") && (GEN_DEADLINE[] = parse(Float64, OPTIONS["deadline"]))
+    gen_checkpoint_options!()
     t_end_opt = haskey(OPTIONS, "t_end") ? only(leak_option("t_end", [1 // 1])) : nothing
     mv_specs = mv_all_specs()
     if haskey(OPTIONS, "worker")

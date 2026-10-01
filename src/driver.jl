@@ -224,7 +224,9 @@ than ending the run.
 
 `forest` has no default: the mesh is the study's, built by
 [`gh_forest`](@ref) or [`hole_forest`](@ref) — or, with `adapt = true`, by
-the indicator's own cycle starting from whichever of those was passed.
+the indicator's own cycle starting from whichever of those was passed. A
+restart takes its forest from `restart_file` instead, and refuses one passed
+beside it.
 `q`, `ops`, `t_end` and `chunk` have none either, for `PLAN.md`'s reason —
 the operator order in particular, since this system takes second
 derivatives and a prolongation below `q + 2` costs the scheme an order.
@@ -316,6 +318,58 @@ step 8f's cycle on the analytic `:damped` data and so lifted its refusal of
 a chart whose analytic core meets the singular set, G5's). A hand-over case
 still chooses it on the analytic layer, which is its initial data.
 
+## Checkpoint and restart (added 2026-10-01)
+
+A run writes checkpoints and restarts from one through TreeAMR's
+`save_checkpoint` and `load_checkpoint` (M9a), which live in TreeAMR's HDF5
+extension — loaded by this package, HDF5 being a hard dependency here. The
+keywords, the file names, the rotation and the refusals are **TreeHydro's**,
+so that the applications of TreeAMR checkpoint alike; see "Checkpoint and
+restart" in `CODE.md` and [`latest_checkpoint`](@ref) for the job-chain
+idiom.
+
+A checkpoint is written at a chunk boundary **after the analysis row and
+before the regrid** — the one difference from TreeHydro (decided
+2026-10-01): a restart regrids first, with the regridding criterion it is
+given, and then steps. With the criterion unchanged a restarted run, or a
+chain of them, is the uninterrupted run bit for bit — its state, its mesh,
+its record and every number returned here. The last chunk is a restart
+point too where `t_end` is a whole number of chunks in `T`, so that a
+finished run can be continued.
+
+- `checkpoint_path_prefix` — the files are
+  `"\$checkpoint_path_prefix.it0000001234.h5"`, numbered by the cumulative
+  step count since `t = 0`; the prefix may include a directory, which must
+  exist.
+- `checkpoint_every_chunks` — write every this many chunks.
+- `checkpoint_interval_seconds` — write when this much wall-clock time has
+  passed since the last write (or the call); `0` writes at every boundary.
+- `max_walltime_seconds` — the job's limit, timed from the call. When the
+  elapsed time plus the longest chunk so far plus the longest write so far
+  would pass it, the run writes a checkpoint and **stops**, before the
+  regrid. Startup and compilation are not counted: leave a margin below the
+  queue's limit.
+- `num_checkpoints_keep` — after each successful write, every file of the
+  prefix but the one just written and the newest `num_checkpoints_keep − 1`
+  others is deleted, **including files an earlier job left behind**.
+- `checkpoint_hdf5_filters`, `checkpoint_sync_to_disk` — TreeAMR's
+  `filters` and `sync`. The tests turn the flush off.
+- `restart_file` — continue from this checkpoint rather than from the
+  initial data, with no `forest`.
+
+A restart must be called with the same case and the same keywords, **except
+`t_end` and the regridding criterion** — the case's `Refinement`, `regrid`
+and `buffer` — which may change; anything else that decides a number is
+refused with one `ArgumentError` naming every field that differs
+([`run_recipe`](@ref)), and a changed criterion is reported and returned as
+`criterion_changed`. The initial-data cycle does not run and the observer is
+**not** called for the rows the file brought back.
+
+`finished` is `false` when `max_walltime_seconds` stopped the run: then `t`
+is the end of the last chunk run, and `U`, `u` and `forest` are the
+checkpointed state, before that chunk's regrid. `checkpoints_written` lists
+the files this call wrote, and `restart_file` is the file it started from.
+
 **A moving hole (added in step 8).** `regrid = true` flags the evolved state
 at every chunk boundary with the geometry the next chunk runs on, and the
 level floor is widened by `|v| · chunk` inward and outward (`travel`, `v`
@@ -331,7 +385,8 @@ evolve!(::Type{S}, case::GHCase{T}; kwargs...) where {S,T} = throw(ArgumentError
     "all in it — so the type is chosen when the case is built and not when " *
     "it is run. Build the case at $S instead."))
 
-function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
+function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
+                 t_end,
                  chunk=case.chunk, cfl=T(1 // 4), regrid::Bool=false,
                  adapt::Bool=false, buffer=nothing, maxpasses::Integer=8,
                  adm_every::Integer=0, backend=CPU(), observer=nothing,
@@ -340,7 +395,16 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                  fit_initial_depth=0, handover=0,
                  target_source::Symbol=:fit, target_rate::Bool=true,
                  fit_initial_blend::Bool=false, trail_ramp=0,
-                 target_exact::Bool=false, refill_cells=1 // 4) where {T}
+                 target_exact::Bool=false, refill_cells=1 // 4,
+                 checkpoint_path_prefix=nothing, checkpoint_every_chunks=nothing,
+                 checkpoint_interval_seconds=nothing, max_walltime_seconds=nothing,
+                 num_checkpoints_keep=2, checkpoint_hdf5_filters=(),
+                 checkpoint_sync_to_disk::Bool=true,
+                 restart_file=nothing) where {T}
+    # The job's wall clock starts here: whatever ran before the call —
+    # startup, compilation, the queue — is the caller's margin to leave
+    # (TreeHydro's rule for `max_walltime_seconds`).
+    t0_wall = time()
     # The tracked geometry (step 8d) is built from the horizon that was found,
     # so a case that asks for it must carry the finder's parameters.
     fitted = case.interior isa FittedSpec
@@ -395,12 +459,76 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     ρ_max_default = ρ_max_factor === nothing && ρ_max_fixed === nothing &&
                     case.interior !== nothing
     ρ_max_factor = ρ_max_factor === nothing ? nothing : T(ρ_max_factor)
+    # The rates as given, for the recipe: what the caller said, before the
+    # default is resolved from the hole.
+    ρ_given = (ρ_max_factor, ρ_max_fixed)
     ρ_max_fixed = ρ_max_fixed !== nothing ? T(ρ_max_fixed) :
                   ρ_max_default ? default_relaxation_rate(case) : nothing
 
+    # Checkpoint and restart (added 2026-10-01; `src/checkpoint.jl`). The
+    # keywords are refused here, before anything is built, so that a job
+    # script's mistake costs a second and not an initial-data cycle; a
+    # restart reads its file first, and refuses it, for the same reason: the
+    # forest is the file's, and every parameter that decides a number must be
+    # the one it was written with — all but `t_end` and the regridding
+    # criterion, which a restart may change.
+    check_checkpoint_keywords(; checkpoint_path_prefix, checkpoint_every_chunks,
+                              checkpoint_interval_seconds, max_walltime_seconds,
+                              num_checkpoints_keep, restart_file)
+    (forest === nothing) == (restart_file !== nothing) || throw(ArgumentError(
+        forest === nothing ?
+        "evolve! needs a forest: the mesh is the study's, built by gh_forest or " *
+        "hole_forest — or a restart_file, whose forest is the checkpoint's." :
+        "evolve! was given both a forest and restart_file = " *
+        "$(repr(restart_file)): a restart continues on the checkpoint's own " *
+        "mesh, so a second one has nowhere to go. Drop the forest."))
+    checkpointing = checkpoint_path_prefix !== nothing
+    recipe, criterion = if checkpointing || restart_file !== nothing
+        (run_recipe(T, case; q=q, ops=ops, chunk=chunk, cfl=cfl, adapt=adapt,
+                    adm_every=adm_every, ρ_max_factor=ρ_given[1],
+                    ρ_max_fixed=ρ_given[2], fit_initial_cont=fit_initial_cont,
+                    fit_initial_depth=fit_initial_depth, handover=handover,
+                    target_source=target_source, target_rate=target_rate,
+                    fit_initial_blend=fit_initial_blend, trail_ramp=trail_ramp,
+                    target_exact=target_exact, refill_cells=refill_cells),
+         run_criterion(T, case; regrid=regrid, buffer=buffer))
+    else
+        (nothing, nothing)
+    end
+    ck = restart_file === nothing ? nothing : load_run(restart_file, T; backend=backend)
+    criterion_changed = nothing
+    if ck !== nothing
+        check_recipe(ck.recipe, recipe, restart_file)
+        eltype(ck.U.work) === T || throw(ArgumentError(
+            "restart_file $(repr(restart_file)) holds its state in " *
+            "$(eltype(ck.U.work)) and this run computes in $T, although its " *
+            "recipe names $(ck.recipe.float_type): the file is damaged."))
+        changes = plain_differences(ck.criterion, criterion)
+        criterion_changed = first.(changes)
+        isempty(changes) || @info "restarting $(repr(restart_file)) with a " *
+                                  "changed regridding criterion, which the " *
+                                  "first regrid uses: " * join(last.(changes), "; ")
+        forest = ck.forest
+    end
+
     G = q ÷ 2 + 1
-    U = FieldSet{T}(forest, 2NC; G=G, centering=vertexcentered(3),
-                    backend=backend)
+    U = if ck === nothing
+        FieldSet{T}(forest, 2NC; G=G, centering=vertexcentered(3), backend=backend)
+    else
+        # The loaded field set's layout is the file's; it is checked against
+        # the run's, since every kernel and the schedule assume this one.
+        (ck.U.nvars == 2NC && all(==(G), ck.U.G) &&
+         ck.U.centering == vertexcentered(3)) || throw(ArgumentError(
+            "restart_file $(repr(restart_file)) holds a field set of " *
+            "$(ck.U.nvars) variables with ghost widths $(ck.U.G) and centering " *
+            "$(ck.U.centering), where this run at q = $q needs $(2NC), G = $G and " *
+            "a vertex-centered set: the file was not written by evolve!, or is " *
+            "damaged."))
+        ck.U
+    end
+    # The restored run state, decoded once (`src/checkpoint.jl`).
+    saved = ck === nothing ? nothing : ck.run
+    t_saved = saved === nothing ? zero(T) : from_plain(T, saved.t)
 
     # The travelling margin, in cells at the finest level the indicator may
     # reach: `CODE.md`'s `|v| · chunk`, the hole's own speed times the
@@ -424,13 +552,18 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     # where the rate is the grid's, whose value changes per chunk; proposed
     # in step 8d).
     spec = fitted ? case.interior : nothing
-    tr = fitted ? seed_track(case, zero(T)) : nothing
+    tr = !fitted ? nothing :
+         saved === nothing ? seed_track(case, zero(T)) :
+         from_plain(HorizonTrack{T}, saved.track; path="run.track")
     n_L = !fitted ? 0 :
           spec.n_L > 0 ? spec.n_L :
           layer_cells(G, ρ_max_fixed === nothing ? default_relaxation_rate(case) :
                          ρ_max_fixed, hole_mass(case.background))
     geometry(f, t, track) = fitted_interior(spec, track, f, G; t=T(t), n_L=n_L)
-    geom = fitted ? geometry(forest, zero(T), tr) : case.interior
+    # On a restart, the geometry the next chunk runs on: `record!`'s
+    # `track!` built it from the updated track at the checkpoint's time, on
+    # the mesh the checkpoint holds, which is the one the file has.
+    geom = fitted ? geometry(forest, t_saved, tr) : case.interior
 
     # The fitted target (step 8e). Its ranges come from the seed's analytic
     # data on the offset surface unless the spec states them, and the first
@@ -491,138 +624,187 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     fitcost = (build_ns=Ref(0), nbuild=Ref(0), fill_ns=Ref(0), nfill=Ref(0),
                nrefills=Ref(0), chunk_refills=Ref(0), nfailed=Ref(0))
 
-    # The initial-data cycle, or the plain fill. The cycle fills the data
-    # itself — that is what it is for: it re-evaluates it on each new mesh
-    # rather than interpolating, since interpolating would bake the coarse
-    # mesh's resolution into the blocks the refinement just bought.
-    passes = 0
-    converged = true
-    schedule = GhostSchedule(U, ops)
-    if adapt && fitmode && handover_t == 0
-        # **A `:fitted` case's mesh is chosen on its own initial data (added
-        # in step 8)** — the analytic solution outside the offset surface and
-        # the fit of it inside, rebuilt with the geometry on every pass's
-        # mesh — so that a chart whose analytic interior is singular, G5's,
-        # has a cycle at all. See `adapt_fitted_initial_data!`.
-        schedule, passes, converged, geom = adapt_fitted_initial_data!(
-            U, ops, case, g -> geometry(g, zero(T), tr); G=G,
-            buffer=bufferwidth, travel=travel, maxpasses=maxpasses,
-            cont=fit_initial_cont, depth=d_init, backend=backend,
-            blend=fit_initial_blend)
-        converged || throw(ErrorException(
-            "the initial-data cycle of this :fitted case had not converged " *
-            "after $passes passes: the hierarchy was still changing when " *
-            "maxpasses ran out. Raise maxpasses only if the passes were still " *
-            "making progress; otherwise the criterion never stops asking, " *
-            "which is a maxlevel_cap too high for the data or a refine_tol " *
-            "below what the mesh can reach."))
-    elseif adapt
-        # The margin is dilated inside the indicator, so that the level
-        # ceiling is applied *after* it — `buffer = 0` here and there is
-        # what `refine_flags` means by "the caller passes zero". A tracked
-        # geometry is rebuilt on each pass's mesh, since its offset and ramp
-        # are stated in that mesh's spacings.
-        #
-        # **A hand-over case's mesh is chosen on the analytic `:damped` data
-        # of the same geometry (added in step 8f** for every `:fitted` case;
-        # **amended in step 8**, which gave a `:fitted` case without a
-        # hand-over a cycle on its own data, the branch above**)**: its
-        # initial data *is* that analytic layer's. That needs the analytic
-        # solution regular on the core surface, which `check_interior_radii`
-        # asserts for the `:damped` geometry — it refuses harmonic Kerr's
-        # spinning charts by name.
-        acycle(g) = fitmode ? with_variant(g, :damped) : g
-        fitmode && check_interior_radii(forest, acycle(geom), case.background,
-                                        G; t=zero(T), center=case.center)
-        criterion(fs) = indicator_flags(fs, case, zero(T); G=G,
-                                        buffer=bufferwidth, travel=travel,
-                                        interior=fitted ?
-                                                 acycle(geometry(fs.forest,
-                                                                 zero(T), tr)) :
-                                                 case.interior).flags
-        schedule, passes, converged = adapt_to_initial_data!(
-            U, ops; initial=state_callback(case, zero(T); interior=acycle(geom)),
-            flags=criterion, buffer=0, maxpasses=maxpasses,
-            boundary=dirichlet(case, zero(T)))
-        converged || throw(ErrorException(
-            "the initial-data cycle had not converged after $passes passes: " *
-            "the hierarchy was still changing when maxpasses ran out. The " *
-            "cycle re-evaluates the initial data on each new mesh rather " *
-            "than interpolating it, so it terminates when the criterion " *
-            "stops asking for anything new — and a criterion that never " *
-            "stops is either a maxlevel_cap too high for the data or a " *
-            "refine_tol below what the mesh can reach. Raise maxpasses only " *
-            "if the passes were still making progress."))
-        # The cycle filled with the geometry of the mesh it started from;
-        # a tracked geometry is rebuilt on the mesh it settled at, and the
-        # data re-evaluated with its core rule — re-evaluated, not
-        # interpolated, for the cycle's own reason.
-        if fitted
-            geom = geometry(forest, zero(T), tr)
-            (fitmode && handover_t == 0) ||
-                fill_exact!(U, case, zero(T); interior=kgeom(geom, zero(T)))
+    # The range projection's record (step 8b), made once and handed to every
+    # problem the run builds — or the checkpoint's, which a restart continues.
+    acc = case.bounds === nothing ? nothing :
+          ck === nothing ? BoundsAccounting() :
+          from_plain(BoundsAccounting, saved.bounds; path="run.bounds")
+    if ck === nothing
+        # The initial-data cycle, or the plain fill. The cycle fills the data
+        # itself — that is what it is for: it re-evaluates it on each new mesh
+        # rather than interpolating, since interpolating would bake the coarse
+        # mesh's resolution into the blocks the refinement just bought.
+        passes = 0
+        converged = true
+        schedule = GhostSchedule(U, ops)
+        if adapt && fitmode && handover_t == 0
+            # **A `:fitted` case's mesh is chosen on its own initial data (added
+            # in step 8)** — the analytic solution outside the offset surface and
+            # the fit of it inside, rebuilt with the geometry on every pass's
+            # mesh — so that a chart whose analytic interior is singular, G5's,
+            # has a cycle at all. See `adapt_fitted_initial_data!`.
+            schedule, passes, converged, geom = adapt_fitted_initial_data!(
+                U, ops, case, g -> geometry(g, zero(T), tr); G=G,
+                buffer=bufferwidth, travel=travel, maxpasses=maxpasses,
+                cont=fit_initial_cont, depth=d_init, backend=backend,
+                blend=fit_initial_blend)
+            converged || throw(ErrorException(
+                "the initial-data cycle of this :fitted case had not converged " *
+                "after $passes passes: the hierarchy was still changing when " *
+                "maxpasses ran out. Raise maxpasses only if the passes were still " *
+                "making progress; otherwise the criterion never stops asking, " *
+                "which is a maxlevel_cap too high for the data or a refine_tol " *
+                "below what the mesh can reach."))
+        elseif adapt
+            # The margin is dilated inside the indicator, so that the level
+            # ceiling is applied *after* it — `buffer = 0` here and there is
+            # what `refine_flags` means by "the caller passes zero". A tracked
+            # geometry is rebuilt on each pass's mesh, since its offset and ramp
+            # are stated in that mesh's spacings.
+            #
+            # **A hand-over case's mesh is chosen on the analytic `:damped` data
+            # of the same geometry (added in step 8f** for every `:fitted` case;
+            # **amended in step 8**, which gave a `:fitted` case without a
+            # hand-over a cycle on its own data, the branch above**)**: its
+            # initial data *is* that analytic layer's. That needs the analytic
+            # solution regular on the core surface, which `check_interior_radii`
+            # asserts for the `:damped` geometry — it refuses harmonic Kerr's
+            # spinning charts by name.
+            acycle(g) = fitmode ? with_variant(g, :damped) : g
+            fitmode && check_interior_radii(forest, acycle(geom), case.background,
+                                            G; t=zero(T), center=case.center)
+            criterion(fs) = indicator_flags(fs, case, zero(T); G=G,
+                                            buffer=bufferwidth, travel=travel,
+                                            interior=fitted ?
+                                                     acycle(geometry(fs.forest,
+                                                                     zero(T), tr)) :
+                                                     case.interior).flags
+            schedule, passes, converged = adapt_to_initial_data!(
+                U, ops; initial=state_callback(case, zero(T); interior=acycle(geom)),
+                flags=criterion, buffer=0, maxpasses=maxpasses,
+                boundary=dirichlet(case, zero(T)))
+            converged || throw(ErrorException(
+                "the initial-data cycle had not converged after $passes passes: " *
+                "the hierarchy was still changing when maxpasses ran out. The " *
+                "cycle re-evaluates the initial data on each new mesh rather " *
+                "than interpolating it, so it terminates when the criterion " *
+                "stops asking for anything new — and a criterion that never " *
+                "stops is either a maxlevel_cap too high for the data or a " *
+                "refine_tol below what the mesh can reach. Raise maxpasses only " *
+                "if the passes were still making progress."))
+            # The cycle filled with the geometry of the mesh it started from;
+            # a tracked geometry is rebuilt on the mesh it settled at, and the
+            # data re-evaluated with its core rule — re-evaluated, not
+            # interpolated, for the cycle's own reason.
+            if fitted
+                geom = geometry(forest, zero(T), tr)
+                (fitmode && handover_t == 0) ||
+                    fill_exact!(U, case, zero(T); interior=kgeom(geom, zero(T)))
+            end
+        elseif !fitmode || handover_t > 0
+            fill_exact!(U, case, zero(T); interior=kgeom(geom, zero(T)))
         end
-    elseif !fitmode || handover_t > 0
-        fill_exact!(U, case, zero(T); interior=kgeom(geom, zero(T)))
-    end
-    # The fitted variant's initial data (decided in review, step 8e): the
-    # cache is filled from the analytic solution's fit first, and the state
-    # is the analytic solution outside the offset surface and the cache
-    # inside it — no analytic evaluation below the surface, so a chart whose
-    # interior is singular gets regular data (`fill_fitted_initial!`, which
-    # the `:fitted` cycle flags on; factored out in step 8). Before a
-    # hand-over the data is the analytic layer's, and only the fit is made.
-    target0 = nothing
-    if fitmode && handover_t == 0
-        ff = fill_fitted_initial!(U, case, geom; cont=fit_initial_cont,
-                                  depth=d_init, backend=backend, rate=rate_on,
-                                  blend=fit_initial_blend)
-        tbounds, fit_initial, target0 = ff.bounds, ff.fit, ff.target
-        fits = (fit_initial, nothing)
-    elseif fitmode
-        tbounds = spec.target_bounds !== nothing ?
-                  _bounds_in(T, spec.target_bounds) :
-                  derive_target_bounds(T, case.background, geom; t=0,
-                                       L=spec.lmax_fit)
-        fit_initial = build_fit(analytic_sampler(case.background, 0.0;
-                                                 δ=tofloat64(geom.h) / 8),
-                                geom, spec; cont=fit_initial_cont,
-                                bounds=tbounds, backend=backend)
-        fits = (fit_initial, nothing)
-        target0 = target_cache(U)
-    end
-    u = statevector(U)
-    gather!(u, U)
-    # The initial data must be finite *everywhere*, core and layer included:
-    # the core rule makes it so, and a non-finite value here is a case whose
-    # analytic solution is singular somewhere the mesh reaches — a
-    # configuration error, not something for the range projection to repair
-    # (kept unmasked in step 8b, where the per-chunk check became the
-    # evolved region's).
-    all(isfinite, u) || throw(ArgumentError(
-        "the initial data is not finite: $(count(!isfinite, u)) of " *
-        "$(length(u)) values are NaN or Inf. The core rule fills every point " *
-        "inside r_0 from the sphere r_0, so this is a case whose analytic " *
-        "solution is singular somewhere the mesh reaches — check r_0 against " *
-        "the chart's singular set and against where |h| is still moderate."))
+        # The fitted variant's initial data (decided in review, step 8e): the
+        # cache is filled from the analytic solution's fit first, and the state
+        # is the analytic solution outside the offset surface and the cache
+        # inside it — no analytic evaluation below the surface, so a chart whose
+        # interior is singular gets regular data (`fill_fitted_initial!`, which
+        # the `:fitted` cycle flags on; factored out in step 8). Before a
+        # hand-over the data is the analytic layer's, and only the fit is made.
+        target0 = nothing
+        if fitmode && handover_t == 0
+            ff = fill_fitted_initial!(U, case, geom; cont=fit_initial_cont,
+                                      depth=d_init, backend=backend, rate=rate_on,
+                                      blend=fit_initial_blend)
+            tbounds, fit_initial, target0 = ff.bounds, ff.fit, ff.target
+            fits = (fit_initial, nothing)
+        elseif fitmode
+            tbounds = spec.target_bounds !== nothing ?
+                      _bounds_in(T, spec.target_bounds) :
+                      derive_target_bounds(T, case.background, geom; t=0,
+                                           L=spec.lmax_fit)
+            fit_initial = build_fit(analytic_sampler(case.background, 0.0;
+                                                     δ=tofloat64(geom.h) / 8),
+                                    geom, spec; cont=fit_initial_cont,
+                                    bounds=tbounds, backend=backend)
+            fits = (fit_initial, nothing)
+            target0 = target_cache(U)
+        end
+        u = statevector(U)
+        gather!(u, U)
+        # The initial data must be finite *everywhere*, core and layer included:
+        # the core rule makes it so, and a non-finite value here is a case whose
+        # analytic solution is singular somewhere the mesh reaches — a
+        # configuration error, not something for the range projection to repair
+        # (kept unmasked in step 8b, where the per-chunk check became the
+        # evolved region's).
+        all(isfinite, u) || throw(ArgumentError(
+            "the initial data is not finite: $(count(!isfinite, u)) of " *
+            "$(length(u)) values are NaN or Inf. The core rule fills every point " *
+            "inside r_0 from the sphere r_0, so this is a case whose analytic " *
+            "solution is singular somewhere the mesh reaches — check r_0 against " *
+            "the chart's singular set and against where |h| is still moderate."))
 
-    # The problem is built once here — the gauge source is sampled in it,
-    # which is the expensive setup phase — and only its interior is
-    # replaced per chunk. Its constructor is also where `CODE.md`'s two
-    # interior radius requirements are asserted, so the mesh the cycle just
-    # chose is checked before anything is integrated on it. The range
-    # projection's record is made once, here, and every problem the run
-    # builds shares it (step 8b).
-    acc = case.bounds === nothing ? nothing : BoundsAccounting()
-    p0 = GHProblem(U, schedule, case; q=q, t=zero(T),
-                   interior=kgeom(geom, zero(T)), accounting=acc,
-                   target=target0, fits=fits, target_rate=rate_on,
-                   trail=trail_on, target_exact=exact_on)
-    # The geometry the gauge source was sampled with (step 8d): the sample
-    # applies the core rule, so a tracked core that moves far from it asks
-    # for a fresh sample — see the chunk loop.
-    geom_sampled = geom
-    nresamples = 0
+        # The problem is built once here — the gauge source is sampled in it,
+        # which is the expensive setup phase — and only its interior is
+        # replaced per chunk. Its constructor is also where `CODE.md`'s two
+        # interior radius requirements are asserted, so the mesh the cycle just
+        # chose is checked before anything is integrated on it. The range
+        # projection's record is made once, before this branch, and every
+        # problem the run builds shares it (step 8b).
+        p0 = GHProblem(U, schedule, case; q=q, t=zero(T),
+                       interior=kgeom(geom, zero(T)), accounting=acc,
+                       target=target0, fits=fits, target_rate=rate_on,
+                       trail=trail_on, target_exact=exact_on)
+        # The geometry the gauge source was sampled with (step 8d): the sample
+        # applies the core rule, so a tracked core that moves far from it asks
+        # for a fresh sample — see the chunk loop.
+        geom_sampled = geom
+        sample_t, sample_track = zero(T), tr
+        nresamples = 0
+    else
+        # **A restart (added 2026-10-01)**: the checkpoint was written after
+        # chunk `saved.chunk`'s analysis row and **before its regrid**, so what
+        # comes back is the state at the end of that chunk, on that chunk's mesh,
+        # with everything the row updated — the track, the fits, the finder's
+        # seed, the projection's accounting, the record itself. The problem is
+        # rebuilt as the row saw it, its gauge source sampled with the core it
+        # was sampled with in the uninterrupted run (`sample_t`, `sample_track`),
+        # and its interior the chunk's own — which is what the indicator below
+        # flags with, and what the next chunk carries forward when the regrid
+        # does not move the mesh. Nothing here is an initial-data cycle: the
+        # observer is not called at `t = 0`, the run not being there.
+        passes, converged = saved.passes, saved.converged
+        schedule = GhostSchedule(U, ops)
+        tbounds = from_plain(Union{Nothing,StateBounds{T}}, saved.target_bounds;
+                             path="run.target_bounds")
+        fit_initial = fit_from_plain(T, saved.fit_initial; backend=backend,
+                                     path="run.fit_initial")
+        fits = saved.fits === nothing ? nothing :
+               (fit_from_plain(T, saved.fits[1]; backend=backend, path="run.fits[1]"),
+                fit_from_plain(T, saved.fits[2]; backend=backend, path="run.fits[2]"))
+        u = ck.u
+        sample_t = from_plain(T, saved.sample_t)
+        sample_track = fitted ? from_plain(HorizonTrack{T}, saved.sample_track;
+                                           path="run.sample_track") : nothing
+        geom_sampled = fitted ? geometry(forest, sample_t, sample_track) : geom
+        nresamples = saved.nresamples
+        t_chunk = from_plain(T, saved.t_chunk)
+        ρ_chunk = from_plain(T, saved.rho_chunk)
+        int_chunk = case.interior === nothing ? nothing :
+                    with_ρ_max(fitted ?
+                               kgeom(geometry(forest, t_chunk,
+                                              from_plain(HorizonTrack{T},
+                                                         saved.track_chunk;
+                                                         path="run.track_chunk")),
+                                     t_chunk) : case.interior, ρ_chunk)
+        p0 = GHProblem(U, schedule, case; q=q, t=sample_t,
+                       interior=fitted ? kgeom(geom_sampled, sample_t) : geom,
+                       accounting=acc, target=fitmode ? target_cache(U) : nothing,
+                       fits=fits, t_target=t_saved, target_rate=rate_on,
+                       trail=trail_on, target_exact=exact_on)
+        p0 = with_interior(p0, int_chunk)
+    end
     # **The record is `Float64` whatever the run computes in.** That is
     # what `precision.jl`'s `tofloat64` exists for: the analysis time
     # series, the numbers a test compares against `CODE.md`, and the I/O of
@@ -632,10 +814,17 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     # only place that function is allowed.
     R = tofloat64
 
-    records = NamedTuple[]
-    nsteps = 0
-    nregrids = 0
-    λ_initial = zero(T)
+    # Each assigned once, for the closures below that capture them; a
+    # restart's from the checkpoint.
+    records = saved === nothing ? NamedTuple[] : NamedTuple[r for r in saved.records]
+    nsteps = saved === nothing ? 0 : saved.nsteps
+    nregrids = saved === nothing ? 0 : saved.nregrids
+    λ_initial = saved === nothing ? zero(T) : from_plain(T, saved.lambda_initial)
+    if saved !== nothing
+        for k in keys(fitcost)
+            fitcost[k][] = saved.fit_cost[k]
+        end
+    end
     # The previous find's shape, which the next one is seeded with
     # (`CODE.md`: "Each find is seeded with the previous result, recentred
     # on `c(t)`"). It is the *shape* that is carried and not the origin:
@@ -649,12 +838,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     # layer and the footprint guard refuses them, and a track whose first
     # three finds fail is lost. On a spherical horizon the two seeds are the
     # same surface.
-    hlm_seed = fitted && case.horizon !== nothing ?
+    hlm_seed = saved !== nothing ? saved.hlm_seed :
+               fitted && case.horizon !== nothing ?
                complex_from_real(tr.shape, case.horizon.N - 1) : nothing
     # The lapse-collapse trigger (step 8d): set by a row whose evolved region
     # has `min α` below the spec's `α_trigger`, it forces a find at the next
     # chunk boundary whatever the cadence, and that row says so.
-    trigger_pending = false
+    trigger_pending = saved === nothing ? false : saved.trigger_pending
 
     # The track's rows for one record entry, and the next chunk's geometry:
     # after this row's find, `update_track`, then `fitted_interior` from the
@@ -722,8 +912,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         return p′
     end
 
+    # The closures below read the mesh as `U.forest` — the same object, which
+    # `regrid!` changes in place — and not as `forest`, which a restart rebinds
+    # to the checkpoint's: a closure that captures a name assigned twice boxes
+    # it ("Things that will bite").
     function track!(t, hz, c_pred, forced)
-        h_fine = minimum_spacing(T, forest)
+        mesh = U.forest
+        h_fine = minimum_spacing(T, mesh)
         prediction = hz.success === true ?
                      R(sqrt(sum(abs2, SVector{3,T}(Tuple(hz.origin)) - c_pred)) /
                        h_fine) : nothing
@@ -737,15 +932,15 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
             tr = e.track
         end
         if lost === nothing
-            geom = geometry(forest, t, tr)
-            check_interior_radii(forest, kgeom(geom, T(t)), case.background, G;
+            geom = geometry(mesh, t, tr)
+            check_interior_radii(mesh, kgeom(geom, T(t)), case.background, G;
                                  t=T(t), center=case.center)
-            check_bounds_gate(forest, geom, case.bounds, q; t=T(t))
+            check_bounds_gate(mesh, geom, case.bounds, q; t=T(t))
         end
         ct = center_at(track_center(tr), T(t))
         ca = center_at(case.center, T(t))
-        leaf_h(x) = (b = locate_point(forest, x);
-                     b === nothing ? h_fine : spacing(T, forest, forest.leaves[b]))
+        leaf_h(x) = (b = locate_point(mesh, x);
+                     b === nothing ? h_fine : spacing(T, mesh, mesh.leaves[b]))
         efolds = margin_efolds(case.background, geom, q; t=T(t),
                                ε_KO=case.ε_KO, spacing=leaf_h).min
         rows = (track_source=tr.source, track_center=ntuple(d -> R(ct[d]), 3),
@@ -761,6 +956,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     end
 
     function record!(p, t, u, dt, steps, λ, λ_end, cflnum)
+        mesh = U.forest
         shell = horizon_shell(case, p.interior)
         gh_constraint!(p, u, t)
         c = constraint_norms(p)
@@ -832,8 +1028,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                                R(centroid_offset(case, t, ind.centroid)),
                bounds_hits=bh.hits, bounds_nonfinite=bh.nonfinite,
                bounds_r_max=bh.r_max, val..., trk..., fr...,
-               nblocks=nleaves(forest), levels=forest_levels(forest),
-               h=R(minimum_spacing(T, forest)),
+               nblocks=nleaves(mesh), levels=forest_levels(mesh),
+               h=R(minimum_spacing(T, mesh)),
                finite=evolved_nonfinite(p, u, t) == 0)
         push!(records, rec)
         observer === nothing || observer(p, t, u)
@@ -842,23 +1038,36 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         return ind
     end
 
-    # `t = 0`, before anything has been integrated: the record's first row
-    # is the initial data's own, which is what makes "the error grew from
-    # zero" a statement a test can check rather than assume.
-    λ_initial = max_speed_of(p0, u, zero(T))
-    dt0 = cfl * minimum_spacing(T, forest) / λ_initial
-    p0 = with_interior(p0, chunk_interior(case, dt0, ρ_max_factor,
-                                          ρ_max_fixed; default=ρ_max_default,
-                                          interior=kgeom(geom, zero(T))))
-    # The initial data has not been through a stage, so neither limiter
-    # has seen it: the range projection first, in the order RK4 applies
-    # the two (stage, then step), and the paste after it **(proposed in
-    # step 8b** — on analytic data neither fires**)**.
-    apply_bounds!(p0, u, zero(T))
-    paste_interior!(p0, u, zero(T))
-    record!(p0, zero(T), u, zero(T), 0, λ_initial, λ_initial, zero(T))
+    if ck === nothing
+        # `t = 0`, before anything has been integrated: the record's first row
+        # is the initial data's own, which is what makes "the error grew from
+        # zero" a statement a test can check rather than assume.
+        λ_initial = max_speed_of(p0, u, zero(T))
+        dt0 = cfl * minimum_spacing(T, forest) / λ_initial
+        p0 = with_interior(p0, chunk_interior(case, dt0, ρ_max_factor,
+                                              ρ_max_fixed; default=ρ_max_default,
+                                              interior=kgeom(geom, zero(T))))
+        # The initial data has not been through a stage, so neither limiter
+        # has seen it: the range projection first, in the order RK4 applies
+        # the two (stage, then step), and the paste after it **(proposed in
+        # step 8b** — on analytic data neither fires**)**.
+        apply_bounds!(p0, u, zero(T))
+        paste_interior!(p0, u, zero(T))
+        record!(p0, zero(T), u, zero(T), 0, λ_initial, λ_initial, zero(T))
+    end
 
     nchunks = ceilint(t_end / chunk)
+    # The chunk the checkpoint ended, and the refusals of a restart with
+    # nothing left to run or with chunks that would not line up (TreeHydro's).
+    c_done = saved === nothing ? 0 : saved.chunk
+    nchunks > c_done || throw(ArgumentError(
+        "t_end = $t_end lies at or before the checkpoint's t = $t_saved, the " *
+        "end of its chunk $c_done: there is nothing left to run. A restart may " *
+        "move t_end, but only beyond the time the checkpoint reached."))
+    c_done == 0 || min(c_done * chunk, t_end) == t_saved || throw(ArgumentError(
+        "restart_file $(repr(restart_file)) ends at t = $t_saved, and chunk " *
+        "$(c_done + 1) of this call would start at $(min(c_done * chunk, t_end)): " *
+        "the file was not written by this recipe, or is damaged."))
     p = p0
     # **A moving hole's step is sized for the speed it will have (proposed in
     # step 8f).** `λ_max` is measured at the chunk's start and the recheck
@@ -876,15 +1085,89 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
     # after a quieter chunk 3, and the recheck stopped the run at a CFL
     # number of `0.20003` against `0.2`. A 1 % margin costs 1 % of the steps.
     moving = sum(abs2, case.center.v) > 0
-    growth = one(T)
+    growth = saved === nothing ? one(T) : from_plain(T, saved.growth)
     # The previous chunk's integrator, whose scratch the next one takes over
     # while the mesh is unchanged (`reuse`); `nothing` before the first chunk
-    # and after a regrid that moved the mesh.
+    # and after a regrid that moved the mesh — and after a restart:
+    # IMEXRungeKutta's scratch carries no value from one step to the next, so
+    # a fresh one is the same run.
     integ_prev = nothing
-    for c in 1:nchunks
+
+    # The regrid at a chunk boundary, on the flags the record computed from
+    # this state, with this `t`'s hook — the loop's and a restart's, one code
+    # path, which is what makes a restart that regrids first the run that
+    # regridded there (added 2026-10-01). `regrid!` is handed the state field
+    # set alone — the fresh `GHProblem` below allocates a new `diag` and
+    # re-samples the gauge source on the new mesh, so resizing either of them
+    # through the transfer would be work thrown away (amended in step 6;
+    # `CODE.md`'s loop lists all three). It returns what it rebuilt rather
+    # than assigning it, so that the loop's `p` and `u` are not captured.
+    function regrid_mesh(p, u, schedule, stop, flags)
+        mesh = U.forest
+        moved = regrid!(mesh, U => schedule; flags=flags, buffer=0,
+                        boundary=dirichlet(case, stop))
+        moved || return (; moved, p, u, schedule, geom)
+        schedule = GhostSchedule(U, ops)
+        # A tracked geometry is rebuilt on the new mesh from the same track —
+        # its offset and ramp are stated in the mesh's spacings — and the
+        # problem's constructor asserts it, as it asserts the sphere (step 8d).
+        g = fitted ? geometry(mesh, stop, tr) : geom
+        # A fitted run's cache is made anew on the new mesh and filled at the
+        # next chunk's start from the same fits — a fit is a polynomial in `x`
+        # and does not know the mesh (proposed in step 8e).
+        p = GHProblem(U, schedule, case; q=q, t=stop,
+                      interior=fitted ? kgeom(g, stop) : g, accounting=acc,
+                      target=fitmode ? target_cache(U) : nothing, fits=fits,
+                      t_target=stop, target_rate=rate_on, trail=trail_on,
+                      target_exact=exact_on)
+        u = statevector(U)
+        gather!(u, U)
+        # The transferred state has not been through a step, so neither
+        # limiter has run on it: the range projection (a no-op without
+        # bounds) — the prolongation into a fresh fine block is unlimited and
+        # can leave an owned point outside every range, TreeHydro's reason for
+        # the same call — and the `:pasted` variant's paste, which every other
+        # variant compiles away.
+        apply_bounds!(p, u, stop)
+        paste_interior!(p, u, stop)
+        return (; moved, p, u, schedule, geom=g)
+    end
+
+    # **A restart regrids first** (decided 2026-10-01): the checkpoint was
+    # written before chunk `c_done`'s regrid, so the flags are computed again
+    # — from the same state with the same indicator, and so the same flags
+    # unless the criterion was changed, which is what a restart may do — and
+    # the mesh is regridded before the next step, exactly where the
+    # uninterrupted run regridded.
+    if ck !== nothing && regrid && c_done < nchunks && case.refinement !== nothing
+        ind0 = gh_indicator!(p, u, t_saved; buffer=bufferwidth, travel=travel)
+        rg = regrid_mesh(p, u, schedule, t_saved, ind0.flags)
+        if rg.moved
+            nregrids += 1
+            p, u, schedule, geom = rg.p, rg.u, rg.schedule, rg.geom
+            fitted && ((geom_sampled, sample_t, sample_track) = (geom, t_saved, tr))
+        end
+    end
+
+    # When to write and when to stop, by the wall clock (TreeHydro's): the
+    # longest chunk seen, regrid included, and the longest write are what
+    # the next chunk and its checkpoint are expected to cost. Timing decides
+    # *when* a file is written and never what is in it.
+    chunk_max = 0.0
+    write_max = 0.0
+    last_write = t0_wall
+    written = String[]
+    finished = true
+    t_done = t_saved
+    for c in (c_done + 1):nchunks
+        chunk_start = time()
         tstart = min((c - 1) * chunk, t_end)
         stop = min(c * chunk, t_end)
         stop > tstart || break
+        # The track this chunk's geometry is built from, which a checkpoint
+        # after the row needs to rebuild the chunk's interior (the row's
+        # `track!` moves `tr` on).
+        tr_chunk = tr
 
         # (0) a tracked run's geometry for this chunk (step 8d), built from
         # the track at the previous row. The gauge source was sampled with
@@ -903,6 +1186,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
                               t_target=p.t_target, target_rate=rate_on,
                               trail=trail_on, target_exact=exact_on)
                 geom_sampled = geom
+                sample_t, sample_track = tstart, tr
                 nresamples += 1
             end
             p = with_interior(p, with_ρ_max(kgeom(geom, tstart),
@@ -986,53 +1270,75 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
         # (3) the record, and whatever is watching — before the regrid that
         # would invalidate the mesh the record describes.
         ind = record!(p, stop, u, dt_used, steps, λ, λ_end, cflnum)
+        t_done = stop
 
-        # (4) the regrid, on the flags the record has already computed from
-        # this state, with this `t`'s hook. **Not after the last chunk**:
-        # the forest that comes back is then the one the returned state was
-        # computed on. `regrid!` is handed the state field set alone — the
-        # fresh `GHProblem` below allocates a new `diag` and re-samples the
-        # gauge source on the new mesh, so resizing either of them through
-        # the transfer would be work thrown away (amended in step 6;
-        # `CODE.md`'s loop lists all three).
-        if regrid && c < nchunks && ind !== nothing
-            moved = regrid!(forest, U => schedule; flags=ind.flags, buffer=0,
-                            boundary=dirichlet(case, stop))
-            if moved
-                nregrids += 1
-                integ_prev = nothing        # its scratch is the old mesh's
-                schedule = GhostSchedule(U, ops)
-                # A tracked geometry is rebuilt on the new mesh from the same
-                # track — its offset and ramp are stated in the mesh's
-                # spacings — and the problem's constructor asserts it, as it
-                # asserts the sphere (step 8d).
-                if fitted
-                    geom = geometry(forest, stop, tr)
-                    geom_sampled = geom
-                end
-                # A fitted run's cache is made anew on the new mesh and filled
-                # at the next chunk's start from the same fits — a fit is a
-                # polynomial in `x` and does not know the mesh (proposed in
-                # step 8e).
-                p = GHProblem(U, schedule, case; q=q, t=stop,
-                              interior=fitted ? kgeom(geom, stop) : geom,
-                              accounting=acc,
-                              target=fitmode ? target_cache(U) : nothing,
-                              fits=fits, t_target=stop, target_rate=rate_on,
-                              trail=trail_on, target_exact=exact_on)
-                u = statevector(U)
-                gather!(u, U)
-                # The transferred state has not been through a step, so
-                # neither limiter has run on it: the range projection (a
-                # no-op without bounds) — the prolongation into a fresh fine
-                # block is unlimited and can leave an owned point outside
-                # every range, TreeHydro's reason for the same call — and
-                # the `:pasted` variant's paste, which every other variant
-                # compiles away.
-                apply_bounds!(p, u, stop)
-                paste_interior!(p, u, stop)
+        # (4) the checkpoint, **before the regrid** (decided 2026-10-01; after
+        # it in TreeHydro): the state at the end of the chunk on the chunk's
+        # own mesh, with everything the row updated, so that a restart
+        # regrids first — with the criterion it is given, which may differ —
+        # and then steps. The last chunk is a restart point too, where `t_end`
+        # lies on a chunk boundary: a longer run would have regridded there,
+        # and the restart does. `u` and not `U.work`, which the row's find,
+        # fit and indicator have scattered into.
+        stopping = false
+        if checkpointing && (c < nchunks || stop == c * chunk)
+            now = time()
+            chunk_cost = max(chunk_max, now - chunk_start)
+            due = (checkpoint_every_chunks !== nothing &&
+                   c % checkpoint_every_chunks == 0) ||
+                  (checkpoint_interval_seconds !== nothing &&
+                   now - last_write ≥ checkpoint_interval_seconds)
+            stopping = c < nchunks && max_walltime_seconds !== nothing &&
+                       (now - t0_wall) + chunk_cost + write_max >
+                       max_walltime_seconds
+            if due || stopping
+                path = checkpoint_filename(checkpoint_path_prefix, nsteps)
+                state = (; chunk=c, t=plain_reals(stop), t_chunk=plain_reals(tstart),
+                         nsteps, nregrids, nresamples, passes, converged,
+                         lambda_initial=plain_reals(λ_initial),
+                         growth=plain_reals(growth),
+                         rho_chunk=plain_reals(T(interior_ρ_max(p.interior))),
+                         track=to_plain(tr; path="run.track"),
+                         track_chunk=to_plain(tr_chunk; path="run.track_chunk"),
+                         sample_t=plain_reals(sample_t),
+                         sample_track=to_plain(sample_track; path="run.sample_track"),
+                         fits=fits === nothing ? nothing :
+                              (to_plain(fits[1]; path="run.fits[1]"),
+                               to_plain(fits[2]; path="run.fits[2]")),
+                         target_bounds=to_plain(tbounds; path="run.target_bounds"),
+                         fit_initial=to_plain(fit_initial; path="run.fit_initial"),
+                         hlm_seed, trigger_pending,
+                         bounds=to_plain(acc; path="run.bounds"),
+                         fit_cost=map(r -> r[], fitcost), records=Tuple(records))
+                save_run(path, U.forest, U, u; recipe=recipe, criterion=criterion,
+                         run=state, filters=checkpoint_hdf5_filters,
+                         sync=checkpoint_sync_to_disk)
+                push!(written, path)
+                rotate_checkpoints!(checkpoint_path_prefix, num_checkpoints_keep;
+                                    keep=path)
+                last_write = time()
+                write_max = max(write_max, last_write - now)
             end
         end
+        # Stopped with the checkpoint just written: the state that comes back
+        # is the one in the file, before the regrid.
+        if stopping
+            finished = false
+            break
+        end
+
+        # (5) the regrid. **Not after the last chunk**: the forest that comes
+        # back is then the one the returned state was computed on.
+        if regrid && c < nchunks && ind !== nothing
+            rg = regrid_mesh(p, u, schedule, stop, ind.flags)
+            if rg.moved
+                nregrids += 1
+                integ_prev = nothing        # its scratch is the old mesh's
+                p, u, schedule, geom = rg.p, rg.u, rg.schedule, rg.geom
+                fitted && ((geom_sampled, sample_t, sample_track) = (geom, stop, tr))
+            end
+        end
+        chunk_max = max(chunk_max, time() - chunk_start)
     end
 
     return (records=records, nsteps=nsteps, nchunks=length(records) - 1,
@@ -1044,7 +1350,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest, q::Integer, ops, t_end,
             track=tr, geometry=fitted ? geom : nothing, n_L=n_L,
             nresamples=nresamples, fits=fits, fit_initial=fit_initial,
             target_bounds=tbounds, handover=R(handover_t),
-            target_source=target_source,
+            target_source=target_source, finished=finished, t=t_done,
+            checkpoints_written=written, restart_file=restart_file,
+            criterion_changed=criterion_changed,
             fit_cost=fitmode ?
                      (build_ms=fitcost.build_ns[] / 1e6, nbuild=fitcost.nbuild[],
                       fill_ms=fitcost.fill_ns[] / 1e6, nfill=fitcost.nfill[],

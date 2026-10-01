@@ -79,6 +79,13 @@ reproducing the gauge wave's rate and its error. There is no refinement
 indicator, no black-hole interior and no driver yet; those are the next
 three steps.
 
+**Checkpoint and restart** (2026-10-01, on TreeAMR 0.1.4): `evolve!`
+writes checkpoints through TreeAMR's HDF5 extension — before the regrid, so
+that a restart may change the regridding criterion — and a chain of
+restarts, one chunk per job, is the uninterrupted run bit for bit. The
+keywords and the file names are TreeHydro's; `latest_checkpoint(prefix)`
+makes a job chain one command. See `CODE.md`, "Checkpoint and restart".
+
 The formulation and the pointwise algebra are inherited from
 `GeneralizedHarmonicSecondOrder2`, where they were validated on SBP-SAT
 spectral elements; that repository is unpublished, so the documents this

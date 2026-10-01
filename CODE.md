@@ -47,8 +47,10 @@ spin**; time integration through IMEXRungeKutta's RK4 by block owner
 deliverable; refinement is driven by an **error indicator**, not by
 prescribed spheres; `Float64` on Symmetry's H200 is the device
 requirement and `Float32` on a device is desirable, not required; no
-checkpointing; GPU kernel efficiency is a later research project; the
-inherited documents live in `notes/`.
+checkpointing **(amended 2026-10-01**, Erik's decision: checkpoint and
+restart through TreeAMR 0.1.4's M9a, see [Checkpoint and
+restart](#checkpoint-and-restart)**)**; GPU kernel efficiency is a later
+research project; the inherited documents live in `notes/`.
 
 ## Goals
 
@@ -60,7 +62,7 @@ inherited documents live in `notes/`.
   in `Float64` on Symmetry's H200, bit-identical across thread counts.
   Milestones G4–G6 define the proof. What a production code adds on top
   — binaries, excision, a dynamical gauge, radiative boundaries,
-  checkpointing, an efficient GPU kernel — is under
+  an efficient GPU kernel — is under
   [Possible extensions](#possible-extensions), each with the design note
   that would start it.
 - **GPU-efficient, meaning memory-bandwidth-frugal.** GHSO2's goal
@@ -133,7 +135,11 @@ inherited documents live in `notes/`.
   binary data from an elliptic solver is an extension.
 - **No checkpoint and restart** (decided in review). A proof of concept
   runs to completion; checkpointing arrives with TreeAMR's M9 or as a
-  production extension.
+  production extension. **(Amended 2026-10-01**, Erik's decision: it
+  arrived with TreeAMR 0.1.4's M9a, and G5's runs — `38`–`149 h` for
+  harmonic `a = 9/10`, eleven hours for step 8′'s crossing — outlast a
+  queue's day, so `evolve!` checkpoints and restarts; see [Checkpoint and
+  restart](#checkpoint-and-restart).**)**
 - **No mesh machinery.** Trees, ghosts, interpolation, regrid transfer
   and reductions are TreeAMR's. The one thing this package writes that
   arguably belongs upstream — point interpolation from a field set, for
@@ -799,7 +805,8 @@ threads, and the numbers above are what G6 measures the H200 against.
 
 GHSO2's conservative bound on the coordinate characteristic speed, taken
 once per chunk from a speed slot in `diag` (a kernel writes it,
-`block_mapreduce(max)` reduces it) and re-checked at the chunk's end as
+`block_mapreduce(max)` reduces it — `mesh_mapreduce(max)` from 2026-10-01)
+and re-checked at the chunk's end as
 TreeHydro does — throw, do not warn, if the step used violated the bound.
 `cfl = 1/4` **(proposed** default, GHSO2's**)**.
 
@@ -2936,7 +2943,17 @@ the tests assert on them.
 **Constraints.** Both kernels mask the interior `r < r_1` and write zero
 inside it; the modified region is not a numerical solution. Norms are
 `block_mapreduce` partials weighted by each block's `h³`, combined in
-block order, so they are bit-identical across thread counts.
+block order, so they are bit-identical across thread counts. **(Amended
+2026-10-01:** they are TreeAMR's `mesh_mapreduce` — the same partials, the
+weight `h³` applied by TreeAMR, the combination on the host, which is the
+one place TreeAMR's M7 will put the `Allreduce` — and so is every other
+reduction that crosses blocks: the speed, the indicator's scales and
+`τ_max`, the projection's counts and the validity monitor's extremes. They
+are still bit-identical across thread counts. `mesh_mapreduce` combines
+pairwise where this package's loop summed left to right, so the L2 norms
+moved in the last place and nothing printed to the digits this document
+records did; `max`, `min` and the counts are unchanged bit for bit. The
+denominator is `evolved_volume`, one weighted reduction of the mask.**)**
 
 **(Implemented and measured in step 4**, `src/constraints.jl`.**)** Five
 things the writing settled, each stated where it is made in that file:
@@ -3374,7 +3391,157 @@ break it:
 - **No checkpoint and restart** (decided in review): a proof of concept
   runs to completion. When it is needed it is a few dozen lines over
   TreeAMR's leaf keys and the state vector, or TreeAMR's M9; it is under
-  [Possible extensions](#possible-extensions).
+  [Possible extensions](#possible-extensions). **(Amended 2026-10-01:** it
+  is TreeAMR's M9a, and [Checkpoint and restart](#checkpoint-and-restart)
+  is its section.**)**
+
+## Checkpoint and restart
+
+*(Added 2026-10-01, on TreeAMR 0.1.4, whose M9a adds `save_checkpoint` and
+`load_checkpoint` through a package extension on HDF5. Erik's decision of
+that day reversed "No checkpoint and restart" above; the mechanism is
+TreeHydro's — its `CODE.md`, "Checkpoint and restart", 2026-09-29 — on
+purpose, so that the applications of TreeAMR checkpoint alike, with the
+two differences marked.)* G5's crossing is eleven hours on a node, the
+`a = 9/10` run `38`–`149 h`, and a queue's day is the limit. **Everything
+about the file is upstream**: the forest, the field-set layout, the atomic
+and durable write, element types as limbs, the provenance and the refusal
+of a file a version cannot read — "no mesh machinery" applied to I/O. What
+`src/checkpoint.jl` holds is when to write, the run state, the refusal of a
+restart with other parameters, and the files' names and rotation.
+
+**HDF5 is a hard dependency** (decided 2026-10-01; *TreeHydro leaves it to
+the caller*). `TreeGeneralizedHarmonic.jl` imports it, which loads
+TreeAMR's `TreeAMRHDF5Ext`, so a run can always be checkpointed and no job
+script has to remember `using HDF5`; `prerequisite_tests.jl` asserts the
+extension is loaded.
+
+**Where: at a chunk boundary, after the analysis row and before the regrid**
+(decided 2026-10-01; *TreeHydro writes after the regrid*). At a chunk
+boundary the fixed-step integrator holds nothing but `(t, u)` —
+IMEXRungeKutta's scratch carries no value from one step to the next — so a
+restart that restores the state and the run state begins where the
+uninterrupted run would. Before the regrid, so that a restart can **regrid
+with a changed criterion** as the first thing it does, before its next
+step: the flags are computed again from the restored state with the
+indicator the restart is given — the record computes them last, from
+nothing the other rows leave behind, so with the same criterion they are
+the same flags — and the regrid is the loop's own code (`regrid_mesh` in
+`driver.jl`), which is what makes the replay exact. The price is one
+indicator evaluation per restart. A second consequence: **the last chunk is
+a restart point too**, where `t_end` is a whole number of chunks in `T`
+(`1/10 = 2 · 1/20` is, `3 · 1/20 ≠ 3/20` is not), since a longer run would
+have regridded there; elsewhere it is not written, because a continued run
+would move the chunk boundaries.
+
+**Would TreeHydro's work the same way?** Yes, and nothing in TreeAMR is in
+the way: its regrid flags read the primitives, which `update_primitives!`
+rebuilds from `u`, its buffer is derived from `λ_end` (in its history), and
+its post-regrid atmosphere reset is a function of `(u, p, t)` — so a restart
+before the regrid replays the flags, the regrid and the reset, as this
+package replays the indicator and the regrid. Its recipe would split off the
+criterion as below. That change is TreeHydro's to make.
+
+**What is saved.** The forest and the state field set `U` with its state
+vector `u`, through TreeAMR, and this package's plain data `(; recipe,
+criterion, run)` in its group `TreeGeneralizedHarmonic.jl`, format version
+1. `u` and not `U.work`: the row's find, fit and indicator have scattered
+into the working array, and without a regrid it holds the integrator's last
+stage. The **run state** is what the uninterrupted run would carry into the
+next chunk and cannot be recomputed from `(forest, u, t)`; since step 8d
+that is a good deal more than TreeHydro's accumulators, and the old note
+under [Possible extensions](#possible-extensions) — "bit-identical, since
+the layer and the hook depend on `(x, t)` only" — was no longer true:
+
+- the **horizon track**, after the row's update (the next chunk's geometry
+  and the next find's jump test), and the track the chunk was built from
+  (the chunk's interior, which the restart's indicator masks with);
+- the **two fits**, the row's and the previous one (the target and its
+  slope), each its parameters and coefficients — the backend's copy is made
+  from the host's on load — and the **initial fit** and the **target's
+  ranges**, derived once on the initial mesh;
+- the **finder's seed**, the previous find's shape, and the pending
+  **lapse-collapse trigger**;
+- the **gauge source's sample**: the time and the track of the geometry it
+  was sampled with, so that the restart samples it with the same core rule
+  (a non-harmonic background's tracked core is re-sampled only when it has
+  moved half a cell, step 8d);
+- the **speed growth** `λ_end/λ` that sizes a moving hole's next step (step
+  8f), in `T`, and the chunk's relaxation rate;
+- the **range projection's accounting**, the counters, the fits' costs and
+  **the record** so far, so that a restarted run's *answer* is the
+  uninterrupted one's and not only its state.
+
+**Reals are stored exactly**: TreeAMR's plain data refuse a MultiFloat
+scalar, so `plain_reals` stores a native float as itself and any `isbits`
+real made of one native float throughout as its limbs (TreeHydro's rule).
+**The run state's structs** (`HorizonTrack`, `FitParams`, `StateBounds`,
+`BoundsAccounting`, …) are stored field by field and rebuilt from their
+declared field types, so that an `SVector{3,T}` comes back as one and not as
+the `Vector{Float64}` a plain read gives; only this package's own structs
+are taken apart, and anything else is refused with its field's path. The
+fits' diagnostics come back as plain `Float64` tuples, which nothing the run
+computes reads. The record is already plain data (its vectors are tuples).
+
+**The recipe and the criterion** (decided 2026-10-01; *TreeHydro's recipe
+holds its criterion*). A restart is called with the same case and keywords
+as the run it continues, and **only `t_end` and the regridding criterion may
+change**. The recipe is every parameter that decides a number: the working
+type by name, `q` and the operators; the case's background, box,
+dissipation, damping, center, interior, horizon finder and bounds (each as
+its `repr`, which prints every real in full); and `chunk`, `cfl`, `adapt`,
+`adm_every`, the rates and the fitted target's switches, every real through
+`T` and then `plain_reals`. A restart whose recipe differs is refused with
+**one** `ArgumentError` naming every field that differs and both values. The
+criterion is the case's `Refinement` field by field, `regrid` and `buffer`;
+a restart whose criterion differs is run, reported field by field, and says
+so in `criterion_changed`. The forest is not in either — a restart takes the
+file's — and `backend`, `maxpasses`, `find` and the observer decide no number
+once the initial data exist.
+
+**Names, rotation, triggers, the observer — TreeHydro's.** The files are
+`"<prefix>.it<iteration>.h5"`, the cumulative step count zero-padded to ten
+digits; after a successful write every file of the prefix but the one just
+written and the newest `num_checkpoints_keep − 1` others is deleted, earlier
+jobs' included; `latest_checkpoint(prefix)`, exported, makes a job chain one
+command for every job:
+
+    r = evolve!(case; …, checkpoint_path_prefix = prefix,
+                max_walltime_seconds = 23.5 * 3600,
+                restart_file = latest_checkpoint(prefix))
+
+with no `forest` once the file exists (a restart refuses one). The triggers
+are `checkpoint_every_chunks`, `checkpoint_interval_seconds` and
+`max_walltime_seconds`, the last stopping the run — `finished = false`, the
+checkpointed state returned, before its regrid — when the elapsed time plus
+the longest chunk so far, regrid included, plus the longest write would pass
+the limit. Timing decides only *when* a file is written. The observer is not
+called for the rows a restart brings back; it sees the chunks it runs.
+`test/hole_runs.jl`'s `generic` and `moving` workers take `checkpoint=<dir>`
+and `walltime=<s>`, so the same command resubmitted is a job chain.
+
+**What it amounts to** (measured 2026-10-01, `test/checkpoint_tests.jl`): a
+chain of restarts, one chunk per job, is the uninterrupted run **bit for
+bit** — state, mesh, record, counters, track, accounting and the fits'
+coefficients — on the step-5 fixture with the range projection on, on the
+adaptive fixture through the regrid that moves its mesh, on a tracked
+`:fitted` Kerr-Schild hole through a regrid (its gauge source re-sampled),
+and on a moving `:fitted` harmonic hole with step 8′'s trailing ramp; a
+finished run continued from its last chunk is the longer run; a restart that
+no longer coarsens keeps the corner the uninterrupted run removes. On a real
+row — `hole_runs.jl moving=l0-trail-9 t_end=1/2`, the boosted `a = 0` hole
+on 820 blocks — the two-job chain's last row is the uninterrupted run's in
+every printed digit, at the same 84 steps, from a `68 MB` file.
+
+**What it costs** (measured 2026-10-01 on the development machine, four
+threads, its SSD; `save_run`/`load_run` of a 20-variable vertex-centered set
+at `N = 8`): on 3536 blocks — G5's mesh at rest is 3900–5600 — the file is
+`290 MB`, a save `0.09 s` (`3 GB/s`), `0.11 s` with the flush to stable
+storage, and a load `0.37 s`, once compiled; the first save and the first
+load of a session compile for `3 s` and `5.5 s`. A G5 chunk is about
+`160 s` of a node, so a checkpoint every chunk costs under a tenth of a
+percent. The record of 53 rows is noise beside the state. Symmetry's BeeGFS
+is not measured.
 
 ## Upstream prerequisites
 
@@ -3411,10 +3578,17 @@ What this package needs from TreeAMR. None blocks G0–G3.
 2. **A device reduce-to-scalar** (TreeAMR `TODO.md`) would let the
    per-chunk norms stay on the device; today `block_mapreduce` copies
    one value per block back, which is fine at chunk frequency.
+   **(Done upstream:** TreeAMR 0.1.2 reduces on a device in two launches,
+   and `mesh_mapreduce` is the one-number form; this package reduces
+   through it from 2026-10-01.**)**
 3. **MPI (M7) and I/O (M9)** are on TreeAMR's roadmap and this package
    is written so they arrive transparently: no host loop over blocks
    assumes all blocks are local, and every reduction is a
-   `block_mapreduce` or a `firing_boxes`.
+   `block_mapreduce` or a `firing_boxes`. **(Amended 2026-10-01:** every
+   reduction that crosses blocks is a `mesh_mapreduce` — the host folds
+   over `block_mapreduce`'s per-block vector, which would have been
+   per-rank answers under M7, are gone — and M9's checkpoint half, M9a,
+   is in use: [Checkpoint and restart](#checkpoint-and-restart).**)**
 4. **A launch-configuration knob on `map_blocks!`** (G6): today it
    launches with KernelAbstractions' default workgroup, and GHAccel
    measured the workgroup shape of a 3D stencil kernel as worth about
@@ -3446,6 +3620,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`; **amended 2026-09-26**: `gh_interpolate`/`gh_interpolate_grad` over TreeAMR's `interpolate`, and the guard as the `Region` `UnevolvedRegion`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
 | `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl` |
 | `src/fit.jl` | the fitted target (added in step 8e, after `tracking.jl` and before `driver.jl`): the fit's variables (`fit_variables`, `state_from_fit`), the real solid harmonics (`_solid_harmonic_fold`, `real_solid_harmonics`, `fit_directions`), the two samplers (`state_sampler`, `analytic_sampler`), the least squares (`solve_fit`, `fit_row_weights`), the validity sweep (`fit_sweep`), `FitParams` and `InteriorFit` with `build_fit`, `fit_residual` and `fit_valid`, the kernel-callable evaluator `fit_variables_at`/`fit_state`, and the kernel half (8e-ii): `derive_target_bounds`, the 40-variable cache (`target_cache`, `fit_target_kernel!`, `fill_target!`) and the initial data's `fitted_state_kernel!`. The variant's branch is in `evolution.jl` (`GHProblem`'s `target`/`fits`/`t_target`, `refill_target`), its residual in `constraints.jl`'s error kernel, its flow in `driver.jl` (`refit!`, the refill and the pieces of a moving chunk) |
+| `src/checkpoint.jl` | checkpoint and restart (added 2026-10-01, after `fit.jl` and before `driver.jl`): the file names and their rotation and `latest_checkpoint` (TreeHydro's), `plain_reals` for exact reals, `to_plain`/`from_plain` for the run state's own structs and `fit_from_plain` for an `InteriorFit`, `run_recipe` and `run_criterion`, `check_recipe`, `save_run`/`load_run` over TreeAMR's `save_checkpoint`/`load_checkpoint`, and `check_checkpoint_keywords`. `evolve!` writes and reads through it; `test/checkpoint_tests.jl` is its file |
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written (added in step 8c′) — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
@@ -3461,7 +3636,9 @@ replaced `OrdinaryDiffEqLowOrderRK` and `SciMLBase` on 2026-09-26, and
 neither is a dependency of the package or of its tests since), `LinearAlgebra` (`det`, `dot`
 and `tr` on `StaticArrays`, which the pointwise algebra uses; a standard
 library, added in step 1 and not listed when `PLAN.md` enumerated step 0's
-`Project.toml` **(proposed in step 1)**), `HDF5` (from G6),
+`Project.toml` **(proposed in step 1)**), `HDF5` (from G6; **from
+2026-10-01** a hard dependency for the checkpoints, whose writer is
+TreeAMR's HDF5 extension),
 `ApparentHorizonFinder` and `KorzynskiSpin` (from G4, added in step 7,
 both pinned to GitHub `main` by `[sources]` like the first two and both
 listed in `test/Project.toml` as well, because `prerequisite_tests.jl`
@@ -6284,7 +6461,11 @@ the design note that would start each:
   case and the state vector to HDF5, read back into a fresh forest
   (`Forest`, `refine!` to the keys, `balance!`, `scatter!`); bit-identical
   to an uninterrupted run, since the layer and the hook depend on
-  `(x, t)` only. A few dozen lines, or TreeAMR's M9.
+  `(x, t)` only. A few dozen lines, or TreeAMR's M9. **(Done 2026-10-01**
+  through TreeAMR 0.1.4's M9a, whose load builds the forest from its leaf
+  list directly (`Forest(roots; leaves)`) — see [Checkpoint and
+  restart](#checkpoint-and-restart); and since step 8d the layer depends on
+  the track and the fits as well, which the run state carries.**)**
 - **Excision**, for spacetimes without an analytic interior. Like the
   interior layer it would be a pointwise decision — a mask that marks
   points as not evolved, with one-sided or extrapolated data supplied
@@ -6360,8 +6541,8 @@ the proof-of-concept target a single boosted, spinning hole;
 OrdinaryDiffEq's RK4 for time integration (amended 2026-09-26:
 IMEXRungeKutta's RK4, by block owner); the analysis quantities as
 part of the deliverable; an error indicator for refinement; `Float64`
-on the H200 as the device requirement; no checkpointing; the inherited
-documents copied into `notes/`.
+on the H200 as the device requirement; no checkpointing (reversed
+2026-10-01); the inherited documents copied into `notes/`.
 
 **Opened in step 5, and the one thing that stands between this package
 and its own proof of concept: a spherical frozen core cannot be used with
@@ -6460,12 +6641,14 @@ interior:
   whole sphere `|x| ≤ 1`, 90 112 blocks, 111 GB, `3.0 h` a `M` and `149 h`
   for `50 M` (measured in step 8f). No checkpointing exists (`Possible
   extensions`), so either is one uninterrupted job longer than any queue's
-  day — and it presumes a fit good enough off the equator, which none of
+  day **(amended 2026-10-01**: it exists now, so either is a chain of
+  jobs**)** — and it presumes a fit good enough off the equator, which none of
   step 8f's is, or a margin that depends on direction.
 
 So `a = 9/10` in the harmonic chart is a research item of its own — a
 direction-dependent margin or a finer equator, a fit that holds 45°, and
-checkpointing for a multi-day run — and not a row of the matrix. **G5 runs
+checkpointing for a multi-day run (there from 2026-10-01) — and not a row of
+the matrix. **G5 runs
 at `a = 7/10`** (`CODE.md`'s fallback since step 5: `√(M² − a²) = 0.714 >
 a`), measured by step 8f's `h7` row at `h = 5/256`.
 
