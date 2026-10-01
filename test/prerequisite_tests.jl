@@ -210,7 +210,7 @@ const TREEAMR_NAMES = (
     :Operators, :PointValue, :GhostSchedule, :fill_ghosts!, :CellBoundary,
     # ODE coupling
     :statevector, :statearray, :scatter!, :gather!, :map_blocks!,
-    :block_mapreduce, :volume_weighted_norm,
+    :block_mapreduce, :mesh_mapreduce, :volume_weighted_norm,
     # Regridding
     :Refine, :Coarsen, :Keep, :flag_blocks, :buffered_flags, :complete_marks,
     :regrid!, :adapt_to_initial_data!,
@@ -219,6 +219,9 @@ const TREEAMR_NAMES = (
     # Point interpolation (M11): the horizon finder and the fit's sampler
     # (from 2026-09-26; `find_leaf` was the stopgap's and is no longer called)
     :locate_point, :interpolate, :Lagrange, :Region,
+    # Checkpoint and restart (M9a, TreeAMR 0.1.4; added 2026-10-01): the
+    # driver's `checkpoint_path_prefix` and `restart_file`
+    :save_checkpoint, :load_checkpoint,
 )
 
 # The TreeAMR internals this package reaches for. `threadchunks`, the
@@ -277,6 +280,10 @@ const KORZYNSKI_NAMES = (:horizon_spin, :SpinResult, :shape_embedding)
     # `[sources]` pins are moving branches, which is exactly why this test
     # exists — see `CLAUDE.md`, "Things that will bite".
     @test setdiff(TREEAMR_NAMES, names(TreeAMR)) == Symbol[]
+    # The checkpoint functions have methods only through TreeAMR's HDF5
+    # extension, which this package's `using HDF5` loads (decided
+    # 2026-10-01: HDF5 is a hard dependency here, unlike TreeHydro's).
+    @test Base.get_extension(TreeAMR, :TreeAMRHDF5Ext) !== nothing
     @test filter(n -> !isdefined(TreeAMR, n),
                  collect(TREEAMR_INTERNAL)) == Symbol[]
     @test setdiff(SPACETIMEMETRICS_NAMES, names(SpacetimeMetrics)) == Symbol[]
