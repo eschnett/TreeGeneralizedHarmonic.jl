@@ -164,6 +164,9 @@ export evolve!, check_cfl, forest_levels, horizon_shell, default_relaxation_rate
 export fill_fitted_initial!, adapt_fitted_initial_data!
 export discrete_gradient_momentum!
 
+# Checkpoint and restart (2026-10-01, on TreeAMR 0.1.4's M9a)
+export latest_checkpoint
+
 include("precision.jl")
 include("device.jl")
 include("pointwise.jl")
@@ -197,6 +200,9 @@ include("tracking.jl")
 # `driver.jl`, which will build one per chunk in step 8e-ii (added in step
 # 8e): the fitted target, its samplers and its evaluator.
 include("fit.jl")
+# After `fit.jl` and `tracking.jl`, whose structs the run state holds, and
+# before `driver.jl`, which writes and reads it (added 2026-10-01).
+include("checkpoint.jl")
 include("driver.jl")
 
 end
