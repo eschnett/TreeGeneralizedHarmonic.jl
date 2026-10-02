@@ -6744,3 +6744,133 @@ own frame is the cheapest test), then the uniform growth — which the
 resting `:fitted` hole shows too at a fifth of the rate. Step 8g's
 host-side test is the right next step only if the spin drift turns out to
 be the layer's.
+
+**Gauge sources that know less about the hole (opened 2026-10-02 in a
+design discussion with Erik; nothing is built).** Today `H_a(x)` is sampled
+from the background ([Gauge and constraint
+damping](#gauge-and-constraint-damping)), so it knows the hole's mass, spin,
+position and velocity, and a moving Kerr-Schild hole is refused because its
+`H_a(x − vt)` is not a per-chunk sample. The question is which gauge
+sources need less of that, and which of them still make the initial data an
+exact stationary solution, so that a run starts without a gauge transient.
+Write `k_ab = g_ab − η_ab`; signs are GHSO2's, `H_a = −Γ_a` on a solution.
+The algebra below was checked against the Kerr-Schild metric with Wolfram,
+to 20 digits or better.
+
+- **Without a length, only `H = 0`.** `H_a` is an inverse length and
+  `g_ab` is dimensionless, so a nonzero gauge source that is an algebraic
+  function of the metric carries a constant with the dimension of a
+  length: a rate, like the damped harmonic gauge's `μ_0 ≈ 1/M` (on the
+  footing of `γ0`), or the hole's own parameters. A gauge source that
+  reads `∂g` instead changes the principal part: the equations
+  differentiate `H` once (`S0` contains `−2∇_(a H_b)`), so `∂g` in `H` is
+  `∂∂g` in the equations — in this package's variables, `∂_i Π` in `Π`'s
+  equation — and the limiting case `H_b = −Γ_b[g]` is the Einstein
+  equations with no gauge fixed at all. That is not ill-posed by itself
+  (1+log slicing and the Gamma driver read `∂g`), but each such choice
+  needs a hyperbolicity analysis of its own and gives up the ten decoupled
+  shifted wave operators the energy estimate rests on; gauge drivers
+  (Lindblom, Matthews, Rinne and Scheel 2008; Lindblom–Szilágyi 2009)
+  avoid it by evolving `H_a` as a field.
+- **The generic gauge in use elsewhere is damped harmonic**
+  (Szilágyi–Lindblom–Scheel 2009), the driver [Possible
+  extensions](#possible-extensions) already lists. In SpECTRE's form
+  `H_a = [μ_L1 L + μ_L2 log(1/α)] t_a − μ_S g_ai β^i/α` with
+  `L = log(√γ/α)` and `μ_X = A_X e^{−(r/σ_r)²} L^{e_X}`; the published
+  binary runs take `A_L1 = A_S = 1`, `A_L2 = 0`, `e = 2`, and the Gaussian
+  about the grid's origin makes the gauge harmonic at the outer boundary.
+  It knows one rate and nothing else about the hole, and single holes
+  settle in it: Lindblom and Szilágyi saw strongly perturbed holes reach
+  time-independent states, and Varma and Scheel (2018, arXiv:1808.07490)
+  construct the equilibrium of a boosted, spinning hole by solving four
+  elliptic equations. It does **not** start stationary from Kerr-Schild
+  data: Kerr-Schild has `α√γ = 1`, so `L = log(1 + 2H)` — `log 2` at the
+  Schwarzschild horizon — and SpEC rolls the gauge on from the data's own
+  source over `σ_g = 15–25 M`. The analytic solution then stops being the
+  error reference (the constraints and the horizon's invariants remain),
+  and a layer relaxing toward the analytic chart relaxes toward the wrong
+  gauge; the `:fitted` target is the one that would survive it.
+- **The harmonic chart's resolution penalty is forced.** A radial harmonic
+  coordinate `f(r) n^i` on Schwarzschild (areal `r`) solves
+  `d/dr((r² − 2Mr) f′) = 2f`, whose solutions are `r − M` and
+  `(r − M) ln(1 − 2M/r) + 2M`. The second falls off as `−2M³/(3r²)`, so
+  asymptotic flatness allows it, and diverges at the horizon, so
+  regularity does not: every regular harmonic chart has its horizon at
+  `r_H = r_BL − M`. For a spinning hole the price is more than the factor
+  two the radius suggests, because the chart's singular disk of radius `a`
+  closes in on the horizon's equator (radii in `M`):
+
+  | `a/M` | KS poles | KS equator | KS equator − `a` | harmonic poles | harmonic equator | harmonic equator − `a` |
+  |---|---|---|---|---|---|---|
+  | `0` | `2` | `2` | `2` | `1` | `1` | `1` |
+  | `0.7` | `1.714` | `1.852` | `1.152` | `0.714` | `1` | `0.3` |
+  | `0.9` | `1.436` | `1.695` | `0.795` | `0.436` | `1` | `0.1` |
+
+- **Constants of the run buy exactness, and the hole's velocity has to be
+  one of them.** With `M` alone, `H_a = −k_tt k_ta/(2M)` makes every
+  non-spinning Kerr-Schild hole *at rest* an exact stationary solution,
+  wherever it is. For Kerr it is off by `Σ/r² = 1 + a² cos²θ/r²`
+  (`1.39` on the axis at the horizon at `a = 9/10`), and `|a|` as a second
+  constant does not repair it: a point on the axis at the horizon
+  (`H = 1/2`, `r = 1.436`) and a point on the equator at `r = 2 M`
+  (`H = 1/2`), the second hole rotated so that the null vectors agree,
+  have the same `g_ab` and `Γ_a` differing by `1.39`. No scalar constant
+  repairs a boost either. `g − η = 2H l l` is null and of rank one, and a
+  boost along `l` only rescales it, so a hole at rest at distance `r` from
+  a point and a hole of the same mass moving along the line through that
+  point, at rest-frame distance `r D²` (`D = √((1 − v)/(1 + v))`), give the
+  point the same `g_ab` and `Γ_a` differing by `D⁻³` — `2.53` at
+  `v = 3/10`. With the spin 4-vector `S^a` (`(0, a⃗)` in the hole's rest
+  frame, `a⃗ = J⃗/M`) and the 4-velocity `u^a` the source is exact for every
+  boosted, spinning Kerr-Schild hole, at any position:
+
+  ```
+  Γ_a = k(u,u) k_ab u^b / (M + √(M² − (S^a k_ab u^b)²)),    H_a = −Γ_a
+  ```
+
+  This is the rest frame's `Γ_a = 2(M/Σ) l_a` with `l_t = 1`, read off the
+  metric — `H = k(u,u)/2`, `l_a = k_ab u^b/(2H)`, `a cos θ = S·l`, and
+  `M/Σ = H/r` with `r` the outer root of `H r² − M r + H (S·l)² = 0` —
+  rewritten so that nothing divides by `H`. It was checked for boosts in
+  general directions, with the spin both along and across them, at
+  `v ≤ 7/10` and `a ≤ 9/10`, to 23 digits. On a solution the root's
+  argument is `M² (r² − a² cos²θ)²/Σ²`, which vanishes only at
+  `r = a |cos θ|`, inside the horizon; off a solution it is clamped at
+  zero, and in the core it is masked like everything else.
+- **What that source would change here.** It is algebraic in `g`, so the
+  principal part is the one GHSO2 analysed, and `∂_a H_b` is the chain rule
+  through the `∂_a g` the kernel already forms (`∂_t g` from `Π`): a few
+  hundred flops a point instead of the `Hsrc` field set, its nested-dual
+  sampling and its re-sampling after every regrid — and instead of the one
+  right-hand side [Possible extensions](#possible-extensions) prices an
+  in-kernel analytic source at. It mentions no position, so the gauge
+  source moves with the hole: a boosted Kerr-Schild hole is stationary in
+  its own frame without a time-dependent `H(t, x)`, which would lift the
+  refusal of a moving non-harmonic background. Kerr-Schild at `a = 9/10`
+  is the chart in which step 5's analytic core already fits
+  (`r_+ = 1.436 > 0.9`), with eight times the harmonic chart's room at the
+  equator — so this is a route to the proof-of-concept case at the spin
+  this document is named for, in a chart that needs neither the fit nor
+  `h ≲ 5/1024`.
+- **What it does not settle.** (1) **Stability.** The stationary solution
+  is the sampled source's, but the linearisation is not — `∂_a H_b` now
+  couples to the perturbation through `∂F/∂g` — so the first measurement is
+  the static Kerr-Schild hole under `F(g)` against the same hole under the
+  sampled `H(x)`, the error and the constraints to `50 M`. (2) **Drift.**
+  `M`, `S` and `u` are constants of the run; if the evolved hole's
+  parameters move (truncation error, junk), the source is slightly wrong
+  and the coordinates drift, without a constraint violation. (3) **One
+  hole.** A binary's superposition is not exact, and the constants are per
+  hole. (4) **The velocity.** A chart whose `g − η` is not null could read
+  the rest frame off the metric: Painlevé–Gullstrand Schwarzschild, with
+  its horizon at `2M` too, has `η^{ab} k_ab = −2M/r` and, by a quick
+  calculation not checked further, fixes the rest frame from the metric at
+  a point outside `r = M/2`. There is no closed form for it here, and
+  Kerr's version (Doran's coordinates) is not worked out.
+
+**Proposed (2026-10-02):** build the source above as an alternative to the
+sampled `Hsrc` behind the kernel's existing gauge-source `Val`, measure (1)
+on the static Kerr-Schild hole, and then run a boosted Kerr-Schild hole
+across the mesh with the analytic layer, against G5's harmonic `a = 7/10`
+rows; the damped harmonic gauge stays the extension for binaries, where no
+constants of the run make the data stationary.
