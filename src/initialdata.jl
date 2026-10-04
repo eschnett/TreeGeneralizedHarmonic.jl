@@ -28,6 +28,7 @@
 
 """
     GHCase(T = Float64, background; box, periodic, reflecting = none,
+           rotating = nothing,
            ε_KO, γ0, γ2, center = (0, 0, 0), velocity = the background's,
            interior = nothing,
            r_0 = 0, r_1 = 0, margin = 8, w_ramp = 1//2, ρ_ramp = 1//2,
@@ -46,7 +47,15 @@ hook of [`dirichlet`](@ref)). `reflecting` is one `(lo, hi)` pair of
 is its own mirror image, a symmetry plane (added 2026-10-02). A reflecting
 face needs no hook — the ghost schedule mirrors the interior, each variable
 with the parity [`state_parity`](@ref) gives it — and a dimension cannot be
-periodic and reflecting at once. `ε_KO` is the Kreiss–Oliger amplitude and
+periodic and reflecting at once. `rotating` is `nothing` or a pair `(d1, d2)`,
+TreeAMR's M12 seam (added 2026-10-04): only the quadrant of the `(d1, d2)`
+plane is evolved, and the others are its images under quarter turns about the
+line where the two low faces meet — the symmetry of a hole spinning about that
+line, which no mirror in `d1` or `d2` has. The ghosts across the seam are
+turned with the signed map [`state_rotation`](@ref) gives; the two dimensions
+can be neither periodic nor reflecting, their widths must agree, and the third
+may reflect at its low face, which makes the rotating octant.
+`ε_KO` is the Kreiss–Oliger amplitude and
 `γ2 > −1` the Gundlach–Pretorius trace parameter. Neither has a default:
 each is a number a run is judged by, and `CODE.md` records `ε_KO ≈ 0.5`
 and `γ0 ≈ 1/M` as GHSO2's *recipe near a hole*, not as something a
@@ -151,6 +160,7 @@ struct GHCase{T,B,D,I,R,H,X,E,S}
     box::NTuple{3,Tuple{T,T}}
     periodic::NTuple{3,Bool}
     reflecting::NTuple{3,Tuple{Bool,Bool}}   # (lo, hi) per dimension (2026-10-02)
+    rotating::NTuple{2,Int}      # the seam's (d1, d2), (0, 0) for none (2026-10-04)
     ε_KO::E                      # a number, or a `HorizonDissipation` (step 8c)
     γ0::D                        # a damping profile, not a number
     γ2::T
@@ -164,8 +174,8 @@ struct GHCase{T,B,D,I,R,H,X,E,S}
 end
 
 function GHCase(::Type{T}, background; box, periodic,
-                reflecting=ntuple(_ -> (false, false), Val(3)), ε_KO, γ0, γ2,
-                center=(zero(T), zero(T), zero(T)), velocity=nothing,
+                reflecting=ntuple(_ -> (false, false), Val(3)), rotating=nothing,
+                ε_KO, γ0, γ2, center=(zero(T), zero(T), zero(T)), velocity=nothing,
                 interior=nothing, r_0=zero(T), r_1=zero(T), margin::Integer=8,
                 w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), target=nothing,
                 refinement=nothing, horizon=nothing, bounds=nothing,
@@ -206,6 +216,7 @@ function GHCase(::Type{T}, background; box, periodic,
             "= $(refl[d]): a periodic dimension has no faces, so there is " *
             "nothing to mirror across. Use one or the other."))
     end
+    rot = case_rotating(rotating, box, periodic, refl)
     T(chunk) ≥ 0 || throw(ArgumentError(
         "the chunk length is a regrid cadence and cannot be negative, got " *
         "$chunk; zero means the case states none and evolve! must be told."))
@@ -242,9 +253,42 @@ function GHCase(::Type{T}, background; box, periodic,
                   typeof(refinement),typeof(horizon),typeof(bounds),
                   typeof(ε),typeof(gauge_source)}(
         background, ntuple(d -> (T(box[d][1]), T(box[d][2])), Val(3)),
-        ntuple(d -> Bool(periodic[d]), Val(3)), refl, ε, damping, T(γ2), c,
+        ntuple(d -> Bool(periodic[d]), Val(3)), refl, rot, ε, damping, T(γ2), c,
         int, refinement, horizon, bounds, T(chunk), gauge_source)
 end
+
+# The `rotating` keyword as the case stores it (added 2026-10-04): `(0, 0)` for
+# none, so that the case stays a plain `isbits` kernel argument, and otherwise
+# the seam's `(d1, d2)` after the refusals TreeAMR's forest would make later —
+# made here, where the message can name the case's own box.
+function case_rotating(rotating, box, periodic, refl)
+    rotating === nothing && return (0, 0)
+    (length(rotating) == 2 && all(d -> d isa Integer && 1 ≤ d ≤ 3, rotating) &&
+     rotating[1] != rotating[2]) || throw(ArgumentError(
+        "rotating is nothing or a pair (d1, d2) of two different dimensions in " *
+        "1:3, the plane of the quarter turn, got $(repr(rotating))."))
+    d1, d2 = Int(rotating[1]), Int(rotating[2])
+    for d in (d1, d2)
+        (periodic[d] || any(refl[d])) && throw(ArgumentError(
+            "rotating = $((d1, d2)), but dimension $d is " *
+            (periodic[d] ? "periodic" : "reflecting at $(refl[d])") * ": its low " *
+            "face is the rotating seam, glued to the other dimension's low face, " *
+            "and its high face is an outer one. Mirror the third dimension " *
+            "instead, as a rotating octant does."))
+    end
+    w1, w2 = box[d1][2] - box[d1][1], box[d2][2] - box[d2][1]
+    w1 == w2 || throw(ArgumentError(
+        "rotating = $((d1, d2)) turns the box's dimension $d1 into its dimension " *
+        "$d2 about the line where their low faces meet, so the two need one " *
+        "width, but they are $w1 and $w2."))
+    return (d1, d2)
+end
+
+# The seam as TreeAMR's `Forest` keyword takes it, `nothing` for none, from a
+# case or from a forest (which holds it as `Int8`s, `(0, 0)` for none).
+seam_dims(case::GHCase) = case.rotating[1] == 0 ? nothing : case.rotating
+seam_dims(forest::Forest) =
+    forest.rotating[1] == 0 ? nothing : (Int(forest.rotating[1]), Int(forest.rotating[2]))
 
 """
     case_velocity(T, background, velocity) -> SVector{3,T}
@@ -357,7 +401,7 @@ with_interior(case::GHCase{T}, interior) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(interior),
            typeof(case.refinement),typeof(case.horizon),typeof(case.bounds),
            typeof(case.ε_KO),typeof(case.gauge)}(
-        case.background, case.box, case.periodic, case.reflecting,
+        case.background, case.box, case.periodic, case.reflecting, case.rotating,
         case.ε_KO, case.γ0, case.γ2,
         case.center, interior, case.refinement, case.horizon, case.bounds,
         case.chunk, case.gauge)
@@ -376,7 +420,7 @@ with_refinement(case::GHCase{T}, refinement) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
            typeof(refinement),typeof(case.horizon),typeof(case.bounds),
            typeof(case.ε_KO),typeof(case.gauge)}(
-        case.background, case.box, case.periodic, case.reflecting,
+        case.background, case.box, case.periodic, case.reflecting, case.rotating,
         case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, refinement, case.horizon, case.bounds,
         case.chunk, case.gauge)
@@ -395,7 +439,7 @@ with_horizon(case::GHCase{T}, horizon) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
            typeof(case.refinement),typeof(horizon),typeof(case.bounds),
            typeof(case.ε_KO),typeof(case.gauge)}(
-        case.background, case.box, case.periodic, case.reflecting,
+        case.background, case.box, case.periodic, case.reflecting, case.rotating,
         case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, horizon, case.bounds,
         case.chunk, case.gauge)
@@ -418,7 +462,7 @@ function with_bounds(case::GHCase{T}, bounds) where {T}
                   typeof(case.interior),typeof(case.refinement),
                   typeof(case.horizon),typeof(bounds),typeof(case.ε_KO),
                   typeof(case.gauge)}(
-        case.background, case.box, case.periodic, case.reflecting,
+        case.background, case.box, case.periodic, case.reflecting, case.rotating,
         case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, case.horizon, bounds,
         case.chunk, case.gauge)
@@ -440,7 +484,7 @@ function with_dissipation(case::GHCase{T}, ε_KO) where {T}
                   typeof(case.interior),typeof(case.refinement),
                   typeof(case.horizon),typeof(case.bounds),typeof(ε),
                   typeof(case.gauge)}(
-        case.background, case.box, case.periodic, case.reflecting,
+        case.background, case.box, case.periodic, case.reflecting, case.rotating,
         ε, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, case.horizon,
         case.bounds, case.chunk, case.gauge)
@@ -606,6 +650,12 @@ halfwidth]³` of that box instead: reflecting at the three faces through the
 origin, Dirichlet at the outer three. It needs a hole that *is* its own
 mirror image in every coordinate plane — at the origin, at rest, without
 spin (a spin along `z` keeps only the `z` mirror) — and refuses any other.
+`octant = :rotating` (added 2026-10-04) is the octant of a hole spinning
+about `z`: the same box, reflecting at `z = 0` only, with TreeAMR's rotating
+seam `(1, 2)` gluing the face `x = 0` to the face `y = 0` by a quarter turn
+about the `z` axis. It needs a hole at the origin and at rest, with any spin
+along `z` — the axisymmetric hole — and refuses any other; `true` is the
+same as `:reflecting`.
 
 `gauge_source` (added 2026-10-02) is `nothing` — the sampled `H_a(x)`, or no
 source on a harmonic background — a [`KerrSchildSource`](@ref), or
@@ -619,7 +669,7 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                    margin::Integer=8, ε_KO=T(1 // 2), γ0=nothing,
                    γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
                    target=nothing, refinement=nothing, horizon=nothing,
-                   bounds=nothing, octant::Bool=false,
+                   bounds=nothing, octant=false,
                    gauge_source=nothing) where {T}
     # `r_0` and `r_1` have no default for step 5's sphere — they are what
     # `check_interior_radii` measures — and no meaning for the tracked
@@ -641,14 +691,28 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
     # then that one, checked by `GHCase` (amended in step 8e: it was built on
     # the keyword's default zero, which a boosted hole does not have).
     v = case_velocity(T, background, velocity)
-    if octant
-        spin = hasproperty(background, :spin) ? background.spin : nothing
+    kind = octant === false ? :none : octant === true ? :reflecting : octant
+    kind in (:none, :reflecting, :rotating) || throw(ArgumentError(
+        "octant is false, true (the same as :reflecting) or :rotating, got " *
+        "$(repr(octant))."))
+    spin = hasproperty(background, :spin) ? background.spin : nothing
+    if kind === :rotating
+        (all(iszero, center) && all(iszero, v) && spin !== nothing) ||
+            throw(ArgumentError(
+            "a rotating octant turns the solution by quarter turns about the z " *
+            "axis and mirrors it across z = 0, so the hole must be its own image " *
+            "under both: at the origin, at rest, and spinning about z (Kerr-Schild " *
+            "or Harmonic with any a, unrotated). Got center = $center, velocity = " *
+            "$v and " * (spin === nothing ? "a background with no spin parameter" :
+                         "a = $spin") * "."))
+    elseif kind === :reflecting
         (all(iszero, center) && all(iszero, v) && spin !== nothing &&
          iszero(spin)) || throw(ArgumentError(
             "an octant case mirrors the solution across x = 0, y = 0 and z = 0, " *
             "so the hole must be its own mirror image in all three planes: at " *
             "the origin, at rest and without spin (Kerr-Schild or Harmonic with " *
-            "a = 0). Got center = $center, velocity = $v and " *
+            "a = 0) — a spinning hole has the rotating octant, octant = " *
+            ":rotating. Got center = $center, velocity = $v and " *
             (spin === nothing ? "a background with no spin parameter" :
              "a = $spin") * "."))
     end
@@ -669,10 +733,13 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
               GaussianDamping(T; near=1 / T(M), far=1 / (10 * T(M)),
                               width=3 * T(M), center=HoleCenter(T, center, v))
     return GHCase(T, background;
-                  box=ntuple(_ -> (octant ? zero(T) : -T(halfwidth), T(halfwidth)),
-                             Val(3)),
+                  box=ntuple(_ -> (kind === :none ? -T(halfwidth) : zero(T),
+                                   T(halfwidth)), Val(3)),
                   periodic=(false, false, false),
-                  reflecting=ntuple(_ -> (octant, false), Val(3)), ε_KO=ε_KO,
+                  reflecting=ntuple(d -> (kind === :reflecting ||
+                                          (kind === :rotating && d == 3), false),
+                                    Val(3)),
+                  rotating=kind === :rotating ? (1, 2) : nothing, ε_KO=ε_KO,
                   γ0=damping,
                   γ2=γ2, center=center, velocity=v, interior=interior,
                   r_0=r_0 === nothing ? zero(T) : r_0,
@@ -757,7 +824,8 @@ function gh_forest(::Type{T}, case::GHCase; N, roots, refined=false) where {T}
         "uniform forest over this box would have anisotropic cells: the " *
         "widths are $widths"))
     forest = Forest{T}(ntuple(_ -> roots, Val(3)); N=N, periodic=case.periodic,
-                       reflecting=case.reflecting, extents=case.box)
+                       reflecting=case.reflecting, rotating=seam_dims(case),
+                       extents=case.box)
     refined || return forest
     xref = ntuple(d -> case.box[d][1] + 3 * widths[d] / 8, Val(3))
     targets = filter(forest.leaves) do k
@@ -1006,6 +1074,13 @@ problem does not have — a jump in the reflected data — so the odd variables
 of each wall plane are set to zero after the draw. Ghosts are not touched;
 fill them before reading a stencil.
 
+**On a rotating seam the noise leaves the two seam planes alone** (added
+2026-10-04). The low planes of `d1` and of `d2` are both owned and evolved,
+and they are the same points a quarter turn apart, so independent draws on
+them would be a solution that disagrees with itself; the axis where they
+meet is its own image and must be turned into itself. Neither is a mode the
+symmetric problem has, so the points of both planes keep their data.
+
 `exclude(x)` (added 2026-10-02) names positions left exactly as they are —
 neither perturbed nor projected — such as a hole's frozen core, whose stale
 data the core rule fills from the sphere `r_0`: at an octant's corner that
@@ -1018,16 +1093,21 @@ function add_noise!(U::FieldSet{T,3}, rng; amplitude, exclude=nothing) where {T}
     A ≥ 0 || throw(ArgumentError("the noise amplitude must be ≥ 0, got $amplitude"))
     host = hostcopy(U)
     forest = U.forest
+    seam = seam_dims(forest)
     for b in 1:nleaves(forest)
         k = forest.leaves[b]
         lo = block_origin(T, forest, k)
         keep = exclude === nothing ? nothing :
                map(I -> !exclude(coordinates(host, b, Tuple(I) .+ host.G)),
                    CartesianIndices(interiorview(host, b, 1)))
+        # The block's owned planes on the low faces of a rotating seam.
+        onseam = ntuple(d -> seam !== nothing && d in seam &&
+                             lo[d] == forest.extents[d][1], Val(3))
         for v in 1:U.nvars
             w = interiorview(host, b, v)
             for I in CartesianIndices(w)
                 δ = A * T(2 * rand(rng) - 1)
+                any(d -> onseam[d] && I[d] == 1, 1:3) && continue
                 (keep === nothing || keep[I]) && (w[I] += δ)
             end
             U.parity === nothing && continue

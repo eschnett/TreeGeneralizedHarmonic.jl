@@ -1048,6 +1048,57 @@ frozen core, the layer, the sampled gauge source and the `γ0` profile need
 nothing of their own at the walls. The suite's version is the `q = 2`
 fixture to `1/5 M` (`3.6·10⁻¹⁴`).
 
+### The rotating octant: a quarter turn about `z` (added 2026-10-04)
+
+A spinning hole has no mirror in `x` or `y`, so the octant above refuses it.
+It does have every rotation about its axis, and TreeAMR 0.1.7's M12 makes
+one of them a seam: `rotating = (d1, d2)` evolves only the quadrant of the
+`(d1, d2)` plane, glues the low face of `d1` to the low face of `d2`, and
+fills the ghosts across it from the data a quarter turn away, `u(Rp) = Q
+u(p)`, with `R` taking `e_{d1}` to `e_{d2}` and `e_{d2}` to `−e_{d1}`.
+Together with the mirror at `z = 0` (equatorial symmetry, which a spin
+along `z` keeps) it is an octant again, a quarter of the bitant proposed
+under "Robust stability on the octant". A case's `rotating` is that pair,
+`(0, 0)` for none so that the case stays `isbits`; it is refused on a
+periodic or reflecting dimension and between unequal widths, and `GHProblem`
+refuses a forest whose seam is not the case's. `hole_case(; octant =
+:rotating)` builds the seam `(1, 2)` with the mirror at `z = 0`, and needs
+the axisymmetric hole — at the origin, at rest, any spin along `z` — and
+refuses any other; `octant = true` is `:reflecting` and still refuses a
+spin, naming `:rotating`.
+
+**The map is the tensor's.** A quarter turn sends every Cartesian
+component to plus or minus one other: with `(d1, d2) = (1, 2)`, index `x`
+of the turned tensor is `−y` of the original and `y` is `+x`, so `h_tx →
+−h_ty`, `h_ty → h_tx`, `h_xx ↔ h_yy`, `h_xy → −h_xy`, `h_xz → −h_yz`, `h_yz
+→ h_xz`, and `h_tt`, `h_tz`, `h_zz` stay (`state_rotation`; the same for
+`Π`). The `G = 0` field sets are declared with the identity
+(`identity_rotation`), as they are declared even. Over a forest without a
+seam both are `nothing`, and a checkpoint's recipe carries `rotating` only
+where there is a seam, so older checkpoints still restart.
+
+**The two seam planes are the same points.** Vertex centering owns the low
+plane of `x` and of `y` (TreeAMR's decision), both evolved, from ghosts
+that are each other's images. `add_noise!` leaves both unperturbed, as it
+projects odd components to zero on a mirror's wall: independent draws there
+would be a solution that disagrees with itself. The refinement ceiling
+skips the seam's faces as it skips reflecting ones.
+
+**(Measured 2026-10-04**, `test/rotation_tests.jl`**.)** Kerr-Schild at
+`a = 3/10` (the ring inside `r_0 = 7/20`, `r_1 = 11/10` eight cells inside
+`r₊ = 1.954`), `q = 2`, uniform at `h = 5/48`: the analytic state is its own
+image under the map to `2·10⁻¹⁶`; after one ghost fill every stored point
+— owned, mirrored, turned or the hook's — holds the exact state to
+`1.3·10⁻¹⁴` relative (the worst next to the ring, where the solution is
+`350`), and `1.3` with every variable declared to turn into itself; after
+two chunks (`t = 1/5`) the rotating octant `[0, 5/2]³` is the box `[−5/2,
+5/2]³` to `2.6 eps` relative at every point outside the core, the layer
+residual agreeing to `10⁻¹⁴`. The horizon finder needs nothing of its own:
+TreeAMR's `interpolate` turns the finder's sphere into the quadrant, and
+`M_irr` and `J` on the octant are the box's to `10⁻¹⁰` (`J = 0.29994`,
+Kerr's `0.3`). A restart chain on the rotating octant is the uninterrupted
+run bit for bit (checked by hand, not in the suite).
+
 ### The interior: a pointwise damping layer
 
 #### The design, as steps 8a–8f leave it (rewritten in step 8f)
@@ -3703,7 +3754,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
 | `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the **five** `Val`s and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. Step 5 split the streaming body out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and added `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c) |
-| `src/boundaries.jl` | the time-dependent Dirichlet hook |
+| `src/boundaries.jl` | the time-dependent Dirichlet hook, and the declarations TreeAMR's symmetries ask of every field set: the parities of the reflecting faces (`state_parity`, `even_parity`, added 2026-10-02) and the signed maps of the rotating seam (`state_rotation`, `identity_rotation`, added 2026-10-04) |
 | `src/bounds.jl` | the range projection (added in step 8b): `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
 | `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii and the hole's mass (`hole_mass`, added in step 8c′), and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes. **Step 8d adds the tracked geometry's kernel side**: the real harmonics (`real_harmonic_index`, `real_from_complex`/`complex_from_real`, the recurrence `shape_series`, `shape_bounds`), the analytic horizon of the seed (`analytic_horizon_radius`), `FittedSpec` — what a case holds — and `FittedInterior` — the kernel argument — with `interior_point`, `fitted_geometry`, `core_position`, `ShapeMask`, `ShapeBand`, `geometry_spacing` and its `check_interior_radii`; and the protocol both geometries speak (`in_layer(int, t, x)`, `interior_point`, `is_outside`, `geometry_radii`, `layer_radii`, `layer_mask`, `shell_mask`) |
 | `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4), or `hole_forest`'s nested shells around a hole (added in step 5, **here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
@@ -6749,7 +6800,11 @@ is `:damped`'s to two digits.
   outside the horizon `2.6×`.
 
 **Proposed next (2026-10-04): a spinning hole on a bitant.** Written for the
-session that picks this up; nothing of it is built.
+session that picks this up; nothing of it is built. **(Amended 2026-10-04:
+the static spinning hole runs on the *rotating octant* instead —
+`hole_case(; octant = :rotating)`, TreeAMR 0.1.7's quarter-turn seam with
+the mirror at `z = 0`, a quarter of the bitant; see "The rotating octant".
+The bitant remains the domain of a hole that moves in the plane.)**
 
 - **A bitant, not an octant.** A spin along `z` keeps only the `z → −z`
   mirror, and so does a boost in the `x`–`y` plane: the domain is
