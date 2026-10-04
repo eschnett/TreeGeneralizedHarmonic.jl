@@ -305,8 +305,10 @@ end
             push!(sample_errs,
                   maximum(i -> maximum(abs, us[i] - u0[i]), eachindex(xs)) /
                   maximum(u -> maximum(abs, u), u0))
-            N == 8 && @test_throws "serves cont = 1" build_fit(sampler, geom, spec;
-                                                                cont=2, bounds=bd)
+            # A first-order sampler cannot serve a `cont = 2` fit, and says
+            # which sampler can (amended 2026-10-03, when `order = 2` came).
+            N == 8 && @test_throws "order = 2" build_fit(sampler, geom, spec;
+                                                          cont=2, bounds=bd)
         end
         rate = log2(state_errs[1] / state_errs[2])
         # Measured: 2.2e−4 and 8.3e−6 (a rate of 4.65; 3.9 from N = 16 to
@@ -602,6 +604,60 @@ end
         @test isfinite(a1) && isfinite(a2)
         @test all(isfinite, values(ms))
         @info "what a fit costs (step 8e)" ms fit_state_ns = ns_point u_exact_ns = ns_exact
+    end
+
+    # Guards the curvature a `cont = 2` fit of the evolved state reads (added
+    # 2026-10-03): the state sampler's `order = 2` differences the interpolated
+    # radial gradient along the ray, and on exact data its `∂_r² u` must
+    # converge to the analytic one on the frozen hierarchy, and the fit built
+    # from it must be a metric. At this fixture's `q = 2` the cubic
+    # interpolant's gradient jumps where its window shifts, and the curvature
+    # converges at about 1.2 here (5 % to 2 % of its size) and 1.6 on a
+    # uniform mesh; at `q = 4`, the production order, it is 3.8 on a uniform
+    # mesh (1.4·10⁻⁴ of its size at `h = 1/16`).
+    @testset "the state sampler's curvature converges, and its cont = 2 fit is the analytic one" begin
+        T = Float64
+        case = fitted_fixture(T)
+        # The points are the `N = 8` geometry's collocation points, used at
+        # both resolutions: the margin is stated in cells, so each mesh's own
+        # offset surface lies elsewhere, and a rate is read at fixed points.
+        # They lie inside the fixture's finest cube, where `h = 5/(8N)`.
+        xs = nothing
+        ns = nothing
+        errs = T[]
+        hs = T[]
+        for N in (8, 16)
+            forest = hole_fixture_forest(T, case; N=N)
+            geom = fitted_interior(case.interior, seed_track(case, 0), forest, 2;
+                                   t=0, n_L=8)
+            analytic = analytic_sampler(case.background, zero(T); δ=T(5 // 512))
+            fs = FieldSet{T}(forest, 20; G=2, centering=vertexcentered(3))
+            fill_exact!(fs, case, zero(T); interior=geom)
+            fill_ghosts!(fs, GhostSchedule(fs, Operators(prolongation=4, restriction=4));
+                         boundary=dirichlet(case, zero(T)))
+            state = state_sampler(fs, 2; t=zero(T), order=2)
+            fa = build_fit(analytic, geom, case.interior; cont=2, bounds=case.bounds)
+            if xs === nothing
+                xs = fa.points
+                ns = [x / sqrt(sum(abs2, x)) for x in xs]
+            end
+            @test maximum(x -> maximum(abs, x), xs) < 5 // 4      # the finest cube
+            us, ua = state(xs, ns), analytic(xs, ns)
+            @test length(us) == 3
+            @test us[2] == state_sampler(fs, 2; t=zero(T))(xs, ns)[2]
+            scale = maximum(maximum(abs, u) for u in ua[3])
+            push!(errs, maximum(maximum(abs, us[3][i] - ua[3][i]) for i in eachindex(ns)) /
+                        scale)
+            push!(hs, minimum_spacing(T, forest))
+            # The fit on this mesh's own geometry, from the state's curvatures.
+            fe = build_fit(state, geom, case.interior; cont=2, bounds=case.bounds)
+            @test fe.valid && fe.params.cont == 2
+        end
+        rate = log(errs[1] / errs[2]) / log(hs[1] / hs[2])
+        @info "the state sampler's curvature against the analytic one (2026-10-03)" errs hs rate
+        @test hs[1] == 2 * hs[2]
+        @test rate > 1                       # measured 1.23 at q = 2
+        @test errs[2] < 3 // 100
     end
 end
 

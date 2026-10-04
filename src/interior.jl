@@ -1181,7 +1181,8 @@ analytic_horizon_radius(bg::AbstractMetric, n) = horizon_min_radius(bg)
     FittedSpec(T = Float64; variant = :damped, margin = 8, n_L = 0,
                core_min = 2, lmax_shape = 4, lmax_fit = 8, ρ_max = 0,
                w_ramp = 1//2, ρ_ramp = 1, max_misses = 3, α_trigger = 1//10,
-               target = nothing, target_bounds = nothing, fit_tilde = true)
+               target = nothing, target_bounds = nothing, fit_tilde = true,
+               fit_cont = 1)
 
 What a [`GHCase`](@ref) holds as its `interior` for the **tracked**
 geometry (step 8d): not a layer, but the rule a layer is built by, once per
@@ -1230,6 +1231,13 @@ the hole; the geometry is a function of the run.
   static holes, 2–40× off the equator of the spinning ones) and the value
   residual by a third, at no cost — the cache holds the packed `Π` either
   way.
+- `fit_cont` is the radial order of the fit of the evolved state at every
+  record row: `1` matches values and slopes on the offset surface (step 8e's
+  fit), `2` also curvatures, from the interpolant's Hessian (added
+  2026-10-03). For `l = 0` the ansatz below the surface is then a quartic in
+  `r` rather than a quadratic — the representation the spherical hole's
+  study pointed at (`CODE.md`, Measured results). The initial data's fit is
+  `evolve!`'s `fit_initial_cont`.
 
 `isbits`: the numbers that have a "use the rule" value spell it `0`, since a
 `Union{Nothing, T}` field would not be; the two optional objects are type
@@ -1250,6 +1258,7 @@ struct FittedSpec{T,V,X,B}
     target::X
     target_bounds::B
     fit_tilde::Bool
+    fit_cont::Int
 end
 
 function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
@@ -1258,7 +1267,8 @@ function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
                     w_ramp=T(1 // 2),
                     ρ_ramp=one(T), max_misses::Integer=3,
                     α_trigger=T(1 // 10), target=nothing,
-                    target_bounds=nothing, fit_tilde::Bool=true) where {T}
+                    target_bounds=nothing, fit_tilde::Bool=true,
+                    fit_cont::Integer=1) where {T}
     variant in INTERIOR_VARIANTS || throw(ArgumentError(
         "the interior variant must be one of $(INTERIOR_VARIANTS), got " *
         ":$variant; the tracked geometry runs CODE.md's three analytic " *
@@ -1301,13 +1311,16 @@ function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
     T(α_trigger) ≥ 0 || throw(ArgumentError(
         "α_trigger is a lapse and must be non-negative (0 switches the " *
         "trigger off), got $α_trigger."))
+    fit_cont in (1, 2) || throw(ArgumentError(
+        "fit_cont is the evolved state's fit's radial order, 1 (values and " *
+        "slopes) or 2 (and curvatures), got $fit_cont."))
     check_layer_target(target)
     tb = target_bounds === nothing ? nothing : _bounds_in(T, target_bounds)
     return FittedSpec{T,variant,typeof(target),typeof(tb)}(
         Int(margin), Int(n_L), Int(core_min), Int(lmax_shape), Int(lmax_fit),
         T(ρ_max), wr,
         ρr, Int(max_misses), T(α_trigger), Val(variant), target, tb,
-        fit_tilde)
+        fit_tilde, Int(fit_cont))
 end
 
 interior_variant(::FittedSpec{T,V}) where {T,V} = V
@@ -1329,7 +1342,7 @@ function with_variant(spec::FittedSpec{T}, variant::Symbol) where {T}
     return FittedSpec{T,variant,typeof(target),typeof(spec.target_bounds)}(
         spec.margin, spec.n_L, spec.core_min, spec.lmax_shape, spec.lmax_fit,
         spec.ρ_max, spec.w_ramp, spec.ρ_ramp, spec.max_misses, spec.α_trigger,
-        Val(variant), target, spec.target_bounds, spec.fit_tilde)
+        Val(variant), target, spec.target_bounds, spec.fit_tilde, spec.fit_cont)
 end
 
 """

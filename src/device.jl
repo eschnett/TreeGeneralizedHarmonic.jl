@@ -78,7 +78,8 @@ function hostcopy(fs::FieldSet{T}) where {T}
     # — which `hostcopy!` would then reject. `G` has no default at all,
     # which is what turns the first of those mistakes into an error message
     # instead of a wrong answer.
-    host = FieldSet{T}(fs.forest, fs.nvars; G=fs.G, centering=fs.centering)
+    host = FieldSet{T}(fs.forest, fs.nvars; G=fs.G, centering=fs.centering,
+                       parity=fs.parity)
     return hostcopy!(host, fs)
 end
 

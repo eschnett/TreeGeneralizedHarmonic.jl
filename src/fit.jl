@@ -312,7 +312,7 @@ end
 # --- the samplers ------------------------------------------------------------------
 
 """
-    state_sampler(fs, q; t) -> StateSampler
+    state_sampler(fs, q; t, order = 1) -> StateSampler
 
 The state on the mesh as the fit reads it: called as `sampler(xs, ns)` with
 points `xs` and the unit radial vectors `ns` there, it returns `(u, ∂_r u)`
@@ -336,22 +336,38 @@ across `r_1`. `mask = AllPoints()` says so at the call.
 windows of points near a block face reach into them (`CLAUDE.md`, "Ghosts
 must be filled before anything is interpolated"). The radial derivative is
 the interpolant's own gradient, one order behind its value: `O(h^{q+1})`.
-The sampler provides no second derivative, so it serves `cont = 1` only.
+
+`order = 2` (added 2026-10-03) returns `(u, ∂_r u, ∂_r² u)` as the analytic
+sampler does — what a `cont = 2` fit of the evolved state needs
+(`FittedSpec`'s `fit_cont`). TreeAMR 0.1.4's `interpolate` gives values and
+first derivatives only (its message: the weights are written for any order,
+the tests that would claim second derivatives are missing), so the curvature
+is the fourth-order central difference of the interpolated radial gradient
+along the ray, `(g₋₂ − 8g₋₁ + 8g₁ − g₂)/(12δ)` with `δ = h_min/8`, as the
+analytic sampler differences values. The interpolant's gradient jumps by
+`O(h^{q+1})` where the window shifts at a node, so a difference across one is
+off by `O(h^q)` — the order of the curvature an interpolated second
+derivative would have. **When TreeAMR interpolates second derivatives, use
+them instead**: that is mesh machinery, and it belongs there.
 """
 struct StateSampler{F,T}
     fs::F
     q::Int
     t::T
+    order::Int
 end
 
-function state_sampler(fs::FieldSet{T,3}, q::Integer; t) where {T}
+function state_sampler(fs::FieldSet{T,3}, q::Integer; t, order::Integer=1) where {T}
     fs.nvars == NFIT || throw(ArgumentError(
         "the fit samples the packed state (h, Π), $NFIT variables, but this " *
         "field set holds $(fs.nvars)."))
-    return StateSampler{typeof(fs),T}(fs, Int(q), T(t))
+    order in (1, 2) || throw(ArgumentError(
+        "the state sampler returns one or two radial derivatives, got order = $order."))
+    return StateSampler{typeof(fs),T}(fs, Int(q), T(t), Int(order))
 end
 
 function (s::StateSampler{F,T})(xs::AbstractVector, ns::AbstractVector) where {F,T}
+    s.order == 2 && return _sample_hessian(s, xs, ns)
     vals, grads = gh_interpolate_grad(s.fs, xs; q=s.q, mask=AllPoints())
     u = [SVector{NFIT,T}(vals[i]) for i in eachindex(xs)]
     u1 = map(eachindex(xs)) do i
@@ -360,6 +376,24 @@ function (s::StateSampler{F,T})(xs::AbstractVector, ns::AbstractVector) where {F
         SVector{NFIT,T}(T(n[1]) * g[1] + T(n[2]) * g[2] + T(n[3]) * g[3])
     end
     return (u, u1)
+end
+
+# `(u, ∂_r u, ∂_r² u)`: the curvature by differencing the interpolated radial
+# gradient at `x + kδ n̂`, `k = −2 … 2`, all five sets in one launch.
+function _sample_hessian(s::StateSampler{F,T}, xs, ns) where {F,T}
+    δ = minimum_spacing(T, s.fs.forest) / 8
+    np = length(xs)
+    pts = [SVector{3,T}(T(xs[j][d]) + k * δ * T(ns[j][d]) for d in 1:3)
+           for k in -2:2 for j in 1:np]
+    vals, grads = gh_interpolate_grad(s.fs, pts; q=s.q, mask=AllPoints())
+    radial(i, j) = (n = ns[j]; g = grads[i];
+                    SVector{NFIT,T}(T(n[1]) * g[1] + T(n[2]) * g[2] + T(n[3]) * g[3]))
+    at(k, j) = (k + 2) * np + j                       # the index of x_j + kδ n̂_j
+    u = [SVector{NFIT,T}(vals[at(0, j)]) for j in 1:np]
+    u1 = [radial(at(0, j), j) for j in 1:np]
+    u2 = [((radial(at(-2, j), j) - radial(at(2, j), j)) +
+           8 * (radial(at(1, j), j) - radial(at(-1, j), j))) / (12 * δ) for j in 1:np]
+    return (u, u1, u2)
 end
 
 """
@@ -566,8 +600,8 @@ function solve_fit(ξs::AbstractVector{SVector{3,T}}, samples, L::Integer,
     length(samples) ≥ nb || throw(ArgumentError(
         "a fit with cont = $cont needs the values and $cont radial " *
         "derivative(s) at each point, got $(length(samples)) sample sets: " *
-        "the state sampler provides one derivative and serves cont = 1; " *
-        "cont = 2 is the analytic sampler's."))
+        "the state sampler gives two derivatives with order = 2, the " *
+        "analytic sampler always does."))
     nrow ≥ ncol || throw(ArgumentError(
         "$nrow rows cannot determine $ncol coefficients: EquiangularGrid(L) " *
         "has (L+1)(2L+1) points and the ansatz (L+1)² (cont+1) terms."))
@@ -849,9 +883,8 @@ function build_fit(sampler, int::FittedInterior{T}, spec::FittedSpec;
     nb = cont + 1
     length(samples) ≥ nb || throw(ArgumentError(
         "a fit with cont = $cont needs $cont radial derivative(s) of the " *
-        "state, and this sampler provides $(length(samples) - 1): the state " *
-        "sampler has only the interpolant's gradient and serves cont = 1; " *
-        "cont = 2 (the initial data's fit) is the analytic sampler's."))
+        "state, and this sampler provides $(length(samples) - 1): build the " *
+        "state sampler with order = 2 for a cont = 2 fit."))
     vs = map(eachindex(xs)) do i
         cont == 1 ? fit_variables(samples[1][i], samples[2][i]; tilde=tilde) :
         fit_variables(samples[1][i], samples[2][i], samples[3][i]; tilde=tilde)
@@ -1031,7 +1064,7 @@ variables (the target and its slope), `G = 0`, `U`'s centering.
 """
 target_cache(U::FieldSet{T,3}) where {T} =
     FieldSet{T}(U.forest, 4NC; G=0, centering=U.centering,
-                backend=get_backend(U.work))
+                parity=even_parity(U.forest, 4NC), backend=get_backend(U.work))
 
 """
     fill_target!(target, origins, spacings, interior, fits, t) -> target

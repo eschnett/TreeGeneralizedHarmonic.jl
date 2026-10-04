@@ -895,6 +895,31 @@ every row, which is also what would notice if one of `SpacetimeMetrics`'
 unexported wrapper types were renamed on `main` — they are listed in
 `prerequisite_tests.jl` for that reason.
 
+**The algebraic Kerr-Schild source (built 2026-10-02**, proposed under
+[Open questions](#open-questions) the same day**)**. A case may carry
+`gauge_source = KerrSchildSource(T; M, spin, velocity)` (or `:algebraic`
+through `hole_case` for an unboosted, unrotated `KerrSchild`): `H_a = −K w_a
+/ (M + √(M² − s²))` with `w_a = k_ab u^b`, `K = u·w`, `s = S·w`, evaluated in
+the kernels from the state itself (`k = h`) — the right-hand side, the gauge
+constraint and the ADM monitor — and `∂_a H_b` by the chain rule through the
+`∂g` each kernel already forms (`∂_t g` from the first evolution equation
+where the source is needed before it). It travels behind the existing
+gauge-source `Val` as `Val(:algebraic)`, the `isbits` source itself in the
+slot where the sampled `Hsrc` array goes, so there is no field set, no
+nested-dual sampling and no re-sampling after a regrid. `GHCase` refuses a
+source that does not reproduce the background's own `−Γ_a` and its gradient
+at twelve points (`check_gauge_source`), and with one the refusal of a moving
+non-harmonic background is lifted, because the source moves with the hole.
+**(Measured 2026-10-02.)** The closed form is `gauge_source_grad`'s `H_a`
+and `∂_a H_b` to `2–4·10⁻¹⁵` for Kerr-Schild at rest (`a = 0`, `0.9`),
+translated, and boosted along `x` and in a general direction with spin
+(`test/gauge_source_tests.jl`). On the static `a = 0` hole (octant `[0, 3]³`,
+uniform `h = 1/16`, `q = 4`, the `:damped` layer, `t = 2 M`) it runs as the
+sampled source does — masked error `1.44·10⁻⁵` against `1.11·10⁻⁵`, `ℋ`
+`1.81·10⁻⁵` against `1.93·10⁻⁵`, `C_a` `3.87·10⁻⁶` against `3.96·10⁻⁶` — in
+`62 s` against `90 s`; `cfl = 1/2` reproduces `cfl = 1/4` to six digits at
+every row to `4 M`.
+
 **Constraint damping** (decided): the Gundlach–Pretorius term `Z_ab`,
 with `γ0(x)` a *function of position* — a Gaussian of width a few `M`
 around the hole's analytic center, tapered to a small value in the wave
@@ -971,6 +996,57 @@ bit** (`test/moving_tests.jl`), where the same points at `t = 0` differ by
 more than `10⁻³`: the time dependence of a hole that moves reaches the
 boundary through the hook's `t` and nothing else. Every moving run of step
 8 fills its boundary this way at every stage.
+
+### Reflecting faces: symmetry planes (added 2026-10-02)
+
+A case's `reflecting` is TreeAMR's M10 (`(lo, hi)` per dimension, refused
+together with `periodic` in one dimension): a face across which the
+solution is its own mirror image. It is not the hook's — the ghost schedule
+turns a ghost region crossing it into a copy, prolongation or restriction
+from the mirrored source, times each variable's parity — so `dirichlet`
+returns `nothing` only when *no* face is outer (`has_outer_face`), and the
+refinement ceiling skips reflecting faces (they have no Dirichlet mismatch,
+and on an octant they are where the hole is). `GHProblem` refuses a forest
+whose faces are not the case's.
+
+**The parities are the tensor's.** `h_ab` and `Π_ab` are symmetric
+tensors, so component `ab` is odd across `x^d = 0` exactly when `x^d`
+occurs an odd number of times in `ab`: `h_tx` is odd in `x`, `h_xy` in `x`
+and `y`, `h_tt` and the diagonal even everywhere (`state_parity`). Every
+other field set of the package has `G = 0` and is never ghost-filled or
+transferred, and is declared even (`even_parity`), which TreeAMR requires
+and nothing reads. Over a forest without a reflecting face both are
+`nothing`, so such a run and its checkpoints are what they were.
+
+**The low wall plane is evolved, and an odd variable is not forced to zero
+on it** (TreeAMR's rule): it stays zero to roundoff if it starts zero.
+`add_noise!` therefore projects its noise onto the parity on the wall
+planes. **(Measured 2026-10-02**, `test/reflection_tests.jl`**.)** A
+uniform octant `[0, 4]³` is the box `[−4, 4]³` with the noise extended by
+parity, to `1.1·10⁻¹⁵` relative after 32 steps; on a three-level octant
+the odd components stay on their walls at `7·10⁻¹⁸` relative after 20
+steps (not exactly zero: a fused multiply-add keeps a mirrored pair from
+cancelling bit for bit), and with every variable declared even they leave
+at the data's size. A *refined* octant is not the refined box: vertex
+centering puts the plane `x = −R` of a cube `[−R, R]³` on the fine level
+and `x = +R` on the coarse one, so the box's discretization has no mirror
+symmetry at a refinement boundary and the octant's is a different (and
+symmetric) discretization of the same problem.
+
+**A hole on the octant** (`hole_case(; octant = true)`, added 2026-10-02)
+needs one that is its own mirror image in all three planes — at the origin,
+at rest, `a = 0` — and refuses any other: a spin along `z` keeps only the
+`z` mirror and a boost breaks its own axis. **(Measured 2026-10-02.)**
+Kerr-Schild `a = 0` with the `:damped` layer (`r_0 = 3/4`, `r_1 = 3/2`),
+`q = 4`, uniform at `h = 1/16` on `[0, 3]³` against `[−3, 3]³`: after 224
+steps (`t = 2 M`, past the layer's saturation at `M/2`) the two agree to
+`6·10⁻¹⁴` at every point outside the core — in the layer, at the horizon and
+next to the outer face alike — where the solution's own error is `6·10⁻²` in
+the layer and `10⁻⁶` at the boundary; the layer residual agrees to every
+printed digit at every row; the octant costs `75 s` against `491 s`. The
+frozen core, the layer, the sampled gauge source and the `γ0` profile need
+nothing of their own at the walls. The suite's version is the `q = 2`
+fixture to `1/5 M` (`3.6·10⁻¹⁴`).
 
 ### The interior: a pointwise damping layer
 
@@ -3394,6 +3470,22 @@ break it:
   [Possible extensions](#possible-extensions). **(Amended 2026-10-01:** it
   is TreeAMR's M9a, and [Checkpoint and restart](#checkpoint-and-restart)
   is its section.**)**
+- **A live status file for SimWatch (added 2026-10-02)**: `src/simwatch.jl`
+  writes `simwatch.toml` into a run directory for SimWatch
+  (`https://github.com/eschnett/simwatch`, whose `FORMAT.md` is the
+  reference), a terminal viewer that shows every run below a directory with
+  its progress, its Slurm state and its diagnostics. It began as that
+  repository's Julia writer and is owned here, layered as a pure document
+  builder (`simwatch_document`), an atomic write that never throws
+  (`write_simwatch`) and a rate-limited `SimWatchWriter`, which reports
+  `update_interval` from the observed spacing of its calls so that a run
+  whose chunks take minutes is not shown as stale between them. Its data
+  come from `evolve!`'s observer, which is handed the chunk's record row when
+  it takes a fourth argument (`observer(p, t, u, row)`, added the same day),
+  so the horizon's numbers are not recomputed; `test/octant_runs.jl` writes
+  everything its CSV carries — constraints overall, by level, in shells and
+  at the boundary, the error, the horizon, the track, the fit and the step —
+  and `finished`, `stopped` or `failed` at the end.
 
 ## Checkpoint and restart
 
@@ -6452,6 +6544,208 @@ drift**: `J = 0.846`, `M_ch = 1.030`, `M_irr = 0.9227` and the extent ratio
 and not the layer's export: on the boosted `a = 0` hole `J` stays at
 `10⁻⁵`.
 
+### Robust stability on the octant (measured 2026-10-02)
+
+`test/octant_runs.jl` on Symmetry's H200 (`octant-run`, jobs 567966 and
+567984): flat space on `[0, 128]³`, reflecting at the three faces through the
+origin and Minkowski Dirichlet data at the outer ones; six levels, `h = 1` at
+the boundary halved inside each cube `[0, R]³`, `R = 64, 32, 16, 8, 4`, to
+`h = 1/32` (`N = 32`, 344 blocks, 11.27 M points, about 1.8 M per level);
+`q = 4`, `ε_KO = 1/2`, `γ0 = 1`, `γ2 = 0`; uniform noise of `10⁻⁸` on every
+point and variable, odd components zero on their walls; to `t = 128`. The
+norms give every grid point the same weight (`weighting = :points`), so the
+six levels count about equally.
+
+**Nothing grows.** Over `[16, 128]` at `cfl = 1/2` the point-weighted L2
+rates are `σ = −0.026` (ℋ), `−0.031` (ℳ_i) and `−0.012` (`C_a`), and over
+the last quarter `−0.005`, `−0.006` and `−0.0035`: the norms fall from
+`2.7·10⁻⁵`, `7.6·10⁻⁶` and `1.5·10⁻⁷` at `t = 0` (the noise's second
+differences, largest on the finest level) to `7.7·10⁻¹¹`, `2.1·10⁻¹¹` and
+`2.7·10⁻¹¹`, and the state itself from `5.8·10⁻⁹` to `1.2·10⁻⁹`. By level,
+ℳ_i decays everywhere (to `3·10⁻¹⁴` on the finest); ℋ and `C_a` on the two
+finest levels fall to a minimum at `t ≈ 48` (`5·10⁻¹²`, `6·10⁻¹³` on level 5)
+and come back up to a **plateau** — level 5's ℋ `1.51, 1.70, 1.80, 1.83,
+1.84·10⁻¹¹` at `t = 88, 100, 112, 120, 128` — a rise that saturates at the
+coarse levels' content (level 0's ℋ is `1.8·10⁻¹⁰` and still falling), not an
+exponential. The mesh's L∞ is level 0's and wanders between `3` and
+`6·10⁻⁹` without a trend.
+
+**`cfl = 1/2` is the same run.** Every norm of the two runs agrees to three
+digits at every row both have, to `t = 128` (the largest relative difference
+of any norm at any row is `2.3 %`, an L∞ of `ℳ` in the noise's transient at
+`t = 8`; at `t = 128` they agree to eight digits), the step
+halves the cost — `55 s` of H200 time per unit of `t` against `107 s`, `2 h 4`
+for the whole run — and RK4's margins at `cfl = 1/2` are wide (`ω dt ≈ 1.15`
+against `2.83` for the wave part at the finest level, `0.43` against `2.78`
+for the dissipation). A 64-core EPYC node is `12.6×` slower than one H200 here
+(`1351 s` per unit of `t`).
+
+**The Kerr-Schild hole on the octant (measured 2026-10-02**, jobs 568189 and
+568190, `ks-octant`**)**: `M = 1`, `a = 0` at the origin of the same octant,
+one level fewer — `h = 1` to `1/16` in `[0, 8]³` (`R = 64, 32, 16, 8`, 9.4 M
+points) — the algebraic source, the `:damped` layer at `r_0 = 3/4`,
+`r_1 = 3/2` (`n_L = 12` cells, `ρ_ramp = 1`, `ρ_max = 4/M`), the Gaussian
+`γ0`, `cfl = 1/2`, to `t = 128 M`: 7168 steps, `57 min` on one H200 (`26 s`
+per `M`), once clean and once with the noise (`10⁻⁸`, the frozen core
+excluded). Masked to `r ≥ r_1`, point-weighted:
+
+- **The hole region is stationary.** After a transient to `t ≈ 6 M` — the
+  layer saturating — `ℋ = 7.24·10⁻⁶`, `ℳ_i = 5.55·10⁻⁶`, `C_a = 1.64·10⁻⁶`
+  and the error `5.56·10⁻⁶` hold to three digits at every row to `128 M`
+  (late rates `≤ 4·10⁻⁶/M`); the layer residual is `0.101`; the drift of
+  `h_tt` at the horizon peaks at `3.5·10⁻⁶` near `40 M` and falls to
+  `2.8·10⁻⁶`.
+- **The outer levels settle slowly.** The error against the exact solution
+  on levels 0–3 grows from zero roughly linearly and decelerating (level 3:
+  `1.0, 1.45, 1.77, 2.03, 2.27, 2.50·10⁻⁷` at `t = 48 … 128`) — the hole's
+  truncation-level stationary state, a slightly different hole than the exact
+  one, spreading outward at the speed of light; their constraints stay at
+  `10⁻¹²–10⁻⁹`. At the outermost blocks `ℋ` rises from `4·10⁻¹³` to
+  `1.3·10⁻¹²` and the error reaches `3.8·10⁻¹⁰`: nothing severe comes from
+  the Dirichlet boundary in `128 M`, though the settling front reaches it at
+  about that time.
+- **The noise decays.** The two runs' norms agree to three or four digits,
+  the noise being three orders below the truncation error; their difference,
+  from paired checkpoints (`test/octant_diff.jl`), falls on every level and
+  in every interval — `2.94, 2.06, 1.60, 1.23, 1.14, 1.05, 0.91,
+  0.78·10⁻⁹` at `t = 16, 32, …, 128` (L∞ `1.6·10⁻⁷` to `2.3·10⁻⁸`), about
+  `−0.012/M`, the hole's own level from `5.1·10⁻⁹` to `1.0·10⁻⁹`.
+- **The same hole with the `:fitted` target (job 568294)**: the tracked
+  geometry at `m = 8` (offset surface at `r ≈ 1.5`, `n_L = 12`),
+  `lmax_shape = 4`, `lmax_fit = 8`, the finder every chunk with the spin,
+  `default_bounds` gated at `9/10`, the analytic initial data down to the core
+  surface (`fit_initial_depth = 3/4`; the default `0`, the fit right below the
+  offset surface, starts at `ℋ = 4·10⁻²`); `61 min`. Stable to `128 M` and
+  stationary from `t ≈ 8 M`, but at a higher level: `ℋ = 2.27·10⁻⁴`,
+  `ℳ_i = 1.11·10⁻⁴`, `C_a = 2.28·10⁻⁵`, error `6.35·10⁻⁵` — `31×`, `20×`,
+  `14×` and `11×` the `:damped` run — with the layer's residual against the
+  truth `2.05` (`:damped`: `0.10`) and the fit's residual a constant
+  `0.0165–0.0173`. All 129 finds succeed (`J = 1.06·10⁻⁹`, the track within
+  `10⁻⁸` cells of the origin) and every fit is valid; the range projection
+  never fires. **The horizon grows linearly**: `M_irr` from `0.9999984` at
+  `16 M` to `1.0000090` at `128 M`, `+9.4·10⁻⁸/M` with constant increments,
+  `r_min` with it — a slightly heavier hole, which the outer levels' error
+  shows too (level 3 `1.35·10⁻⁶` against `:damped`'s `2.5·10⁻⁷`, about
+  `δM/r` there), and the outermost blocks' `ℋ` steps from `1.2·10⁻¹²` to
+  `3.5·10⁻¹²` over `112–128 M`, when that front arrives at the boundary.
+
+**The constraints outside the horizon: convergence, depth and the layer's
+parameters (measured 2026-10-02**, jobs 568343–568363 and the reruns
+568719–568720, `ks-octant/out/study` and `ks-study2`**)**. Kerr-Schild
+`a = 0` on the octant `[0, 64]³`, root brick `2³`, cubes `R = 32, 16, 8`, so
+the finest level `[0, 8]³` has `h = 4/N`; the algebraic source, `q = 4`,
+`cfl = 1/2`, `24 M`, the finder every chunk, one H200 a row
+(`test/octant_runs.jl`, analysed by `test/octant_study.jl`). The norms are
+point-weighted in shells about the hole: the evolved band inside the horizon
+(`in`), then `[2, 2.25)`, `[2.25, 3)`, `[3, 5)`, `[5, 8)` and `r ≥ 8`; the
+values below are at `24 M`, and `dM_irr/dt` is the slope over `8–24 M`.
+
+- **`:damped` converges at order four outside the horizon, the horizon's mass
+  drift included** (`r_1 = 1.5`, `r_0 = 0.75` fixed in `M`, so `m = 8, 12,
+  16` and `n_L = 12, 18, 24` cells at `h = 1/16, 1/24, 1/32`):
+
+  | `h` | `ℋ [2, 2.25)` | `ℋ [2.25, 3)` | error `[2, 2.25)` | `M_irr − 1` | `dM_irr/dt` |
+  |---|---|---|---|---|---|
+  | `1/16` | `2.42·10⁻⁵` | `2.33·10⁻⁶` | `1.08·10⁻⁵` | `1.45·10⁻⁶` | `2.09·10⁻⁸` |
+  | `1/24` | `1.46·10⁻⁶` | `4.17·10⁻⁷` | `1.65·10⁻⁶` | `2.89·10⁻⁷` | `4.05·10⁻⁹` |
+  | `1/32` | `4.30·10⁻⁷` | `1.31·10⁻⁷` | `5.24·10⁻⁷` | `8.7·10⁻⁸` | `1.27·10⁻⁹` |
+
+  Orders: every shell from `2.25` out `4.0` for `ℋ`, `ℳ`, `C_a` and the
+  error; the first shell `6.9/4.25` (`ℋ`) and `4.6/4.0` (error), a layer term
+  that falls faster than the bulk; `dM_irr/dt` `4.05/4.04`. The mass drift is
+  the scheme's truncation error and nothing else: at `h = 1/32`, `1.3·10⁻⁹/M`.
+- **Depth helps `:damped` only to about 8–12 cells** (`h = 1/16`, ramp 12
+  cells): `ℋ [2, 2.25)` is `5.5·10⁻⁵`, `2.4·10⁻⁵`, `1.1·10⁻⁵`, `1.2·10⁻⁵` at
+  `m = 4, 8, 12, 16`, the shell `[2.25, 3)` is `2.1–2.7·10⁻⁶` at every depth,
+  every shell from `r = 3` out is the same to two digits, and `dM_irr/dt` is
+  `2.1–2.2·10⁻⁸` at `m = 8, 12, 16` (at `m = 4` the finder's footprint reaches
+  the layer and the horizon is not found).
+- **`:fitted` converges faster than order four at a fixed physical depth**
+  (`m = 8, 12, 16`, `n_L = 12, 18, 24` at `h = 1/16, 1/24, 1/32`), because
+  its layer gains cells: `ℋ [2, 2.25)` `8.5·10⁻⁴`, `3.5·10⁻⁵`, `5.8·10⁻⁶`
+  (orders `7.9/6.2`), the error there `1.7·10⁻⁴`, `6.2·10⁻⁶`, `6.6·10⁻⁷`
+  (`8.2/7.8`), `dM_irr/dt` `7.0·10⁻⁸`, `5.5·10⁻⁹`, `1.4·10⁻⁹`. At
+  `h = 1/32` it is `:damped`'s outside the first shell — the error in
+  `[2, 2.25)` `1.3×`, from `2.25` out equal — and only `ℋ` just outside the
+  horizon stays `13×`; inside, in the band and the layer, it is far larger.
+- **Depth helps `:fitted` exponentially, about a factor `e` per 2.5–3
+  cells, up to where it fails**: at `h = 1/16`, `ℋ [2, 2.25)` is `2.1·10⁻³`,
+  `8.5·10⁻⁴`, `2.0·10⁻⁴` at `m = 6, 8, 12` (the error `4.9·10⁻⁴`, `1.7·10⁻⁴`,
+  `5.5·10⁻⁵`); `m = 4` loses its track (the finder's footprint), and `m = 16`
+  — the core surface at `r = 0.25` — degenerates in its first chunk
+  (`DomainError` in the kernel, the layer's unguarded outer part), where
+  `:damped` at the same depth runs.
+- **The layer's parameters** (`h = 1/16`, `m = 8`, against the rows above):
+  for `:damped`, `ρ_max = 8/M` and a ramp of 18 cells each lower
+  `ℋ [2, 2.25)` about `3×` (`8.6·10⁻⁶`, `6.8·10⁻⁶`) and `2/M` raises it `3×`;
+  for `:fitted`, `4/M` is the best of the three (`2/M` and `8/M`: `1.4` and
+  `1.6·10⁻³`), the 18-cell ramp lowers it `4×` (`2.0·10⁻⁴`), and
+  **`lmax_fit = 12` is `lmax_fit = 8` to three digits** — the hole is
+  spherical, so the fit's angular degree is not what limits it; for `l = 0`
+  the `cont = 1` ansatz is a quadratic in `r` below the offset surface, which
+  is the representation to suspect next. `ε_KO = 1/4` is worse for both, by
+  `10×` for `:damped` and `3.5×` for `:fitted`.
+- **The transient leaves as a pulse.** The constraint violation the start-up
+  emits near the hole travels outward: in `[5, 8)` it peaks at `t ≈ 12–16`
+  (`:damped` at `h = 1/16` `1.1·10⁻⁸`, `:fitted` `2.0·10⁻⁷`) and falls, in
+  `r ≥ 8` it arrives at `16–20 M`; level 0 and the boundary band are flat to
+  `24 M`. The positive "rates" of the outer shells over `8–24 M` are that
+  pulse passing and, for the error, the slightly different hole's `δM/r`
+  settling outward — not growth. **So `24 M` is long enough** for everything
+  near the hole: its shells saturate by about `8 M`, and the mass drift is
+  linear from there with a rate that converges at order four; what a short
+  run cannot show is the pulse and the settling front meeting the outer
+  boundary.
+
+**A setup for `:fitted` (measured 2026-10-03**, jobs 569587–569594 and
+569644, `ks-study2/out/study`**)**: the same octant and analysis, rows chosen
+from the study above — the depth bound, a fit that also matches curvatures
+(`FittedSpec`'s `fit_cont = 2`, added the same day: the state sampler's
+`order = 2`, which differences the interpolated radial gradient because
+TreeAMR 0.1.4 interpolates no second derivatives), and the proposed setups.
+At `24 M`, against `:damped` at the same `h` (`ℋ` and the error in
+`[2, 2.25)`, the mass drift):
+
+| `h` | `m` / `n_L` / `fit_cont` | `ℋ [2, 2.25)` | error `[2, 2.25)` | `dM_irr/dt` |
+|---|---|---|---|---|
+| `1/16` | `:damped` | `2.4·10⁻⁵` | `1.1·10⁻⁵` | `2.1·10⁻⁸` |
+| `1/16` | 8 / 12 / 1 | `8.5·10⁻⁴` | `1.7·10⁻⁴` | `7.0·10⁻⁸` |
+| `1/16` | 8 / 12 / 2 | `3.2·10⁻⁴` | `8.1·10⁻⁵` | `5.4·10⁻⁹` |
+| `1/16` | 12 / 14 / 1 | `7.3·10⁻⁵` | `1.9·10⁻⁵` | `1.6·10⁻⁸` |
+| `1/24` | `:damped` | `1.46·10⁻⁶` | `1.65·10⁻⁶` | `4.05·10⁻⁹` |
+| `1/24` | 12 / 18 / 1 | `3.5·10⁻⁵` | `6.2·10⁻⁶` | `5.5·10⁻⁹` |
+| `1/24` | 12 / 18 / 2 | `1.47·10⁻⁵` | `3.3·10⁻⁶` | `3.9·10⁻⁹` |
+| `1/24` | 18 / 18 / 1 | `5.4·10⁻⁶` | `2.2·10⁻⁶` | `4.3·10⁻⁹` |
+| `1/24` | 24 / 12 / 1 | `7.3·10⁻⁶` | `3.4·10⁻⁶` | `4.2·10⁻⁹` |
+| `1/24` | 16 / 20 / 1 | `8.3·10⁻⁶` | `2.2·10⁻⁶` | `3.7·10⁻⁹` |
+| **`1/24`** | **16 / 20 / 2** | **`2.3·10⁻⁶`** | **`1.8·10⁻⁶`** | **`4.0·10⁻⁹`** |
+| `1/32` | `:damped` | `4.3·10⁻⁷` | `5.2·10⁻⁷` | `1.3·10⁻⁹` |
+| `1/32` | 16 / 24 / 1 | `5.8·10⁻⁶` | `6.6·10⁻⁷` | `1.4·10⁻⁹` |
+| `1/32` | 20 / 24 / 1 | `1.1·10⁻⁶` † | `4.7·10⁻⁷` † | — |
+
+† at `18 M`: the node failed (`NODE_FAIL`, both H200 nodes down); its
+shells were saturated from `8 M`, and the run is resubmitted with
+checkpoints. From `r = 2.25` out every row is `:damped`'s to two digits.
+
+- **The layer that failed at `h = 1/16` runs at `1/24`**: the offset surface
+  at `r = 1.0` with the core surface at `0.5` (`m = 24`, `n_L = 12`) is stable
+  to `24 M`, so the bound is cells, not the radius. Past 16–18 cells more
+  margin does not help (`m = 24` is worse than `m = 18`), a thicker ramp does.
+- **`fit_cont = 2` wins every pair**, `2.3–3.6×` in `ℋ` just outside the
+  horizon and `1.2–2×` in the error, and at `h = 1/16` it takes the mass
+  drift from `7.0·10⁻⁸` to `5.4·10⁻⁹`. Its fit residual is `15–17×`
+  `cont = 1`'s and flat in time (`0.017` against `0.0011` for the `1/24`,
+  16 / 20 rows): the ansatz cannot match values, slopes and curvatures at
+  once — a representation limit, two to three orders above the sampled
+  curvature's own error (`3·10⁻⁵` relative at `1/24`), so interpolating the
+  second derivative directly would not change these rows.
+- **The setup: `h = 1/24` at the hole, `m = 16`, `n_L = 20`,
+  `fit_cont = 2`**, `ρ_max = 4/M`, `ε_KO = 1/2`, `lmax_fit = 8` (12 for a
+  spinning hole), `fit_initial_depth = n_L h`: `ℋ` just outside the horizon
+  `1.6×` `:damped`'s, the error `1.1×`, the mass drift the same, and everything
+  from `r = 2.25` out equal. At `h = 1/32`, `m = 20` with `cont = 1` already
+  matches `:damped`'s error.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -6744,3 +7038,138 @@ own frame is the cheapest test), then the uniform growth — which the
 resting `:fitted` hole shows too at a fifth of the rate. Step 8g's
 host-side test is the right next step only if the spin drift turns out to
 be the layer's.
+
+**Gauge sources that know less about the hole (opened 2026-10-02 in a
+design discussion with Erik; nothing is built).** Today `H_a(x)` is sampled
+from the background ([Gauge and constraint
+damping](#gauge-and-constraint-damping)), so it knows the hole's mass, spin,
+position and velocity, and a moving Kerr-Schild hole is refused because its
+`H_a(x − vt)` is not a per-chunk sample. The question is which gauge
+sources need less of that, and which of them still make the initial data an
+exact stationary solution, so that a run starts without a gauge transient.
+Write `k_ab = g_ab − η_ab`; signs are GHSO2's, `H_a = −Γ_a` on a solution.
+The algebra below was checked against the Kerr-Schild metric with Wolfram,
+to 20 digits or better.
+
+- **Without a length, only `H = 0`.** `H_a` is an inverse length and
+  `g_ab` is dimensionless, so a nonzero gauge source that is an algebraic
+  function of the metric carries a constant with the dimension of a
+  length: a rate, like the damped harmonic gauge's `μ_0 ≈ 1/M` (on the
+  footing of `γ0`), or the hole's own parameters. A gauge source that
+  reads `∂g` instead changes the principal part: the equations
+  differentiate `H` once (`S0` contains `−2∇_(a H_b)`), so `∂g` in `H` is
+  `∂∂g` in the equations — in this package's variables, `∂_i Π` in `Π`'s
+  equation — and the limiting case `H_b = −Γ_b[g]` is the Einstein
+  equations with no gauge fixed at all. That is not ill-posed by itself
+  (1+log slicing and the Gamma driver read `∂g`), but each such choice
+  needs a hyperbolicity analysis of its own and gives up the ten decoupled
+  shifted wave operators the energy estimate rests on; gauge drivers
+  (Lindblom, Matthews, Rinne and Scheel 2008; Lindblom–Szilágyi 2009)
+  avoid it by evolving `H_a` as a field.
+- **The generic gauge in use elsewhere is damped harmonic**
+  (Szilágyi–Lindblom–Scheel 2009), the driver [Possible
+  extensions](#possible-extensions) already lists. In SpECTRE's form
+  `H_a = [μ_L1 L + μ_L2 log(1/α)] t_a − μ_S g_ai β^i/α` with
+  `L = log(√γ/α)` and `μ_X = A_X e^{−(r/σ_r)²} L^{e_X}`; the published
+  binary runs take `A_L1 = A_S = 1`, `A_L2 = 0`, `e = 2`, and the Gaussian
+  about the grid's origin makes the gauge harmonic at the outer boundary.
+  It knows one rate and nothing else about the hole, and single holes
+  settle in it: Lindblom and Szilágyi saw strongly perturbed holes reach
+  time-independent states, and Varma and Scheel (2018, arXiv:1808.07490)
+  construct the equilibrium of a boosted, spinning hole by solving four
+  elliptic equations. It does **not** start stationary from Kerr-Schild
+  data: Kerr-Schild has `α√γ = 1`, so `L = log(1 + 2H)` — `log 2` at the
+  Schwarzschild horizon — and SpEC rolls the gauge on from the data's own
+  source over `σ_g = 15–25 M`. The analytic solution then stops being the
+  error reference (the constraints and the horizon's invariants remain),
+  and a layer relaxing toward the analytic chart relaxes toward the wrong
+  gauge; the `:fitted` target is the one that would survive it.
+- **The harmonic chart's resolution penalty is forced.** A radial harmonic
+  coordinate `f(r) n^i` on Schwarzschild (areal `r`) solves
+  `d/dr((r² − 2Mr) f′) = 2f`, whose solutions are `r − M` and
+  `(r − M) ln(1 − 2M/r) + 2M`. The second falls off as `−2M³/(3r²)`, so
+  asymptotic flatness allows it, and diverges at the horizon, so
+  regularity does not: every regular harmonic chart has its horizon at
+  `r_H = r_BL − M`. For a spinning hole the price is more than the factor
+  two the radius suggests, because the chart's singular disk of radius `a`
+  closes in on the horizon's equator (radii in `M`):
+
+  | `a/M` | KS poles | KS equator | KS equator − `a` | harmonic poles | harmonic equator | harmonic equator − `a` |
+  |---|---|---|---|---|---|---|
+  | `0` | `2` | `2` | `2` | `1` | `1` | `1` |
+  | `0.7` | `1.714` | `1.852` | `1.152` | `0.714` | `1` | `0.3` |
+  | `0.9` | `1.436` | `1.695` | `0.795` | `0.436` | `1` | `0.1` |
+
+- **Constants of the run buy exactness, and the hole's velocity has to be
+  one of them.** With `M` alone, `H_a = −k_tt k_ta/(2M)` makes every
+  non-spinning Kerr-Schild hole *at rest* an exact stationary solution,
+  wherever it is. For Kerr it is off by `Σ/r² = 1 + a² cos²θ/r²`
+  (`1.39` on the axis at the horizon at `a = 9/10`), and `|a|` as a second
+  constant does not repair it: a point on the axis at the horizon
+  (`H = 1/2`, `r = 1.436`) and a point on the equator at `r = 2 M`
+  (`H = 1/2`), the second hole rotated so that the null vectors agree,
+  have the same `g_ab` and `Γ_a` differing by `1.39`. No scalar constant
+  repairs a boost either. `g − η = 2H l l` is null and of rank one, and a
+  boost along `l` only rescales it, so a hole at rest at distance `r` from
+  a point and a hole of the same mass moving along the line through that
+  point, at rest-frame distance `r D²` (`D = √((1 − v)/(1 + v))`), give the
+  point the same `g_ab` and `Γ_a` differing by `D⁻³` — `2.53` at
+  `v = 3/10`. With the spin 4-vector `S^a` (`(0, a⃗)` in the hole's rest
+  frame, `a⃗ = J⃗/M`) and the 4-velocity `u^a` the source is exact for every
+  boosted, spinning Kerr-Schild hole, at any position:
+
+  ```
+  Γ_a = k(u,u) k_ab u^b / (M + √(M² − (S^a k_ab u^b)²)),    H_a = −Γ_a
+  ```
+
+  This is the rest frame's `Γ_a = 2(M/Σ) l_a` with `l_t = 1`, read off the
+  metric — `H = k(u,u)/2`, `l_a = k_ab u^b/(2H)`, `a cos θ = S·l`, and
+  `M/Σ = H/r` with `r` the outer root of `H r² − M r + H (S·l)² = 0` —
+  rewritten so that nothing divides by `H`. It was checked for boosts in
+  general directions, with the spin both along and across them, at
+  `v ≤ 7/10` and `a ≤ 9/10`, to 23 digits. On a solution the root's
+  argument is `M² (r² − a² cos²θ)²/Σ²`, which vanishes only at
+  `r = a |cos θ|`, inside the horizon; off a solution it is clamped at
+  zero, and in the core it is masked like everything else.
+- **What that source would change here.** It is algebraic in `g`, so the
+  principal part is the one GHSO2 analysed, and `∂_a H_b` is the chain rule
+  through the `∂_a g` the kernel already forms (`∂_t g` from `Π`): a few
+  hundred flops a point instead of the `Hsrc` field set, its nested-dual
+  sampling and its re-sampling after every regrid — and instead of the one
+  right-hand side [Possible extensions](#possible-extensions) prices an
+  in-kernel analytic source at. It mentions no position, so the gauge
+  source moves with the hole: a boosted Kerr-Schild hole is stationary in
+  its own frame without a time-dependent `H(t, x)`, which would lift the
+  refusal of a moving non-harmonic background. Kerr-Schild at `a = 9/10`
+  is the chart in which step 5's analytic core already fits
+  (`r_+ = 1.436 > 0.9`), with eight times the harmonic chart's room at the
+  equator — so this is a route to the proof-of-concept case at the spin
+  this document is named for, in a chart that needs neither the fit nor
+  `h ≲ 5/1024`.
+- **What it does not settle.** (1) **Stability.** The stationary solution
+  is the sampled source's, but the linearisation is not — `∂_a H_b` now
+  couples to the perturbation through `∂F/∂g` — so the first measurement is
+  the static Kerr-Schild hole under `F(g)` against the same hole under the
+  sampled `H(x)`, the error and the constraints to `50 M`. (2) **Drift.**
+  `M`, `S` and `u` are constants of the run; if the evolved hole's
+  parameters move (truncation error, junk), the source is slightly wrong
+  and the coordinates drift, without a constraint violation. (3) **One
+  hole.** A binary's superposition is not exact, and the constants are per
+  hole. (4) **The velocity.** A chart whose `g − η` is not null could read
+  the rest frame off the metric: Painlevé–Gullstrand Schwarzschild, with
+  its horizon at `2M` too, has `η^{ab} k_ab = −2M/r` and, by a quick
+  calculation not checked further, fixes the rest frame from the metric at
+  a point outside `r = M/2`. There is no closed form for it here, and
+  Kerr's version (Doran's coordinates) is not worked out.
+
+**Built (2026-10-02)**: the source above, `KerrSchildSource` behind
+`Val(:algebraic)` — see [Gauge and constraint
+damping](#gauge-and-constraint-damping) — and measured first on the static
+hole on the octant (Measured results, "Robust stability on the octant").
+
+**Proposed (2026-10-02):** build the source above as an alternative to the
+sampled `Hsrc` behind the kernel's existing gauge-source `Val`, measure (1)
+on the static Kerr-Schild hole, and then run a boosted Kerr-Schild hole
+across the mesh with the analytic layer, against G5's harmonic `a = 7/10`
+rows; the damped harmonic gauge stays the extension for binaries, where no
+constants of the run make the data stationary.

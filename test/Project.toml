@@ -9,6 +9,7 @@ MultiFloats = "bdf0d083-296b-4888-a5b6-7498122e68a5"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SpacetimeMetrics = "77e61b41-605e-43a6-b70f-04b7dcd1f572"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TreeAMR = "91bc416d-811c-44c1-9bc4-b9c8bbdbbd08"
 

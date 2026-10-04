@@ -337,6 +337,31 @@ recipe. `evolve!`'s regrid is a local `regrid_mesh` that the loop and a
 restart share. `test/checkpoint_tests.jl` is its file, and `hole_runs.jl`'s
 `generic` and `moving` workers take `checkpoint=<dir>` and `walltime=<s>`.
 
+From 2026-10-02/03 a single hole runs **on an octant**, and the static
+Kerr-Schild hole has a gauge source that needs no sampling. **Reflecting
+faces** (TreeAMR's M10): `GHCase(; reflecting)`, `state_parity`/`even_parity`
+at every `FieldSet` site, `has_outer_face`, `minkowski_octant_case`,
+`hole_case(; octant = true)` (a hole at the origin, at rest, `a = 0` only),
+`hole_forest(; shape = :cube)` for nested boxes. **The algebraic Kerr-Schild
+source** (`CODE.md`, "Gauge and constraint damping"): `KerrSchildSource(T; M,
+spin, velocity)` behind `Val(:algebraic)`, evaluated in the kernels from `h`,
+checked against the background at construction (`check_gauge_source`), which
+lifts the refusal of a moving Kerr-Schild hole; `hole_case(; gauge_source =
+:algebraic)`. **Run tools**: `add_noise!` (with `exclude` for a frozen core),
+`evolve!(; perturb)`, point-weighted and per-level norms (`weighting =
+:points`, `at_level`, `level_constraint_norms`), an observer that takes a
+fourth argument gets the chunk's record row, and `src/simwatch.jl` writes
+SimWatch status files (`SimWatchWriter`; https://github.com/eschnett/simwatch).
+**`FittedSpec(; fit_cont = 2)`** fits curvatures too (the state sampler's
+`order = 2` differences the interpolated gradient: TreeAMR 0.1.4 has no
+second-derivative interpolation; TreeAMR's `main` has it, unreleased).
+`test/reflection_tests.jl`, `gauge_source_tests.jl` and `simwatch_tests.jl`
+are its files; `test/octant_runs.jl` is the run script (`octant_rates.jl`,
+`octant_study.jl`, `octant_diff.jl` analyse its output), and `CODE.md`'s
+Measured results from "Robust stability on the octant" on hold the numbers —
+among them the `:fitted` setup to use: `h = 1/24` at the hole, `m = 16`,
+`n_L = 20`, `fit_cont = 2`.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -719,6 +744,20 @@ and `test/threading_tests.jl`'s four-thread subprocess inherits the
 affinity mask and aborts with `Too many threads requested for
 JULIA_EXCLUSIVE option` — the environment, not the code. The `symmetry-hpc`
 skill has the rest of the cluster's mechanics.
+
+The octant runs (added 2026-10-02) are `test/octant_runs.jl`, one run per
+call, `key=value` options listed in its header — the case (`case=minkowski`
+or `ks`, `interior=damped|fitted`, margins, `fit_cont`), the mesh (`L`, `N`,
+`roots`, `radii`), the run (`t_end`, `cfl`, `chunk`), noise, `backend=cuda`,
+`out=<dir>` (CSV, `records.csv`, `simwatch.toml`) and `checkpoint=<dir>`.
+On Symmetry they ran one H200 each from a copy with `CUDA` added to its
+`Project.toml` (`ks-octant`, `ks-study2`); `cfl = 1/2` is as accurate as
+`1/4` there and half the cost:
+
+```bash
+julia --project=. --threads=4 test/octant_runs.jl case=ks interior=fitted L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/smoke
+julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
+```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
@@ -1325,6 +1364,20 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
 - **Measured numbers go into `CODE.md`**, beside the prediction they
   confirm or correct, so a regression shows up as a changed number and
   not as a test that merely still passes.
+- **A refined octant is not the refined full box** (found 2026-10-02):
+  vertex centering puts a refinement cube's plane `x = −R` on the fine level
+  and `x = +R` on the coarse one, so the box's discretization is not
+  mirror-symmetric there. Compare an octant with its box on uniform meshes
+  only (`test/reflection_tests.jl` does).
+- **An octant's corner is in the core, and its stale data is not of definite
+  parity** (2026-10-02): the core rule maps the origin to a point of the
+  sphere `r_0` off the walls, so it holds `h_tx ≠ 0` on a wall. Never project
+  or perturb the core; `add_noise!(; exclude)` skips it.
+- **A Symmetry node failure requeues a job from scratch** (2026-10-03): Slurm
+  restarts it with no checkpoint unless the run has one, over its own log and
+  appending to its CSV. Give every run longer than an hour `checkpoint=` and a
+  `walltime=`. And inside a `while read` loop `ssh` eats the loop's stdin —
+  use `ssh -n`.
 
 ## Conventions
 
