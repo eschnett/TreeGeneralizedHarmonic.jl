@@ -296,8 +296,9 @@ means. The difference is `O(h^{q+1})`, the dissipation's own order
 
     # (3) the source, from the state, its gradients and the coefficients —
     #     the gauge source is read at the owned point, `Hsrc` having no
-    #     ghosts to read.
-    Hl, dHl = gauge_at(T, Hwork, inner, b, Val(HASH))
+    #     ghosts to read — or, for the algebraic source, evaluated from the
+    #     state and the `∂g` just formed (added 2026-10-02).
+    Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), hv, ∂ₜh, ∂h)
     msrc = gh_node_source(g4, gu4, α, sqrtγ, _dg4(∂ₜh, ∂h), Hl, dHl, γ0, γ2)
     return ∂ₜh, ∂ₜΠ + msrc
 end
@@ -719,23 +720,37 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         "fitted_interior(spec, track, forest, G; t, n_L)`, which is what " *
         "evolve! does at every chunk (CODE.md, \"The tracked geometry\")."))
     backend = get_backend(U.work)
+    # The mirrors are the forest's and the hook's faces the case's (added
+    # 2026-10-02): a face the case calls reflecting and the mesh does not
+    # would take Dirichlet data the hook was never asked for, and the reverse
+    # a mirror of a solution with no symmetry.
+    U.forest.reflecting == case.reflecting || throw(ArgumentError(
+        "the mesh reflects at $(U.forest.reflecting) and the case at " *
+        "$(case.reflecting): build the forest from the case (gh_forest, " *
+        "hole_forest), which passes the case's faces."))
 
-    HASH = !isharmonic(case.background)
-    Hsrc = if HASH
+    # The gauge source's kind: none on a harmonic background, the closed form
+    # where the case carries one (added 2026-10-02) — it is then the kernel
+    # argument itself, in place of the sampled `Hsrc` array — and the sample
+    # otherwise.
+    HASH = case.gauge !== nothing ? :algebraic : !isharmonic(case.background)
+    Hsrc = if HASH === :algebraic
+        case.gauge
+    elseif HASH
         fs = FieldSet{T}(U.forest, 2NC; G=0, centering=U.centering,
-                         backend=backend)
+                         parity=even_parity(U.forest, 2NC), backend=backend)
         sample_gauge_source!(fs, case.background, t; interior=interior)
         fs
     else
         nothing
     end
     diag = FieldSet{T}(U.forest, NDIAG; G=0, centering=U.centering,
-                       backend=backend)
+                       parity=even_parity(U.forest, NDIAG), backend=backend)
 
     origins = to_backend(backend, block_origins(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))
     DISS = has_dissipation(case.ε_KO)
-    hasdirichlet = !all(case.periodic)
+    hasdirichlet = has_outer_face(case)
 
     # CODE.md asks for the two radius requirements "at every regrid", and a
     # fresh problem is built after every one — so this is where they are
@@ -862,6 +877,7 @@ target_work(fs::FieldSet) = fs.work
 # kernel never asks whether it has one — its `Val` already said.
 gauge_work(::Nothing) = nothing
 gauge_work(fs::FieldSet) = fs.work
+gauge_work(src::KerrSchildSource) = src
 
 """
     gh_rhs!(du, u, p::GHProblem, t)

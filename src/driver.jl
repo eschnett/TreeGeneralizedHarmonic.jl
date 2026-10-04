@@ -131,11 +131,17 @@ horizon_shell(case::GHCase, ::FittedSpec) = throw(ArgumentError(
     "built from the track once per chunk: pass the geometry, " *
     "horizon_shell(case, fitted_interior(…))."))
 
+# The observer with the chunk's record row if it takes one (added
+# 2026-10-02), and without it otherwise, so that every existing three-argument
+# observer is called as it was.
+call_observer(f, p, t, u, row) =
+    applicable(f, p, t, u, row) ? f(p, t, u, row) : f(p, t, u)
+
 """
     evolve!([T], case::GHCase; forest, q, ops, t_end, chunk = case's,
             cfl = 1//4, regrid = false, adapt = false, buffer = nothing,
             maxpasses = 8, adm_every = 0, backend = CPU(),
-            observer = nothing, ρ_max_factor = nothing,
+            observer = nothing, perturb = nothing, ρ_max_factor = nothing,
             ρ_max_fixed = nothing, find = find_gh_horizon,
             fit_initial_cont = 1, fit_initial_depth = 0, handover = 0,
             target_source = :fit)
@@ -253,7 +259,18 @@ G5.
 `observer(p, t, u)` is called with the state scattered into `p.U` and the
 analysis record for that chunk already written — once at `t = 0` and once
 per chunk — which is what keeps a viewer free of any time stepping of its
-own.
+own. An observer that also takes a fourth argument, `observer(p, t, u,
+row)`, is handed that chunk's record row, the `NamedTuple` the returned
+`records` holds — the horizon's numbers, the track, the fit — so that a
+monitor (a SimWatch status file, say) need not repeat what the record already
+computed (added 2026-10-02).
+
+`perturb(U)` (added 2026-10-02) is called once, with the initial data
+filled into the state field set `U` and before anything reads it — the
+initial projection and paste, the problem, the first record row — so that a
+perturbation, [`add_noise!`](@ref)'s robust-stability noise above all, is the
+initial data from the run's point of view. It is not part of the recipe: a
+restart takes its state from the checkpoint and never calls it.
 
 ## The range projection (added in step 8b)
 
@@ -390,7 +407,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  chunk=case.chunk, cfl=T(1 // 4), regrid::Bool=false,
                  adapt::Bool=false, buffer=nothing, maxpasses::Integer=8,
                  adm_every::Integer=0, backend=CPU(), observer=nothing,
-                 ρ_max_factor=nothing, ρ_max_fixed=nothing,
+                 perturb=nothing, ρ_max_factor=nothing, ρ_max_fixed=nothing,
                  find=find_gh_horizon, fit_initial_cont::Integer=1,
                  fit_initial_depth=0, handover=0,
                  target_source::Symbol=:fit, target_rate::Bool=true,
@@ -513,7 +530,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
 
     G = q ÷ 2 + 1
     U = if ck === nothing
-        FieldSet{T}(forest, 2NC; G=G, centering=vertexcentered(3), backend=backend)
+        FieldSet{T}(forest, 2NC; G=G, centering=vertexcentered(3),
+                    parity=state_parity(forest), backend=backend)
     else
         # The loaded field set's layout is the file's; it is checked against
         # the run's, since every kernel and the schedule assume this one.
@@ -730,6 +748,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             fits = (fit_initial, nothing)
             target0 = target_cache(U)
         end
+        perturb === nothing || perturb(U)
         u = statevector(U)
         gather!(u, U)
         # The initial data must be finite *everywhere*, core and layer included:
@@ -866,7 +885,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # next chunk runs on (`track!` has just rebuilt it), from the state
     # sampler on freshly filled ghosts — the find filled them, but so may
     # every monitor since, and a fill is a fifth of a right-hand side —
-    # `cont = 1`, into the target ranges. A fit whose sweep is not a metric
+    # `cont = spec.fit_cont` (`1` unless the spec asks for curvatures, added
+    # 2026-10-03), into the target ranges. A fit whose sweep is not a metric
     # does not become the target: the previous fits are kept, the row says
     # `fit_valid = false`, and the run goes on (proposed in step 8e — the
     # find's coasting, applied to the fit).
@@ -879,8 +899,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             fill_ghosts!(p.U, p.schedule; boundary=bnd)
         end
         t0 = time_ns()
-        f = build_fit(state_sampler(p.U, q; t=T(t)), geom, spec;
-                      cont=1, bounds=tbounds, backend=backend, check=false)
+        f = build_fit(state_sampler(p.U, q; t=T(t), order=spec.fit_cont), geom, spec;
+                      cont=spec.fit_cont, bounds=tbounds, backend=backend, check=false)
         fitcost.build_ns[] += time_ns() - t0
         fitcost.nbuild[] += 1
         if f.valid
@@ -1032,7 +1052,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                h=R(minimum_spacing(T, mesh)),
                finite=evolved_nonfinite(p, u, t) == 0)
         push!(records, rec)
-        observer === nothing || observer(p, t, u)
+        observer === nothing || call_observer(observer, p, t, u, rec)
         lost === nothing ||
             throw(TrackLostError(lost.msg, lost.track, Any[records...]))
         return ind
@@ -1178,7 +1198,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # re-sampled, by rebuilding the problem, once it has moved half of
         # one (proposed in step 8d).
         if fitted
-            if p.Hsrc !== nothing &&
+            if p.Hsrc isa FieldSet &&
                surface_shift(geom_sampled, geom, tstart) > geom.h / 2
                 p = GHProblem(U, schedule, case; q=q, t=tstart,
                               interior=kgeom(geom, tstart), accounting=acc,

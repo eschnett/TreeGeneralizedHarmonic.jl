@@ -63,6 +63,8 @@ using KernelAbstractions: @Const, @index, @kernel
 using KernelAbstractions: Backend, CPU, allocate, get_backend
 using KorzynskiSpin: horizon_spin
 using LinearAlgebra: UpperTriangular, cond, det, dot, qr, tr
+using Dates: Dates, DateTime
+using TOML: TOML
 import IMEXRungeKutta as IRK
 using SpacetimeMetrics: AbstractMetric, GaugeWave, Harmonic, KerrSchild,
                         Minkowski, ShiftedMinkowski, dmetric, gauge_source_grad
@@ -83,15 +85,16 @@ export apply_stencil, apply_mixed_stencil
 
 # Gauge sources
 export isharmonic, isstatic, sample_gauge_source!
+export KerrSchildSource, algebraic_gauge_source, gauge_source, check_gauge_source
 
 # Cases, backgrounds and initial data
 export GHCase, with_interior, with_refinement, with_horizon, with_dissipation
 export horizon_dissipation
 export gh_forest, hole_forest
-export minkowski_case, gauge_wave_case, shifted_minkowski_case
+export minkowski_case, minkowski_octant_case, gauge_wave_case, shifted_minkowski_case
 export hole_case, kerr_schild_case, harmonic_kerr_case
 export background_state, state_tuple, case_state_tuple, state_callback
-export fill_exact!
+export fill_exact!, add_noise!
 
 # Gauge and constraint damping, as a function of position
 export ConstantDamping, GaussianDamping, damping_rate, damping_bounds
@@ -132,8 +135,8 @@ export bounds_project, sym_eigen3, state_validity, with_bounds
 export BoundsAccounting, take_chunk!, apply_bounds!, gh_stage_limiter!
 export validity_rows, evolved_nonfinite
 
-# Boundaries
-export dirichlet
+# Boundaries: the Dirichlet hook, and the parities of the reflecting faces
+export dirichlet, has_outer_face, state_parity, even_parity
 
 # Evolution
 export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate
@@ -146,6 +149,7 @@ export state_partition, gh_limiter!, gh_integrator, gh_solve, ProblemRef
 export AllPoints, is_evolved, adm_constraints_at_node
 export gh_constraint!, adm_constraint!, gh_error!
 export masked_counts, evolved_volume, masked_norms, constraint_norms, error_norms
+export level_constraint_norms
 
 # Refinement: the masked Löhner indicator, its marks and its bounds
 export Refinement, lohner, cell_tau, field_scales, field_scale
@@ -166,6 +170,10 @@ export discrete_gradient_momentum!
 
 # Checkpoint and restart (2026-10-01, on TreeAMR 0.1.4's M9a)
 export latest_checkpoint
+
+# SimWatch status files (2026-10-02)
+export SimWatchWriter, simwatch_update!, simwatch_finish!, simwatch_document
+export write_simwatch
 
 include("precision.jl")
 include("device.jl")
@@ -204,5 +212,7 @@ include("fit.jl")
 # before `driver.jl`, which writes and reads it (added 2026-10-01).
 include("checkpoint.jl")
 include("driver.jl")
+# SimWatch status files (2026-10-02): host-side, for run scripts.
+include("simwatch.jl")
 
 end

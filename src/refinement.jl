@@ -287,7 +287,7 @@ before the pass would have the wrong number of blocks by the second one.
 function field_scales(U::FieldSet{T,3}, mask, origins, spacings) where {T}
     backend = get_backend(U.work)
     scratch = FieldSet{T}(U.forest, NC; G=0, centering=U.centering,
-                          backend=backend)
+                          parity=even_parity(U.forest, NC), backend=backend)
     map_blocks!(gh_scale_kernel!, U, scratch.work, U.work, origins, spacings,
                 mask, Val(U.G))
     # One reduction per component: `mesh_mapreduce` takes a contiguous
@@ -578,13 +578,16 @@ function _box_meets_shell(ext, c, lo, hi)
     return near ≤ hi && far ≥ lo
 end
 
-# Whether a block's extent comes within `margin` of a non-periodic face of
-# the box. A periodic dimension has no outer boundary and is skipped.
-function _box_near_boundary(ext, box, periodic, margin)
+# Whether a block's extent comes within `margin` of an outer face of the
+# box. A periodic dimension has no outer boundary and is skipped, and so is a
+# reflecting face (added 2026-10-02): it is a symmetry plane with no Dirichlet
+# mismatch to keep coarse, and on an octant it is where the hole is.
+function _box_near_boundary(ext, box, periodic, margin,
+                            reflecting=ntuple(_ -> (false, false), Val(3)))
     for d in 1:3
         periodic[d] && continue
-        (ext[d][1] - box[d][1] ≤ margin || box[d][2] - ext[d][2] ≤ margin) &&
-            return true
+        (!reflecting[d][1] && ext[d][1] - box[d][1] ≤ margin) && return true
+        (!reflecting[d][2] && box[d][2] - ext[d][2] ≤ margin) && return true
     end
     return false
 end
@@ -610,7 +613,8 @@ function block_level_bounds(lb::LevelBounds{T}, k::MortonKey{3}) where {T}
     flo = lb.floor_level > 0 &&
           _box_meets_shell(ext, lb.center, lb.floor_lo, lb.floor_hi) ?
           lb.floor_level : 0
-    capped = _box_near_boundary(ext, lb.box, lb.periodic, lb.ceiling_margin)
+    capped = _box_near_boundary(ext, lb.box, lb.periodic, lb.ceiling_margin,
+                                lb.forest.reflecting)
     cap = capped ? lb.ceiling_level : lb.maxlevel_cap
     flo ≤ cap || throw(ArgumentError(
         "the refinement's level floor and its ceiling disagree about the " *
@@ -918,7 +922,7 @@ function indicator_flags(U::FieldSet{T,3}, case::GHCase{T}, t;
     scale = field_scale(U, mask, origins, spacings)
     τfs = scratch === nothing ?
           FieldSet{T}(U.forest, NDIAG; G=0, centering=U.centering,
-                      backend=backend) : scratch
+                      parity=even_parity(U.forest, NDIAG), backend=backend) : scratch
     gh_tau!(τfs, U, origins, spacings, mask; scale=scale, ε=ref.ε)
     out = refine_flags(τfs, level_bounds(case, U.forest, t, G;
                                          interior=interior, travel=travel), ref;

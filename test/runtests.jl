@@ -57,6 +57,9 @@ using TreeGeneralizedHarmonic
     include("fit_tests.jl")         # step 8e: the fitted target (shares 8d's run)
     include("moving_tests.jl")      # step 8: the moving hole's floor, seed and cycle
     include("checkpoint_tests.jl")  # 2026-10-01: chains of restarts are the run
+    include("reflection_tests.jl")  # 2026-10-02: the octant is the mirrored box
+    include("gauge_source_tests.jl")  # 2026-10-02: the algebraic Kerr-Schild source
+    include("simwatch_tests.jl")    # 2026-10-02: SimWatch status files
     include("type_tests.jl")
     include("threading_tests.jl")
 end

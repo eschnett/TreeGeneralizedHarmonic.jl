@@ -191,6 +191,14 @@ using KernelAbstractions: CPU
         gh_hole_run(T, case; N=8, q=q, t_end=T(1 // 10),
                     observer=(p, t, u) -> push!(seen, T(t)))
         @test seen ≈ T[0, 1 // 20, 1 // 10]
+        # An observer that takes a fourth argument is handed the chunk's
+        # record row, the very rows the run returns (added 2026-10-02: what a
+        # monitor reads instead of recomputing the record).
+        rows = NamedTuple[]
+        out4 = gh_hole_run(T, case; N=8, q=q, t_end=T(1 // 10),
+                           observer=(p, t, u, row) -> push!(rows, row))
+        @test length(rows) == length(out4.records) == 3
+        @test all(isequal(rows[i], out4.records[i]) for i in eachindex(rows))
     end
 
     # `CODE.md`'s frozen-hierarchy protocol: the block layout is held fixed

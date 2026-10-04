@@ -27,8 +27,8 @@
 # vanishes and `α = √γ`.
 
 """
-    GHCase(T = Float64, background; box, periodic, ε_KO, γ0, γ2,
-           center = (0, 0, 0), velocity = the background's,
+    GHCase(T = Float64, background; box, periodic, reflecting = none,
+           ε_KO, γ0, γ2, center = (0, 0, 0), velocity = the background's,
            interior = nothing,
            r_0 = 0, r_1 = 0, margin = 8, w_ramp = 1//2, ρ_ramp = 1//2,
            target = nothing, refinement = nothing, horizon = nothing,
@@ -41,7 +41,12 @@ are properties of the physics rather than of the mesh.
 `CODE.md`'s table under "Initial data and backgrounds" is the list of
 backgrounds; `box` is the domain's `(lo, hi)` per dimension and `periodic`
 says which dimensions close on themselves (the others take the Dirichlet
-hook of [`dirichlet`](@ref)). `ε_KO` is the Kreiss–Oliger amplitude and
+hook of [`dirichlet`](@ref)). `reflecting` is one `(lo, hi)` pair of
+`Bool`s per dimension, TreeAMR's M10 faces: a face across which the solution
+is its own mirror image, a symmetry plane (added 2026-10-02). A reflecting
+face needs no hook — the ghost schedule mirrors the interior, each variable
+with the parity [`state_parity`](@ref) gives it — and a dimension cannot be
+periodic and reflecting at once. `ε_KO` is the Kreiss–Oliger amplitude and
 `γ2 > −1` the Gundlach–Pretorius trace parameter. Neither has a default:
 each is a number a run is judged by, and `CODE.md` records `ε_KO ≈ 0.5`
 and `γ0 ≈ 1/M` as GHSO2's *recipe near a hole*, not as something a
@@ -141,10 +146,11 @@ right-hand side needs a case two steps before there is a driver, and a
 struct cannot be defined twice. `driver.jl` adds `evolve!` and the
 refinement fields step 6 needs.
 """
-struct GHCase{T,B,D,I,R,H,X,E}
+struct GHCase{T,B,D,I,R,H,X,E,S}
     background::B
     box::NTuple{3,Tuple{T,T}}
     periodic::NTuple{3,Bool}
+    reflecting::NTuple{3,Tuple{Bool,Bool}}   # (lo, hi) per dimension (2026-10-02)
     ε_KO::E                      # a number, or a `HorizonDissipation` (step 8c)
     γ0::D                        # a damping profile, not a number
     γ2::T
@@ -154,15 +160,22 @@ struct GHCase{T,B,D,I,R,H,X,E}
     horizon::H                   # a `Horizon`, or `nothing`
     bounds::X                    # a `StateBounds`, or `nothing`
     chunk::T
+    gauge::S                     # a `KerrSchildSource`, or `nothing` (2026-10-02)
 end
 
-function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
+function GHCase(::Type{T}, background; box, periodic,
+                reflecting=ntuple(_ -> (false, false), Val(3)), ε_KO, γ0, γ2,
                 center=(zero(T), zero(T), zero(T)), velocity=nothing,
                 interior=nothing, r_0=zero(T), r_1=zero(T), margin::Integer=8,
                 w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), target=nothing,
                 refinement=nothing, horizon=nothing, bounds=nothing,
-                chunk=zero(T)) where {T}
-    isharmonic(background) || isstatic(background) || throw(ArgumentError(
+                chunk=zero(T), gauge_source=nothing) where {T}
+    gauge_source === nothing || gauge_source isa KerrSchildSource{T} ||
+        throw(ArgumentError(
+            "gauge_source is nothing (the sampled H_a(x), or none on a harmonic " *
+            "background) or a KerrSchildSource{$T}, got a $(typeof(gauge_source))."))
+    gauge_source !== nothing || isharmonic(background) || isstatic(background) ||
+        throw(ArgumentError(
         "this background is neither harmonic nor static, so its prescribed " *
         "gauge source H_a(x − vt) depends on time, and CODE.md's Hsrc field " *
         "set — sampled once per chunk as a function of position — cannot " *
@@ -171,7 +184,9 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
         "Kerr-Schild is exactly this case. Use boost(Harmonic(M, a), v) " *
         "instead: a boost preserves the harmonic condition □x^a = 0, so the " *
         "boosted hole in harmonic coordinates has H ≡ 0 and needs no source " *
-        "at all. That is why it is the proof-of-concept case."))
+        "at all. That is why it is the proof-of-concept case. Or give a " *
+        "Kerr-Schild hole the algebraic source, gauge_source = " *
+        "KerrSchildSource(T; M, spin, velocity), which moves with the hole."))
     damping = γ0 isa Real ? ConstantDamping(T, γ0) : γ0
     first(damping_bounds(damping)) ≥ 0 || throw(ArgumentError(
         "the constraint-damping rate must satisfy γ0 ≥ 0 everywhere — the " *
@@ -184,6 +199,13 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
         "γ2 = $γ2"))
     all(d -> box[d][2] > box[d][1], 1:3) || throw(ArgumentError(
         "every dimension of the box needs hi > lo, but box = $box"))
+    refl = ntuple(d -> (Bool(reflecting[d][1]), Bool(reflecting[d][2])), Val(3))
+    for d in 1:3
+        periodic[d] && any(refl[d]) && throw(ArgumentError(
+            "dimension $d is both periodic and reflecting, got reflecting[$d] " *
+            "= $(refl[d]): a periodic dimension has no faces, so there is " *
+            "nothing to mirror across. Use one or the other."))
+    end
     T(chunk) ≥ 0 || throw(ArgumentError(
         "the chunk length is a regrid cadence and cannot be negative, got " *
         "$chunk; zero means the case states none and evolve! must be told."))
@@ -211,12 +233,17 @@ function GHCase(::Type{T}, background; box, periodic, ε_KO, γ0, γ2,
     end
     check_case_bounds(bounds, int, T)
     ε = case_dissipation(ε_KO, c, T)
+    # The algebraic source must make this background exact, or the run starts
+    # with a gauge transient (added 2026-10-02).
+    gauge_source === nothing ||
+        check_gauge_source(background, gauge_source, T; center=center_at(c, zero(T)),
+                           scale=gauge_source.M)
     return GHCase{T,typeof(background),typeof(damping),typeof(int),
                   typeof(refinement),typeof(horizon),typeof(bounds),
-                  typeof(ε)}(
+                  typeof(ε),typeof(gauge_source)}(
         background, ntuple(d -> (T(box[d][1]), T(box[d][2])), Val(3)),
-        ntuple(d -> Bool(periodic[d]), Val(3)), ε, damping, T(γ2), c,
-        int, refinement, horizon, bounds, T(chunk))
+        ntuple(d -> Bool(periodic[d]), Val(3)), refl, ε, damping, T(γ2), c,
+        int, refinement, horizon, bounds, T(chunk), gauge_source)
 end
 
 """
@@ -329,10 +356,11 @@ and every evaluation.
 with_interior(case::GHCase{T}, interior) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(interior),
            typeof(case.refinement),typeof(case.horizon),typeof(case.bounds),
-           typeof(case.ε_KO)}(
-        case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
+           typeof(case.ε_KO),typeof(case.gauge)}(
+        case.background, case.box, case.periodic, case.reflecting,
+        case.ε_KO, case.γ0, case.γ2,
         case.center, interior, case.refinement, case.horizon, case.bounds,
-        case.chunk)
+        case.chunk, case.gauge)
 
 """
     with_refinement(case::GHCase, refinement) -> GHCase
@@ -347,10 +375,11 @@ A reconstruction and not a mutation, for the reason
 with_refinement(case::GHCase{T}, refinement) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
            typeof(refinement),typeof(case.horizon),typeof(case.bounds),
-           typeof(case.ε_KO)}(
-        case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
+           typeof(case.ε_KO),typeof(case.gauge)}(
+        case.background, case.box, case.periodic, case.reflecting,
+        case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, refinement, case.horizon, case.bounds,
-        case.chunk)
+        case.chunk, case.gauge)
 
 """
     with_horizon(case::GHCase, horizon) -> GHCase
@@ -365,10 +394,11 @@ A reconstruction and not a mutation, for the reason
 with_horizon(case::GHCase{T}, horizon) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
            typeof(case.refinement),typeof(horizon),typeof(case.bounds),
-           typeof(case.ε_KO)}(
-        case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
+           typeof(case.ε_KO),typeof(case.gauge)}(
+        case.background, case.box, case.periodic, case.reflecting,
+        case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, horizon, case.bounds,
-        case.chunk)
+        case.chunk, case.gauge)
 
 """
     with_bounds(case::GHCase, bounds) -> GHCase
@@ -386,10 +416,12 @@ function with_bounds(case::GHCase{T}, bounds) where {T}
     check_case_bounds(bounds, case.interior, T)
     return GHCase{T,typeof(case.background),typeof(case.γ0),
                   typeof(case.interior),typeof(case.refinement),
-                  typeof(case.horizon),typeof(bounds),typeof(case.ε_KO)}(
-        case.background, case.box, case.periodic, case.ε_KO, case.γ0, case.γ2,
+                  typeof(case.horizon),typeof(bounds),typeof(case.ε_KO),
+                  typeof(case.gauge)}(
+        case.background, case.box, case.periodic, case.reflecting,
+        case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, case.horizon, bounds,
-        case.chunk)
+        case.chunk, case.gauge)
 end
 
 """
@@ -406,10 +438,12 @@ function with_dissipation(case::GHCase{T}, ε_KO) where {T}
     ε = case_dissipation(ε_KO, case.center, T)
     return GHCase{T,typeof(case.background),typeof(case.γ0),
                   typeof(case.interior),typeof(case.refinement),
-                  typeof(case.horizon),typeof(case.bounds),typeof(ε)}(
-        case.background, case.box, case.periodic, ε, case.γ0, case.γ2,
+                  typeof(case.horizon),typeof(case.bounds),typeof(ε),
+                  typeof(case.gauge)}(
+        case.background, case.box, case.periodic, case.reflecting,
+        ε, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, case.horizon,
-        case.bounds, case.chunk)
+        case.bounds, case.chunk, case.gauge)
 end
 
 """
@@ -451,6 +485,23 @@ any test in this package makes about the kernel.
 minkowski_case(::Type{T}=Float64; L, ε_KO, γ0, γ2) where {T} =
     GHCase(T, Minkowski(); box=ntuple(_ -> (zero(T), T(L)), Val(3)),
            periodic=(true, true, true), ε_KO=ε_KO, γ0=γ0, γ2=γ2)
+
+"""
+    minkowski_octant_case(T = Float64; L, ε_KO, γ0, γ2, chunk = 0)
+
+Flat space on the octant `[0, L]³` of the box `[−L, L]³`: reflecting at the
+three faces through the origin and Dirichlet — Minkowski's `h = Π = 0`,
+constant in time — at the three outer ones (added 2026-10-02). It is the
+robust-stability case on the mesh a single black hole at the origin will run
+on: a symmetry plane in every dimension, the nested cubes of
+[`hole_forest`](@ref)`(; shape = :cube)` about the corner, and an outer
+boundary that is not periodic.
+"""
+minkowski_octant_case(::Type{T}=Float64; L, ε_KO, γ0, γ2, chunk=zero(T)) where {T} =
+    GHCase(T, Minkowski(); box=ntuple(_ -> (zero(T), T(L)), Val(3)),
+           periodic=(false, false, false),
+           reflecting=ntuple(_ -> (true, false), Val(3)), ε_KO=ε_KO, γ0=γ0,
+           γ2=γ2, chunk=chunk)
 
 """
     gauge_wave_case(T = Float64; A = 1//20, d = 1, ε_KO, γ0, γ2)
@@ -512,7 +563,8 @@ shifted_minkowski_case(::Type{T}=Float64; A=T(1//2), w=T(2), halfwidth=T(2),
               M = 1, center = (0,0,0), velocity = the background's,
               interior = :damped, margin = 8, ε_KO = 1//2,
               γ0 = GHSO2's recipe, γ2 = 0, w_ramp, ρ_ramp, target = nothing,
-              refinement = nothing, horizon = nothing, bounds = nothing)
+              refinement = nothing, horizon = nothing, bounds = nothing,
+              octant = false, gauge_source = nothing)
 
 A black hole in a **Dirichlet** box, with the damping layer of
 `CODE.md`'s "The interior" and GHSO2's recipe near a hole — the shape both
@@ -548,6 +600,17 @@ its radii come from the horizon that was found.
 means "off" (added in step 8b): a [`StateBounds`](@ref) has no default for
 any of its ranges, and [`default_bounds`](@ref) is the named proposal a
 caller asks for explicitly.
+
+`octant = true` (added 2026-10-02) puts the hole on the octant `[0,
+halfwidth]³` of that box instead: reflecting at the three faces through the
+origin, Dirichlet at the outer three. It needs a hole that *is* its own
+mirror image in every coordinate plane — at the origin, at rest, without
+spin (a spin along `z` keeps only the `z` mirror) — and refuses any other.
+
+`gauge_source` (added 2026-10-02) is `nothing` — the sampled `H_a(x)`, or no
+source on a harmonic background — a [`KerrSchildSource`](@ref), or
+`:algebraic`, which builds the source of an unrotated, unboosted `KerrSchild`
+background at any position from its own mass and spin (`spin = (0, 0, a)`).
 """
 function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                    chunk,
@@ -556,7 +619,8 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                    margin::Integer=8, ε_KO=T(1 // 2), γ0=nothing,
                    γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
                    target=nothing, refinement=nothing, horizon=nothing,
-                   bounds=nothing) where {T}
+                   bounds=nothing, octant::Bool=false,
+                   gauge_source=nothing) where {T}
     # `r_0` and `r_1` have no default for step 5's sphere — they are what
     # `check_interior_radii` measures — and no meaning for the tracked
     # geometry, whose radii come from the horizon that was found (step 8d).
@@ -577,18 +641,45 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
     # then that one, checked by `GHCase` (amended in step 8e: it was built on
     # the keyword's default zero, which a boosted hole does not have).
     v = case_velocity(T, background, velocity)
+    if octant
+        spin = hasproperty(background, :spin) ? background.spin : nothing
+        (all(iszero, center) && all(iszero, v) && spin !== nothing &&
+         iszero(spin)) || throw(ArgumentError(
+            "an octant case mirrors the solution across x = 0, y = 0 and z = 0, " *
+            "so the hole must be its own mirror image in all three planes: at " *
+            "the origin, at rest and without spin (Kerr-Schild or Harmonic with " *
+            "a = 0). Got center = $center, velocity = $v and " *
+            (spin === nothing ? "a background with no spin parameter" :
+             "a = $spin") * "."))
+    end
+    src = if gauge_source === :algebraic
+        bare = background isa KerrSchild ? background :
+               background isa SpacetimeMetrics.TranslatedMetric &&
+               background.metric isa KerrSchild ? background.metric : nothing
+        bare === nothing && throw(ArgumentError(
+            "gauge_source = :algebraic reads the mass and spin of a Kerr-Schild " *
+            "hole at rest, unrotated; for any other hole pass " *
+            "KerrSchildSource(T; M, spin, velocity) itself. Got a " *
+            "$(typeof(background))."))
+        KerrSchildSource(T; M=bare.mass, spin=(0, 0, bare.spin))
+    else
+        gauge_source
+    end
     damping = γ0 !== nothing ? γ0 :
               GaussianDamping(T; near=1 / T(M), far=1 / (10 * T(M)),
                               width=3 * T(M), center=HoleCenter(T, center, v))
     return GHCase(T, background;
-                  box=ntuple(_ -> (-T(halfwidth), T(halfwidth)), Val(3)),
-                  periodic=(false, false, false), ε_KO=ε_KO, γ0=damping,
+                  box=ntuple(_ -> (octant ? zero(T) : -T(halfwidth), T(halfwidth)),
+                             Val(3)),
+                  periodic=(false, false, false),
+                  reflecting=ntuple(_ -> (octant, false), Val(3)), ε_KO=ε_KO,
+                  γ0=damping,
                   γ2=γ2, center=center, velocity=v, interior=interior,
                   r_0=r_0 === nothing ? zero(T) : r_0,
                   r_1=r_1 === nothing ? zero(T) : r_1, margin=margin,
                   w_ramp=w_ramp,
                   ρ_ramp=ρ_ramp, target=target, refinement=refinement,
-                  horizon=horizon, bounds=bounds, chunk=chunk)
+                  horizon=horizon, bounds=bounds, chunk=chunk, gauge_source=src)
 end
 
 hole_case(background; kwargs...) = hole_case(Float64, background; kwargs...)
@@ -666,7 +757,7 @@ function gh_forest(::Type{T}, case::GHCase; N, roots, refined=false) where {T}
         "uniform forest over this box would have anisotropic cells: the " *
         "widths are $widths"))
     forest = Forest{T}(ntuple(_ -> roots, Val(3)); N=N, periodic=case.periodic,
-                       extents=case.box)
+                       reflecting=case.reflecting, extents=case.box)
     refined || return forest
     xref = ntuple(d -> case.box[d][1] + 3 * widths[d] / 8, Val(3))
     targets = filter(forest.leaves) do k
@@ -714,10 +805,21 @@ where its hole is at the time the hierarchy is built.
 `levels` is `length(radii)` and is accepted explicitly so that a caller
 that says both is told when they disagree rather than silently getting one
 of them.
+
+`shape = :cube` (added 2026-10-02) makes each shell the cube
+`|x − center|_∞ < radii[ℓ]` instead of the ball: a leaf is refined when its
+extent overlaps the open cube, so a block that only touches the cube's face
+is not. With the center on a corner of the box — an octant's origin — the
+shells are the boxes `[0, R]³`, and with `radii` a power of two times the
+block width they are exactly unions of blocks. The ball keeps its closed
+`≤`, which every existing hierarchy was built with.
 """
 function hole_forest(::Type{T}, case::GHCase; N, roots,
                      center=center_at(case.center, zero(T)), radii,
-                     levels::Integer=length(radii)) where {T}
+                     levels::Integer=length(radii), shape::Symbol=:ball) where {T}
+    shape in (:ball, :cube) || throw(ArgumentError(
+        "a shell is a :ball (|x − c| ≤ R) or a :cube (|x − c|_∞ < R), got " *
+        ":$shape"))
     length(radii) == levels || throw(ArgumentError(
         "hole_forest takes one radius per refinement level, but levels = " *
         "$levels and radii has $(length(radii)) entries: the shells are the " *
@@ -736,7 +838,9 @@ function hole_forest(::Type{T}, case::GHCase; N, roots,
         R = T(radii[ℓ])
         targets = filter(forest.leaves) do k
             level(k) == ℓ - 1 &&
-                _box_meets_ball(block_extent(T, forest, k), c, R)
+                (shape === :ball ?
+                 _box_meets_ball(block_extent(T, forest, k), c, R) :
+                 _box_meets_cube(block_extent(T, forest, k), c, R))
         end
         isempty(targets) && throw(ArgumentError(
             "no leaf of level $(ℓ - 1) comes within radii[$ℓ] = $R of " *
@@ -750,6 +854,11 @@ function hole_forest(::Type{T}, case::GHCase; N, roots,
 end
 
 hole_forest(case::GHCase; kwargs...) = hole_forest(Float64, case; kwargs...)
+
+# Whether the extent `ext` overlaps the open cube `|x − c|_∞ < R` — strictly,
+# so that a block sharing only a face with the cube is outside it.
+_box_meets_cube(ext, c, R) =
+    all(d -> ext[d][1] < c[d] + R && ext[d][2] > c[d] - R, 1:3)
 
 """
     background_state(background, t, x) -> (h, Π, ∂h)
@@ -875,3 +984,66 @@ different points (TreeWave's note on the error field set).
 """
 fill_exact!(fs::FieldSet, case::GHCase, t; interior=case.interior) =
     fill_by_coordinates!(state_callback(case, t; interior=interior), fs)
+
+"""
+    add_noise!(U::FieldSet, rng; amplitude) -> U
+
+Add independent uniform noise in `[−amplitude, amplitude]` to every
+variable at every **owned** point of `U` — the robust-stability test's
+perturbation (added 2026-10-02) — drawn from `rng` (any random number
+generator; the caller seeds it, so the package needs none of its own). The
+draws are made on the host in the leaf order, block by block, variable by
+variable and point by point, so the data depend on the seed and the mesh
+and on nothing else: not the thread count, not the backend. On a device the
+state is copied to the host and back.
+
+**At a reflecting face the noise is projected onto the parity.** The low
+wall plane of a vertex-centered set is owned and evolved, and TreeAMR does
+not force an odd variable to zero there: it stays zero if it starts zero,
+because the mirrored ghosts give `u(−h) = −u(h)` and a centred stencil
+respects that. A nonzero odd value on the wall would be a mode the mirrored
+problem does not have — a jump in the reflected data — so the odd variables
+of each wall plane are set to zero after the draw. Ghosts are not touched;
+fill them before reading a stencil.
+
+`exclude(x)` (added 2026-10-02) names positions left exactly as they are —
+neither perturbed nor projected — such as a hole's frozen core, whose stale
+data the core rule fills from the sphere `r_0`: at an octant's corner that
+data is not of definite parity, and projecting it there would leave a
+non-Lorentzian metric for the monitors to read. The draws are made for every
+point regardless, so the noise elsewhere does not depend on `exclude`.
+"""
+function add_noise!(U::FieldSet{T,3}, rng; amplitude, exclude=nothing) where {T}
+    A = T(amplitude)
+    A ≥ 0 || throw(ArgumentError("the noise amplitude must be ≥ 0, got $amplitude"))
+    host = hostcopy(U)
+    forest = U.forest
+    for b in 1:nleaves(forest)
+        k = forest.leaves[b]
+        lo = block_origin(T, forest, k)
+        keep = exclude === nothing ? nothing :
+               map(I -> !exclude(coordinates(host, b, Tuple(I) .+ host.G)),
+                   CartesianIndices(interiorview(host, b, 1)))
+        for v in 1:U.nvars
+            w = interiorview(host, b, v)
+            for I in CartesianIndices(w)
+                δ = A * T(2 * rand(rng) - 1)
+                (keep === nothing || keep[I]) && (w[I] += δ)
+            end
+            U.parity === nothing && continue
+            for d in 1:3
+                (forest.reflecting[d][1] && U.parity[v][d] === OddParity &&
+                 lo[d] == forest.extents[d][1]) || continue
+                wall = selectdim(w, d, 1)
+                if keep === nothing
+                    wall .= zero(T)
+                else
+                    kw = selectdim(keep, d, 1)
+                    wall[kw] .= zero(T)
+                end
+            end
+        end
+    end
+    host === U || copyto!(U.work, host.work)
+    return U
+end

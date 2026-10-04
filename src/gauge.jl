@@ -209,6 +209,152 @@ end
                  ::Val{false}) where {T} =
     (zero(SVector{4,T}), zero(SMatrix{4,4,T}))
 
+# --- the algebraic Kerr-Schild source (added 2026-10-02) ---------------------
+#
+# `CODE.md`, "Open questions", "Gauge sources that know less about the hole":
+# a gauge source that is a closed-form function of the metric and of three
+# constants of the run — the hole's mass `M`, its spin 4-vector `S^a` and its
+# 4-velocity `u^a` — and makes every boosted, spinning Kerr-Schild hole an
+# exact stationary solution wherever it is:
+#
+#     Γ_a = k(u,u) k_ab u^b / (M + √(M² − (S^a k_ab u^b)²)),    H_a = −Γ_a ,
+#
+# with `k_ab = g_ab − η_ab`, which is the state's `h` itself. It mentions no
+# position, so it moves with the hole, and it needs no `Hsrc` field set: the
+# kernel evaluates it from `h` at the point, and `∂_a H_b` by the chain rule
+# through the `∂_a g` it already forms.
+
+"""
+    KerrSchildSource(T = Float64; M, spin = (0, 0, 0), velocity = (0, 0, 0))
+
+The constants of [`algebraic_gauge_source`](@ref): the mass `M`, the spin
+4-vector `S^a` — the rest frame's `(0, a⃗)`, `a⃗ = J⃗/M`, boosted into the lab
+— and the 4-velocity `u^a = γ(1, v⃗)`, from the rest-frame `spin` and the
+hole's lab `velocity` (its motion, [`hole_velocity`](@ref); note that
+`boost(m, v)` moves the hole at `−v`). `isbits`, so it is the kernel argument
+where a sampled source passes its `Hsrc` array. A case takes it as
+`GHCase(…; gauge_source)`, which checks that it reproduces the background's
+own `H_a = −Γ_a` before anything is built ([`check_gauge_source`](@ref)).
+"""
+struct KerrSchildSource{T}
+    M::T
+    S::SVector{4,T}
+    u::SVector{4,T}
+end
+
+function KerrSchildSource(::Type{T}=Float64; M, spin=(0, 0, 0),
+                          velocity=(0, 0, 0)) where {T}
+    T(M) > 0 || throw(ArgumentError("the hole's mass must be positive, got $M"))
+    v = SVector{3,T}(velocity...)
+    v2 = sum(abs2, v)
+    v2 < 1 || throw(ArgumentError(
+        "the hole's velocity must be below the speed of light, got |v| = $(sqrt(v2))"))
+    a = SVector{3,T}(spin...)
+    γ = 1 / sqrt(1 - v2)
+    va = sum(v .* a)
+    # The boost of the rest frame's `(0, a⃗)`: `S⁰ = γ v·a`,
+    # `S⃗ = a⃗ + (γ − 1)(v·a)/v² v⃗`.
+    Ss = iszero(v2) ? a : a + ((γ - 1) * va / v2) * v
+    return KerrSchildSource{T}(T(M), SVector{4,T}(γ * va, Ss...),
+                               SVector{4,T}(γ, (γ * v)...))
+end
+
+"""
+    algebraic_gauge_source(src::KerrSchildSource, h, ∂ₜh, ∂h) -> (Hl, dHl)
+
+The gauge source `H_a` of `CODE.md`'s closed form at one point, and its
+gradient `dHl[c, a] = ∂_c H_a` — the layout of a sampled source's
+[`gauge_at`](@ref) — from the packed `h = g − η` and its packed derivatives
+`∂ₜh` and `∂h[i]`. Algebraic in `g`, so the principal part is unchanged.
+
+With `w_a = k_ab u^b`, `K = u^a w_a`, `s = S^a w_a` and
+`D = M + √(M² − s²)`, `H_a = −K w_a / D`; the root's argument is clamped at
+zero (on a solution it vanishes only at `r = a|cos θ|`, inside the horizon),
+and where it is clamped the root's derivative is taken as zero.
+"""
+@inline function algebraic_gauge_source(src::KerrSchildSource, h::SVector{NC,T},
+                                        ∂ₜh::SVector{NC,T},
+                                        ∂h::NTuple{3,SVector{NC,T}}) where {T}
+    M = T(src.M)
+    u = SVector{4,T}(src.u)
+    S = SVector{4,T}(src.S)
+    w = _sym4(h) * u
+    K = sum(u .* w)
+    sw = sum(S .* w)
+    rad = M * M - sw * sw
+    root = rad > 0 ? sqrt(rad) : zero(T)
+    D = M + root
+    Hl = (-K / D) * w
+    dw = (_sym4(∂ₜh) * u, _sym4(∂h[1]) * u, _sym4(∂h[2]) * u, _sym4(∂h[3]) * u)
+    dHl = SMatrix{4,4,T}(ntuple(Val(16)) do n
+        c = (n - 1) % 4 + 1
+        a = (n - 1) ÷ 4 + 1
+        dK = sum(u .* dw[c])
+        dD = root > 0 ? -sw * sum(S .* dw[c]) / root : zero(T)
+        -(dK * w[a] + K * dw[c][a]) / D + K * w[a] * dD / (D * D)
+    end)
+    return Hl, dHl
+end
+
+"""
+    gauge_source(T, Hwork, idx, b, ::Val{kind}, h, ∂ₜh, ∂h) -> (Hl, dHl)
+
+The gauge source at one point, whichever kind the problem has: a pair of
+zeros (`Val(false)`, harmonic), the sampled `Hsrc` value at the owned index
+(`Val(true)`), or the closed form of the [`KerrSchildSource`](@ref) that
+`Hwork` then is (`Val(:algebraic)`, added 2026-10-02), from the point's state
+and derivatives. The kernels call this and nothing else.
+"""
+@inline gauge_source(::Type{T}, Hwork, idx, b, kind::Union{Val{true},Val{false}},
+                     h, ∂ₜh, ∂h) where {T} = gauge_at(T, Hwork, idx, b, kind)
+@inline gauge_source(::Type{T}, src::KerrSchildSource, idx, b, ::Val{:algebraic},
+                     h, ∂ₜh, ∂h) where {T} = algebraic_gauge_source(src, h, ∂ₜh, ∂h)
+
+"""
+    check_gauge_source(background, src::KerrSchildSource, T; center, scale)
+
+Refuse a [`KerrSchildSource`](@ref) that does not make `background` exact:
+at twelve fixed points between `2.5` and `6` mass scales from `center`, the
+closed form's `H_a` and `∂_a H_b` on the background's own metric must be its
+`−Γ_a` and that gradient, as `gauge_source_grad` gives them, to `10⁻⁹` of
+their size. A source with the wrong constants — or a background that is not
+a Kerr-Schild hole — would otherwise start a run with a gauge transient that
+looks like a physical one.
+"""
+function check_gauge_source(bg, src::KerrSchildSource, ::Type{T}; center,
+                            scale) where {T}
+    dirs = ((3, 1, -2), (-2, 2, 1), (1, -3, 2), (-1, -1, -3), (2, 3, 1),
+            (-3, 1, 1), (1, 1, 3), (3, -2, -1), (-2, -3, 2), (2, -1, 3),
+            (-1, 3, -2), (1, 2, -3))
+    worst = 0.0
+    where_ = nothing
+    for (k, d) in enumerate(dirs)
+        n = SVector{3,Float64}(d...) / sqrt(sum(abs2, d))
+        x = SVector{3,Float64}(center...) +
+            Float64(scale) * (2.5 + 3.5 * (k - 1) / (length(dirs) - 1)) * n
+        p = SVector{4,Float64}(0, x...)
+        Hs, dHs = gauge_source_grad(bg, p)
+        g, dg = dmetric(bg, p)
+        h = pack_g(g)
+        ∂ₜh = pack_sym(SMatrix{4,4,Float64}(dg[a, b, 1] for a in 1:4, b in 1:4))
+        ∂h = ntuple(i -> pack_sym(SMatrix{4,4,Float64}(dg[a, b, i + 1]
+                                                       for a in 1:4, b in 1:4)), Val(3))
+        s64 = KerrSchildSource{Float64}(Float64(src.M), SVector{4,Float64}(src.S),
+                                        SVector{4,Float64}(src.u))
+        Ha, dHa = algebraic_gauge_source(s64, h, ∂ₜh, ∂h)
+        mag = max(maximum(abs, Hs), maximum(abs, dHs), eps())
+        err = max(maximum(abs, Ha - Hs), maximum(abs, dHa - dHs)) / mag
+        err > worst && (worst = err; where_ = x)
+    end
+    worst ≤ 1e-9 || throw(ArgumentError(
+        "this gauge source does not make the background exact: its H_a or ∂_a H_b " *
+        "differs from the background's own −Γ_a by $(worst) of their size at " *
+        "x = $(where_). The constants are the hole's mass, rest-frame spin and " *
+        "lab velocity (KerrSchildSource(; M, spin, velocity); boost(m, v) moves " *
+        "the hole at −v), and the background must be a Kerr-Schild hole."))
+    return worst
+end
+
 # --- the constraint-damping rate, as a function of position -----------------
 #
 # `CODE.md`, "Gauge and constraint damping": the Gundlach–Pretorius term

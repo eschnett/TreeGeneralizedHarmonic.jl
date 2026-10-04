@@ -236,7 +236,7 @@ the one ported function written against `dmetric`.
 
     g4, gu4, α, β, _, sqrtγ = metric_quantities(_sym4(hv))
     ∂ₜh = β[1]*∂h[1] + β[2]*∂h[2] + β[3]*∂h[3] + (α / sqrtγ) * Πv
-    Hl, _ = gauge_at(T, Hwork, inner, b, Val(HASH))
+    Hl, _ = gauge_source(T, Hwork, inner, b, Val(HASH), hv, ∂ₜh, ∂h)
     Cl = g4 * gauge_constraint_at_node(g4, _dg4_last(∂ₜh, ∂h), gu4 * Hl)
 
     # **A branch, not a multiplication by zero (fixed in step 5).** Step 4
@@ -431,7 +431,10 @@ differencing the dissipation operator as well.
     end
 
     g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(hv))
-    Hl, dHl = gauge_at(T, Hwork, inner, b, Val(HASH))
+    # The algebraic source's gradient needs `∂_t g`, which the first
+    # evolution equation gives without the source (added 2026-10-02).
+    ∂ₜh₀ = β[1]*∂h[1] + β[2]*∂h[2] + β[3]*∂h[3] + (α / sqrtγ) * Πv
+    Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), hv, ∂ₜh₀, ∂h)
     ∂ₜh, ∂ₜΠ = gh_node_rhs_expanded(hv, Πv, ∂h, ∂Π, ∂∂h, Hl, dHl, γ0, γ2)
 
     φ = α / sqrtγ
@@ -593,10 +596,26 @@ them, and it is a full sweep of the `diag` array — so
 [`constraint_norms`](@ref) takes it once and hands it to the eight norms
 it assembles rather than letting each recompute it.
 """
-function evolved_volume(p::GHProblem{T}) where {T}
-    forest = p.U.forest
+function evolved_volume(p::GHProblem{T}; weighting::Symbol=:volume,
+                        at_level=nothing) where {T}
     return mesh_mapreduce(identity, +, zero(T), p.diag; vars=DIAG_MASK,
-                          weight=k -> spacing(T, forest, k)^3)
+                          weight=_norm_weight(T, p.U.forest, weighting, at_level))
+end
+
+# The per-block weight of a norm (added 2026-10-02): the cell volume `h³`
+# (`:volume`, the record's), or one per point (`:points`), which gives every
+# grid point the same weight whatever its level — on a nested hierarchy whose
+# levels hold about as many points each, that weights the levels equally
+# where the volume weight is all but the coarsest. `at_level` keeps the blocks
+# of that refinement level only, by a weight of zero for the others.
+function _norm_weight(::Type{T}, forest, weighting::Symbol, lev) where {T}
+    weighting in (:volume, :points) || throw(ArgumentError(
+        "a norm is weighted by :volume (each point by its cell volume h³) or " *
+        "by :points (each point by one), got :$weighting"))
+    keep(k) = lev === nothing || level(k) == lev
+    return weighting === :volume ?
+           (k -> keep(k) ? spacing(T, forest, k)^3 : zero(T)) :
+           (k -> keep(k) ? one(T) : zero(T))
 end
 
 """
@@ -620,13 +639,24 @@ rather than assumes.
 The masked points hold exactly zero — the kernels wrote it there — so the
 maximum is over the evolved points too, and `NaN` from a blown-up run
 still propagates.
+
+`weighting = :points` (added 2026-10-02) gives every evolved point the
+weight one instead of its cell volume, and divides by the number of evolved
+points — the norm a robust-stability test on a nested hierarchy reads, where
+the volume weight would be the coarsest level's. `at_level = ℓ` reduces over
+the blocks of refinement level `ℓ` alone, `L∞` included; `volume` is then
+that level's evolved volume (or point count).
 """
-function masked_norms(p::GHProblem{T}, v::Integer;
-                      volume=evolved_volume(p)) where {T}
-    forest = p.U.forest
-    num = mesh_mapreduce(x -> x * x, +, zero(T), p.diag; vars=v,
-                         weight=k -> spacing(T, forest, k)^3)
-    linf = mesh_mapreduce(abs, max, zero(T), p.diag; vars=v)
+function masked_norms(p::GHProblem{T}, v::Integer; weighting::Symbol=:volume,
+                      at_level=nothing,
+                      volume=evolved_volume(p; weighting=weighting,
+                                            at_level=at_level)) where {T}
+    weight = _norm_weight(T, p.U.forest, weighting, at_level)
+    num = mesh_mapreduce(x -> x * x, +, zero(T), p.diag; vars=v, weight=weight)
+    linf = at_level === nothing ?
+           mesh_mapreduce(abs, max, zero(T), p.diag; vars=v) :
+           mesh_mapreduce(abs, max, zero(T), p.diag; vars=v,
+                          weight=_norm_weight(T, p.U.forest, :points, at_level))
     l2 = iszero(volume) ? zero(T) : sqrt(num / volume)
     return (l2=l2, linf=linf)
 end
@@ -639,19 +669,40 @@ record holds them: `gauge_l2` and `gauge_linf` per component of `C_a`
 (four each), `ham_l2`, `ham_linf` for `ℋ`, and `mom_l2`, `mom_linf` per
 component of `ℳ_i` (three each).
 
+`weighting` and `at_level` are [`masked_norms`](@ref)'s (added 2026-10-02).
+
 It reads the `diag` field set and launches nothing, so the caller decides
 which monitors ran: [`gh_constraint!`](@ref) alone leaves the ADM slots
 holding whatever the last ADM pass wrote, which is why the record names
 them separately and `CODE.md` gives them different cadences.
 """
-function constraint_norms(p::GHProblem{T}) where {T}
-    volume = evolved_volume(p)
-    gauge = ntuple(a -> masked_norms(p, DIAG_CGH + a - 1; volume=volume), Val(4))
-    ham = masked_norms(p, DIAG_HAM; volume=volume)
-    mom = ntuple(i -> masked_norms(p, DIAG_MOM + i - 1; volume=volume), Val(3))
+function constraint_norms(p::GHProblem{T}; weighting::Symbol=:volume,
+                          at_level=nothing) where {T}
+    volume = evolved_volume(p; weighting=weighting, at_level=at_level)
+    nrm(v) = masked_norms(p, v; weighting=weighting, at_level=at_level,
+                          volume=volume)
+    gauge = ntuple(a -> nrm(DIAG_CGH + a - 1), Val(4))
+    ham = nrm(DIAG_HAM)
+    mom = ntuple(i -> nrm(DIAG_MOM + i - 1), Val(3))
     return (gauge_l2=SVector{4,T}(ntuple(a -> gauge[a].l2, Val(4))),
             gauge_linf=SVector{4,T}(ntuple(a -> gauge[a].linf, Val(4))),
             ham_l2=ham.l2, ham_linf=ham.linf,
             mom_l2=SVector{3,T}(ntuple(i -> mom[i].l2, Val(3))),
             mom_linf=SVector{3,T}(ntuple(i -> mom[i].linf, Val(3))))
+end
+
+"""
+    level_constraint_norms(p::GHProblem; weighting = :points) -> Vector
+
+[`constraint_norms`](@ref) once per refinement level present in the mesh,
+coarsest first, each as a `NamedTuple` with its `level` and its evolved
+`points` (added 2026-10-02): where a growing mode lives, by level. Like
+`constraint_norms` it reads `diag` and launches no monitor.
+"""
+function level_constraint_norms(p::GHProblem{T}; weighting::Symbol=:points) where {T}
+    levels = sort!(unique(level.(p.U.forest.leaves)))
+    return map(levels) do ℓ
+        n = evolved_volume(p; weighting=:points, at_level=ℓ)
+        (; level=ℓ, points=n, constraint_norms(p; weighting=weighting, at_level=ℓ)...)
+    end
 end
