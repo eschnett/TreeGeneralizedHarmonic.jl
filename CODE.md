@@ -6721,11 +6721,12 @@ At `24 M`, against `:damped` at the same `h` (`ℋ` and the error in
 | **`1/24`** | **16 / 20 / 2** | **`2.3·10⁻⁶`** | **`1.8·10⁻⁶`** | **`4.0·10⁻⁹`** |
 | `1/32` | `:damped` | `4.3·10⁻⁷` | `5.2·10⁻⁷` | `1.3·10⁻⁹` |
 | `1/32` | 16 / 24 / 1 | `5.8·10⁻⁶` | `6.6·10⁻⁷` | `1.4·10⁻⁹` |
-| `1/32` | 20 / 24 / 1 | `1.1·10⁻⁶` † | `4.7·10⁻⁷` † | — |
+| `1/32` | 20 / 24 / 1 | `1.1·10⁻⁶` | `4.8·10⁻⁷` | `1.26·10⁻⁹` |
 
-† at `18 M`: the node failed (`NODE_FAIL`, both H200 nodes down); its
-shells were saturated from `8 M`, and the run is resubmitted with
-checkpoints. From `r = 2.25` out every row is `:damped`'s to two digits.
+The last row's first attempt ended at `18 M` in a node failure (both H200
+nodes down); it was rerun with checkpoints (job 569644), and its shells at
+`18 M` were its shells at `24 M` to two digits. From `r = 2.25` out every row
+is `:damped`'s to two digits.
 
 - **The layer that failed at `h = 1/16` runs at `1/24`**: the offset surface
   at `r = 1.0` with the core surface at `0.5` (`m = 24`, `n_L = 12`) is stable
@@ -6744,7 +6745,41 @@ checkpoints. From `r = 2.25` out every row is `:damped`'s to two digits.
   spinning hole), `fit_initial_depth = n_L h`: `ℋ` just outside the horizon
   `1.6×` `:damped`'s, the error `1.1×`, the mass drift the same, and everything
   from `r = 2.25` out equal. At `h = 1/32`, `m = 20` with `cont = 1` already
-  matches `:damped`'s error.
+  matches `:damped`: the error `0.92×`, the mass drift to 1 %, `ℋ` just
+  outside the horizon `2.6×`.
+
+**Proposed next (2026-10-04): a spinning hole on a bitant.** Written for the
+session that picks this up; nothing of it is built.
+
+- **A bitant, not an octant.** A spin along `z` keeps only the `z → −z`
+  mirror, and so does a boost in the `x`–`y` plane: the domain is
+  `[−L, L]² × [0, L]`, reflecting at `z = 0` only — four times the octant —
+  and G5's moving spinning hole fits it too. `state_parity` is already right
+  (Kerr-Schild's `g_tz` is odd in `z`). Needed: a `bitant` option to
+  `hole_case` that accepts a spin along `z` and a velocity and center in the
+  plane and refuses anything else, and a non-cubic root brick (`(2, 2, 1)`)
+  in `gh_forest`/`hole_forest`, which today refuse unequal box widths.
+- **The source is ready.** `KerrSchildSource(; spin = (0, 0, a))` is exact at
+  `a = 9/10` to `2.5·10⁻¹⁵` and lifts the refusal of a moving Kerr-Schild
+  hole. Its `M`, `S` and `u` are constants of the run, so a drift of the
+  evolved hole's parameters is a drift of the coordinates without a
+  constraint violation: record `M_irr` and `J` from the start.
+- **The interior is tighter.** At `a = 9/10` the horizon's smallest radius is
+  `1.436` (poles) and the singular ring has radius `0.9`. Step 5's sphere needs
+  `r_0 > 0.9` and `r_1 ≤ 1.436 − m h`, so a 12-cell ramp wants `h ≈ 1/48`
+  rather than `1/24` (`check_interior_radii` will say). The tracked shape is
+  oblate, but with `fit_initial_depth = n_L h` the analytic initial data must
+  stay outside the ring, which bounds `m + n_L` at the equator: the `a = 0`
+  recipe above does not carry over, and `lmax_fit` matters now (step 8f used
+  12). Step 8f's `ks9` rows (`q = 2`) had `:fitted` `40×` `:damped`; whether
+  `fit_cont = 2` and depth repair that is the first measurement.
+- **An order.** `:damped` at `a = 9/10`, `h = 1/48`, `24 M`, with a
+  convergence pair, as the reference; `:fitted` on the same mesh, depth and
+  `fit_cont` as above; then whether a static spinning hole's `J` drifts, as
+  G5's moving one does. `test/octant_runs.jl` and its analysis scripts carry
+  over once they take the bitant. TreeAMR `main`'s second-derivative
+  interpolation can replace the state sampler's differenced gradient when it
+  is released; nothing here needs it sooner.
 
 ## Possible extensions
 
