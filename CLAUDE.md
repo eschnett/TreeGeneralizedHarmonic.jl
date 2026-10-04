@@ -762,7 +762,8 @@ skill has the rest of the cluster's mechanics.
 
 The octant runs (added 2026-10-02) are `test/octant_runs.jl`, one run per
 call, `key=value` options listed in its header — the case (`case=minkowski`
-or `ks`, `interior=damped|fitted`, margins, `fit_cont`), the mesh (`L`, `N`,
+or `ks`, `interior=damped|fitted`, margins, `fit_cont`; from 2026-10-04
+`octant=reflecting|rotating` and the spin `a=`, which needs `rotating`), the mesh (`L`, `N`,
 `roots`, `radii`), the run (`t_end`, `cfl`, `chunk`), noise, `backend=cuda`,
 `out=<dir>` (CSV, `records.csv`, `simwatch.toml`) and `checkpoint=<dir>`.
 On Symmetry they ran one H200 each from a copy with `CUDA` added to its
@@ -772,6 +773,7 @@ On Symmetry they ran one H200 each from a copy with `CUDA` added to its
 ```bash
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=fitted L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/smoke
 julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
+julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=1/2 L=8 N=16 roots=1 radii=4,2,1 r_0=3/4 r_1=5/4 t_end=1/2 chunk=1/4 out=out/spin
 ```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and

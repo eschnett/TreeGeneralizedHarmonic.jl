@@ -1,15 +1,19 @@
 # Runs on the octant (added 2026-10-02): white noise on flat space, on the
 # nested hierarchy a single black hole at the origin will run on, and that
 # black hole — Kerr-Schild `M = 1`, `a = 0`, with the damping layer and the
-# algebraic gauge source, with or without the same noise.
+# algebraic gauge source, with or without the same noise. From 2026-10-04 the
+# hole may spin about `z` (`a=`), on the rotating octant (`octant=rotating`).
 #
 # A standalone script, not part of the suite. The box is `[0, L]³` with
-# reflecting faces through the origin and Minkowski Dirichlet data
+# reflecting faces through the origin — or, on the rotating octant, the seam
+# gluing `x = 0` to `y = 0` by a quarter turn about `z` and a reflecting face
+# at `z = 0` only — and Minkowski Dirichlet data
 # (`h = Π = 0`, constant in time) at the three outer faces; the mesh is
 # `hole_forest(; shape = :cube)` about the origin, `h = L/(roots N)` at the
 # outer boundary and halved inside each cube `[0, R]³` of `radii`. The initial
 # data are `add_noise!`'s uniform noise on every owned point and variable,
-# projected onto the parity on the wall planes. Each chunk the observer runs
+# projected onto the parity on the wall planes and left out of the seam's two
+# planes on the rotating octant. Each chunk the observer runs
 # both monitors and writes one CSV row: the ADM constraints `ℋ`, `ℳ_i` and
 # the gauge constraints `C_a`, separately, point-weighted (every grid point
 # the same weight) and volume-weighted, over the mesh and per level, and the
@@ -32,6 +36,11 @@
 #   t_end=128 chunk=1 cfl=1/4 q=4   the run
 #   eps=1/2 gamma0=1 gamma2=0       ε_KO, γ0, γ2
 #   case=minkowski|ks               flat space, or the Kerr-Schild hole
+#   octant=reflecting|rotating      three mirrors (a = 0 only), or the quarter turn
+#                                   about z and the mirror at z = 0 (any a)
+#   a=0                             the hole's spin along z, in M (ks only; a ≠ 0
+#                                   needs octant=rotating, and r_0 > a for :damped,
+#                                   which the ring of radius a must be inside)
 #   r_0=3/4 r_1=3/2 source=algebraic|sampled   the hole's layer and gauge source
 #   interior=damped|fitted          step 5's analytic layer, or step 8's fitted
 #                                   target on the tracked horizon (margin m=8,
@@ -52,7 +61,12 @@
 #                                   always does)
 #   shells=2,9/4,3,5,8              radii of the shells outside the horizon whose
 #                                   norms the CSV carries (and one beyond the last;
-#                                   and the evolved band inside the horizon)
+#                                   and the evolved band inside the horizon). The
+#                                   first is the horizon's equatorial radius
+#                                   √(r₊² + a²) = √(2 r₊) by default, 2 at a = 0:
+#                                   the KS horizon of a spinning hole is oblate, so
+#                                   the band inside it also holds points outside
+#                                   the horizon near the poles
 #   amplitude=1e-8 seed=20261002    the noise (amplitude=0: none)
 #   backend=cpu|cuda                cuda needs CUDA in the active environment
 #   out=<dir>                       where `octant.csv` and the log go
@@ -107,6 +121,17 @@ ckkeep = parse(Int, opt("keep", "2"))
 casename = opt("case", "minkowski")
 casename in ("minkowski", "ks") || error("case is minkowski or ks, got $casename")
 hole = casename == "ks"
+symmetry = opt("octant", "reflecting")
+symmetry in ("reflecting", "rotating") ||
+    error("octant is reflecting or rotating, got $symmetry")
+rotating = symmetry == "rotating"
+a_spin = rat(opt("a", "0"))
+hole || iszero(a_spin) || error("a = $a_spin is the hole's spin, and case = minkowski has none")
+# The Kerr-Schild horizon (`M = 1`): `r₊` at the poles and `√(r₊² + a²) = √(2 r₊)`
+# at the equator.
+r_plus = 1 + sqrt(1 - T(a_spin)^2)
+r_equator = sqrt(2 * r_plus)
+M_irr_kerr = sqrt(r_plus / 2)
 
 backend = if opt("backend", "cpu") == "cuda"
     @eval using CUDA
@@ -136,30 +161,33 @@ case = if hole
         # The range projection's gate: step 8f's `9/10`, or `default_gate`'s
         # rule — the offset surface less `2G` spacings — where that is deeper
         # (a margin of 12 cells or more at `h = 1/16`).
+        # Against the horizon's least radius, `r₊` at the poles.
         hfine = T(L) / (roots * N) / 2^length(radii)    # the finest spacing
-        r_gate = min(T(9 // 10), 2 - (m + 2 * (q ÷ 2 + 1)) * hfine)
-        kerr_schild_case(T; halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2, octant=true,
+        r_gate = min(T(9 // 10), r_plus - (m + 2 * (q ÷ 2 + 1)) * hfine)
+        kerr_schild_case(T; a=a_spin, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
+                         octant=Symbol(symmetry),
                          gauge_source=gs, interior=spec,
                          horizon=Horizon(T; every=1, N=12, spin=true),
                          bounds=default_bounds(T; M=1, r_gate=r_gate))
     else
-        kerr_schild_case(T; halfwidth=L, r_0=rat(opt("r_0", "3/4")),
+        kerr_schild_case(T; a=a_spin, halfwidth=L, r_0=rat(opt("r_0", "3/4")),
                          r_1=rat(opt("r_1", "3/2")), ρ_ramp=1, chunk=chunk, ε_KO=ε_KO,
-                         γ2=γ2, octant=true, gauge_source=gs,
+                         γ2=γ2, octant=Symbol(symmetry), gauge_source=gs,
                          margin=parse(Int, opt("margin", "8")), horizon=finder)
     end
 else
-    minkowski_octant_case(T; L=L, ε_KO=ε_KO, γ0=γ0, γ2=γ2, chunk=chunk)
+    minkowski_octant_case(T; L=L, ε_KO=ε_KO, γ0=γ0, γ2=γ2, chunk=chunk,
+                          rotating=rotating)
 end
 forest0 = hole_forest(T, case; N=N, roots=roots, center=(0, 0, 0), radii=radii,
                       shape=:cube)
 nlev = length(radii) + 1
-@printf("octant: L = %s, N = %d, %d blocks, %d points, levels %d, h = %s … %s\n",
-        L, N, nleaves(forest0), nleaves(forest0) * N^3, nlev,
+@printf("octant (%s): L = %s, N = %d, %d blocks, %d points, levels %d, h = %s … %s\n",
+        symmetry, L, N, nleaves(forest0), nleaves(forest0) * N^3, nlev,
         maximum(k -> spacing(T, forest0, k), forest0.leaves), minimum_spacing(T, forest0))
 @printf("        case %s, t_end = %s, chunk = %s, cfl = %s, q = %d, ε_KO = %s, γ0 = %s, γ2 = %s\n",
         casename, t_end, chunk, cfl, q, ε_KO, hole ? "Gaussian 1/M → 1/(10M)" : γ0, γ2)
-hole && @printf("        hole: %s, gauge source %s\n",
+hole && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin,
                 case.interior isa FittedSpec ?
                 "fitted target, tracked, margin $(case.interior.margin)" :
                 "damped layer, r_0 = $(case.interior.r_0), r_1 = $(case.interior.r_1)",
@@ -184,7 +212,9 @@ hole && push!(cols, "err_l2_bnd")
 # The shells about the hole: the evolved band inside the horizon, `[r_in, r_h)`,
 # then `[s_k, s_{k+1})` outside it and one beyond the last radius. Named by
 # their inner radius (`_in` for the band inside).
-shell_r = hole ? [T(rat(x)) for x in split(opt("shells", "2,9/4,3,5,8"), ',')] : T[]
+shell_r = !hole ? T[] : haskey(OPTIONS, "shells") ?
+          [T(rat(x)) for x in split(OPTIONS["shells"], ',')] :
+          vcat([r_equator], T[9 // 4, 3, 5, 8])
 shell_names = hole ? vcat(["in"], [@sprintf("r%g", r) for r in shell_r]) : String[]
 for nm in shell_names, c in ("ham_l2", "ham_linf", "mom_l2", "gauge_l2", "err_l2", "err_linf")
     push!(cols, "$(c)_$nm")
@@ -228,10 +258,12 @@ sw = SimWatchWriter(outdir; name=opt("name", basename(outdir)),
                     code="TreeGeneralizedHarmonic")
 time_unit = hole ? "M" : nothing
 setup = Dict{String,Any}(
-    "case" => casename, "L" => Float64(L), "N" => N, "levels" => nlev,
+    "case" => casename, "octant" => symmetry, "L" => Float64(L), "N" => N, "levels" => nlev,
     "h_min" => Float64(minimum_spacing(T, forest0)), "q" => q, "cfl" => Float64(cfl),
     "eps_KO" => Float64(ε_KO), "noise" => amplitude, "options" => join(ARGS, " "))
 if hole
+    setup["a"] = Float64(a_spin)
+    setup["M_irr_kerr"] = M_irr_kerr
     setup["interior"] = case.interior isa FittedSpec ? "fitted" : "damped"
     setup["gauge_source"] = case.gauge === nothing ? "sampled" : "algebraic"
     case.interior isa FittedSpec ? (setup["margin_cells"] = case.interior.margin) :
@@ -364,9 +396,10 @@ function observe(p, t, u, rec)
         (extra["fit"] = Dict("valid" => rec.fit_valid, "residual" => rec.fit_residual))
     rec.bounds_hits === nothing || (extra["bounds_hits"] = rec.bounds_hits)
     msg = if hole
-        @sprintf("t = %.1f M: ℋ %.2e just outside the horizon, %.2e overall; M_irr − 1 = %s",
+        @sprintf("t = %.1f M: ℋ %.2e just outside the horizon, %.2e overall; M_irr − Kerr's = %s, J − a = %s",
                  t, extra["shells"][shell_names[2]]["ham_l2"], pts.ham_l2,
-                 rec.M_irr === nothing ? "—" : @sprintf("%+.2e", rec.M_irr - 1))
+                 rec.M_irr === nothing ? "—" : @sprintf("%+.2e", rec.M_irr - M_irr_kerr),
+                 rec.J === nothing ? "—" : @sprintf("%+.2e", rec.J - a_spin))
     else
         @sprintf("t = %.1f: ℋ %.2e, ℳ %.2e, C %.2e", t, pts.ham_l2, mom2(pts), gauge2(pts))
     end
@@ -395,9 +428,12 @@ end
 restarting = get(ckw, :restart_file, nothing) !== nothing
 
 # A hole's frozen core is left alone: it is never evolved, and its stale data
-# at the corner is not of definite parity (see `add_noise!`).
+# at the corner is not of definite parity (see `add_noise!`). The default
+# `r_core` of a `:fitted` hole is the horizon's least radius less `5/4` (`3/4`
+# at `a = 0`, as before).
 core² = !hole ? zero(T) : case.interior isa FittedSpec ?
-        rat(opt("r_core", "3/4"))^2 : case.interior.r_0^2
+        (haskey(OPTIONS, "r_core") ? T(rat(OPTIONS["r_core"])) :
+         r_plus - 5 // 4)^2 : case.interior.r_0^2
 fitkw = if hole && case.interior isa FittedSpec
     nL = case.interior.n_L > 0 ? case.interior.n_L :
          TreeGeneralizedHarmonic.layer_cells(q ÷ 2 + 1, T(4), one(T))

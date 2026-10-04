@@ -531,7 +531,7 @@ minkowski_case(::Type{T}=Float64; L, ε_KO, γ0, γ2) where {T} =
            periodic=(true, true, true), ε_KO=ε_KO, γ0=γ0, γ2=γ2)
 
 """
-    minkowski_octant_case(T = Float64; L, ε_KO, γ0, γ2, chunk = 0)
+    minkowski_octant_case(T = Float64; L, ε_KO, γ0, γ2, chunk = 0, rotating = false)
 
 Flat space on the octant `[0, L]³` of the box `[−L, L]³`: reflecting at the
 three faces through the origin and Dirichlet — Minkowski's `h = Π = 0`,
@@ -539,13 +539,17 @@ constant in time — at the three outer ones (added 2026-10-02). It is the
 robust-stability case on the mesh a single black hole at the origin will run
 on: a symmetry plane in every dimension, the nested cubes of
 [`hole_forest`](@ref)`(; shape = :cube)` about the corner, and an outer
-boundary that is not periodic.
+boundary that is not periodic. `rotating = true` (added 2026-10-04) is the
+rotating octant a spinning hole runs on instead: the seam `(1, 2)` glues
+`x = 0` to `y = 0` by a quarter turn about `z`, and only `z = 0` reflects.
 """
-minkowski_octant_case(::Type{T}=Float64; L, ε_KO, γ0, γ2, chunk=zero(T)) where {T} =
+minkowski_octant_case(::Type{T}=Float64; L, ε_KO, γ0, γ2, chunk=zero(T),
+                      rotating::Bool=false) where {T} =
     GHCase(T, Minkowski(); box=ntuple(_ -> (zero(T), T(L)), Val(3)),
            periodic=(false, false, false),
-           reflecting=ntuple(_ -> (true, false), Val(3)), ε_KO=ε_KO, γ0=γ0,
-           γ2=γ2, chunk=chunk)
+           reflecting=ntuple(d -> (!rotating || d == 3, false), Val(3)),
+           rotating=rotating ? (1, 2) : nothing, ε_KO=ε_KO, γ0=γ0, γ2=γ2,
+           chunk=chunk)
 
 """
     gauge_wave_case(T = Float64; A = 1//20, d = 1, ε_KO, γ0, γ2)
