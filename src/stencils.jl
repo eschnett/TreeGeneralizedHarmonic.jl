@@ -372,3 +372,361 @@ physical `∂_x∂_y f` divides it by `hx·hy`.
 @inline function apply_mixed_stencil(w::SVector, f, x, y, hx, hy)
     return apply_stencil(w, ξ -> apply_stencil(w, η -> f(ξ, η), y, hy), x, hx)
 end
+
+# ---------------------------------------------------------------------------
+# The closures at an excision surface (added in step X1)
+# ---------------------------------------------------------------------------
+#
+# `CODE.md`, "Excision": at an evolved point next to the excised set the
+# centered stencils of an axis would read excised points, so per axis and
+# side the point counts `k⁻, k⁺ ∈ 0…G`, the consecutive non-excised points
+# on each side (capped at `G`, so `G` means "at least `G`"), and every
+# stencil that would reach past them is replaced by a **closure** on the
+# points it may read. Everything below is a function of `(q, k⁻, k⁺)` and
+# nothing else — no position, no block, no level — built in `Rational` on
+# `lagrange_derivative_weights`, exactly as the centered weights are, and
+# rounded once into `T` by `closure_table`. No kernel uses it yet: step
+# X2b's zone kernel is what will, and step X1's models
+# (`test/excision_model.jl`) are what chose among the options.
+#
+# Three families, each with the full-width code as the case where it fits:
+#
+#   * the derivatives `∂` and `∂²` (`closure_derivative_weights`): centered
+#     when `min(k⁻, k⁺) ≥ q/2`, otherwise the Lagrange derivative on *every*
+#     node in `[−k⁻, k⁺]` capped at the reach (`G` by default) — the most
+#     accurate stencil the point may read, and the one an extrapolation of
+#     the excised taps followed by the centered stencil would give;
+#   * the dissipation (`closure_dissipation_weights`): centered when
+#     `min(k⁻, k⁺) ≥ G`, otherwise one of three closures — reduced rank,
+#     one-sided, or Mattsson–Svärd–Nordström's boundary-modified form, the
+#     one that keeps the damping sign in the discrete `l²` norm;
+#   * the lopsided advection (`lopsided_weights`): the order-`q` first
+#     derivative on `q + 1` nodes shifted one point to the upwind side,
+#     which reaches exactly `G` there and acts on the Nyquist mode that
+#     every centered first derivative annihilates.
+
+# The ghost width `G = q/2 + 1`: the farthest any stencil of the scheme
+# reaches, and therefore the cap on `k⁻, k⁺` and on a closure's reach.
+_reach(q::Integer) = q ÷ 2 + 1
+
+function _check_closure_args(q, kminus, kplus)
+    q >= 2 && iseven(q) || throw(ArgumentError(
+        "a closure belongs to a centered scheme of even order q ≥ 2, whose " *
+        "half-width q/2 and ghost width G = q/2 + 1 define it, but q=$q"))
+    kminus >= 0 && kplus >= 0 || throw(ArgumentError(
+        "k⁻ and k⁺ count the consecutive non-excised points on each side of " *
+        "the point and cannot be negative, but k⁻=$kminus, k⁺=$kplus"))
+    return nothing
+end
+
+"""
+    closure_nodes(q, k⁻, k⁺; reach = q/2 + 1) -> UnitRange{Int}
+
+The offsets a closure of the order-`q` scheme reads at a point with `k⁻`
+and `k⁺` consecutive non-excised points to its left and right (`CODE.md`,
+"Excision"): the centered `−q/2 … q/2` when `min(k⁻, k⁺) ≥ q/2`, and
+otherwise **every** offset in `[−min(k⁻, reach), min(k⁺, reach)]`.
+
+`reach` is the cap, the scheme's ghost width `G = q/2 + 1` by default —
+the halo the mesh already has — so a closure never reads further than a
+centered dissipation stencil does. Other values exist for step X1's
+models, which ask whether a narrower or a wider closure is more stable.
+
+The range is the same for `∂` and `∂²`; whether it holds enough nodes for
+either is [`closure_derivative_weights`](@ref)'s question.
+"""
+function closure_nodes(q::Integer, kminus::Integer, kplus::Integer;
+                       reach::Integer=_reach(q))
+    _check_closure_args(q, kminus, kplus)
+    reach >= 1 || throw(ArgumentError(
+        "a closure's reach is how far it may read and must be at least one " *
+        "point, but reach=$reach"))
+    r = q ÷ 2
+    min(kminus, kplus) >= r && return (-r):r
+    return (-min(kminus, reach)):min(kplus, reach)
+end
+
+"""
+    closure_derivative_weights(q, m, k⁻, k⁺; reach = q/2 + 1)
+        -> (nodes::UnitRange{Int}, weights::Vector{Rational{BigInt}})
+
+The closure of `∂^m`, `m ∈ {1, 2}`, at a point with `k⁻, k⁺` consecutive
+non-excised points on each side: the Lagrange derivative on
+[`closure_nodes`](@ref), in `Rational`, for unit spacing (the caller divides
+by `h^m`, as for [`derivative_weights`](@ref)).
+
+Where `min(k⁻, k⁺) ≥ q/2` this **is** the centered stencil,
+[`rational_derivative_weights`](@ref)`(q, m)`, entry for entry. Elsewhere it
+is exact to the degree [`closure_exact_degree`](@ref) says — at the first
+evolved point (`k⁻ = 0`, reach `G`) of orders `q/2 + 1` for `∂` and `q/2`
+for `∂²`: `(2, 1)` at `q = 2`, `(3, 2)` at `q = 4`.
+
+A closure needs `m + 1` nodes; fewer is an `ArgumentError`, which is what a
+point excised on both sides of an axis within a point or two meets.
+"""
+function closure_derivative_weights(q::Integer, m::Integer, kminus::Integer,
+                                    kplus::Integer; reach::Integer=_reach(q))
+    m in (1, 2) || throw(ArgumentError(
+        "this package differentiates at most twice — CODE.md's second-order " *
+        "reduction takes ∂_i and ∂_i∂_j and nothing else — but m=$m"))
+    nodes = closure_nodes(q, kminus, kplus; reach=reach)
+    length(nodes) >= m + 1 || throw(ArgumentError(
+        "∂^$m needs at least $(m + 1) nodes, and a point with k⁻=$kminus, " *
+        "k⁺=$kplus non-excised neighbours (reach $reach) has only the " *
+        "offsets $nodes: it is excised on both sides of this axis too close " *
+        "to have a closure"))
+    if nodes == (-(q ÷ 2)):(q ÷ 2)
+        return nodes, rational_derivative_weights(q, m)
+    end
+    return nodes,
+           lagrange_derivative_weights([StencilRational(j) for j in nodes], m)
+end
+
+"""
+    closure_exact_degree(q, m, k⁻, k⁺; reach = q/2 + 1) -> Int
+
+The highest polynomial degree on which [`closure_derivative_weights`](@ref)
+is exact: `n − 1` on `n` nodes, and one more when the nodes are symmetric
+about the point and `n − m` is odd — the centered `∂²`'s extra degree. The
+order of the truncation error is this plus `1 − m`. `test/stencils_tests.jl`
+asserts it in `Rational`, and that the closure is *not* exact one degree
+further.
+"""
+function closure_exact_degree(q::Integer, m::Integer, kminus::Integer,
+                              kplus::Integer; reach::Integer=_reach(q))
+    nodes = closure_nodes(q, kminus, kplus; reach=reach)
+    n = length(nodes)
+    sym = first(nodes) == -last(nodes)
+    return n - 1 + (sym && isodd(n - m) ? 1 : 0)
+end
+
+"""
+    DISSIPATION_CLOSURES
+
+The three closures of the Kreiss–Oliger operator step X1 compares
+(`CODE.md`, "Excision"):
+
+- `:reduced` — the centered operator of the largest rank `r′ ≤ r` that fits,
+  `r′ = min(k⁻, k⁺)`, and none at all at the first evolved point;
+- `:onesided` — the `2r′`-th difference on the most nodes that fit,
+  shifted toward the evolved side and signed so that it damps the
+  Nyquist mode at the point;
+- `:msn` — Mattsson, Svärd and Nordström's boundary-modified form
+  (J. Sci. Comput. 21, 57, 2004), `−2^{−2r} D_rᵀ B D_r`, with `D_r` the
+  `r`-th undivided forward difference and `B` the indicator of the rows
+  whose `r + 1` points are all evolved: the interior rows are the centered
+  operator, and the assembled operator is symmetric and negative
+  semidefinite in the discrete `l²` norm **by construction**, on any
+  pattern of excised points.
+"""
+const DISSIPATION_CLOSURES = (:reduced, :onesided, :msn)
+
+# The `r`-th undivided forward difference's coefficient at offset `j` of a
+# window starting at `0`: `(−1)^{r−j} binom(r, j)`.
+_forward_difference(r, j) =
+    StencilRational((iseven(r - j) ? 1 : -1) * binomial(big(r), big(j)))
+
+"""
+    closure_dissipation_weights(q, kind, k⁻, k⁺)
+        -> (nodes::UnitRange{Int}, weights::Vector{Rational{BigInt}})
+
+The Kreiss–Oliger operator of rank `r = G = q/2 + 1` at a point with `k⁻,
+k⁺` consecutive non-excised points on each side, closed by `kind ∈`
+[`DISSIPATION_CLOSURES`](@ref). The weights carry the operator's sign and
+`2^{−2r}` exactly as [`rational_dissipation_weights`](@ref) does, so the
+caller applies `ε/h` as for the centered one.
+
+Where `min(k⁻, k⁺) ≥ G` every kind **is** the centered operator,
+[`rational_dissipation_weights`](@ref)`(G)`. Elsewhere the nodes lie in
+`[−min(k⁻, G), min(k⁺, G)]`, and a closure that has no room returns the
+single node `0` with weight `0`: no dissipation at that point.
+"""
+function closure_dissipation_weights(q::Integer, kind::Symbol, kminus::Integer,
+                                     kplus::Integer)
+    _check_closure_args(q, kminus, kplus)
+    kind in DISSIPATION_CLOSURES || throw(ArgumentError(
+        "the dissipation closures are $(DISSIPATION_CLOSURES) — reduced rank, " *
+        "one-sided, and Mattsson–Svärd–Nordström's — but kind=:$kind"))
+    G = _reach(q)
+    none = (0:0, [zero(StencilRational)])
+    min(kminus, kplus) >= G && return (-G):G, rational_dissipation_weights(G)
+    lo, hi = -min(kminus, G), min(kplus, G)
+    if kind === :reduced
+        rr = min(kminus, kplus)
+        rr == 0 && return none
+        return (-rr):rr, rational_dissipation_weights(rr)
+    elseif kind === :onesided
+        rr = min(G, (hi - lo) ÷ 2)
+        rr == 0 && return none
+        s = clamp(0, lo + rr, hi - rr)
+        sgn = iseven(s) ? 1 : -1
+        return (s - rr):(s + rr), sgn .* rational_dissipation_weights(rr)
+    else                                   # :msn
+        # The windows `[k, k + G]` that contain the point and lie in
+        # `[lo, hi]`; the row is `−2^{−2G} Σ_k D_{k,0} D_{k,·}`.
+        ks = max(lo, -G):min(0, hi - G)
+        isempty(ks) && return none
+        nodes = first(ks):(last(ks) + G)
+        w = zeros(StencilRational, length(nodes))
+        scale = -inv(StencilRational(big(2)^(2G)))
+        for k in ks
+            d0 = _forward_difference(G, -k)       # the point is at `−k` in it
+            for j in 0:G
+                w[k + j - first(nodes) + 1] += scale * d0 *
+                                               _forward_difference(G, j)
+            end
+        end
+        return nodes, w
+    end
+end
+
+"""
+    lopsided_weights(q, up, k⁻, k⁺) -> (nodes::UnitRange{Int},
+                                       weights::Vector{Rational{BigInt}})
+
+The lopsided (upwind-biased) first derivative of order `q` for the shift
+advection `β^d ∂_d`, at a point with `k⁻, k⁺` consecutive non-excised
+points on each side, `up = ±1` the upwind side — the side the shift points
+to, since `∂_t u = +β^d ∂_d u` carries information against `β`.
+
+On the open line it is the Lagrange derivative on the `q + 1` nodes
+`1 − q/2 … q/2 + 1` (mirrored for `up = −1`): order `q`, reaching exactly
+`G` on the upwind side and `q/2 − 1` on the other, and **not** annihilating
+the Nyquist mode, on which every centered `D₁` vanishes — inside a horizon
+it damps the grid-scale content that the centered advection carries outward
+(`CODE.md`, "Kreiss–Oliger dissipation", step 8a). Where the downwind side
+is shorter than `q/2 − 1` the nodes start at `−k_down`; where the upwind
+side has fewer than `G` points it is not lopsided at all, and the result is
+[`closure_derivative_weights`](@ref)`(q, 1, k⁻, k⁺)`.
+"""
+function lopsided_weights(q::Integer, up::Integer, kminus::Integer,
+                          kplus::Integer)
+    _check_closure_args(q, kminus, kplus)
+    up in (-1, 1) || throw(ArgumentError(
+        "the upwind side is +1 or −1 along the axis, the sign of the shift " *
+        "component, but up=$up"))
+    G = _reach(q)
+    kup, kdn = up > 0 ? (kplus, kminus) : (kminus, kplus)
+    kup >= G || return closure_derivative_weights(q, 1, kminus, kplus)
+    # In the upwind frame (the upwind side positive).
+    lo = max(1 - q ÷ 2, -kdn)
+    w = lagrange_derivative_weights([StencilRational(j) for j in lo:G], 1)
+    up > 0 && return lo:G, w
+    # Mirrored: `∂` is odd, so the weights change sign and order.
+    return (-G):(-lo), -reverse(w)
+end
+
+"""
+    closure_admissible(q, k⁻, k⁺) -> Bool
+
+Whether a point with `k⁻, k⁺` non-excised points on each side of an axis
+(capped at `G`) has a closure step X2b's build accepts: at least one side
+clear to the full reach `G` (`PLAN.md`, step X2b: "refusing a zone point
+with no admissible closure — excised on both sides of one axis within
+reach"). The weights exist for more than this — a gap of three points has
+a `∂²` closure — but a convex excised set never makes one, and a point that
+meets it is a statement about the geometry, not about the stencil
+**(proposed in step X1)**.
+"""
+function closure_admissible(q::Integer, kminus::Integer, kplus::Integer)
+    _check_closure_args(q, kminus, kplus)
+    return max(kminus, kplus) >= _reach(q)
+end
+
+"""
+    ClosureTable
+
+What [`closure_table`](@ref) returns: every closure of one order `q`,
+rounded once into `T`, as `isbits` arrays a kernel argument can carry.
+Weights are stored on the `2G + 1` offsets `−G … G` (slot `j + G + 1`), zero
+outside a closure's nodes, and indexed `[slot, k⁻ + 1, k⁺ + 1]`; the
+lopsided advection has a fourth index, `1` for `up = −1` and `2` for
+`up = +1`. `*_lo` and `*_hi` are the nodes each closure reads, so that a
+contraction runs over those and **never** touches an excised value, not
+even with weight zero (`0 · NaN = NaN`). `admissible` is
+[`closure_admissible`](@ref); where the derivative closures do not exist
+at all (fewer than three nodes) their weights are zero and `d_lo > d_hi`.
+"""
+struct ClosureTable{T,q,A3,A4,I2,I3,B2}
+    d1::A3
+    d2::A3
+    ko::A3
+    lop::A4
+    d_lo::I2
+    d_hi::I2
+    ko_lo::I2
+    ko_hi::I2
+    lop_lo::I3
+    lop_hi::I3
+    admissible::B2
+end
+
+"""
+    closure_table(T, ::Val{q}; dissipation = :msn) -> ClosureTable
+
+Every closure of the order-`q` scheme — `∂`, `∂²`, the dissipation closed
+by `dissipation ∈` [`DISSIPATION_CLOSURES`](@ref) and the lopsided
+advection, for every `k⁻, k⁺ ∈ 0…G` — built in `Rational` and rounded
+**once** into `T` as `T(num)/T(den)`, the conversion
+[`derivative_weights`](@ref) emits, so that the table's centered entries
+are the centered weights bit for bit at every IEEE type
+(`test/stencils_tests.jl`). A host function and not `@generated`: the
+table is a kernel *argument* for step X2b, built once per problem, and a
+plain function converts in the caller's world at every type.
+
+`:msn` is the default because it is the closure that keeps the damping
+sign in the `l²` norm on any excised pattern (`CODE.md`, "Excision", and
+"Excision: the analysis (step X1)" under "Measured results").
+"""
+function closure_table(::Type{T}, ::Val{q};
+                       dissipation::Symbol=:msn) where {T,q}
+    G = _reach(q)
+    W = 2G + 1
+    K = G + 1
+    conv(w) = T(Int(numerator(w))) / T(Int(denominator(w)))
+    d1 = zeros(T, W, K, K)
+    d2 = zeros(T, W, K, K)
+    ko = zeros(T, W, K, K)
+    lop = zeros(T, W, K, K, 2)
+    d_lo = zeros(Int8, K, K)
+    d_hi = fill(Int8(-1), K, K)
+    ko_lo = zeros(Int8, K, K)
+    ko_hi = zeros(Int8, K, K)
+    lop_lo = zeros(Int8, K, K, 2)
+    lop_hi = fill(Int8(-1), K, K, 2)
+    adm = falses(K, K)
+    for km in 0:G, kp in 0:G
+        adm[km + 1, kp + 1] = closure_admissible(q, km, kp)
+        if length(closure_nodes(q, km, kp)) >= 3
+            for (arr, m) in ((d1, 1), (d2, 2))
+                nodes, w = closure_derivative_weights(q, m, km, kp)
+                for (j, wj) in zip(nodes, w)
+                    arr[j + G + 1, km + 1, kp + 1] = conv(wj)
+                end
+                d_lo[km + 1, kp + 1] = first(nodes)
+                d_hi[km + 1, kp + 1] = last(nodes)
+            end
+            for (iu, up) in enumerate((-1, 1))
+                nodes, w = lopsided_weights(q, up, km, kp)
+                for (j, wj) in zip(nodes, w)
+                    lop[j + G + 1, km + 1, kp + 1, iu] = conv(wj)
+                end
+                lop_lo[km + 1, kp + 1, iu] = first(nodes)
+                lop_hi[km + 1, kp + 1, iu] = last(nodes)
+            end
+        end
+        nodes, w = closure_dissipation_weights(q, dissipation, km, kp)
+        for (j, wj) in zip(nodes, w)
+            ko[j + G + 1, km + 1, kp + 1] = conv(wj)
+        end
+        ko_lo[km + 1, kp + 1] = first(nodes)
+        ko_hi[km + 1, kp + 1] = last(nodes)
+    end
+    A3 = SArray{Tuple{W,K,K}}
+    I2 = SArray{Tuple{K,K}}
+    I3 = SArray{Tuple{K,K,2}}
+    t = (A3(d1), A3(d2), A3(ko), SArray{Tuple{W,K,K,2}}(lop), I2(d_lo),
+         I2(d_hi), I2(ko_lo), I2(ko_hi), I3(lop_lo), I3(lop_hi), I2(adm))
+    return ClosureTable{T,q,typeof(t[1]),typeof(t[4]),typeof(t[5]),
+                        typeof(t[9]),typeof(t[11])}(t...)
+end

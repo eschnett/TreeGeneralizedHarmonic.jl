@@ -20,6 +20,7 @@
 # are weights and polynomials, and this file stays cheap.
 
 using KernelAbstractions: CPU, @Const, @index, @kernel, synchronize
+using LinearAlgebra: Symmetric, eigen
 using MultiFloats: Float32x2
 using Random: MersenneTwister
 using StaticArrays: SVector
@@ -517,4 +518,321 @@ end
     @test occursin("even", errmsg(() -> rational_derivative_weights(3, 1)))
     @test occursin("twice", errmsg(() -> rational_derivative_weights(4, 3)))
     @test occursin("2r = q + 2", errmsg(() -> rational_dissipation_weights(0)))
+end
+
+# ---------------------------------------------------------------------------
+# The closures at an excision surface (added in step X1)
+# ---------------------------------------------------------------------------
+#
+# `CODE.md`, "Excision": at an evolved point with `k⁻, k⁺ ∈ 0…G` consecutive
+# non-excised points on each side of an axis, every stencil that would read
+# past them is replaced by a closure on the points it may read. The claims
+# are exact, in `Rational`, as above: where each closure reads, what it is
+# exact on, that the full-width code is the centered one, that the
+# dissipation's closure keeps its sign, and that the table a kernel will
+# carry rounds once. No kernel uses them yet (step X2b's zone kernel will).
+# Each claim is one assertion per `(q, k⁻, k⁺)` — the cases are many and
+# cheap, and a failure names the case in its testset's loop variables.
+
+using TreeGeneralizedHarmonic: DISSIPATION_CLOSURES, closure_admissible,
+                               closure_derivative_weights,
+                               closure_dissipation_weights,
+                               closure_exact_degree, closure_nodes,
+                               closure_table, lopsided_weights
+
+# The ghost width, which is the cap on `k⁻, k⁺` and on every closure's reach.
+ghost(q) = q ÷ 2 + 1
+
+# Every `(k⁻, k⁺)` a class can hold, and whether it has a `∂²` closure at all.
+closure_cases(q) = [(km, kp) for km in 0:ghost(q) for kp in 0:ghost(q)]
+has_d2(q, km, kp) = length(closure_nodes(q, km, kp)) >= 3
+
+# A closure's contraction against a function sampled at `x0 + j h`.
+apply_closure(nodes, w, f, x0, h) = sum(w[k] * f(x0 + j * h)
+                                        for (k, j) in enumerate(nodes))
+
+# Whether `nodes, w` is exact for `∂^m` on every monomial of degree `≤ deg`
+# and not on degree `deg + 1`, in `Rational` at an off-grid center and a
+# spacing that is not a power of two, so that nothing passes by the
+# cancellation of round numbers.
+function exact_to(nodes, w, m, deg)
+    x0, h = RQ(3//7), RQ(2//5)
+    ok = all(apply_closure(nodes, w, monomial(d), x0, h) // h^m ==
+             monomial_derivative(d, m)(x0) for d in 0:deg)
+    return ok && apply_closure(nodes, w, monomial(deg + 1), x0, h) // h^m !=
+                 monomial_derivative(deg + 1, m)(x0)
+end
+
+@testset "A closure reads only what it may, and is centered where that fits: q=$q" for q in
+                                                                                     STENCIL_ORDERS
+    # Guards the two halves of `CODE.md`'s definition. A closure that read
+    # one point past `k⁻` would read an excised value — `0 · NaN = NaN` at
+    # best, a stale core at worst — and one past `G` would need a halo the
+    # mesh does not have; and a closure that differed from the centered
+    # stencil where the centered one fits would change the exterior's
+    # operator, which `PLAN.md`'s sharp edges require to be unchanged bit for
+    # bit. Not centered, it takes *every* point it may read — the most
+    # accurate stencil there, and the one an extrapolation of the excised taps
+    # followed by the centered stencil gives (`CODE.md`, "Excision").
+    G = ghost(q)
+    r = q ÷ 2
+    inside(ns, km, kp) = first(ns) >= -min(km, G) && last(ns) <= min(kp, G)
+    @test all(inside(closure_nodes(q, km, kp), km, kp)
+              for (km, kp) in closure_cases(q))
+    for (km, kp) in closure_cases(q), m in (1, 2)
+        has_d2(q, km, kp) || continue
+        ns, w = closure_derivative_weights(q, m, km, kp)
+        want = min(km, kp) >= r ? ((-r):r) : ((-min(km, G)):min(kp, G))
+        @test ns == closure_nodes(q, km, kp) == want && length(w) == length(ns)
+        min(km, kp) >= r && @test w == rational_derivative_weights(q, m)
+        # A mirrored point has the mirrored closure: `∂` odd, `∂²` even.
+        ms, wm = closure_derivative_weights(q, m, kp, km)
+        @test ms == (-last(ns)):(-first(ns)) &&
+              wm == (isodd(m) ? -1 : 1) .* reverse(w)
+    end
+    # The starting family's orders at the first evolved point, `CODE.md`:
+    # `q/2 + 1` for `∂` and `q/2` for `∂²` — `(2, 1)` at `q = 2`, `(3, 2)` at
+    # `q = 4` — and the centered `q` from `k = q/2` on.
+    @test closure_exact_degree(q, 1, 0, G) == q ÷ 2 + 1          # order q/2 + 1
+    @test closure_exact_degree(q, 2, 0, G) - 1 == q ÷ 2          # order q/2
+    @test closure_exact_degree(q, 1, r, G) == q
+    @test closure_exact_degree(q, 2, r, G) - 1 == q
+end
+
+@testset "Every closure is exact to its degree and not one further: q=$q" for q in
+                                                                             STENCIL_ORDERS
+    # Guards the claim `CODE.md` makes of every closure, and the one a
+    # convergence measurement near the surface would be read against: a
+    # closure is the Lagrange derivative on its nodes, exact to
+    # `closure_exact_degree` and *not* exact one degree further — which is
+    # what catches a node list off by one or a weight vector padded with a
+    # point it does not use.
+    for (km, kp) in closure_cases(q), m in (1, 2)
+        has_d2(q, km, kp) || continue
+        @test exact_to(closure_derivative_weights(q, m, km, kp)..., m,
+                       closure_exact_degree(q, m, km, kp))
+    end
+    # A wider reach than `G` — only step X1's models ask for one — is still
+    # the Lagrange derivative on every node it may read.
+    G = ghost(q)
+    nodes, w = closure_derivative_weights(q, 2, 0, G + 2; reach=G + 2)
+    @test nodes == 0:(G + 2)
+    @test exact_to(nodes, w, 2, G + 2)
+end
+
+# The Mattsson–Svärd–Nordström operator built *independently* of
+# `closure_dissipation_weights`: on a line of `n` points with the excised
+# ones marked, `−2^{−2r} Dᵀ B D` with `D` the `r`-th forward difference over
+# every window `[k, k + r]` and `B` its indicator of a window of evolved
+# points. And the same operator assembled row by row from the closures,
+# with `k⁻, k⁺` counted on the line and capped at `G`.
+function msn_global(r, excised)
+    n = length(excised)
+    Q = zeros(RQ, n, n)
+    d = [RQ((iseven(r - j) ? 1 : -1) * binomial(r, j)) for j in 0:r]
+    for k in 1:(n - r)
+        all(.!excised[k:(k + r)]) || continue
+        Q[k:(k + r), k:(k + r)] .-= (d * d') ./ RQ(2)^(2r)
+    end
+    return Q
+end
+
+function closure_line_operator(q, kind, excised)
+    n = length(excised)
+    G = ghost(q)
+    Q = zeros(RQ, n, n)
+    for i in 1:n
+        excised[i] && continue
+        km = 0
+        while km < G && i - km - 1 >= 1 && !excised[i - km - 1]
+            km += 1
+        end
+        kp = 0
+        while kp < G && i + kp + 1 <= n && !excised[i + kp + 1]
+            kp += 1
+        end
+        nodes, w = closure_dissipation_weights(q, kind, km, kp)
+        for (j, wj) in zip(nodes, w)
+            Q[i, i + j] += wj
+        end
+    end
+    return Q
+end
+
+@testset "The dissipation's closures are the centered operator where it fits: q=$q" for q in
+                                                                                       STENCIL_ORDERS
+    # Guards the dissipation's half of "the exterior's operator is unchanged
+    # bit for bit", and its reach: every kind is the centered operator of
+    # rank `G` where `min(k⁻, k⁺) ≥ G`, reads only `[−k⁻, k⁺] ∩ [−G, G]`
+    # elsewhere, annihilates constants (a dissipation that touched them
+    # would be a source), and does not drive the Nyquist mode at the point.
+    # A closure switches off only where it has no room: the reduced rank at
+    # the first evolved point of either side, the other two only where both
+    # sides are short — which no admissible point is.
+    G = ghost(q)
+    for kind in DISSIPATION_CLOSURES, (km, kp) in closure_cases(q)
+        nodes, w = closure_dissipation_weights(q, kind, km, kp)
+        ny = sum(w[k] * alternating(j) for (k, j) in enumerate(nodes))
+        @test first(nodes) >= -min(km, G) && last(nodes) <= min(kp, G) &&
+              sum(w) == 0 && ny <= 0 &&
+              (!iszero(ny) || (kind === :reduced && min(km, kp) == 0) ||
+               !closure_admissible(q, km, kp))
+        min(km, kp) >= G &&
+            @test nodes == (-G):G && w == rational_dissipation_weights(G)
+    end
+    # The Mattsson–Svärd–Nordström closure annihilates polynomials of degree
+    # below `G` — the forward difference's own — so it is `O(h^{G−1})` near
+    # the surface and the centered `O(h^{2G−1})` away from it.
+    x0, h = RQ(3//7), RQ(2//5)
+    for (km, kp) in closure_cases(q)
+        nodes, w = closure_dissipation_weights(q, :msn, km, kp)
+        all(iszero, w) && continue
+        @test all(apply_closure(nodes, w, monomial(d), x0, h) == 0
+                  for d in 0:(G - 1))
+    end
+end
+
+@testset "The MSN closure damps in l², and the other two do not: q=$q" for q in
+                                                                         STENCIL_ORDERS
+    # Guards the choice `CODE.md` records for step X2b (proposed in step X1):
+    # the dissipation's closure has to keep the sign that makes it
+    # dissipation, and the norm that sign is stated in is the discrete
+    # `l²`, the one in which the centered operator is negative
+    # semidefinite. Mattsson, Svärd and Nordström's form is `−2^{−2r} DᵀBD`,
+    # so it is symmetric and negative semidefinite on *any* pattern of
+    # excised points — here a line with a gap, a one-point sliver, a
+    # three-point one and both ends, so that every `(k⁻, k⁺)` occurs — and
+    # the closures assembled row by row are exactly that matrix.
+    G = ghost(q)
+    excised = falses(48)
+    excised[1:2] .= true
+    excised[14:17] .= true
+    excised[22] = true
+    excised[27:29] .= true
+    excised[47:48] .= true
+    keep = .!excised
+    Q = closure_line_operator(q, :msn, excised)
+    @test Q == msn_global(G, excised)
+    @test Q[keep, keep] == transpose(Q[keep, keep])
+    rng = MersenneTwister(20261005 + q)
+    xs = [[RQ(rand(rng, -64:64), rand(rng, 1:16)) for _ in 1:48] .* keep
+          for _ in 1:16]
+    @test all(x' * Q * x <= 0 for x in xs)
+
+    # The reduced rank and the one-sided closure do not drive the Nyquist
+    # mode at any point (above), but neither is negative semidefinite in
+    # `l²`: a witness, exact, on the same line. That is why step X1 chose
+    # the third — a closure that is not damping in some norm has no energy
+    # estimate behind it.
+    for kind in (:reduced, :onesided)
+        Qk = closure_line_operator(q, kind, excised)
+        S = Float64.(Qk[keep, keep] + transpose(Qk[keep, keep])) ./ 2
+        λ, V = eigen(Symmetric(S))
+        x = zeros(RQ, 48)
+        x[keep] .= [rationalize(BigInt, v; tol=1e-9) for v in V[:, end]]
+        @test λ[end] > 0 && x' * Qk * x > 0
+    end
+end
+
+@testset "The lopsided advection is order q, reads upwind, and damps Nyquist: q=$q" for q in
+                                                                                      STENCIL_ORDERS
+    # Guards the candidate cure `CODE.md` names for the grid-scale leakage:
+    # the lopsided first derivative is the order-`q` stencil on `q + 1`
+    # nodes shifted one point to the upwind side — exact to degree `q`, not
+    # `q + 1`, reaching `G` upwind and `q/2 − 1` downwind — and, unlike every
+    # centered one, it acts on the Nyquist mode, with the sign that *damps*
+    # it under the code's advection `∂_t u = +β ∂u` with `β` pointing
+    # upwind.
+    G = ghost(q)
+    for up in (-1, 1)
+        nodes, w = lopsided_weights(q, up, G, G)
+        @test nodes == (up > 0 ? ((1 - q ÷ 2):G) : ((-G):(q ÷ 2 - 1)))
+        @test exact_to(nodes, w, 1, q)
+        # `β` has the sign of `up`: `β · Σ_j w_j (−1)^j < 0` is a decaying
+        # Nyquist mode. And the whole symbol's real part has that sign, `β Re
+        # D(θ) ≤ 0` at every phase: dissipative everywhere, not only at
+        # Nyquist.
+        @test up * sum(w[k] * alternating(j) for (k, j) in enumerate(nodes)) < 0
+        wf = Float64.(w)
+        @test all(up * sum(wf[k] * cos(j * θ) for (k, j) in enumerate(nodes)) <=
+                  8 * eps(Float64) for θ in range(0, π; length=65))
+        # Near the surface on the downwind side it reads only what it may,
+        # and where the upwind side is short it is the closure, unlopsided.
+        for k in 0:G
+            km, kp = up > 0 ? (k, G) : (G, k)
+            ns, _ = lopsided_weights(q, up, km, kp)
+            @test first(ns) >= -min(km, G) && last(ns) <= min(kp, G)
+            km2, kp2 = up > 0 ? (G, k) : (k, G)
+            (k < G && has_d2(q, km2, kp2)) || continue
+            @test lopsided_weights(q, up, km2, kp2) ==
+                  closure_derivative_weights(q, 1, km2, kp2)
+        end
+    end
+end
+
+@testset "The closure table rounds once, and its centered rows are the kernel's: q=$q" for q in
+                                                                                         STENCIL_ORDERS
+    # Guards what step X2b's zone kernel will carry: one table per order,
+    # `isbits`, every entry the exact rational rounded once — so that its
+    # centered rows are the very weights the main kernel uses, `===` at
+    # `Float64` and `Float32`, and a zone point with no excised tap computes
+    # what the centered code computes — with the nodes each closure reads, so
+    # that a contraction never touches an excised value. (It is a plain
+    # function, not `@generated`, so it converts in the caller's world at any
+    # type: `Float32x2` builds too — checked by hand in step X1 and left out
+    # here, where its compilation would cost eighteen seconds.)
+    G = ghost(q)
+    once(T, w) = T(Int(numerator(w))) / T(Int(denominator(w)))
+    for T in (Float64, Float32)
+        tab = closure_table(T, Val(q))
+        @test isbits(tab)
+        w1 = derivative_weights(T, Val(q), Val(1))
+        w2 = derivative_weights(T, Val(q), Val(2))
+        wk = dissipation_weights(T, Val(G))
+        for (km, kp) in closure_cases(q)
+            i, j = km + 1, kp + 1
+            @test tab.admissible[i, j] == closure_admissible(q, km, kp)
+            if min(km, kp) >= q ÷ 2
+                @test SVector{q + 1}(tab.d1[2:(end - 1), i, j]) === w1 &&
+                      SVector{q + 1}(tab.d2[2:(end - 1), i, j]) === w2 &&
+                      iszero(tab.d1[1, i, j]) && iszero(tab.d1[end, i, j])
+            end
+            min(km, kp) >= G && @test SVector{2G + 1}(tab.ko[:, i, j]) === wk
+            if has_d2(q, km, kp)
+                for (arr, m) in ((tab.d1, 1), (tab.d2, 2))
+                    nodes, w = closure_derivative_weights(q, m, km, kp)
+                    @test tab.d_lo[i, j] == first(nodes) &&
+                          tab.d_hi[i, j] == last(nodes) &&
+                          all(arr[n + G + 1, i, j] === once(T, w[k])
+                              for (k, n) in enumerate(nodes)) &&
+                          all(iszero(arr[s, i, j]) for s in 1:(2G + 1)
+                              if !(s - G - 1 in nodes))
+                end
+            else
+                @test tab.d_lo[i, j] > tab.d_hi[i, j]
+            end
+            nodes, w = closure_dissipation_weights(q, :msn, km, kp)
+            @test tab.ko_lo[i, j] == first(nodes) && tab.ko_hi[i, j] == last(nodes) &&
+                  all(tab.ko[n + G + 1, i, j] === once(T, w[k])
+                      for (k, n) in enumerate(nodes))
+        end
+        # The other dissipation closures are a keyword away.
+        @test all(iszero, closure_table(T, Val(q); dissipation=:reduced).ko[:, 1, G + 1])
+    end
+end
+
+@testset "A closure that does not exist is refused, with the reason" begin
+    # `ArgumentError`s say why (`CLAUDE.md`, "Conventions"): a point excised
+    # on both sides of an axis within a point has no `∂²` at all, an odd
+    # order has no centered scheme to close, and an unknown dissipation
+    # closure is a typo the table would otherwise silently build.
+    @test_throws ArgumentError closure_derivative_weights(4, 2, 0, 1)
+    @test occursin("both sides", errmsg(() -> closure_derivative_weights(4, 2, 0, 1)))
+    @test_throws ArgumentError closure_derivative_weights(4, 3, 0, 3)
+    @test_throws ArgumentError closure_nodes(3, 0, 2)
+    @test_throws ArgumentError closure_nodes(4, -1, 2)
+    @test_throws ArgumentError closure_dissipation_weights(4, :upwind, 0, 3)
+    @test occursin("msn", errmsg(() -> closure_dissipation_weights(4, :upwind, 0, 3)))
+    @test_throws ArgumentError lopsided_weights(4, 0, 0, 3)
+    @test !closure_admissible(4, 2, 2) && closure_admissible(4, 0, 3)
 end
