@@ -738,6 +738,16 @@ per evaluation. **(Amended in step 5:** the interior's `Val` carries the
 well, because the three variants differ inside the kernel, so a `Bool`
 would have needed a second parameter beside it.**)**
 
+**(Measured on the H200 2026-10-05**, in [The right-hand side on an
+H200](#the-right-hand-side-on-an-h200-measured-2026-10-05)**.)**
+
+- The black-box attempts are worth little: the workgroup shape under 10 %; the
+  split 6 % once the source fits in registers.
+- What the kernel needed was inlining forced on the device and a register-lean
+  spelling of the source: 8.5 → 1.2 ns a point.
+- The order above changes once the source is lean: the source moves before the Π
+  components (step 3 becomes step 2), and the per-component streaming stays.
+
 The kernel is *block-local*: it reads its own block's stored points and
 nothing else, so it runs on every backend unchanged. Per-block spacings
 and origins travel to the backend once per chunk, as TreeWave's spacings
@@ -2914,6 +2924,10 @@ faster than `Float64` (not investigated), and its error is
 roundoff-dominated (`1.9e−5` against
 `1.7e−6` on the hole). None of this is tuned: G6's kernel efficiency is
 still a research project, and these are the numbers it starts from.
+**(Taken up 2026-10-05**, in [The right-hand side on an
+H200](#the-right-hand-side-on-an-h200-measured-2026-10-05): on the device the
+kernel is not inlined and spills 8 KB a thread; inlined, with a register-lean
+source, it is 7× faster.**)**
 
 **Block size and block count (measured 2026-09-26**, `bench/stepping.jl`'s
 `scan` mode, `q = 4` throughout — fourth-order centred differences, sixth-order
@@ -3447,7 +3461,14 @@ break it:
   picoseconds per point against the roofline in the format of
   `notes/ghaccel-bench.jl`, whose numbers (25.8 % of the H200 roofline,
   49.6 % on an A40, for 10 fields) are the reference this kernel is
-  compared to.
+  compared to. **(Measured 2026-10-05**, in [The right-hand side on an
+  H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).**)**
+  - **The arithmetic:** 3867 FP64 instructions a point, about 6.5 kflop, inside the
+    prediction.
+  - **The cost was neither the arithmetic nor the traffic:** the kernel held 255
+    registers and spilled 3.8–8 KB a thread, at about 5 % of FP64 peak.
+  - **The lean source alone:** 52 % of FP64 peak.
+  - **Around the kernel,** TreeAMR's scatter and ghost fill run at 0.65–1 TB/s.
 
 ## I/O and viewers
 
@@ -6781,6 +6802,315 @@ session that picks this up; nothing of it is built.
   interpolation can replace the state sampler's differenced gradient when it
   is released; nothing here needs it sooner.
 
+### The right-hand side on an H200 (measured 2026-10-05)
+
+An investigation of how the right-hand side can be evaluated faster on a GPU, made
+as an analysis and changing nothing in `src/`. Scope (Erik's):
+
+- `q = 4`, no interior (`INT = :none`), one H200, `Float64`;
+- the state's storage, the ghosts and the time integration are open to change.
+
+It takes up [Possible extensions](#possible-extensions)' research item and answers
+[Open questions](#open-questions) 3.
+
+**Setup.**
+
+- **Hardware and versions:** `main` at `acc30ba` on one H200 (Symmetry cn111,
+  `h200debugq`): TreeAMR 0.1.7, CUDA.jl 6.4.2, KernelAbstractions 0.9.43,
+  Julia 1.13.1.
+- **Case:** the gauge wave with `ε_KO = 1/2`, `γ0 = 1` (no gauge source), on a
+  uniform periodic mesh. The main mesh is 512 blocks of `32³` (16.8 M points); also
+  8 × `128³` (the octant runs' `N`) and 512 × `16³`.
+- **Timing:** the minimum of eight calls, in nanoseconds per owned point.
+- **Correctness:** every prototype was compared with `gh_rhs!` on the same filled
+  working array. `h` agrees bit for bit without inlining and to `2·10⁻³²` relative
+  with it. `Π` agrees to `7.1·10⁻¹³` of `max |∂ₜΠ|`. That is also what the
+  package's *own* kernel shows when it is merely compiled with inlining forced:
+  contraction differences of one body at two call sites ("Two spellings of one
+  expression are not bit-identical"), not a different scheme.
+- **Where the code is:** the prototypes are raw CUDA.jl kernels and KA kernels in
+  `bench/rhs_lab.jl`, whose modes `baseline`, `variants` and `round3` … `round9` are
+  the rounds below. It runs from a copy of the package with CUDA added to its
+  `Project.toml` (on Symmetry `rhs-gpu-lab`, jobs 570186–570203). Its companions:
+  - `bench/rhs_lab_source.jl`, the lean source, shared by the GPU and CPU scripts;
+  - `bench/rhs_lab_cpu.jl`, the source's CPU check and timing, in the package's own
+    environment;
+  - `bench/sass_stats.jl`, which counts a SASS dump's instructions.
+
+**Where the time goes.** The kernel is nine tenths of an evaluation, and the mesh
+pattern around it is small today:
+
+| per owned point, ns | 512 × `16³` | 512 × `32³` | 8 × `128³` |
+|---|---|---|---|
+| `gh_rhs!` | 9.94 | 9.21 | 9.31 |
+| — the kernel (`map_blocks!`) | 8.55 | 8.48 | 8.90 |
+| — `scatter!` | 0.36 | 0.34 | 0.33 |
+| — `fill_ghosts!` | **1.03** | 0.40 | 0.08 |
+| RK4 step (IMEXRungeKutta, broadcast) | 40.4 | 37.4 | 37.8 |
+
+A step is 4.06 right-hand sides, and the stage arithmetic is 0.54 ns a point a step.
+An evaluation launches 28 kernels (26 transfer groups, the scatter, the kernel), each
+4 µs of host time, and the GPU is busy 97 % of it: launch overhead is not a cost here.
+The workgroup shape moves the kernel by less than 10 % (`(32, 8, 1)` and `(32, 4, 1)`
+best, `(8, 8, 2)` worst).
+
+**Why the kernel is slow: on a device it is not inlined.** KA launches it with a
+default `CUDABackend()`, whose `always_inline = false` leaves GPUCompiler to Julia's
+inlining heuristics. These keep as real functions:
+
+- the `ntuple(Val(n)) do … end` blocks of `gh_rhs_at_point`;
+- `mixed_stencil`'s closures;
+- the StaticArrays generator closures of `gh_node_source` and `metric_derivatives`.
+
+A device call passes its `SVector` and `SArray` arguments through the stack, and a
+closure that indexes an `SVector` with its argument indexes memory. The SASS:
+
+| `gpu_gh_rhs_kernel_` | as compiled | with `always_inline = true` |
+|---|---|---|
+| instructions (callees included) | 11 224 | 10 992, straight line |
+| call sites | 162, about 140 into Julia closures | 0 to Julia code |
+| registers, local memory per thread | 255, 8.1 KB | 255, 3.8 KB |
+| spill stores / loads (`STL` / `LDL`) | 2417 / 2020 | 914 / 990 |
+| FP64 instructions (`DFMA` + `DMUL` + `DADD`) | — | 3867 (2656 + 930 + 281) |
+| global loads (`LDG`) | — | 871 |
+| kernel | 8.48 ns/pt | 5.0–5.4 ns/pt |
+
+At 255 registers a 256-thread block fills an SM, so there are eight warps. The local
+memory per SM is 1–2 MB, beyond L1 (256 KB) and beyond an SM's share of L2 (50 MB
+for 132). So the spills go to HBM — inferred, not counted: no `ncu`.
+
+In the inlined build the ~1900 spill instructions move about 15 KB a point. At HBM
+bandwidth that alone is 70 ms of the kernel's 72. The FP64 pipes are about 5 %
+busy. So neither the arithmetic nor the traffic of [Precision, threads,
+devices](#precision-threads-devices)' budget is what the kernel costs, and **the
+stencils are not the problem.** Ablations of the inlined kernel (raw CUDA, static
+strides):
+
+| | ns/pt |
+|---|---|
+| state, `∂_i h`, the dissipation of `h`, the coefficients and `∂ₜh` only | 0.32 |
+| everything but the source | 1.20 |
+| everything but the Π stencils | 2.54 |
+| everything | 4.30 |
+
+The source alone in a kernel of its own, with nothing else live, still holds 255
+registers and 1.8 KB of local memory and costs 2.02 ns/pt. `gh_node_source` builds
+`Clul`, `Cluu`, `Γlll` and `Γ4` as 64-entry `SArray{Tuple{4,4,4}}` from generators,
+and nothing between Julia, LLVM and `ptxas` reorders that DAG to shorten live
+ranges.
+
+**The lever: a register-lean spelling of the source.** It keeps `gh_node_source`'s
+terms and changes three things about how they are formed:
+
+- **Unique components.** Symmetric tensors are held by their unique components:
+  `∂_a g_bc` and `Γ^a_bc` as four `SVector{10}`s in `_pack10`'s slots.
+- **Phases ordered so that intermediates die.**
+  1. `S = C2 + C2ᵀ`, one first index `a` at a time. `E = G D_a` (4×4) and
+     `Cuu = E G` (ten values) give `C2[a, b] = Σ_μν Cuu_μν D_μ[ν, b]`. No 4×4×4
+     array is ever formed.
+  2. The forty `Γ^a_bc = Σ_x G^{ax} ½(D_b[x,c] + D_c[x,b] − D_x[b,c])` and
+     `Γ^c = Σ G^{de} Γ^c_de`, then per packed `(ab)`:
+     `−2 Σ_xy Γ^x_ya Γ^y_xb − (∂_a H_b + ∂_b H_a) + 2 Σ_c Γ^c_ab H_c − Σ_c Γ^c ∂_c g_ab`.
+  3. The damping.
+  4. `−α√γ S`.
+- **No closures.** Every loop is unrolled with literal indices by
+  `Base.Cartesian.@ntuple`.
+
+It agrees with `gh_node_source` to `8·10⁻¹⁶` relative, the worst of 200 random
+Lorentzian states (`bench/rhs_lab_cpu.jl`). It is not a re-derivation: it is a third spelling of the validated algebra,
+to be tested against `gh_node_source` and `gh_node_rhs` as the second spelling is
+tested against the first. Measured:
+
+| `N = 32` | ns/pt | registers, local |
+|---|---|---|
+| source alone, `gh_node_source` | 2.02 | 255, 1792 B |
+| source alone, lean | **0.178** | 254, 40 B |
+| fused kernel, package source, reordered (below) | 3.81 | 255, 3.3 KB |
+| fused kernel, lean source, reordered | **1.21** (1.32 at `16³`, 1.49 at `128³`) | 255, 2.0 KB |
+| two kernels: pointwise and source, then the Π principal part | 0.85 + 0.29 = 1.14 | |
+| three kernels: stencils and coefficients, the source, the Π principal part | 0.67 + 0.18 + 0.29 = 1.14 | |
+
+The lean source does 1879 FP64 instructions a point: 3.1 kflop in 0.178 ns,
+17.7 TFLOP/s, **52 % of the H200's FP64 peak**. The package's spelling of the same
+terms takes 2.02 ns, eleven times as long.
+
+On the CPU (development machine, one thread, `bench/rhs_lab_cpu.jl`), each
+inlined into its caller as in the kernel:
+
+| | ns per call |
+|---|---|
+| `gh_node_source` | 383–396 |
+| the closure-free lean source | 90 |
+| the first lean version, each loop an `ntuple` do-block | 2.6–2.7 µs |
+
+So the closure-free spelling is 4.3× faster than `gh_node_source` on the CPU. The
+do-block version was also 46 ns/pt on the device without forced inlining: its
+closures were calls on both backends.
+
+**The fused kernel's order matters once the source is lean.** The package's kernel
+with only `gh_node_source` replaced runs at 7.56 ns/pt inlined and 49 ns/pt without.
+`CODE.md`'s streaming order puts the source last, as step 3. The fast kernel keeps
+the per-component stencil streaming but moves the source before the Π components:
+
+1. load the state and form `∂_i h` and the coefficient set;
+2. form `∂ₜh` with its dissipation and **store it**;
+3. form the source;
+4. run a *runtime* `for` loop over the ten Π components, each formed, combined with
+   its source component and stored.
+
+As a KA kernel (static workgroup, `N = 32`):
+
+| | ns/pt |
+|---|---|
+| the order above, static strides (`Val(N)`), stencils without the zero weights | **1.21** |
+| … with strides from `size(work)` | 1.26 |
+| … with the Π components unrolled by `ntuple` | 1.29 |
+| … with all stencil weights, zeros included | 1.21 |
+| … with the source after the Π components (the package's order) | 1.34 |
+| dynamic strides, unrolled, all weights, source last, together | 3.48 |
+| the order above without `always_inline` | 51 (3.10 with the closure-free source) |
+
+**KernelAbstractions is not the obstacle, and the launch must be configured.**
+Written as KA kernels over `@index(Global, NTuple)`, the three-kernel split matches
+raw CUDA exactly: 1.15 ns/pt at `N = 32` and 1.29–1.31 at `N = 128`. That needs two
+things:
+
+- **a static workgroup**, `kernel(backend, (32, 4, 1, 1))`. A dynamic one costs
+  about 20 % (1.38 ns/pt);
+- **forced inlining.** Without it the split runs at 48–50 ns/pt.
+
+The package cannot ask for either today. `launch_by_owner!` launches with
+`get_backend(fs.work)`, a default `CUDABackend()`, and a field set does not keep the
+backend it was built with. GHSO2 met the same trap on the CPU (`get_backend(::Array)`
+always returns the dynamic `CPU()`). There are two ways out:
+
+- **TreeAMR keeps the backend**, its flags and a workgroup, and `map_blocks!`
+  launches with it — upstream, by the mesh rule;
+- **every helper the kernel reaches is written without closures**, as the lean
+  source is. Measured for the source alone: 0.22 ns/pt without the flag, 0.18 with
+  it.
+
+**The design's other ideas, measured.**
+
+| idea (where it was proposed) | measured | verdict |
+|---|---|---|
+| Stencil/algebra split ("One right-hand-side evaluation", black-box attempt) | package source: 3.2 + 0.29 against 4.3 fused (inlined); lean source: 1.14 against 1.21 | 6 % once the source fits; the Π principal part alone is a spill-free 0.29 ns/pt kernel at ~80 % of L1 load bandwidth |
+| Workgroup shape (black-box attempt; GHAccel's 10 %) | within 10 % for a spilling kernel; static against dynamic is ~20 % for the split | set a static `(32, 4, 1)`; no further tuning |
+| `Float32` (black-box attempt) | not measured: `Float64` is the requirement (1.4–1.6× in September) | — |
+| Shared-memory staging of one variable's ghosted block ([Possible extensions](#possible-extensions)) | Π principal part, one component's `h` and `Π` tiles at a time: 0.95–1.59 ns/pt against 0.28 through L1 | **no**: L1 already holds the reuse |
+| Fusing the scatter and the stage update into the kernel (GHSO2's "Tier 5") | scatter plus stage arithmetic ≈ 0.48 ns/pt per right-hand side | second order now; ~10–15 % of a step after the kernel (below) |
+| Generated code for the source's register schedule | the hand-written lean source, 11× the source and 7× the kernel | **yes**, and no generator is needed |
+| Kernel or scatter-and-ghost pattern first ([Possible extensions](#possible-extensions)) | the kernel is 92 % of an evaluation | the kernel, then the pattern |
+| `Int32`, arrays, `div` (GHAccel) | static against dynamic strides: no difference while spilling, 4 % in the lean kernel | minor |
+| Skipping the stencils' zero weights (new; IEEE forbids dropping `0·x`, so a fifth of the first derivative's loads and over a third of the mixed derivative's are zeros) | Π principal part 0.283 against 0.309 ns/pt; nothing elsewhere | minor |
+| `maxregs` (new) | always slower: the fused kernel 5.95 at 128 and 5.72 at 168 against 4.30 | no |
+| One Π component per thread (new) | 0.31–0.43 against 0.28–0.31 ns/pt | no |
+
+The algebraic Kerr-Schild source has `gh_node_source`'s structure — an `SMatrix`
+generator over closures. It adds 0.47 ns/pt to the fused lean kernel and costs 0.54
+ns/pt in the source's own kernel against 0.18 without it, so it wants the same
+treatment. So does `metric_derivatives`: the stencils-and-coefficients kernel still
+spills 1.26 KB.
+
+**Around the kernel: storage, ghosts and time integration.** Once the kernel is
+1.2 ns/pt, the pattern around it is 40 % of an evaluation at `N = 32` and two thirds
+at `N = 16`:
+
+| per owned point, ns | `16³` | `32³` | `128³` |
+|---|---|---|---|
+| TreeAMR `scatter!` | 0.36 | 0.34 | 0.33 |
+| the same with static strides | 0.19 | 0.14 | 0.12 |
+| TreeAMR `fill_ghosts!` | 1.03 | 0.40 | 0.08 |
+| copy floor: 20 values in, 20 out | 0.10 | 0.088 | 0.086 |
+| one stage broadcast, `y + c k` | 0.12 | 0.12 | 0.12 |
+| stage update and scatter in one kernel | 0.41 | 0.35 | 0.32 |
+| the fused lean kernel, for scale | 1.32 | 1.21 | 1.49 |
+
+**TreeAMR's copy kernels run far below bandwidth.**
+
+- The scatter moves 320 B a point at 0.96 TB/s, and the ghost fill's transfer kernel
+  0.65–0.68 TB/s, of the H200's 4.8 TB/s.
+- Both index through KA's 5-D `CartesianIndices` with run-time sizes. Their SASS is
+  about 1200 instructions for one element, with integer division sequences.
+- A static-stride scatter is 2.4× faster. A fill at copy bandwidth would be about 4×
+  faster, which at `16³` saves more than the whole lean kernel costs.
+- That is TreeAMR's: precomputed or static indexing for its copy groups.
+
+**Storage.**
+
+- **Block size.** On the device `N ≥ 32`: at `16³` the fill is as dear as the
+  kernel. At `128³` the fill is negligible, but the stencil kernels are 5–25 %
+  slower (the fused lean kernel 1.49 against 1.21) because their strides reach
+  further. With an efficient fill, `32`–`64` is the range to use.
+- **Layout.** The variable-major block layout `(i, j, k, v, b)` stays: warps
+  coalesce along `i` and every component is a dense 3-D array. Padding the stored
+  `x` extent (39 at `N = 32`) so that owned rows start on 128 B would save L1
+  wavefronts on the stencil loads without an `x` offset — about half of them — for
+  perhaps 10 % on the stencil kernels **(predicted, not measured)**.
+- **A ghosted state.** The integrator's stage vectors are field sets, so there is
+  no scatter. The cost is `(N + 2G + 1)³/N³` of memory per stage vector — 1.81 at
+  `N = 32`, 1.16 at `N = 128` — unless the stage arithmetic skips the ghosts.
+
+**Time integration.** A native RK4 whose stage update is the right-hand side's
+epilogue never stores `k`. The kernel writes `acc += b Δt k`, and writes the next
+stage's input `y + a Δt k` straight into a second working array — double-buffered,
+since neighbours still read the current one.
+
+- **What it saves:** about 640 B a point a stage against 960, so 0.1–0.2 ns/pt a
+  stage and **10–15 % of a step** once the kernel is 1.2 ns/pt. It removes passes,
+  not much traffic.
+- **What it would change:** the range projection is pointwise and would go into the
+  same epilogue. That merges two of [the state's three
+  writers](#the-range-projection) into one kernel, which is a
+  decision for review.
+
+**The projection (predicted)**, per owned point at `N = 32`, from the measured
+pieces:
+
+| ns/pt | today | kernel fixed | and TreeAMR's copies at bandwidth | and a ghosted state with a fused stepper |
+|---|---|---|---|---|
+| kernel | 8.48 | 1.21 | 1.21 | ~1.3 with the epilogue |
+| scatter | 0.34 | 0.34 | 0.14 | 0 |
+| ghost fill | 0.40 | 0.40 | ~0.1 | ~0.1 |
+| right-hand side | 9.21 | 1.95 | 1.45 | ~1.4 |
+| RK4 step | 37.4 | ~8.3 | ~6.3 | ~5.6 |
+
+That is 4.5× to 7× per step. At `128³` the first column's change alone gives about
+8 ns/pt.
+
+**The order of the work (proposed).**
+
+1. **The lean, closure-free source in `pointwise.jl`.** It is a third spelling,
+   tested to roundoff against `gh_node_source` on every background of
+   `pointwise_backgrounds.jl` and against the forward-mode pass. It helps the CPU
+   too.
+2. **The kernel in the order above**, with `Val(N)` for static strides and linear
+   `@inbounds` stores. This amends "One right-hand-side evaluation": the source
+   moves from step 3 to step 2, and the per-component streaming stays.
+3. **Forced inlining and a static workgroup** on the device, through TreeAMR keeping
+   the backend a field set was built with, or the kernel's remaining closures
+   rewritten.
+   - Steps 1–3 together are measured: **8.5 → 1.2 ns/pt**.
+   - Steps 1–2 alone are 3.1 ns/pt.
+4. **TreeAMR's scatter and transfer kernels at bandwidth:** 0.74 → ~0.25 ns/pt at
+   `N = 32`, and more at `N = 16`. Upstream.
+5. **`metric_derivatives` and the algebraic gauge source made lean** like the
+   source.
+6. **Then, if its 10–15 % is wanted, a native stepper** with a ghosted state and the
+   stage update fused into the right-hand side.
+
+Not worth doing, measured: shared-memory staging of the principal part, `maxregs`,
+one component per thread, further workgroup tuning.
+
+**Not measured.**
+
+- A hole: the interior branches, the sampled gauge source and the `:fitted` cache
+  reads are outside this scope.
+- `ncu` counters: occupancy and HBM traffic above are inferred from registers,
+  local memory and SASS counts.
+- `Float32`, more than one GPU, and the monitor kernels.
+- The CPU effect of steps 2–3; only the source's is measured.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -6847,7 +7177,13 @@ the design note that would start each:
   and a change to TreeAMR's RHS contract); generated code for the
   register schedule of the source algebra; and the question the traffic
   estimate above raises, whether TreeAMR's scatter-and-ghost pattern or
-  the kernel is the first thing to change.
+  the kernel is the first thing to change. **(Investigated 2026-10-05**, in [The
+  right-hand side on an H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).**)**
+  - Shared-memory staging is slower than L1.
+  - The source's register schedule is the lever, and a hand-written spelling
+    suffices.
+  - The kernel comes first; then TreeAMR's scatter and transfer kernels; the fused
+    stage update last, at 10–15 % of a step.
 - **A truncation-error indicator** in place of Löhner's — Richardson
   between a block and its restriction, which TreeAMR's operators make
   cheap — if the calibration in G4 shows Löhner's thresholds to be
@@ -7014,7 +7350,13 @@ first touch them:
    algebra is 505 ns and the stencils the rest, and the mesh pattern
    around it adds another 616. A host CPU says nothing about spills, so
    the question stays open for the H200; what G2 adds to it is that the
-   split it would be measured against is 3:1 and not 1:1.
+   split it would be measured against is 3:1 and not 1:1. **(Answered on the
+   H200 2026-10-05**, in [The right-hand side on an
+   H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).**)**
+   - The split is worth 1.25× with the package's source and 6 % with a
+     register-lean one, so the fused kernel stays.
+   - The spills come from the source and from closures left uninlined on the
+     device, not from the stencils.
 4. **In-kernel evaluation of `SpacetimeMetrics`** on the H200 (G6); the
    structure does not depend on it, the cost does.
 5. **The defaults** — `q = 4`, `N = 32`, `cfl = 1/4`, `ε_KO = 0.5`,

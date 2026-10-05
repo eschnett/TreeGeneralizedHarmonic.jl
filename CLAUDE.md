@@ -731,6 +731,22 @@ placements) in a scratch copy with `OrdinaryDiffEqLowOrderRK` and
 BENCH_MODE=step BENCH_CASE=wave,hole julia --project=. -t 4 bench/stepping.jl
 ```
 
+The GPU right-hand-side prototypes (added 2026-10-05) are `bench/rhs_lab.jl`:
+`key=value` options, one mode per round of `CODE.md`'s "The right-hand side on an
+H200", listed in its header. Like `bench/stepping.jl` on a device, it runs from a
+copy with `CUDA` added — on Symmetry `rhs-gpu-lab`, one H200 a job in `h200debugq`.
+`bench/rhs_lab_source.jl` is the lean source it measures. `bench/rhs_lab_cpu.jl`
+checks and times that source on the CPU in the package's own environment, and
+`bench/sass_stats.jl` counts the instructions of a SASS dump it writes:
+
+```bash
+julia --project=. bench/rhs_lab.jl mode=round9 N=32 roots=8
+```
+
+```bash
+julia --project=. bench/rhs_lab_cpu.jl
+```
+
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a
 64-core EPYC node, which is what makes them parallel — a node *core* is
