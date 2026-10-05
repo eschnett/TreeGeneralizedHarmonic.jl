@@ -2413,7 +2413,9 @@ neither is good enough. Excision needs none. `PLAN.md`'s steps X1–X3 decide
 whether it works on this mesh: X1 by models on the host, X2 by building it,
 X3 by measuring it on the octant against `:damped` and `:fitted`. Nothing
 below is built yet; every number is **(predicted)** until a step measures
-it. Moving holes — points that leave the excised set on the trailing side
+it. **(Amended in step X1:** the closure weights are built, in
+`src/stencils.jl`, and X1's models have measured what is marked so; no
+kernel uses either yet.**)** Moving holes — points that leave the excised set on the trailing side
 and need values — are a later round.
 
 **The variant, `:excised`.** Points beyond the **excision surface** are
@@ -2464,6 +2466,7 @@ built in `Rational` and rounded once into `T`.
   `x + a e_i` it is taken at.
 - Kreiss–Oliger dissipation near the surface needs a one-sided or
   reduced-rank form that keeps the damping sign. Step X1 chooses it.
+  **(Chosen in step X1: Mattsson–Svärd–Nordström's, `:msn`, below.)**
 - **Lopsided (upwinded) shift advection** inside the horizon is the
   candidate cure for the grid-scale leakage. Inside the horizon `β`
   points away from the hole, so the upwind side of `β^k ∂_k` *is* the
@@ -2471,7 +2474,67 @@ built in `Rational` and rounded once into `T`.
   centered `D₁` annihilates. It is a blend, `C²` in the depth below the
   horizon, off outside it, so the exterior's operator is unchanged bit for
   bit. X1 says whether it is needed; X2 builds it as an option, off by
-  default.
+  default. **(Answered in step X1: not for stability; it is the lever on
+  leakage. Below.)**
+
+**The closures as built (amended in step X1).** `src/stencils.jl` holds
+every closure as a function of `(q, k⁻, k⁺)` alone, in `Rational` on
+`lagrange_derivative_weights`, with `k⁻, k⁺` capped at `G` (`G` meaning
+"at least `G`"):
+- `closure_nodes`, `closure_derivative_weights` and `closure_exact_degree`
+  are the starting family above, unchanged: centered from `min(k⁻, k⁺) ≥
+  q/2`, otherwise every node in `[−min(k⁻, G), min(k⁺, G)]`. At the first
+  evolved point the orders are `(2, 1)` at `q = 2`, `(3, 2)` at `q = 4` and
+  `(q/2 + 1, q/2)` at every `q`. A `reach` keyword moves the cap; only the
+  models use it.
+- `closure_dissipation_weights(q, kind, k⁻, k⁺)` has the three closures,
+  `DISSIPATION_CLOSURES = (:reduced, :onesided, :msn)`:
+  - the reduced rank `r′ = min(k⁻, k⁺)`, none at the first evolved point;
+  - the `2r′`-th difference shifted to the evolved side and signed to damp
+    Nyquist at the point;
+  - Mattsson, Svärd and Nordström's `−2^{−2r} D_rᵀ B D_r`, `D_r` the
+    `r`-th forward difference and `B` the indicator of its windows of
+    evolved points. Its interior rows are the centered operator, it reads
+    `[−k⁻, G]`, and it annihilates degree `< G` near the surface.
+
+  Every kind is the centered operator where `min(k⁻, k⁺) ≥ G`, and none
+  drives Nyquist at any point. **Only `:msn` is negative semidefinite in
+  the discrete `l²` norm, on any excised pattern; the reduced rank and the
+  one-sided closure are not** (an exact witness each in
+  `test/stencils_tests.jl`). The symmetric part's largest eigenvalue, in
+  units of `ε/h`, is `+0.033–0.035` (reduced) and `+0.022–0.096`
+  (one-sided) on a half-line at `q = 2 … 8`, and `+0.052`, `+0.059–0.099`
+  on the test's line with gaps, against `10⁻¹⁶` for `:msn` (measured in
+  step X1). So **the dissipation's closure is `:msn` (proposed in step
+  X1)**, in the norm in which the centered operator is damping. The models
+  cannot tell the three apart — on the frozen line all three are stable at
+  the faces Kerr-Schild `a = 0` has and unstable where the shift points
+  into the excised set at `ε_KO = 1/2` (the reduced rank and the one-sided
+  closure escape some of those rows at `ε_KO = 1`), and on the plane all
+  three decay at the same rate —
+  so the choice rests on the estimate only `:msn` has.
+- `lopsided_weights(q, up, k⁻, k⁺)` is the order-`q` first derivative on
+  `1 − q/2 … q/2 + 1`, mirrored for `up = −1`. It reaches `G` upwind and
+  `q/2 − 1` downwind; nearer the surface on the downwind side it starts at
+  `−k_down`, and where the upwind side is short it is the closure,
+  unlopsided. Its symbol's real part has the damping sign at every phase,
+  not only at Nyquist (asserted at 65 phases).
+- `closure_admissible(q, k⁻, k⁺)` is one side clear to `G`. That is X2b's
+  build-time refusal "excised on both sides of one axis within reach"
+  **(proposed in step X1)**. The weights exist for more (a three-point gap
+  has a `∂²` closure), but a convex excised set never makes such a point.
+- `closure_table(T, Val(q); dissipation = :msn)` returns a `ClosureTable`,
+  the kernel argument X2b will carry. `d1`, `d2`, `ko` are `[slot, k⁻ + 1,
+  k⁺ + 1]` on the `2G + 1` slots `−G … G` (slot `j + G + 1`, zero outside
+  the closure's nodes), and `lop` has a fourth index for `up = −1, +1`.
+  `d_lo/d_hi`, `ko_lo/ko_hi` and `lop_lo/lop_hi` are the nodes each closure
+  reads, so that a contraction never touches an excised value, and
+  `admissible` is the refusal. Every entry is `T(num)/T(den)` once, so its
+  centered rows are `derivative_weights`/`dissipation_weights` bit for bit
+  at `Float64` and `Float32`. It is **4624 bytes at `q = 4`, `Float64`**
+  (1888 at `q = 2`, 2384 at `q = 4`, `Float32`): above CUDA's classic 4 kB
+  kernel-parameter limit and inside the 32 kB that CUDA 12.1 allows on an
+  H200. X2b decides between an argument and a device array.
 
 **The outflow condition, and the lego staircase (predicted 2026-10-05; X1
 measures).** In the continuum, a surface inside the horizon needs no
@@ -2500,6 +2563,93 @@ written. It compares:
   excision codes have used — with and without lopsided advection.
 The normal-direction fill priced in [Possible
 extensions](#possible-extensions) stays the last resort.
+
+**What X1 measured: go, for Kerr-Schild `a = 0` (measured in step X1).**
+The tables are under [Measured results](#measured-results), "Excision: the
+analysis (step X1)":
+- **The prediction holds.** On the lego sphere the inflow-like fraction is
+  `r_E/(2M)` to `0.03` at every `h` from `1/16` to `1/48`.
+- **Every inflow-like face of Kerr-Schild `a = 0` is of the benign kind.**
+  `β` is radial, so at every face the shift still points out of the excised
+  set, `0 ≤ b/a < 1`. On the frozen line such a face is marginal: it has a
+  zero mode, the static `u = c(x − L)` that an inflow boundary without data
+  admits (a Jordan block at `q = 4`), and nothing to the right of zero. An
+  outflow face (`b/a > 1`) is strictly stable.
+- **On the lego circle the per-axis closures are stable at every `r_E` from
+  `M/2` to `7M/4`.** That is inflow-like fractions `0` to `0.73`, at
+  `q = 2, 4`, `ε_KO = 1/2` and `1`, with and without lopsided advection.
+  The rightmost eigenvalue is `−0.31` to `−0.37/M` in every
+  configuration, against the `:damped` layer's `−0.26` to `−0.34/M`. Noise
+  decays at the box's own `−0.32` to `−0.37/M` to roundoff by `100 M` at
+  `h = 5/128` and `5/256`. The per-stencil extrapolation is stable too, at
+  `ε_KO > 0`.
+- **`ε_KO > 0` is required, and it is what separates the two families.**
+  Without dissipation the per-axis closures grow as the interior itself
+  does: `+0.08` to `+0.14/M` against the layer's `+0.11` to `+0.14/M`,
+  which has no surface, and nearly independent of `h` (GHSO2's grid-scale
+  layer, `notes/sonic-surface.md`). The extrapolation grows at `+1.1` to
+  `+3.8/M`, on the surface, and faster at the finer `h`.
+- **The closures do what a bare frozen core does not.** Centered stencils
+  reading the unperturbed core's data — Dirichlet at an outflow surface —
+  barely decay at `r_E = 3M/2`, `−0.07` to `+0.04/M` (growing at `q = 2`,
+  `h = 5/48`), against the closures' `−0.31` to `−0.37/M`.
+- **The closure leaks what the layer leaks.** At the layer's outer radius it
+  transmits the layer's amount of grid-scale content through the horizon,
+  so step 8a's leakage margin carries over unchanged. The lopsided
+  advection is the lever on that leakage, not on stability: from eight
+  cells deep it cuts what crosses the horizon `7.6–72×`. It costs RK4's
+  step — on the plane `cfl` from `2.05` to `1.21–1.50` at `q = 2` and from
+  `1.86` to `1.52–1.79` at `q = 4` (`ε_KO = 1/2`) — which `cfl = 1/2`
+  absorbs.
+- **Spinning holes are not covered.** Their lego surfaces have faces where
+  frame dragging turns the shift *into* the excised set along the axis
+  (`b/a < 0`, on the surfaces with normal outflow: 2–14 % of faces at
+  Kerr-Schild `a = 3/5`, 5–10 % at `9/10`, 12–17 % on harmonic `a = 7/10`
+  and 17–18 % at `9/10`, down to `b/a = −1.2` to `−2.9`). On the frozen
+  line the closure is **unstable** there, `0.03–0.19/h`, at every `ε_KO`
+  under `:msn` and under every dissipation closure at `ε_KO = 1/2`,
+  lopsided or not. And Kerr-Schild's normal outflow ends at the inner
+  horizon — `0.63 M` below the outer one at the equator at `a = 9/10`, not
+  the ring — and the harmonic chart's at its disk, `0.3 M` and `0.1 M`
+  below at `a = 7/10` and `9/10`.
+
+**What X2a and X2b take from X1 (proposed in step X1).**
+1. **The closure family is the per-axis one, as built** (the starting
+   family, reach `G`, `closure_table`), with the mixed derivative nested.
+   The per-stencil extrapolation is as stable at `ε_KO > 0`. It needs no
+   `k±` tables, but it is ten times worse without dissipation and grows
+   with resolution there, and it extrapolates per tap.
+2. **The dissipation's closure is `:msn`.** It is the only one with the
+   damping sign in `l²`, and the plane cannot tell the three apart at
+   `ε_KO = 1/2`.
+3. **`ε_KO > 0` near the surface is part of the variant.** X2b refuses
+   `:excised` with `ε_KO = 0` (or a dissipation profile that vanishes at
+   the surface), saying why.
+4. **The lopsided advection is built as the option the plan says, off by
+   default**, and X3's depth scan runs every depth with and without it. The
+   blend is `C²` (`smoothstep`) in the depth below the horizon, from
+   `1` cell to full at `5` cells (`start = 1`, `width = 4`), the profile the
+   models measured.
+5. **The least depth, for Kerr-Schild `a = 0`:**
+   - The closures set none: `r_E = 7M/4` is stable, `0.25 M` and four cells
+     of `5/64` below the horizon.
+   - The scheme's reach sets it in cells. X2b's assertion is `m ≥ G + 1`
+     (3 cells at `q = 2`, 4 at `q = 4`).
+   - The horizon finder's footprint must not reach the excised set. Its
+     `q + 2` points per axis reach less than `G h` from the query, `√3 G h`
+     on a diagonal, so `m ≥ ⌈√3 G⌉`: **6 cells at `q = 4`** (`0.375 M` at
+     `h = 1/16`, `0.19 M` at `1/32`), 4 at `q = 2`. The octant study's
+     `:damped` run at `m = 4`, `q = 4`, whose finder reached the layer, is
+     the same bound met.
+   - Step 8a's leakage margin and the octant study's 8–12 cells are what
+     buys accuracy beyond that.
+   - **X3's depth window at `h = 1/16` is therefore `r_E = M/2 … 13M/8`,
+     6 to 24 cells.**
+
+   For the spinning charts the window exists in normal outflow (above), but
+   the per-axis closures do not hold its `b/a < 0` faces. That is the
+   question a spinning round has to answer first, with the normal-direction
+   fill or a closure for those faces.
 
 **On the mesh, and on a device (proposed 2026-10-05; step X2 decides the
 details).** These are the pieces:
@@ -6963,6 +7113,272 @@ session that picks this up; nothing of it is built.
   interpolation can replace the state sampler's differenced gradient when it
   is released; nothing here needs it sooner.
 
+### Excision: the analysis (step X1)
+
+Host-side, no kernel change: the closure weights in `src/stencils.jl` (under
+[Excision](#excision-added-2026-10-05), "The closures as built") and the
+script `test/excision_model.jl`, whose three sections are below. Every model
+is a sparse matrix assembled from the package's own closure weights and the
+background's coefficients, read through `background_state`,
+`metric_quantities` and `metric_derivatives` as the kernel reads them; its
+self-checks throw (Kerr-Schild's closed form, `dispersion.jl`'s recorded
+layer numbers to their printed digits, the parity sectors against the full
+operator to `10⁻¹²`). Measured on the development machine (Apple silicon, 12
+CPU threads, Julia 1.13.1), shared with the suite and other work at a load
+of 10–40.
+
+**Margins** (`excision_model.jl margins`, 20 s). The seed's offset surfaces
+`r_E(n̂) = r_h(n̂) − m h` at the octant runs' `h = 1/16 … 1/48`; *normal* is
+the least `b_n/a_n − 1` over the surface along its true normal (outflow
+`> 0`); *b/a* the per-axis ratio over the lego surface's closure faces (a
+face is an evolved point with an excised axis neighbour, `b = −s β^d` toward
+the excised side `s`, `a = α√γ^{dd}`), its least value and 1 % quantile;
+*inflow* the fraction of faces with `b/a < 1`, and *`b/a < 0`* of those
+whose shift points into the excised set; *clearance* the least distance
+from the surface to the chart's singular disk. Representative
+rows at `h = 1/32` (the full table has every `h` and `m = 1 … 48`):
+
+| chart | `m` | `r_E` | normal | faces | `b/a` min, 1 % | inflow | `b/a < 0` | `r_E/(2M)` | clearance (cells) |
+|---|---|---|---|---|---|---|---|---|---|
+| KS `a = 0` | 4 | 1.875 | `+0.067` | 67 662 | `0.037`, `0.099` | 0.947 | 0 | 0.938 | — |
+| | 16 | 1.500 | `+0.333` | 43 254 | `0.055`, `0.110` | 0.752 | 0 | 0.750 | — |
+| | 32 | 1.000 | `+1.000` | 19 230 | `0.072`, `0.145` | 0.495 | 0 | 0.500 | — |
+| KS `a = 3/5` | 8 | 1.55–1.65 | `+0.121` | 50 342 | `−0.286`, `−0.079` | 0.827 | 0.021 | — | 33.5 |
+| | 32 | 0.80–0.90 | `+0.456` | 14 446 | `−0.866`, `−0.494` | 0.529 | 0.071 | — | 9.5 |
+| KS `a = 9/10` | 8 | 1.19–1.45 | `+0.065` | 35 502 | `−0.676`, `−0.335` | 0.785 | 0.063 | — | 17.4 |
+| | 16 | 0.94–1.20 | `+0.065` | 23 638 | `−1.183`, `−0.594` | 0.734 | 0.092 | — | 9.4 |
+| | 24 | 0.69–0.95 | **`−0.250`** | 14 182 | `−4.117`, `−1.366` | 0.769 | 0.148 | — | 1.4 |
+| harmonic `a = 7/10` | 4 | 0.59–0.88 | `+0.136` | 11 550 | `−1.150`, `−0.887` | 0.659 | 0.138 | — | 5.6 |
+| | 8 | 0.46–0.75 | `+0.298` | 8 134 | `−1.668`, `−1.300` | 0.459 | 0.172 | — | 1.6 |
+| harmonic `a = 9/10` | 1 | 0.41–0.97 | `+0.027` | 11 054 | `−1.395`, `−1.183` | 0.816 | 0.173 | — | 2.2 |
+| | 2 | 0.37–0.94 | `+0.049` | 10 198 | `−1.503`, `−1.290` | 0.762 | 0.176 | — | 1.2 |
+
+Four findings **(measured in step X1)**:
+
+- **The lego staircase's inflow-like fraction is `r_E/(2M)`**, as predicted
+  for Kerr-Schild `a = 0`: `0.947, 0.880, 0.752, 0.622, 0.495` against
+  `0.938, 0.875, 0.750, 0.625, 0.500` at `h = 1/32`, within `0.03` at every
+  `h` and depth, and the least per-axis ratio is near zero (`0.008–0.45`):
+  some face is always nearly tangent.
+- **A spinning hole's lego surface has faces where the shift points *into*
+  the excised set along the axis, `b/a < 0`** — frame dragging gives `β` an
+  azimuthal part — down to `−0.4` (`a = 3/5`) and `−1.2` (`a = 9/10`)
+  within half an `M` of the horizon (below `−2` near the inner horizons),
+  and below `−1` (both characteristics entering) on harmonic Kerr. Kerr-Schild `a = 0` has none (`β` is radial, so
+  `b = β^r cos θ ≥ 0`), and none of the models below covers them except
+  the frozen line, which finds them unstable.
+- **Normal outflow holds everywhere between the horizon and Kerr-Schild's
+  inner horizon** — the spheroid `R = r₋`, at the equator `√(r₋² + a²)` —
+  and fails below it: the margin is positive from `m = 1` cell at every `h`
+  in every chart down to where it ends, `2M/r_E − 1` for `a = 0`; for `a = 9/10` it peaks at
+  `+0.079` half an `M` down and is `−0.058` at `0.667 M` and `−0.25` at
+  `0.75 M`, the inner horizon being `0.633 M` below the outer one at the
+  equator (`1.265 M` at `a = 3/5`). So **Kerr-Schild `a = 9/10` has room:
+  a depth window of `0.63 M` at the equator, which the ring (`0.9`) does
+  not bind** (the ring is inside the inner horizon, `1.062`); it is
+  `≤ 9` cells at `h = 1/16` and `≤ 28` at `1/48`. The harmonic chart ends
+  at its disk before the inner horizon: `0.3 M` at `a = 7/10` (a surface
+  with three cells' clearance from `h = 1/24` on, at `m ≤ 8` at `1/48`)
+  and `0.1 M` at `a = 9/10` — `m = 1, 2` at `h = 1/48` only, where `m = 4`
+  already fails normal outflow (`−0.032`).
+- **The answer per chart**, the shallowest surface with normal outflow and
+  the deepest scanned that has it and clears the disk by three cells: `m = 1`
+  and any depth to `r_E ≈ M/2` (Kerr-Schild `a = 0`); `m = 1` and `1.0 M`
+  (`a = 3/5`); `m = 1` and `0.5 M` (`a = 9/10`); `m = 1` and `0.17 M`
+  (harmonic `a = 7/10`, from `h = 1/24`); `m = 1` at `h = 1/48` only
+  (harmonic `a = 9/10`).
+
+**The frozen line** (`model1d=frozen`, 20 s): `dispersion.jl`'s
+constant-coefficient system, `a = 1/2`, on 200 points closed at the left,
+Dirichlet ghosts on the right. Entries are the dense spectrum's largest
+`Re λ` in `1/h` away from zero (`< 0` to `10⁻¹⁰`, `(b)` for a mode with
+half its norm on the first ten points), then `0` for a zero mode and `0²`
+for a Jordan block at zero (a mode growing linearly in time), and the RK4
+step the spectrum allows as `dt (a + |b|)/h`; at `ε_KO = 1/2`, the default
+closure (reach `G`, `:msn`):
+
+| `b/a` | `q = 2` | cfl | `q = 4` | cfl | Dirichlet ghosts' cfl, `q = 2, 4` | lopsided `q = 2, 4` | its cfl |
+|---|---|---|---|---|---|---|---|
+| `−1.25` | **`+1.2e−1` (b)**, `0²` | 2.38 | **`+1.9e−1` (b)**, `0` | 1.90 | 2.38, 1.90 | **`+6.8e−2`**, **`+1.6e−1`** | 1.08, 1.26 |
+| `−0.5` | **`+3.2e−2` (b)**, `0` | 1.78 | **`+5.0e−2` (b)**, `0²` | 1.61 | 1.78, 1.61 | **`+3.1e−2`**, **`+4.8e−2`** | 1.17, 1.21 |
+| `0` | `< 0`, `0²` | 1.19 | `< 0`, `0²` | 1.07 | 1.19, 1.07 | `< 0`, `< 0` | 1.19, 1.07 |
+| `0.5` | `< 0`, `0` | 1.80 | `< 0`, `0²` | 1.64 | 1.80, 1.65 | `< 0`, `< 0` | 1.23, 1.27 |
+| `0.95` | `< 0`, `0` | 2.28 | `< 0`, `0²` | 1.88 | 2.28, 1.88 | `< 0`, `< 0` | 1.22, 1.41 |
+| `1.05` | `< 0` | 2.35 | `< 0` | 1.89 | 2.35, 1.89 | `< 0`, `< 0` | 1.20, 1.44 |
+| `2` | `< 0` | 2.56 | `< 0` | 1.96 | 2.56, 1.96 | `< 0`, `< 0` | 1.13, 1.50 |
+
+- **Outflow (`b/a > 1`) is stable** at every `q`, `ε_KO ∈ {0, 1/4, 1/2,
+  1}`, reach (`G − 1 … G + 2`) and dissipation closure, and so is a
+  Dirichlet-ghost left end.
+- **An inflow-like face with the shift still pointing out of the excised
+  set (`0 ≤ b/a < 1`) is marginal, not unstable**: no eigenvalue to the
+  right of zero, and a zero mode — the static `u = c(x − L)` an inflow
+  boundary without data admits — that is a Jordan block at `q = 4` under
+  `:msn` (linear growth; a simple zero under the reduced rank and the
+  one-sided closure) and at `ε_KO = 0` for `q = 2`.
+- **A face with the shift pointing into the excised set (`b/a < 0`) is
+  unstable**, with a mode on the closure growing at `0.03–0.19/h` — at
+  every `ε_KO` from `1/4` to `1` under `:msn`, under the other two
+  closures at `ε_KO = 1/2`, at every reach but one row (reach 4 at
+  `q = 2`, `b/a = −1.25`), and with the lopsided advection (whose upwind
+  side is then the excised one, so it falls back to the closure); only the
+  reduced rank and the one-sided closure at `ε_KO = 1` escape some rows.
+  That is what the spinning charts' lego surfaces have, above.
+- **The closures do not shorten RK4's step**: the closed line allows what
+  the Dirichlet-ghost line and the open line allow, to three digits. The
+  lopsided advection does, from `1.8–2.6` to `1.1–1.5` here — at the
+  octant runs' `cfl = 1/2` a margin of two.
+
+**What the closure reflects** (`model1d=reflect`, 30 s). A pure discrete
+branch-1 packet (the fast ingoing branch, projected in Fourier space) into
+the closure; `R` the largest `|u|` off the closure's points after it has
+arrived, against its own. At `ε_KO = 0` the closure turns `0.03–1.4 %` of a
+smooth packet (`λ = 16h`) and `1–25 %` of a `λ = 8h` one into grid-scale
+outgoing content, carried at the open line's branch-2 group velocity of its
+phase (`θ = 0.55–0.97 π`; at `q = 2`, `b/a = 0.8`, measured `+0.386` against
+`+0.389` cells per unit time). At `ε_KO = 1/2` that content is damped within
+cells and `R` is `0.6–4 × 10⁻⁴` (`λ = 16h`) and `0.9–83 × 10⁻⁴` (`8h`).
+With the lopsided advection nothing comes back: `R ≤ 5 × 10⁻⁵`, and what
+remains moves inward (the packet's own mismatch with the lopsided branch,
+`v_g < 0`).
+
+**Into the surface and out through the horizon** (`model1d=radial`, 20 s).
+`dispersion.jl`'s radial line of Kerr-Schild `a = 0` at `h = 5/64`, `ε_KO =
+1/2`; the largest `A_0/A` in the first shell outside the horizon, over
+`λ = 2h, 4h, 8h` for the ripple at depth `d`, and for a Gaussian pulse
+(half-width two cells) halfway between the surface and the horizon; and
+the line's spectrum at `h = 5/64, 5/128, 5/256`:
+
+| interior | `q` | ripple `d = 4`: `2 M`, `10 M` | `d = 8`: `2 M`, `10 M` | pulse: `2 M`, `10 M` | largest `Re λ` (`1/M`) |
+|---|---|---|---|---|---|
+| the layer (`r_1 = 1.15`, control) | 2 | `9.2e−2`, `0.136` | `8.9e−3`, `5.8e−2` | `4.6e−2`, `0.112` | `−0.08`, `−0.15`, `−0.13` |
+| excised at `r_E = 1.15` | 2 | `9.2e−2`, `0.137` | `8.9e−3`, `6.1e−2` | `4.6e−2`, `0.115` | `−0.12`, `−0.13`, `−0.13` |
+| excised, lopsided | 2 | `4.6e−2`, `8.1e−2` | `3.7e−4`, `8.5e−4` | `2.7e−2`, `4.5e−2` | `−0.13` |
+| the layer (control) | 4 | `4.4e−2`, `0.177` | `1.1e−2`, `3.7e−2` | `9.2e−3`, `3.2e−2` | `−0.08`, `−0.17`, `−0.13` |
+| excised at `r_E = 1.15` | 4 | `4.4e−2`, `0.174` | `1.0e−2`, `2.6e−2` | `8.8e−3`, `1.5e−2` | `−0.13` |
+| excised, lopsided | 4 | `3.0e−2`, `8.8e−2` | `7.1e−4`, `3.4e−3` | `4.2e−3`, `1.4e−2` | `−0.13` |
+
+- **The closure at the layer's outer radius transmits what the layer
+  does**: the same to two digits from depths 2 and 4, within 6 % (`q = 2`)
+  and 30 % lower (`q = 4`) from depth 8 by `10 M`, and the pulse likewise
+  (half the layer's at `q = 4` by `10 M`).
+  So the leakage margin of step 8a ([The margin](#the-margin)) carries over
+  to excision unchanged: excision makes no more grid-scale content than the
+  layer's outer surface does.
+- **The lopsided advection is the lever on the leakage**: from depth 8 it
+  cuts what crosses the horizon `24×` and `72×` at `q = 2` (`2 M`,
+  `10 M`) and `15×` and `7.6×` at `q = 4`; from depth 4 by `1.5–2.0×`;
+  from depth 2 — inside its ramp — hardly at all.
+- A deeper surface (`r_E = 0.75`) changes nothing for content made above it,
+  and a pulse made between it and the horizon starts deeper and leaks
+  `5.7×` (`q = 2`) and `5.4×` (`q = 4`) less at `2 M`.
+
+**The go/no-go: the plane** (`model2d`). One component's evolution on
+Kerr-Schild `a = 0`'s equatorial plane, `[−5/2, 5/2]²` vertex-centered about
+the hole with zero Dirichlet ghosts, in the kernel's form with the
+coefficient gradients over the plane — the wave equation of a stationary
+2+1 metric with Kerr-Schild's radial speeds and horizon, whose continuum has
+no growing or static mode **(decided in step X1:** the first version took
+the 3D divergences at `z = 0`, which leave lower-order `∂_z` terms with no
+energy behind them; under them the `:damped` control grew at `+0.04/M` and
+the excised runs settled onto plateaus**)**. The lego circle `r < r_E` is
+excised. *axis*: per-axis closures (`:msn`); *extrap*: centered stencils
+with each excised tap replaced by the quadratic extrapolation along the
+lattice direction nearest the normal, from sources in the point's `G`-box;
+*lop*: the advection lopsided from one cell below the horizon, full at
+five. Entries are the largest `Re λ` in `1/M` over the four parity sectors
+(the operator commutes with both reflections to `10⁻¹²`), and the RK4
+`cfl = dt λ_max/h` the whole spectrum allows. At `h = 5/64` (`65²` points),
+`ε_KO = 1/2`:
+
+| `r_E/M` | `r_E/h` | faces | inflow | `q = 2`: axis | axis, lop | extrap | extrap, lop | `q = 4`: axis | axis, lop | extrap | extrap, lop |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.50 | 6.4 | 52 | 0.154 | `−0.35` / 2.05 | `−0.34` / 1.23 | `−0.35` / 2.05 | `−0.34` / 1.21 | `−0.34` / 1.86 | `−0.34` / 1.56 | `−0.34` / 1.86 | `−0.34` / 1.56 |
+| 0.75 | 9.6 | 76 | 0.211 | `−0.35` / 2.05 | `−0.34` / 1.26 | `−0.35` / 2.05 | `−0.34` / 1.24 | `−0.34` / 1.86 | `−0.34` / 1.56 | `−0.34` / 1.86 | `−0.34` / 1.55 |
+| 1.00 | 12.8 | 100 | 0.240 | `−0.35` / 2.05 | `−0.34` / 1.28 | `−0.35` / 2.05 | `−0.34` / 1.26 | `−0.34` / 1.86 | `−0.34` / 1.54 | `−0.34` / 1.86 | `−0.34` / 1.53 |
+| 1.25 | 16.0 | 124 | 0.387 | `−0.35` / 2.05 | `−0.34` / 1.32 | `−0.36` / 2.05 | `−0.34` / 1.29 | `−0.34` / 1.86 | `−0.34` / 1.57 | `−0.35` / 1.86 | `−0.34` / 1.52 |
+| 1.50 | 19.2 | 156 | 0.513 | `−0.35` / 2.05 | `−0.34` / 1.50 | `−0.37` / 2.05 | `−0.34` / 1.38 | `−0.34` / 1.86 | `−0.34` / 1.79 | `−0.34` / 1.86 | `−0.34` / 1.55 |
+| 1.75 | 22.4 | 180 | 0.667 | `−0.32` / 2.05 | `−0.33` / 2.05 | `−0.31` / 2.05 | `−0.31` / 2.05 | `−0.34` / 1.86 | `−0.34` / 1.86 | `−0.34` / 1.86 | `−0.34` / 1.86 |
+
+The `:damped` layer of the octant runs (`r_0 = 3/4`, `r_1 = 3/2`, `4/M`) on
+the same plane: `−0.27` / 2.05 (`q = 2`) and `−0.34` / 1.86 (`q = 4`). At
+`h = 5/48` (`49²`, `r_E = 4.8 … 16.8` cells, faces 36 … 132, inflow
+`0 … 0.727`) and at `ε_KO = 1` every entry is again between `−0.30` and
+`−0.36/M`; `ε_KO = 1` takes the step to `1.65` (`1.52`), and with the
+lopsided advection to `0.93–1.67` (`1.20–1.54`). **No configuration has an
+eigenvalue to the right of `−0.30/M`** — the rightmost is the box's own
+slowest decay, the same with and without a hole's closure. The inflow-like
+fraction on the circle is `1 − √(1 − r_E/(2M))` in the continuum rather
+than the sphere's `r_E/(2M)` (`0.29` against `0.5` at `r_E = M`), so the
+plane reaches a fraction of `0.73` at `r_E = 7M/4`, where the sphere has
+`0.875`; what carries
+over is the kind of face, `0 ≤ b/a < 1` in both, which the frozen line
+found marginal.
+
+*The controls* (`model2d=controls`, 13 min), the same spectrum at `h = 5/64`
+(`5/48` in parentheses) for what the go is read against:
+
+| variation | `q = 2`, `r_E = M` | `r_E = 3M/2` | `q = 4`, `r_E = M` | `r_E = 3M/2` |
+|---|---|---|---|---|
+| the `:damped` layer, `ε_KO = 0` | **`+0.108`** (`+0.106`) | | **`+0.136`** (`+0.131`) | |
+| axis, `ε_KO = 0` | **`+0.144`** (`+0.134`) | **`+0.085`** (`+0.079`) | **`+0.143`** (`+0.127`) | **`+0.094`** (`+0.088`) |
+| extrap, `ε_KO = 0` | **`+1.79` (s)** (`+1.52`) | **`+1.35` (s)** (`+1.12`) | **`+3.82` (s)** (`+3.56`) | **`+2.99` (s)** (`+2.68`) |
+| axis, reduced rank | `−0.35` | `−0.34` | `−0.34` | `−0.33` |
+| axis, one-sided | `−0.35` | `−0.35` | `−0.34` | `−0.35` |
+| extrap, degree `≤ q` | `−0.35` | `−0.37` | `−0.35` | `−0.34` |
+| extrap, degree 1 | `−0.35` | `−0.36` | `−0.34` | `−0.34` |
+| bare frozen core (Dirichlet) | `−0.17` | `−0.029` (**`+0.041` (s)**) | `−0.24` | `−0.066` (`−0.008`) |
+| bare frozen core, `ε_KO = 0` | **`+0.241`** | **`+0.191`** | **`+0.285`** | **`+0.228`** |
+
+`(s)`: the mode has half its norm within three cells of the surface.
+Without dissipation the per-axis closures grow at about the rate of the
+interior itself (the layer has no surface at all) and almost independently
+of `h`; the extrapolation grows on the surface ten to thirty times faster,
+and faster at the finer `h`. The three dissipation closures and the
+extrapolation's degree make no difference at `ε_KO = 1/2`; the bare core
+barely decays at `r_E = 3M/2` and grows on its surface at `q = 2`,
+`h = 5/48`.
+
+*Noise* (`model2d=noise`, 4 min at `129²`; `model2d=fine`, 36 min at
+`257²`): uniform noise on every unknown, RK4 at `cfl = 1/2`, `ε_KO = 1/2`,
+to `100 M`. Every configuration — the four families at every `r_E` from
+`M/2` to `7M/4`, `q = 2, 4`, and the layer — falls to `0.08–0.75` of its
+start by `10 M` and to `10⁻¹⁶–10⁻¹⁴` by `100 M`, at the spectrum's
+rightmost rate. The late rate (`1/M`, over `60–100 M`), as a range over
+`r_E`:
+
+| `q`, grid | `:damped` layer | axis | axis, lop | extrap | extrap, lop |
+|---|---|---|---|---|---|
+| 2, `129²` (`h = 5/128`) | `−0.34` | `−0.35 … −0.36` | `−0.35 … −0.36` | `−0.35 … −0.36` | `−0.35 … −0.36` |
+| 4, `129²` | `−0.35` | `−0.36` | `−0.35 … −0.37` | `−0.36` | `−0.35 … −0.37` |
+| 2, `257²` (`h = 5/256`) | `−0.36` | `−0.34 … −0.36` | `−0.34 … −0.37` | `−0.32 … −0.36` | `−0.34 … −0.37` |
+| 4, `257²` | `−0.34` | `−0.34 … −0.35` | `−0.34 … −0.36` | `−0.34 … −0.35` | `−0.34 … −0.36` |
+
+So the closures change nothing the evolution can see, at four resolutions
+and to `100 M`: the box's content falls into the hole or out through its
+face at the same rate with a layer, a closure or an extrapolation inside.
+
+**The least depth, per chart** (from the margins, the frozen line and the
+plane; `q = 4`):
+
+| chart | normal outflow | ends at (equator) | faces with `b/a < 0` | per-axis closures | least depth |
+|---|---|---|---|---|---|
+| Kerr-Schild `a = 0` | from `m = 1` | the singularity | none | **go** (`r_E = M/2 … 7M/4`) | `⌈√3 G⌉ = 6` cells (`0.375 M` at `h = 1/16`, `0.19 M` at `1/32`) |
+| Kerr-Schild `a = 3/5` | from `m = 1` | inner horizon, `1.26 M` down | 2–14 % | not covered | (6 cells) |
+| Kerr-Schild `a = 9/10` | from `m = 1` | inner horizon, `0.63 M` down | 5–10 % | not covered | (6 cells; the window is 10 cells at `h = 1/16`) |
+| harmonic `a = 7/10` | from `m = 1` | the disk, `0.3 M` down (3 cells' clearance: `m ≤ 8` at `1/48`) | 12–17 % | not covered | (6 cells: fits from `h = 1/48`) |
+| harmonic `a = 9/10` | from `m = 1` | the disk, `0.1 M` down (`m ≤ 2` at `1/48`) | 17–18 % | not covered | no room |
+
+**What it cost.** The script's parts on the development machine at a load of
+10–40 (the suite and three parts at once): `margins` 20 s, `model1d` 70 s
+(`frozen` 20 s, `reflect` 30 s, `radial` 20 s), `model2d=eig` 32 min,
+`controls` 13 min, `noise` 4 min, `fine` 36 min. The suite went from
+**4787 assertions in 19m23** (one thread, load 5–10) and **4795 in 15m59**
+(four, load 5–18) to **6458 in 22m46** (one thread, load 6–22, the first
+half beside the plane's runs) and **6466 in 15m12** (four, load 6–11). The
+`1671` new ones are `stencils_tests.jl`'s, `13.8 s` and `7.6 s` of it, most
+of that compiling the closure tables' `SArray`s at `q = 6, 8`.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -7409,7 +7825,12 @@ answer it in order:
   on the offset surfaces of every chart, and a one- and a two-dimensional
   model of the closure. The two-dimensional model is the go/no-go — the
   inflow-like closures of a lego staircase are a fraction `r_E/(2M)` of
-  them.
+  them. **(Answered in step X1: go, for Kerr-Schild `a = 0`.** The
+  per-axis closures with `:msn` dissipation are stable on the lego circle
+  at every `r_E` from `M/2` to `7M/4` at `ε_KO > 0`, and X3's depth window
+  at `h = 1/16` is `r_E = M/2 … 13M/8`. Spinning holes are not covered:
+  their faces with the shift pointing into the excised set are unstable on
+  the frozen line. See [Excision](#excision-added-2026-10-05).**)**
 - **X2a**, the stencil provider: the right-hand side's physics in one copy,
   bit for bit.
 - **X2b**, the `:excised` variant.

@@ -382,6 +382,29 @@ Measured results from "Robust stability on the octant" on hold the numbers —
 among them the `:fitted` setup to use: `h = 1/24` at the hole, `m = 16`,
 `n_L = 20`, `fit_cont = 2`.
 
+From step X1 (2026-10-05, the first of the excision round, `PLAN.md`'s
+X1–X3 on the integration branch `claude/excision-singularity-handling-30feec`)
+there are **closures** and their **analysis**, and no kernel uses either yet.
+`src/stencils.jl` has every one-sided stencil as a function of `(q, k⁻, k⁺)`
+in `Rational` — `closure_nodes`, `closure_derivative_weights`,
+`closure_exact_degree`, `closure_dissipation_weights` (`:reduced`,
+`:onesided`, `:msn`; `DISSIPATION_CLOSURES`), `lopsided_weights`,
+`closure_admissible` — and `closure_table(T, Val(q); dissipation = :msn)`,
+the `isbits` `ClosureTable` step X2b's zone kernel will carry (4.6 kB at
+`q = 4`, `Float64`). `test/stencils_tests.jl` asserts them exactly.
+**`test/excision_model.jl`** is the analysis, a standalone script beside
+`dispersion.jl`: `margins` (the outflow condition on every chart's offset
+surfaces), `model1d` (the closure on a frozen line, its reflection, and
+`dispersion.jl`'s radial line excised) and `model2d` (the go/no-go: a lego
+circle on Kerr-Schild's equatorial plane, dense spectra by parity sector and
+noise evolutions). Its answer is in `CODE.md`, "Excision" and "Excision: the
+analysis (step X1)": **go for the static Kerr-Schild `a = 0` hole with
+per-axis closures and `:msn` dissipation, at every `r_E` from `M/2` to
+`7M/4`; `ε_KO > 0` is required; the lopsided advection is not needed for
+stability and is the lever on leakage; and spinning holes are not covered —
+their lego faces where the shift points into the excised set are unstable on
+the frozen line.**
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -455,7 +478,13 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4690 assertions in 18m43** at one thread and **4698 in
+After step X1 the suite is **6458 assertions in 22m46** at one thread and
+**6466 in 15m12** at four (2026-10-05, at a load of 6–22 shared with the
+step's own 2D models): its 1671 new claims are `stencils_tests.jl`'s
+closures, `13.8 s` / `7.6 s`, cheap rational checks, most of the time
+compiling the closure tables' `SArray`s at `q = 6, 8`. Before it the suite
+was 4787 in 19m23 and 4795 in 15m59 (the same day). Earlier:
+the suite was **4690 assertions in 18m43** at one thread and **4698 in
 12m59** at four after TreeAMR 0.1.4's two features (2026-10-01, on a machine
 loaded 6–10 by other work — read the times against that): `mesh_mapreduce`
 changed no count, and `checkpoint_tests.jl` is 78 new claims in `2m02` /
@@ -614,6 +643,19 @@ Its predictions are a script of their own, a minute at one thread:
 
 ```bash
 julia --project=. test/dispersion.jl
+```
+
+Step X1's excision analysis is a script in the same manner (added
+2026-10-05): three sections, `margins` (20 s), `model1d` (about a minute)
+and `model2d` (its parts `eig`, `controls`, `noise` and `fine`; the last two
+are the long ones), each part selectable as `section=part,part` and each
+default overridable (`q=`, `n=`, `eps=`, `rE=`, `ratios=`, `t_end=`, `fam=`).
+The header lists the runtime and the command for every recorded table:
+
+```bash
+julia --project=. --threads=4 test/excision_model.jl margins
+julia --project=. --threads=4 test/excision_model.jl model1d=frozen,reflect,radial
+julia --project=. --threads=4 test/excision_model.jl model2d=eig q=2 n=24 eps=1/2
 ```
 
 The `bounds` section (added in step 8b) has three rows, selectable as
@@ -1398,6 +1440,18 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   appending to its CSV. Give every run longer than an hour `checkpoint=` and a
   `walltime=`. And inside a `while read` loop `ssh` eats the loop's stdin —
   use `ssh -n`.
+- **The excision go is for Kerr-Schild `a = 0` only** (step X1). Its lego
+  faces all have the shift pointing out of the excised set (`b/a ≥ 0`),
+  which the per-axis closures hold. A spinning hole's faces include ones
+  where frame dragging points it in (`b/a < 0`, 2–18 % of them), and on the
+  frozen line the closure is unstable there. Do not run `:excised` on a
+  spinning hole without that answered. And the closures need `ε_KO > 0`:
+  without it the extrapolation family grows at `+1–4/M` on the surface.
+- **A 2D model of a 3D operator keeps its conservation form** (step X1).
+  Evaluating the 3D divergences at `z = 0` leaves `∂_z` lower-order terms
+  with no energy estimate, and the `:damped` control itself grew at
+  `+0.04/M` under them; `test/excision_model.jl` takes the divergences over
+  the plane. Check a model's control before reading its experiment.
 
 ## Conventions
 
