@@ -6836,6 +6836,102 @@ The bitant remains the domain of a hole that moves in the plane.)**
   interpolation can replace the state sampler's differenced gradient when it
   is released; nothing here needs it sooner.
 
+**A spinning hole on the rotating octant, `a = 3/5` (measured 2026-10-04**,
+jobs 569778 and 569779, `spin-a06`**)**. Erik's first spinning reference: not
+`a = 9/10` at `h ≈ 1/48`, but `a = 3/5` at `h = 1/32`, `:damped` and
+`:fitted` side by side, everything else the `a = 0` rows `dA128` and `fR32`
+— the octant `[0, 64]³`, cubes `32, 16, 8`, `N = 128` (60.8 M points),
+`q = 4`, `cfl = 1/2`, the algebraic source, `24 M`, the finder with the spin
+every chunk — on the rotating octant (`test/octant_runs.jl octant=rotating
+a=3/5`). Kerr-Schild `a = 3/5` has `r₊ = 1.8` at the poles, `√(2 r₊) = 1.897`
+on the equator, and its ring at `0.6`. Two settings follow from the ring:
+
+- `:damped` keeps `r_0 = 3/4`, `r_1 = 3/2` — the ring inside `r_0`, `r_1`
+  9.6 cells inside the horizon at the poles.
+- `:fitted` keeps `m = 20` but takes `n_L = 18`, not `fR32`'s 24: the
+  analytic initial data fill the layer down to the core surface, and
+  `m + n_L = 44` cells below the equator's `1.897` is `0.52`, inside the
+  ring; at 38 cells the core surface is `0.71` there. `lmax_fit = 12` (the
+  spinning hole's, above), `fit_cont = 1`.
+
+Both run to `24 M` in `2 h 35` on one H200 each. At `24 M`, point-weighted
+L2 in the shells of `test/octant_runs.jl` (the first from the equatorial
+radius; the band `in` is the evolved region inside it):
+
+| | `ℋ` in | `ℋ [1.90, 2.25)` | `ℋ [2.25, 3)` | error in | error `[1.90, 2.25)` | error `[2.25, 3)` |
+|---|---|---|---|---|---|---|
+| `:damped` | `3.95·10⁻⁶` | `6.41·10⁻⁷` | `1.55·10⁻⁷` | `5.0·10⁻⁶` | `1.35·10⁻⁶` | `4.75·10⁻⁷` |
+| `:fitted` | `1.43·10⁻³` | `2.04·10⁻⁶` | `1.39·10⁻⁷` | `2.7·10⁻⁴` | `1.41·10⁻⁶` | `4.41·10⁻⁷` |
+| `dA128` (`a = 0`) | `1.77·10⁻⁶` | `4.30·10⁻⁷` | `1.31·10⁻⁷` | `2.2·10⁻⁶` | `5.24·10⁻⁷` | `1.89·10⁻⁷` |
+| `fR32` (`a = 0`) | `1.65·10⁻⁴` | `1.11·10⁻⁶` | `1.34·10⁻⁷` | `1.7·10⁻⁵` | `4.82·10⁻⁷` | `1.89·10⁻⁷` |
+
+- **The spin changes nothing qualitative outside the horizon.** Both runs'
+  constraints are stationary from `t ≈ 6–8 M` to `64 M` (both rows were
+  continued from their `24 M` checkpoints, jobs 569811 and 569812): `ℋ` just
+  outside the horizon `6.41 → 6.47·10⁻⁷` (`:damped`) and `2.04·10⁻⁶`
+  throughout (`:fitted`, `3.2×` — `a = 0`: `2.6×`), and from `2.25` out the
+  two agree to two digits. Every find succeeds (65 of 65), every fit is
+  valid, the projection never fires, and `:fitted`'s band inside the horizon
+  and its fit residual (`6.9·10⁻³`) are constant from `t = 2 M`. The spinning
+  hole's own error is `2–2.6×` the `a = 0` hole's from `2.25` to `8`, and
+  `ℋ` just outside the horizon `1.5×`.
+- **The spin drifts, linearly, as truncation error at order four.**
+  `:damped`'s `J` rises from `a + 8·10⁻⁹` at a constant rate to `64 M` —
+  `5.42`, `5.11`, `5.16·10⁻⁸/M` over `8–24`, `24–40`, `40–64 M`
+  (`+3.6·10⁻⁶` at `64 M`) — and `M_irr` falls with it, about `−0.2 δJ` at
+  constant mass (`−2.7·10⁻⁷` at `64 M`). The convergence rows `h = 1/16` and
+  `1/24` (`N = 64, 96`, the same radii in `M`, `margin = 4` for the check;
+  jobs 569813 and 569814) give the same constant rates, `1.1–1.4·10⁻⁶` and
+  `1.6–1.75·10⁻⁷`, and orders `3.99–4.07` from `1/24` to `1/32` in every
+  interval, `4.16` for `J − a` at `24 M` and `4.02` for `dM_irr/dt`; every
+  shell's `ℋ` and error from `2.25` out converge at `3.98–4.17`. `1/16` is not
+  in the asymptotic regime (orders `4.6–8.7` from it, and `145×` the `1/32`
+  `ℋ` just outside the horizon by `8 M`): `r_1 = 3/2` is only 4.8 of its cells
+  inside the horizon at the poles. The drift is the scheme's, as `a = 0`'s
+  mass drift is (`1.3·10⁻⁹/M`); it is four orders below G5's moving hole's.
+  `:fitted`'s `J` wanders by `±2·10⁻⁷` to `15 M` and then drifts at
+  `4.1·10⁻⁸/M`, `0.8×` `:damped`'s.
+- **The error grows with the drift, so the variants' error ratio is the ratio
+  of their drifts.** The error outside the horizon grows linearly in every
+  run, the slightly different hole spreading outward, at order four: in the
+  first shell `:fitted`/`:damped` goes `1.65×` (`8 M`), `1.04×` (`24 M`),
+  `0.88×` (`40 M`), `0.81×` (`64 M`), toward the drifts' `0.80`. So a
+  comparison of the two by their error must name its time; by `ℋ` it need not.
+- **`:fitted` is worse inside than at `a = 0`.** The evolved band inside
+  the horizon is `9×` `fR32`'s `ℋ`, and the fit's residual `9×` `fR32`'s
+  `7.5·10⁻⁴` — the shorter ramp, the band reaching deeper (from `1.27`
+  rather than `1.375`) and an oblate hole in the `cont = 1` ansatz, not
+  separated here.
+- **The far field settles by `64 M`**: the start-up pulse passes `r ≥ 8` at
+  about `24 M` for `:fitted` (`ℋ 1.2·10⁻¹⁰`, then `1.0·10⁻¹⁰`) and both rows
+  end at `1.0–1.3·10⁻¹⁰` there, three orders below the first shell.
+
+**`a = 9/10` at `h = 1/48` (measured 2026-10-04**, jobs 569826, 569855,
+569856, `spin-a06`**)**. Kerr-Schild `a = 9/10` has `r₊ = 1.436` at the poles,
+`1.695` on the equator and its ring at `0.9`, which leaves `0.79` below the
+equator for a `:fitted` margin and ramp — 25 cells at `h = 1/32` — so the rows
+run at `h = 1/48` on one more cube (`32, 16, 8, 4`, the finest level
+`[0, 4]³`, `N = 96`, 31.9 M points, `2 h` for `24 M` on an H200).
+
+- **`:fitted` at `m = 16`, `n_L = 18` (the core surface at `0.986` on the
+  equator, 4 cells outside the ring), `lmax_fit = 12` is unstable, at either
+  `fit_cont`.** With `fit_cont = 2` the band inside the horizon grows `2–4×`
+  per `M` from `t = 0` (`ℋ` `3.9·10⁻³` at `1 M`, `0.65` at `7 M`), the fit's
+  residual with it (`0.034 → 0.46`), and it crosses the horizon — the first
+  shell outside `1600×` in `6 M` — and ends in a `DomainError` in the kernel
+  at `7.5 M`; every fit stays valid, every find succeeds and the projection
+  never fires. `fit_cont = 1` grows the same way (`ℋ 0.14`, L∞ `178` at `8 M`;
+  cancelled). So the curvature fit is not the cause.
+- **`:damped` runs** (`r_0 = 19/20`, the ring inside the core; `r_1 = 5/4`,
+  8.9 cells inside the poles' horizon, a 14-cell ramp), stationary from `8 M`
+  to `24 M` — but at a high level: `ℋ` `3.7·10⁻³` in the band inside the
+  horizon and `2.4·10⁻⁵` just outside it (`37×` the `a = 3/5` hole's at
+  `h = 1/32`), the error there `5.4·10⁻⁶` (`4×`), the layer's residual against
+  the truth `5.2` (`a = 3/5`: `0.15`). `J` starts `7·10⁻⁶` above `a` (the
+  finder at this resolution) and drifts at `7.8·10⁻⁸/M`; all 25 finds succeed.
+  The layer next to the ring is under-resolved at `1/48`: on the equator it
+  spans `0.95–1.25`, where Kerr-Schild's `H` falls from `3.3` to `1.3`.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
