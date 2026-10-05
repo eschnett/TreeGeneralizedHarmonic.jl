@@ -60,6 +60,7 @@ using TreeGeneralizedHarmonic
     include("reflection_tests.jl")  # 2026-10-02: the octant is the mirrored box
     include("gauge_source_tests.jl")  # 2026-10-02: the algebraic Kerr-Schild source
     include("simwatch_tests.jl")    # 2026-10-02: SimWatch status files
+    include("excision_tests.jl")    # step X2b: the :excised variant
     include("type_tests.jl")
     include("threading_tests.jl")
 end

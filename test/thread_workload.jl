@@ -195,13 +195,47 @@ function gh_workload(; N=8, roots=2, q=4, chunks=2, steps=6, buffer=1,
 end
 
 """
+One right-hand side of an **excised** hole (added in step X2b), reduced to a
+printed line: the step-5 fixture's Kerr-Schild hole at `q = 2`, `N = 8`, with
+the ball `r < 3/4` excised. It puts on the path what the cycle above does
+not reach: the classes' three passes — owned, a ghost exchange of the
+excised bit, every stored point — and their census (`mesh_mapreduce`,
+`block_mapreduce`), the zone kernel after the main one, the outflow
+monitor's reductions, and the gauge constraint under `monitor_mask`.
+"""
+function excised_workload(; q=2, N=8)
+    T = Float64
+    case = kerr_schild_case(T; halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=T(3 // 4),
+                            chunk=T(1 // 10), interior=:excised)
+    forest = hole_forest(T, case; N=N, roots=1, radii=(T(3), T(3), one(T)))
+    fs = FieldSet{T}(forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3))
+    fill_exact!(fs, case, zero(T))
+    ops = Operators(prolongation=q + 2, restriction=q + 2)
+    problem = GHProblem(fs, GhostSchedule(fs, ops), case; q=q)
+    u = statevector(fs)
+    gather!(u, fs)
+    du = similar(u)
+    gh_rhs!(du, u, problem, zero(T))
+    ex = problem.excision
+    rows = excision_rows(problem, u, zero(T))
+    gh_constraint!(problem, u, zero(T))
+    gauge = constraint_norms(problem)
+    return [string("excised zone ", ex.nzone, " excised ", ex.nexcised, " blocks ",
+                   ex.nzoneblocks, " classes ", digest(string(vec(Array(ex.classes)))),
+                   " du ", digest(du), " normal ", repr(rows.excision_normal_min),
+                   " axis ", repr(rows.excision_axis_min), " inflow ",
+                   rows.excision_inflow, " C ", repr(maximum(gauge.gauge_l2)))]
+end
+
+"""
 The digest lines the threading test compares, as a `Vector{String}`.
 
 One workload, not two: unlike TreeWave's pair of cases this package has a
 single right-hand side, and what varies between them would be the physics
 rather than the parallel structure. The cycle above already visits every
-loop that threads.
+loop that threads — and from step X2b one excised right-hand side, whose
+classes, zone kernel and monitors are loops of their own.
 """
-thread_digests() = gh_workload()
+thread_digests() = vcat(gh_workload(), excised_workload())
 
 abspath(PROGRAM_FILE) == abspath(@__FILE__) && foreach(println, thread_digests())
