@@ -23,8 +23,10 @@ Step 9 (G6), which does not depend on it, is running (started
 
 **Excision is reopened (2026-10-05, Erik's decision): steps X1, X2a, X2b
 and X3 below, static holes first, as per-step agents on the integration
-branch `claude/excision-singularity-handling-30feec`. X1 is next.** They
-supersede step 8g's brief.
+branch `claude/excision-singularity-handling-30feec`.** They supersede step
+8g's brief. **X1 is done and merged (2026-10-05): go for the static
+Kerr-Schild `a = 0` hole with per-axis closures and `:msn` dissipation,
+`ε_KO > 0` required, spinning holes not covered. X2a is next.**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1322,6 +1324,74 @@ beside the layer and not instead of it, for **static holes first**.
   and X2a and X2b do not start until Erik has read it;
 - the suite green at one and four threads.
 
+**What step X1 hands over** (its report's section 6, 2026-10-05; the
+numbers are `CODE.md`'s "Excision" and "Excision: the analysis (step X1)").
+X1 found a **go** for the static Kerr-Schild `a = 0` hole with per-axis
+closures and `:msn` dissipation, at every `r_E` from `M/2` to `7M/4`, with
+`ε_KO > 0` required. Spinning holes are not covered.
+
+- **For X2a — the advection must be a provider method of its own.** X2b's
+  optional lopsided advection replaces the centered `D₁` in the two
+  advective terms `β^k ∂_k h` and `β^k ∂_k Π` — and only there. So the
+  provider takes the shift's component:
+  - `adv(S, β_d, ∂f_d, work, base, d)` for both fields;
+  - the centered provider returns the `∂f_d` it is handed, so the main
+    kernel forms no new stencil and stays bit for bit.
+- **The closure family is the per-axis one, as built**: `closure_table(T,
+  Val(q); dissipation = :msn)`, with the mixed derivative nested.
+  - The table layout: `d1`, `d2` and `ko` are `[slot, k⁻ + 1, k⁺ + 1]` on
+    the slots `−G … G` (slot `j + G + 1`, zeros outside each closure's
+    nodes).
+  - `lop` has a fourth index for `up = −1, +1`.
+  - `d_lo/d_hi`, `ko_lo/ko_hi` and `lop_lo/lop_hi` (`Int8`) are the nodes
+    each closure reads, and `admissible` is the refusal.
+  - **Contract over `d_lo:d_hi` in ascending order**, as `axis_stencil`
+    does: the centered rows are `derivative_weights` bit for bit, so "no
+    excised tap ⇒ the centered `F`" can be `isequal`.
+- **The table is 4624 bytes at `q = 4`, `Float64`.** That is above CUDA's
+  classic 4 kB kernel-parameter limit, so pass it as a **device array**
+  (`to_backend`), not as an `isbits` argument.
+- **The dissipation's closure is `:msn`**, the only one negative
+  semidefinite in `l²`. It reads `[−k⁻, G]`.
+- **`ε_KO > 0` at the surface is part of the variant.** Refuse `:excised`
+  with `ε_KO = 0`, or with a profile that vanishes at the surface, saying
+  why: without dissipation the extrapolation family grows `+1–4/M`, and the
+  per-axis one as the interior does.
+- **Spinning holes are refused in this round.** On their lego faces frame
+  dragging can turn the shift *into* the excised set along an axis
+  (`b/a < 0`, 2–18 % of the faces), and there the closure is unstable on
+  the frozen line, `0.03–0.19/h`.
+  - The refusal is the physics, not the spin: `build_excision` computes, at
+    every band point and closure axis, the shift's component toward the
+    excised side from the state it is built on, and refuses any negative
+    one by name.
+  - The record carries the count every chunk.
+- **The lopsided advection is an option, off by default.** It is a `C²`
+  blend (`smoothstep`) in the depth below the horizon: zero at `1` cell
+  below, full from `5` cells (`start = 1`, `width = 4`), the profile X1
+  measured.
+  - With it on, every point from the surface to one cell below the horizon
+    is non-centered. That is a thick shell (about 23 cells at `h = 1/16`,
+    `r_E = M/2`), not the zone of a few cells the brief sized.
+  - So **the blend lives in the main kernel's `:excised` specialisation**,
+    through the provider's `adv`, gated by a `Val`, so that no other
+    variant's kernel changes. The zone kernel keeps the band points only,
+    with the blend applied there too.
+  - It costs RK4's step: the plane's stable `cfl` falls from `1.86` to
+    `1.52–1.79` at `q = 4`, which `cfl = 1/2` absorbs.
+- **The least depth.** `check_interior_radii`'s `:excised` method asserts
+  `m ≥ G + 1`. A case with a `Horizon` asserts `m ≥ ⌈√3 G⌉`, 6 cells at
+  `q = 4`: the finder's footprint reaches `√3 G h` on a diagonal and must
+  not touch the excised set.
+- **For X3:**
+  - the depth window at `h = 1/16` is `r_E = M/2 … 13M/8` (6 to 24 cells);
+  - run every depth with and without the lopsided advection;
+  - `ε_KO = 1/2`;
+  - X1's plane reached an inflow-like fraction of `0.73` against `0.875` on
+    the 3D sphere at the same `r_E`. The go rests on the kind of face
+    (`0 ≤ b/a < 1`), which both share, and X3 is the 3D test.
+- **Still open:** the gauge drift, which X3 measures.
+
 ## Step X2a — The stencil provider (one copy of the physics)
 
 `CODE.md`: "One right-hand-side evaluation", "Finite-difference stencils",
@@ -1329,13 +1399,17 @@ beside the layer and not instead of it, for **static holes first**.
 
 **Changes.** `gh_rhs_at_point` takes a stencil *provider* `S` with methods
 `d1(S, work, base, d)`, `d2`, `dmix(S, work, base, i, j)` (outer sum along
-`i`, inner along `j`, as now), `ko`, and `adv_h(S, ∂h_d, work, base, d)`.
+`i`, inner along `j`, as now), `ko`, and — amended after X1 —
+`adv(S, β_d, ∂f_d, work, base, d)`. `adv` is the derivative that multiplies
+`β^d` in the two advective terms, `β^k ∂_k h` and `β^k ∂_k Π`, and only
+there.
 - `Centered{T,q}` holds the strides and the three `@generated` weight
   vectors.
   - Its methods are today's `axis_stencil`/`mixed_stencil` calls, in
     today's order.
-  - Its `adv_h` returns the kept `∂h_d`, so the main kernel forms no new
-    stencil.
+  - Its `adv` returns the `∂f_d` it is handed, so the main kernel forms no
+    new stencil.
+- X2b's lopsided blend is another `adv`, which reads the sign of `β_d`.
 - The existing `gh_rhs_at_point` signature builds `Centered` itself, so
   `gh_rhs_kernel!`'s call site is unchanged.
 - No other provider yet: X2b adds the closure one.
@@ -1357,7 +1431,12 @@ kernel are measured in X3.
 `CODE.md`: "Excision" (and its "On the mesh, and on a device"), "The
 tracked geometry", "The range projection", "Analysis quantities",
 "Checkpoint and restart". Starts from X1's recommendation and X2a's
-provider.
+provider. **Read "What step X1 hands over" above first.** Where it and the
+list below differ, it wins:
+- the per-axis family with `:msn`, from `closure_table`, as a device array;
+- the refusals of `ε_KO = 0` and of a shift pointing into the excised set;
+- the lopsided blend in the main kernel's `:excised` specialisation;
+- `m ≥ ⌈√3 G⌉` with a `Horizon`.
 
 **What a review of the code found** (2026-10-05). Each item is a thing the
 naive design gets wrong:
