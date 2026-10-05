@@ -373,7 +373,7 @@ function fitted_interior(spec::FittedSpec{T,V,X}, tr::HorizonTrack, forest,
                           thickness=n_L * h, ρ_max=ρ_max, variant=V,
                           w_ramp=spec.w_ramp, ρ_ramp=spec.ρ_ramp, margin=m,
                           n_L=n_L, h=h, target=spec.target, r_in=r_in,
-                          r_out=r_out)
+                          r_out=r_out, excision=spec.excision)
 end
 
 """

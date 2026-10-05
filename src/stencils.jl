@@ -617,6 +617,39 @@ function lopsided_weights(q::Integer, up::Integer, kminus::Integer,
 end
 
 """
+    lopsided_centered_weights([T = Float64], ::Val{q}, ::Val{up}) -> SVector{q+1,T}
+
+The lopsided first derivative of [`lopsided_weights`](@ref) on the open
+line — `k⁻, k⁺ ≥ G` — as an `isbits` vector for the main kernel (added in
+step X2b): the order-`q` weights on the `q + 1` offsets `1 − q/2 … q/2 + 1`
+for `up = +1`, and on `−(q/2 + 1) … q/2 − 1` for `up = −1`, in ascending
+offset order ([`lopsided_first`](@ref) is the first), for unit spacing.
+`@generated` as [`derivative_weights`](@ref) is, emitting each weight's
+exact numerator and denominator, so that its entries are
+[`closure_table`](@ref)'s `lop[·, G + 1, G + 1, ·]` bit for bit at every IEEE
+type: the main kernel's blend and the zone kernel's are one operator.
+"""
+@generated function lopsided_centered_weights(::Type{T}, ::Val{q},
+                                              ::Val{up}) where {T,q,up}
+    ws = try
+        lopsided_weights(q, up, _reach(q), _reach(q))[2]
+    catch err
+        err isa ArgumentError || rethrow()
+        return :(throw($err))
+    end
+    return _weight_expr(ws)
+end
+
+"""
+    lopsided_first(::Val{q}, ::Val{up}) -> Int
+
+The offset [`lopsided_centered_weights`](@ref)`(T, Val(q), Val(up))` starts
+at: `1 − q/2` upwind to the right, `−(q/2 + 1)` to the left.
+"""
+@inline lopsided_first(::Val{q}, ::Val{up}) where {q,up} =
+    up > 0 ? 1 - q ÷ 2 : -(q ÷ 2 + 1)
+
+"""
     closure_admissible(q, k⁻, k⁺) -> Bool
 
 Whether a point with `k⁻, k⁺` non-excised points on each side of an axis
