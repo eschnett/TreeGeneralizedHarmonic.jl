@@ -814,6 +814,95 @@ host: the kernel's arithmetic and the mesh pattern around it are of the
 same order, and neither dominates. Threading is worth 3.6–3.9× on four
 threads, and the numbers above are what G6 measures the H200 against.
 
+**The stencils come from a provider (amended in step X2a).** The kernel no
+longer calls its contractions directly: `gh_rhs_at_point(S, …)` asks a
+*stencil provider* `S` for each one, so that the closures at an excision
+surface are this physics with other stencils and not a second copy of it
+([Excision](#excision-added-2026-10-05), "On the mesh, and on a device").
+A provider is an `isbits` value built per point. It answers five methods,
+each about one component at the point, addressed by that component's linear
+index `base` in the working array:
+- `d1(S, work, base, d)`, `d2(S, work, base, d)`, `dmix(S, work, base, i,
+  j)` (outer sum along `i`, inner along `j`, as before) and `ko(S, work,
+  base, d)` are raw contractions on unit spacing. The `1/h`, `1/h²` and
+  `ε_KO/h` stay in the right-hand side where they were **(proposed in step
+  X2a**: the brief named the methods and not where the spacing goes;
+  unscaled is what keeps today's arithmetic, since the dissipation scales a
+  sum of three contractions by `ε_KO/h` once**)**.
+- `adv(S, β_d, ∂f_d, work, base, d)` is the derivative that multiplies
+  `β^d` in the two advective terms, `β^k ∂_k h_ab` and `β^k ∂_k Π_ab`, and
+  nowhere else. It is handed the shift's component and the scaled
+  derivative the kernel already formed — `∂_d h`, which the coefficients and
+  `∂_i(α√γγ^{ij}) ∂_j h` keep, and `d1/h` of `Π` — and returns a scaled
+  one.
+
+`Centered{T,q}` holds the working array's strides and the three
+`@generated` weight vectors. Its methods are the `axis_stencil` and
+`mixed_stencil` calls of before, and its `adv` returns `∂f_d`, so the kernel
+forms no new stencil. The original signature, `gh_rhs_at_point(T, …, st,
+…, Val(q), …)`, builds it and calls the provider form, so `gh_rhs_kernel!`'s
+call site did not change. The other kernels that take stencils — the two
+constraint monitors, Löhner's `τ` and the `Π` post-pass — keep their own
+centered contractions: step X2b masks the first three around the excised
+set and refuses the last.
+
+**The refactor is invisible (measured in step X2a)**, against the
+integration branch's `5dcddab` in a second checkout with the same manifest
+(TreeAMR 0.1.7, Julia 1.13.1, Apple silicon):
+- `test/thread_workload.jl`'s digest is identical, character for character,
+  at one and at four threads.
+- A one-chunk `test/octant_runs.jl` (`case=ks L=8 N=16 roots=2 radii=4,2
+  t_end=1/2 chunk=1/2 cfl=1/2`, 28 steps at `q = 4` with the algebraic
+  source), for `:damped` with the default noise and for `:fitted` without:
+  `octant.csv` is identical in every column but `wall`, and `records.csv`
+  is identical, at one and at four threads.
+- One `gh_rhs!` in eleven kernel specialisations — the gauge wave at
+  `q = 2, 4, 6`, with and without dissipation and at `Float32`; shifted
+  Minkowski and harmonic Kerr with the sampled source; step 5's fixture
+  `:damped`, `:pasted` and `:frozen`, and with the algebraic source — gives
+  an identical `du`. `@allocated gh_rhs!` is unchanged: 12.5 kB on the
+  gauge wave and 114 kB on the fixture, the ghost fill's, none per point.
+- On Metal at `Float32` (a scratch environment with `Metal` 1.11.1, as
+  CLAUDE.md asks), the kernel compiles, and one `gh_rhs!` of the gauge wave
+  at `q = 2, 4` and of the fixture's `:damped` layer gives a `du` identical
+  to the base's.
+- `test/evolution_tests.jl` claims the interface: the centered provider's
+  four contractions are `isequal` to the host's cartesian `apply_stencil`
+  and `apply_mixed_stencil` (`q = 2, 4`, `Float64` and `Float32`), and a
+  host-side `ProbeProvider`, which wraps `Centered` and logs every request,
+  sees each of a point's 240 stencils asked for exactly once, `adv` handed
+  `β^d` and `d1/h` of the same field, and an offset added to `adv`'s answer
+  move `∂ₜh` or `∂ₜΠ` by `Σ β^d δ_d` to roundoff and nothing else. The
+  probe's `F` — the same body compiled for a provider whose methods are not
+  inlined — is bit for bit the built-in's on Apple silicon; the test claims
+  `64 eps` only, because two specialisations of one body have differed in
+  the last place on x86-64 before (CLAUDE.md, "Two spellings of one
+  expression").
+- `bench/stepping.jl` (`BENCH_CASE=wave,hole`, four threads, `N = 16`, 512
+  blocks), base and branch interleaved base–branch–branch–base, four runs
+  each, on a machine loaded 5–17 by other work. Minimum time in ms, the
+  range over the four runs and their median:
+
+  | row | base | branch | change of the median |
+  |---|---|---|---|
+  | wave, `rhs` | 961–981 (969) | 930–961 (941) | −2.9 % |
+  | wave, `imex_owner_step` | 3922–4240 (3937) | 3771–3849 (3824) | −2.9 % |
+  | hole, `rhs` | 1397–1486 (1407) | 1435–1489 (1453) | +3.3 % |
+  | hole, `imex_owner_step` | 5633–5841 (5666) | 5799–5869 (5861) | +3.5 % |
+
+  The differences have opposite signs in the two cases and are of the size
+  of the base's own spread (6 % on the hole's `rhs`, 8 % on the wave's
+  step). A second check, `gh_rhs!` alone 25 times in each of three
+  processes per tree, interleaved, gave the same picture (wave 945–962
+  against 973–990, hole 1451–1452 against 1409–1436, leaving out one
+  branch process that ran during a load spike to 88). The arithmetic is the
+  same bit for bit; what differs in the compiled code is the layout of the
+  closures' captured environments — `S` where `w1`, `w2`, `wD` and `st`
+  were, the same 160 bytes — and a ±3 % that changes sign with the
+  specialisation is what code layout does **(proposed in step X2a**, not
+  measured further; X3's H200 measurement of the `:damped` `q = 4` kernel's
+  registers and spills is the check on a device**)**.
+
 ### The time step
 
     dt = cfl · minimum_spacing(forest) / λ_max,
@@ -2668,7 +2757,27 @@ details).** These are the pieces:
   exit, since TreeAMR has no launch over a subset.
   - The physics is one copy. `gh_rhs_at_point` takes a stencil *provider*:
     the centered one is today's code, bit for bit; the closure one reads
-    `k±` and a small table.
+    `k±` and a small table. **(Built in step X2a**, with the centered
+    provider only: the interface and its measurements are under [One
+    right-hand-side evaluation](#one-right-hand-side-evaluation). What the
+    closure provider has to implement is below.**)**
+  - **How the closure provider plugs in (proposed in step X2a).** It is a
+    `StencilProvider` subtype built per zone point, `isbits` like
+    `Centered`, holding what the point needs: its codes `k±` along the three
+    axes, the class array (or the codes) and the point's own linear index in
+    it — stored per point as the working array is, `(n₁, n₂, n₃, block)`, it
+    has the same spatial strides, so a neighbour along `i` at offset `a` is
+    that index plus `a·st[i]` — the weight table (a device array, X1's
+    4.6 kB), `1/h` and the lopsided blend's weight at the point. Its `d1`, `d2` and `ko` contract the row
+    `[·, k⁻ + 1, k⁺ + 1]` of the axis over `d_lo:d_hi` (`ko_lo:ko_hi`) in
+    ascending order, unscaled; its `dmix` runs the outer sum along `i` over
+    the point's `i`-closure and, at each outer node, the inner sum along `j`
+    over **that node's** `j`-closure, read from the class array; its `adv`
+    returns `∂f_d` where the blend is zero — so that the exterior's operator
+    stays bit for bit — and otherwise mixes it with `1/h` times the
+    lopsided row for `up = sign(β_d)` (`lopsided_weights`: the upwind side is
+    the side the shift points to). Nothing else in `gh_rhs_at_point`
+    changes.
   - No kernel reads an excised value: zero-weight taps are branched out or
     clamped to the point itself, because `0 · NaN = NaN`.
   - The zone is a shell a few cells thick, around `10⁴`–`10⁵` points

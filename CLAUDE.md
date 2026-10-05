@@ -405,6 +405,20 @@ stability and is the lever on leakage; and spinning holes are not covered —
 their lego faces where the shift points into the excised set are unstable on
 the frozen line.**
 
+From step X2a (2026-10-05) the right-hand side takes its stencils from a
+**provider**: `src/evolution.jl` has `StencilProvider`, its five methods
+`d1(S, work, base, d)`, `d2`, `dmix(S, work, base, i, j)`, `ko` (raw
+contractions on unit spacing; the caller scales) and `adv(S, β_d, ∂f_d,
+work, base, d)` (the derivative beside `β^d` in the two advective terms and
+only there, handed the scaled derivative it replaces), and `Centered{T,q}`,
+today's stencils, whose `adv` returns its argument. `gh_rhs_at_point(S, T,
+…)` is the provider form; the old signature builds `Centered` and calls it,
+so no kernel's call site changed, and the refactor is invisible bit for bit
+against the tree before it (`CODE.md`, "One right-hand-side evaluation").
+`evolution_tests.jl` has a host-side `ProbeProvider` that logs what the
+right-hand side asks for. No other provider exists yet: X2b adds the closure
+one (`CODE.md`, "Excision", "How the closure provider plugs in").
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -478,7 +492,14 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-After step X1 the suite is **6458 assertions in 22m46** at one thread and
+After step X2a the suite is **6488 assertions in 30m09** at one thread and
+**6496 in 25m26** at four (2026-10-05; four suites at once — the branch and
+its base, one and four threads — at a load of 5–16, so read the times as
+each other's and not as X1's): its 30 new claims are `evolution_tests.jl`'s
+two provider testsets, `4.1 s` / `3.8 s`, most of it compiling the right-hand
+side once for the host-side probe. The base beside it measured 6458 in 30m14
+and 6466 in 25m15, so the provider costs the suite nothing it can measure.
+After step X1 the suite was **6458 assertions in 22m46** at one thread and
 **6466 in 15m12** at four (2026-10-05, at a load of 6–22 shared with the
 step's own 2D models): its 1671 new claims are `stencils_tests.jl`'s
 closures, `13.8 s` / `7.6 s`, cheap rational checks, most of the time
@@ -901,6 +922,14 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   getindex)"). Give each branch its own names. The symptom on the CPU is
   `@allocated gh_rhs!(…)` growing with the block count; the ghost fill's
   13 kB is fixed. `Profile.Allocs` names the line.
+- **The stencil provider's methods have short names** (step X2a): `d1`,
+  `d2`, `dmix`, `ko` and `adv` are module functions, and `d1`, `d2` and `ko`
+  are also common local names (`constraints.jl`, `interior.jl`, the
+  `ClosureTable`'s fields). A function that calls the provider must not have
+  a local of the same name, or the call is to the local. A provider is built
+  per point and must be `isbits`; its methods are `@inline`, and a provider
+  whose methods are not (the tests' `ProbeProvider`, which logs) is
+  host-only.
 - **KernelAbstractions refuses a `return` in a kernel** — anywhere in the
   body, closures included, which is what `ntuple(Val(10)) do v … end` is.
   End the block with the value instead. The error names the kernel and
