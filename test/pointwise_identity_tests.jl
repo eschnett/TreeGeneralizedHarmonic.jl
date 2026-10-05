@@ -119,6 +119,48 @@ identity_tolerance(::Type{Float32}) = 1.0f-1
     end
 end
 
+@testset "The kernel's spellings of the source and the coefficients are the port's: T=$T" for T in
+                                                                                       (Float64,
+                                                                                        Float32)
+    # Guards the two functions the right-hand-side kernel calls instead of
+    # `gh_node_source` and `metric_derivatives` (added 2026-10-05, `CODE.md`,
+    # "The right-hand side on an H200").
+    #
+    # - `gh_node_source_lean` holds the source's tensors by their unique
+    #   components and orders the work so that it fits a GPU thread's
+    #   registers.
+    # - `metric_divergences` forms only the two contractions the momentum
+    #   equation reads.
+    #
+    # Both are the same terms summed in another order, so the claim is
+    # roundoff against the scale of the inputs. A transposed index, a dropped
+    # symmetrisation or a slot mapped to the wrong component would be O(1). The
+    # boosted and spinning rows, whose derivatives have no symmetry to hide
+    # behind, are where a `∂_a g_bc` swapped for `∂_b g_ac` shows.
+    #
+    # The largest differences measured (2026-10-05) are 0.03 of the source's
+    # tolerance and 0.06 of the coefficients'. In units of the scale that is
+    # 0.2–0.25 eps at both precisions.
+    for (name, bg, _) in gh_backgrounds(T), x in gh_points(T, 2)
+        h, Π, ∂h = gh_state(bg, T(GH_TIME), x)
+        Hl, dHl = gh_gauge(bg, T(GH_TIME), x)
+        g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(h))
+        dtg = β[1] * ∂h[1] + β[2] * ∂h[2] + β[3] * ∂h[3] + (α / sqrtγ) * Π
+        scale = max(maximum(maximum(abs, ∂h[i]) for i in 1:3), maximum(abs, dtg),
+                    one(T))
+        for (γ0, γ2) in ((zero(T), zero(T)), (gh_γ0(T), gh_γ2(T)))
+            ref = gh_node_source(g4, gu4, α, sqrtγ, _dg4(dtg, ∂h), Hl, dHl, γ0, γ2)
+            lean = gh_node_source_lean(g4, gu4, α, sqrtγ, dtg, ∂h, Hl, dHl, γ0, γ2)
+            @test absdiff(lean, ref) < 8 * eps(T) * max(maximum(abs, ref), scale^2)
+        end
+        _, dβ, dA = metric_derivatives(gu4, α, β, γu, sqrtγ, ∂h)
+        divβ, divA = metric_divergences(gu4, α, β, γu, sqrtγ, ∂h)
+        @test abs(divβ - (dβ[1, 1] + dβ[2, 2] + dβ[3, 3])) < 4 * eps(T) * scale
+        @test absdiff(divA, SVector{3,T}(dA[1, 1, j] + dA[2, 2, j] + dA[3, 3, j]
+                                         for j in 1:3)) < 4 * eps(T) * scale
+    end
+end
+
 @testset "The flux identity ∂_tΠ − ∂_iF^i = msrc holds on exact data: T=$T" for T in
                                                                                (Float64,
                                                                                 Float32)

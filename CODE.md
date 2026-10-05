@@ -748,6 +748,36 @@ H200](#the-right-hand-side-on-an-h200-measured-2026-10-05)**.)**
 - The order above changes once the source is lean: the source moves before the Π
   components (step 3 becomes step 2), and the per-component streaming stays.
 
+**(Implemented 2026-10-05.)** The kernel's order is now:
+
+1. **The head.** Load `h` and `Π` at the point, form the thirty `∂_i h` and the
+   coefficient set.
+2. **`∂ₜh`, complete with its dissipation,** stored at once.
+3. **The source**, [`gh_node_source_lean`](#the-right-hand-side-on-an-h200-measured-2026-10-05),
+   from `∂ₜh`.
+4. **`∂_i β^i` and `∂_i(α√γγ^{ij})`** from `metric_divergences`, which forms only
+   those four numbers.
+5. **A run-time loop over the ten Π components.** Each forms its nine stencils of
+   `h_v` (`∂_i h_v` again, from cached loads, rather than thirty values kept live
+   across the source) and its seven of `Π_v`, adds its source component and is
+   stored.
+
+In the code, steps 1–4 are `gh_rhs_head`, step 5's component is `gh_rhs_pi` and
+the store is `gh_rhs_store!`, all in `src/evolution.jl`. The interior variants
+combine `F` with the layer before storing, so they take it as two vectors from
+`gh_rhs_at_point`: the same two functions, with the components unrolled.
+
+Nothing in the kernel without an interior forms a closure:
+
+- its loops are `Base.Cartesian.@ntuple` and `@nexprs`;
+- the stencils are `@generated` with an explicit `:inline` meta;
+- the gauge sources are spelled out.
+
+So a device compiles it without a single call into Julia code whether or not the
+backend forces inlining. Measured: 8.48 → 1.08 ns a point on the H200; the
+numbers are under [The right-hand side on an
+H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).
+
 The kernel is *block-local*: it reads its own block's stored points and
 nothing else, so it runs on every backend unchanged. Per-block spacings
 and origins travel to the backend once per chunk, as TreeWave's spacings
@@ -3706,7 +3736,46 @@ What this package needs from TreeAMR. None blocks G0–G3.
    launches with KernelAbstractions' default workgroup, and GHAccel
    measured the workgroup shape of a 3D stencil kernel as worth about
    10 % of peak. A `workgroupsize` keyword passed through to the launch
-   is the whole request.
+   is the whole request. **(Measured 2026-10-05**, [The right-hand side on an
+   H200](#the-right-hand-side-on-an-h200-measured-2026-10-05)**.)**
+   - **The right-hand side no longer needs the knob.** Now that its kernel forms
+     no closure, KA's default workgroup is within 1 % of the best shape at
+     `N = 32` and `128`, and 2.7 % at `16`. Forcing inlining changes nothing
+     (1.075 against 1.077 ns a point).
+   - **Two halves of the request are still worth having, second to item 5.**
+     `map_blocks!` launches with `get_backend(fs.work)`, a default
+     `CUDABackend()`, so the backend a field set was built with — its
+     `always_inline` and a static workgroup — never reaches the launch.
+     Keeping it matters to the kernels that still have closures: the interior
+     variants' layers and the monitors. Before this package's kernel was
+     rewritten, forcing inlining was worth 1.6×, and a static workgroup 20 %
+     to the prototypes.
+5. **TreeAMR's copy kernels at bandwidth: the first thing TreeAMR should change
+   for a device** (added 2026-10-05).
+   - **What is left of an evaluation is TreeAMR's.** After this package's kernel
+     went from 8.5 to 1.1 ns a point, `scatter!` and `fill_ghosts!` are 0.73 of
+     `gh_rhs!`'s 1.81 ns at `N = 32`, 1.39 of 2.61 at `N = 16`, and 0.41 of 1.70
+     at `N = 128`.
+   - **Both run far below the H200's 4.8 TB/s.** The scatter moves 320 B a point
+     at 0.96 TB/s, and the transfer kernel its ghost data at 0.65 TB/s.
+   - **Why:** both launch over a 5-D `CartesianIndices` with run-time sizes. KA
+     forms that index with integer divisions for every element, about 1200 SASS
+     instructions to copy one value.
+   - **What it would buy:** a scatter with the strides known is 2.4× faster
+     (0.14 ns a point, measured in `bench/rhs_lab.jl`'s `round5`). A fill at
+     copy bandwidth would be about 4× faster, which at `N = 16` saves more than
+     the whole kernel costs.
+
+   In order:
+   1. **`scatter!` and `gather!`** with an index that is cheap to form: a
+      linear range over owned points, variables and blocks, divided by
+      constants, or the block size as a type parameter.
+   2. **`transfer_kernel!` the same** for its copy groups (`Ps = (1, 1, 1)`,
+      the bulk of a uniform fill): a linear source and target offset per
+      transfer, and no `stencil_sum` for a copy.
+   3. **Then a state that lives in the working array**, for a native stepper
+      that writes the next stage's input straight into it (the stage vectors
+      as field sets). That removes the scatter altogether.
 
 Two further items are *not* needed for the proof of concept and are
 recorded with the extensions that would need them: an interior-reading
@@ -7083,33 +7152,72 @@ That is 4.5× to 7× per step. At `128³` the first column's change alone gives 
 1. **The lean, closure-free source in `pointwise.jl`.** It is a third spelling,
    tested to roundoff against `gh_node_source` on every background of
    `pointwise_backgrounds.jl` and against the forward-mode pass. It helps the CPU
-   too.
+   too. **(Done 2026-10-05:** `gh_node_source_lean`.**)**
 2. **The kernel in the order above**, with `Val(N)` for static strides and linear
    `@inbounds` stores. This amends "One right-hand-side evaluation": the source
-   moves from step 3 to step 2, and the per-component streaming stays.
+   moves from step 3 to step 2, and the per-component streaming stays. **(Done
+   2026-10-05, without `Val(N)`:** static strides are worth 4 %, and a kernel
+   specialised on the block size would be compiled again at every `N` the suite
+   runs.**)**
 3. **Forced inlining and a static workgroup** on the device, through TreeAMR keeping
    the backend a field set was built with, or the kernel's remaining closures
    rewritten.
    - Steps 1–3 together are measured: **8.5 → 1.2 ns/pt**.
    - Steps 1–2 alone are 3.1 ns/pt.
+
+   **(Done 2026-10-05 by the second route:** nothing in the kernel is a closure
+   any more, and forcing inlining changes nothing — below.**)**
 4. **TreeAMR's scatter and transfer kernels at bandwidth:** 0.74 → ~0.25 ns/pt at
-   `N = 32`, and more at `N = 16`. Upstream.
+   `N = 32`, and more at `N = 16`. Upstream. **(The first change TreeAMR should
+   make:** [Upstream prerequisites](#upstream-prerequisites), item 5.**)**
 5. **`metric_derivatives` and the algebraic gauge source made lean** like the
-   source.
+   source. **(Half done 2026-10-05:** `metric_divergences` forms the contraction
+   alone; the algebraic source has lost its closures but not its spills.**)**
 6. **Then, if its 10–15 % is wanted, a native stepper** with a ghosted state and the
    stage update fused into the right-hand side.
 
 Not worth doing, measured: shared-memory staging of the principal part, `maxregs`,
 one component per thread, further workgroup tuning.
 
+**Implemented (2026-10-05).** Items 1–3, and half of 5, are in `src/`.
+
+The package's own `gh_rhs!`, through `map_blocks!` and KernelAbstractions'
+default backend (H200 job 570217, cn111):
+
+| per owned point, ns | 512 × `16³` | 512 × `32³` | 8 × `128³` |
+|---|---|---|---|
+| the kernel, before → after | 8.55 → **1.21** | 8.48 → **1.08** | 8.90 → **1.28** |
+| `gh_rhs!`, before → after | 9.94 → **2.61** | 9.21 → **1.81** | 9.31 → **1.70** |
+| of which TreeAMR's `scatter!` and `fill_ghosts!`, unchanged | 1.39 | 0.73 | 0.41 |
+
+- **Forcing inlining changes nothing now:** 1.075 against 1.077 ns at `32³`, with
+  `du` bit for bit the same.
+- **The kernel's SASS:** 5992 instructions, 2872 of them FP64, 255 registers, and no
+  call into Julia code. Its 32 call sites are CUDA's division and square-root slow
+  paths and the exception paths. Some spilling is left (298 `LDL` and 232 `STL`,
+  static): the head still spills a little, as the prototypes' K1a did.
+- **`bench/stepping.jl` on the H200** (512 × `16³`):
+  - the gauge wave's right-hand side 20.7 → 5.47 ms, and its RK4 step 84.3 → 22.7 ms;
+  - the hole fixture 28.8 → 17.8 ms and 116 → 72 ms. Its `:damped` layer branch
+    still collects `F` and evaluates the analytic solution's dual pass.
+- **The driver's records** (`BENCH_MODE=driver`): the hole's `err_l2 =
+  1.690514e−06` equals September's to every printed digit, and the wave's is
+  `7.683712e−09`.
+- **On the CPU** (development machine, four threads, loaded 9–12), the right-hand
+  side is faster too: the gauge wave's (64 × `16³`) 140 → 84 ms, the hole
+  fixture's (512 × `16³`) 1521 → 1187 ms.
+
+What is left of an evaluation is TreeAMR's: the scatter and the ghost fill are 40 %
+of `gh_rhs!` at `32³` and 53 % at `16³`.
+
 **Not measured.**
 
 - A hole: the interior branches, the sampled gauge source and the `:fitted` cache
-  reads are outside this scope.
+  reads are outside this scope. The layer kernels run the new head and Π functions
+  but keep their own shape.
 - `ncu` counters: occupancy and HBM traffic above are inferred from registers,
   local memory and SASS counts.
 - `Float32`, more than one GPU, and the monitor kernels.
-- The CPU effect of steps 2–3; only the source's is measured.
 
 ## Possible extensions
 

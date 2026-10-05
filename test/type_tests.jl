@@ -111,6 +111,15 @@ type_second(::Type{T}) where {T} =
     src = gh_node_source(g4, gu4, α, sqrtγ, _dg4(∂ₜh, ∂h), Hl, dHl, γ0, γ2)
     @test eltype(src) === T
 
+    # The kernel's spellings (added 2026-10-05): the same type, and the same
+    # numbers to the type's own precision.
+    lean = gh_node_source_lean(g4, gu4, α, sqrtγ, ∂ₜh, ∂h, Hl, dHl, γ0, γ2)
+    @test eltype(lean) === T
+    @test maximum(abs, lean - src) < 64 * eps(T) * max(maximum(abs, src), one(T))
+    divβ, divA = metric_divergences(gu4, α, β, γu, sqrtγ, ∂h)
+    @test divβ isa T && eltype(divA) === T
+    @test abs(divβ - (dβ[1, 1] + dβ[2, 2] + dβ[3, 3])) < 64 * eps(T)
+
     # The step-4 additions: the four-dimensional curvature assembly, on the
     # second derivatives packed by the symmetric pair.
     dd = (∂ₜΠ / 100, ∂h[1] / 50, ∂h[2] / 50, ∂h[3] / 50, ∂∂h[1], ∂∂h[2],

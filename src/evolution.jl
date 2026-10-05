@@ -113,7 +113,10 @@ const NDIAG = 22
     h = spacings[b]
     origin = origins[b]
     off = oftype(h, 1 // 1)
-    return ntuple(d -> origin[d] + (I[d] - off) * h, Val(3))
+    # Spelled out rather than `ntuple(d -> …, Val(3))`: no closure for a device
+    # to compile as a call (amended 2026-10-05).
+    return (origin[1] + (I[1] - off) * h, origin[2] + (I[2] - off) * h,
+            origin[3] + (I[3] - off) * h)
 end
 
 # --- the kernel-side stencil contractions -----------------------------------
@@ -154,153 +157,256 @@ end
     return (1, n1, n1 * n2), sv, sv * size(work, 4)
 end
 
+# The linear index of point `I = (i1, i2, i3, block)`'s first variable in a
+# **state-layout** array `(N, N, N, nvars, nblocks)` — `du` — and the stride
+# between its variables (added 2026-10-05, for the kernel that stores `F` as it
+# goes). From `size` alone, as `work_strides` is.
+@inline function state_offset(du, I)
+    n1, n2, n3 = size(du, 1), size(du, 2), size(du, 3)
+    sd = n1 * n2 * n3
+    return I[1] + n1 * (I[2] - 1) + n1 * n2 * (I[3] - 1) + sd * size(du, 4) * (I[4] - 1), sd
+end
+
 # `∑_k w[k] u[base + (k − 1 − r)·stride]`: the contraction every
-# one-dimensional operator here is, whatever the weights mean.
-# `ntuple(…, Val(n))` unrolls it, so the offsets and the weights are
-# compile-time constants and the loop leaves no index arithmetic behind.
-@inline function axis_stencil(w::SVector{n,T}, work, base::Int,
-                              stride::Int) where {n,T}
+# one-dimensional operator here is, whatever the weights mean. It is
+# **generated**, so the sum is written out term by term from the lowest offset
+# to the highest — the left fold `_fold` would form, the same arithmetic — and
+# the offsets are constants. **(Amended 2026-10-05:** it was an
+# `ntuple(Val(n)) do … end`, whose closure a device compiles as a real call
+# unless inlining is forced, with the weights passed through the stack —
+# `CODE.md`, "The right-hand side on an H200".**)** The generator builds an
+# expression and nothing else, so it calls no method of the caller's type. The
+# body carries an explicit `:inline` meta: a generated method is not inlined
+# because its generator is marked `@inline`, and without the meta a device
+# compiles each stencil as a call (measured: 2.2 against 1.1 ns a point).
+@generated function axis_stencil(w::SVector{n,T}, work, base::Int,
+                                 stride::Int) where {n,T}
     r = (n - 1) ÷ 2
-    return _fold(ntuple(Val(n)) do k
-        @inbounds w[k] * work[base + (k - 1 - r) * stride]
-    end)
+    ex = :(w[1] * work[base + $(-r) * stride])
+    for k in 2:n
+        ex = :($ex + w[$k] * work[base + $(k - 1 - r) * stride])
+    end
+    return Expr(:block, Expr(:meta, :inline), :(@inbounds $ex))
 end
 
 # The mixed derivative: the tensor product of two first-derivative vectors,
 # outer sum along the first axis, inner along the second. It reads the edge
 # ghosts TreeAMR fills unconditionally, which is why `∂_i∂_j` needs no
-# wider halo than `∂_i∂_i`.
-@inline function mixed_stencil(w::SVector{n,T}, work, base::Int, s1::Int,
-                               s2::Int) where {n,T}
+# wider halo than `∂_i∂_i`. Generated for the same reason as `axis_stencil`,
+# with the same two left folds the `ntuple` version formed.
+@generated function mixed_stencil(w::SVector{n,T}, work, base::Int, s1::Int,
+                                  s2::Int) where {n,T}
     r = (n - 1) ÷ 2
-    return _fold(ntuple(Val(n)) do a
-        w[a] * _fold(ntuple(Val(n)) do e
-            @inbounds w[e] * work[base + (a - 1 - r) * s1 + (e - 1 - r) * s2]
-        end)
-    end)
+    outer = :(nothing)
+    for a in 1:n
+        inner = :(w[1] * work[base + $(a - 1 - r) * s1 + $(-r) * s2])
+        for e in 2:n
+            inner = :($inner + w[$e] * work[base + $(a - 1 - r) * s1 + $(e - 1 - r) * s2])
+        end
+        outer = a == 1 ? :(w[1] * $inner) : :($outer + w[$a] * $inner)
+    end
+    return Expr(:block, Expr(:meta, :inline), :(@inbounds $outer))
+end
+
+"""
+    gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
+                ::Val{q}, ::Val{HASH}, ::Val{DISS}) -> (; ∂ₜh, msrc, β, divβ, divA, A)
+
+What every component of `F(u)` at one owned point needs. In `CODE.md`'s streaming
+order, as amended 2026-10-05:
+
+1. the state at the point, the 30 first derivatives `∂_i h` and the coefficient
+   set built from them once;
+2. `∂ₜh_ab = β^i ∂_i h_ab + (α/√γ) Π_ab + Q_d h_ab`, complete;
+3. the source `−α√γ (S0 + Z)` ([`gh_node_source_lean`](@ref)), from `∂ₜh`;
+4. the coefficients the Π components read: `β^i`, `∂_i β^i`, `∂_i(α√γ γ^{ij})`
+   ([`metric_divergences`](@ref)) and `A^{ij} = α√γ γ^{ij}`.
+
+The Π components themselves are [`gh_rhs_pi`](@ref), one at a time, after it.
+
+**The source comes before the Π components, not after them** (amended
+2026-10-05, `CODE.md`, "The right-hand side on an H200"). The source is the
+register-heaviest part of the evaluation: computed last, it was live together with
+the ten accumulated `∂ₜΠ` and spilled. Computed here, with `∂ₜh` final, it leaves
+ten numbers behind.
+
+**The `∂_t g` the source is given is `∂ₜh`, dissipation included** — the time
+derivative of the numerical solution, which is what the reduced source's
+`−Γ^ν ∂_ν g_ab` means. The difference is `O(h^{q+1})`, the dissipation's own order
+**(recorded in step 3**, where `CODE.md` had said only "from `h`, `∂_i h`, `∂_t h`
+and the coefficients"**)**.
+
+`var` is the point's linear index in `work`, `st` the per-axis strides and `sv` the
+per-variable one ([`work_strides`](@ref)); `γ0` is this point's constraint-damping
+rate, a **profile** the caller evaluates (`CODE.md`, "Gauge and constraint
+damping"). No closure is formed here or below: every loop is `@ntuple`, so nothing
+is a call on a device whether or not inlining is forced.
+"""
+@inline function gh_rhs_head(::Type{T}, work, Hwork, inner, b::Int, var::Int, st,
+                             sv::Int, inv_h, γ0, γ2, εh, ::Val{q}, ::Val{HASH},
+                             ::Val{DISS}) where {T,q,HASH,DISS}
+    w1 = derivative_weights(T, Val(q), Val(1))
+    wD = dissipation_weights(T, dissipation_rank(Val(q)))
+
+    # (1) the state at the point, the 30 first derivatives of `h`, and the
+    #     coefficients built from them once.
+    hv = SVector{NC,T}(@ntuple 10 v -> (@inbounds work[var + (v - 1) * sv]))
+    Πv = SVector{NC,T}(@ntuple 10 v -> (@inbounds work[var + (NC + v - 1) * sv]))
+    ∂h = @ntuple 3 d -> inv_h * SVector{NC,T}(@ntuple 10 v ->
+        axis_stencil(w1, work, var + (v - 1) * sv, st[d]))
+    g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(hv))
+    a_div = α / sqrtγ
+
+    # (2) `∂ₜh`, complete: the advection, the momentum and the dissipation.
+    ∂ₜh = SVector{NC,T}(@ntuple 10 v ->
+        _dth(work, var + (v - 1) * sv, st, εh, β, a_div, ∂h[1][v], ∂h[2][v], ∂h[3][v],
+             Πv[v], wD, Val(DISS)))
+
+    # (3) the source, from the state, its gradients and `∂ₜh` — the gauge source
+    #     read at the owned point (`Hsrc` has no ghosts to read) or, for the
+    #     algebraic source, evaluated from the state and the `∂g` just formed
+    #     (added 2026-10-02).
+    Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), hv, ∂ₜh, ∂h)
+    msrc = gh_node_source_lean(g4, gu4, α, sqrtγ, ∂ₜh, ∂h, Hl, dHl, γ0, γ2)
+
+    # (4) the coefficients of the Π components.
+    A = (α * sqrtγ) * γu                          # A^{jk} = α√γ γ^{jk}
+    divβ, divA = metric_divergences(gu4, α, β, γu, sqrtγ, ∂h)
+    return (; ∂ₜh, msrc, β, divβ, divA, A)
+end
+
+# One component of `∂ₜh`: `β^i ∂_i h + (α/√γ) Π`, then the dissipation —
+# the package's summation order since step 3.
+@inline function _dth(work, bh, st, εh, β, a_div, ∂h1, ∂h2, ∂h3, Π_v, wD,
+                      ::Val{DISS}) where {DISS}
+    s = β[1] * ∂h1 + β[2] * ∂h2 + β[3] * ∂h3 + a_div * Π_v
+    DISS || return s
+    return s + εh * (axis_stencil(wD, work, bh, st[1]) + axis_stencil(wD, work, bh, st[2]) +
+                     axis_stencil(wD, work, bh, st[3]))
+end
+
+"""
+    gh_rhs_pi(T, work, var, st, sv, v, inv_h, εh, head, ::Val{q}, ::Val{DISS})
+
+Component `v` of `∂ₜΠ` without its source: nine stencils of `h_v` (`∂_i h`, the
+compact `∂_i∂_i`, the tensor-product `∂_i∂_j`) and seven of `Π_v` (the value, `∂_i Π`,
+the dissipation), formed, contracted with [`gh_rhs_head`](@ref)'s coefficients and
+dropped:
+
+    β^i ∂_i Π + (∂_iβ^i) Π + ∂_i(α√γ γ^{ij}) ∂_j h + α√γ γ^{ij} ∂_i∂_j h + Q_d Π
+
+in the package's summation order since step 3. `∂_i h_v` is formed again here
+rather than kept from the head (amended 2026-10-05): three stencils of cached
+loads cost less than thirty values live across the source. `v` may be a run-time
+index — the kernel loops over the components — or a constant.
+"""
+@inline function gh_rhs_pi(::Type{T}, work, var::Int, st, sv::Int, v::Int, inv_h, εh,
+                           head, ::Val{q}, ::Val{DISS}) where {T,q,DISS}
+    inv_h² = inv_h * inv_h
+    w1 = derivative_weights(T, Val(q), Val(1))
+    w2 = derivative_weights(T, Val(q), Val(2))
+    wD = dissipation_weights(T, dissipation_rank(Val(q)))
+    β, divβ, divA, A = head.β, head.divβ, head.divA, head.A
+    bh = var + (v - 1) * sv                       # this component of `h`
+    bΠ = bh + NC * sv                             # and of `Π`
+    Π_v = @inbounds work[bΠ]
+    ∂h1 = inv_h * axis_stencil(w1, work, bh, st[1])
+    ∂h2 = inv_h * axis_stencil(w1, work, bh, st[2])
+    ∂h3 = inv_h * axis_stencil(w1, work, bh, st[3])
+    ∂Π1 = inv_h * axis_stencil(w1, work, bΠ, st[1])
+    ∂Π2 = inv_h * axis_stencil(w1, work, bΠ, st[2])
+    ∂Π3 = inv_h * axis_stencil(w1, work, bΠ, st[3])
+    s = β[1] * ∂Π1 + β[2] * ∂Π2 + β[3] * ∂Π3 + divβ * Π_v +
+        divA[1] * ∂h1 + divA[2] * ∂h2 + divA[3] * ∂h3
+    s += A[1, 1] * (inv_h² * axis_stencil(w2, work, bh, st[1])) +
+         A[2, 2] * (inv_h² * axis_stencil(w2, work, bh, st[2])) +
+         A[3, 3] * (inv_h² * axis_stencil(w2, work, bh, st[3]))
+    ∂xy = inv_h² * mixed_stencil(w1, work, bh, st[1], st[2])
+    ∂xz = inv_h² * mixed_stencil(w1, work, bh, st[1], st[3])
+    ∂yz = inv_h² * mixed_stencil(w1, work, bh, st[2], st[3])
+    s += 2 * (A[1, 2] * ∂xy + A[1, 3] * ∂xz + A[2, 3] * ∂yz)
+    if DISS
+        s += εh * (axis_stencil(wD, work, bΠ, st[1]) + axis_stencil(wD, work, bΠ, st[2]) +
+                   axis_stencil(wD, work, bΠ, st[3]))
+    end
+    return s
+end
+
+"""
+    gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
+                  ::Val{q}, ::Val{HASH}, ::Val{DISS})
+
+`F(u)` at one owned point written straight into `du`, component `v` at
+`du[o + (v − 1) sd]`, as each is finished (added 2026-10-05). The ten `∂ₜh` are
+stored after [`gh_rhs_head`](@ref), and the ten `∂ₜΠ` one at a time by a **run-time
+loop** over [`gh_rhs_pi`](@ref): nothing of `F` stays live longer than it takes to
+store it.
+
+This is the kernel where nothing modifies `F` (no hole). The interior variants
+combine `F` with the layer's terms and take it as two vectors
+([`gh_rhs_at_point`](@ref)), from the same two functions. Measured on an H200, with
+the source before the components and the loop at run time, it is 1.2 ns a point
+against 8.5 for step 3's kernel (`CODE.md`, "The right-hand side on an H200").
+"""
+@inline function gh_rhs_store!(du, o::Int, sd::Int, ::Type{T}, work, Hwork, inner,
+                               b::Int, var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
+                               ::Val{q}, ::Val{HASH}, ::Val{DISS}) where {T,q,HASH,DISS}
+    head = gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
+                       Val(q), Val(HASH), Val(DISS))
+    ∂ₜh = head.∂ₜh
+    @nexprs 10 v -> (@inbounds du[o + (v - 1) * sd] = ∂ₜh[v])
+    msrc = head.msrc
+    for v in 1:NC
+        @inbounds du[o + (NC + v - 1) * sd] =
+            gh_rhs_pi(T, work, var, st, sv, v, inv_h, εh, head, Val(q), Val(DISS)) +
+            msrc[v]
+    end
+    return nothing
 end
 
 """
     gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
                     ::Val{q}, ::Val{HASH}, ::Val{DISS}) -> (∂ₜh, ∂ₜΠ)
 
-`F(u)` at one owned point: the fused right-hand side of `(EXPANDED)`, in
-`CODE.md`'s streaming order, with the Kreiss–Oliger term and the source
-already in it.
-
-It is a **plain function called from the kernel** rather than the kernel's
-own body (restructured in step 5). The reason is `CODE.md`'s rule that `F`
-is never evaluated where `w = 0`: the frozen core holds finite but stale
-data on which `F` may be `NaN`, and `0 · NaN = NaN`, so the kernel has to
-branch *around* this whole computation — and KernelAbstractions refuses a
-`return` statement anywhere in a kernel body, closures included, so the
-branch cannot be an early exit. Inlined, the generated code and the
-streaming order are what they were; `test/evolution_tests.jl`'s comparison
-against [`gh_node_rhs_expanded`](@ref) is unchanged and still passes at the
-same tolerance.
-
-`var` is the point's linear index in `work`, `st` the per-axis strides and
-`sv` the per-variable one ([`work_strides`](@ref)); `γ0` is this point's
-constraint-damping rate, which is now a **profile** evaluated by the
-caller (`CODE.md`, "Gauge and constraint damping").
-
-What it computes:
+`F(u)` at one owned point, as two `SVector{10}`s: the fused right-hand side of
+`(EXPANDED)`, with the Kreiss–Oliger term and the source already in it.
 
     ∂ₜh_ab = β^i ∂_i h_ab + (α/√γ) Π_ab                    + Q_d h_ab
     ∂ₜΠ_ab = β^i ∂_i Π_ab + (∂_iβ^i) Π_ab
            + α√γ γ^{ij} ∂_i∂_j h_ab + ∂_i(α√γ γ^{ij}) ∂_j h_ab
            − α√γ (S0_ab + Z_ab)                            + Q_d Π_ab
 
-The source `S0 + Z` is [`gh_node_source`](@ref) and the coefficient
-derivatives are [`metric_derivatives`](@ref) — the same functions
-[`gh_node_rhs_expanded`](@ref) calls, which is what makes that function the
-reference this kernel is checked against on analytic data. The two are not
-bit-identical and are not expected to be: one body reached from two call
-sites is contracted into fused multiply-adds differently (`CODE.md`,
-"Measured results").
+It is [`gh_rhs_head`](@ref) and the ten [`gh_rhs_pi`](@ref) unrolled, the same
+arithmetic as [`gh_rhs_store!`](@ref) in the same order, so the two agree bit for
+bit wherever they are compiled alike. The interior variants call it, because they
+combine `F` with the layer's terms before storing (amended 2026-10-05; until then
+it was the whole kernel's body).
 
-**The `∂_t g` the source is given is the accumulated `∂ₜh`, dissipation
-included** — the two accumulators per component that the streaming order
-budgets, and the honest answer besides: it is the time derivative of the
-numerical solution, which is what the reduced source's `−Γ^ν ∂_ν g_ab`
-means. The difference is `O(h^{q+1})`, the dissipation's own order
-**(recorded in step 3**, where `CODE.md` had said only "from `h`, `∂_i h`,
-`∂_t h` and the coefficients"**)**.
+It is a **plain function called from the kernel** rather than the kernel's own body
+(restructured in step 5). The reason is `CODE.md`'s rule that `F` is never
+evaluated where `w = 0`: the frozen core holds finite but stale data on which `F`
+may be `NaN`, and `0 · NaN = NaN`, so the kernel has to branch *around* this whole
+computation. KernelAbstractions refuses a `return` statement anywhere in a kernel
+body, closures included, so the branch cannot be an early exit.
+
+The source is [`gh_node_source_lean`](@ref) and the coefficient derivatives are
+[`metric_divergences`](@ref) — the kernel's spellings of [`gh_node_source`](@ref)
+and [`metric_derivatives`](@ref), the functions [`gh_node_rhs_expanded`](@ref)
+calls, which is what makes that function the reference this kernel is checked
+against on analytic data. The two are not bit-identical and are not expected to
+be: the spellings sum in other orders, and one body reached from two call sites is
+contracted into fused multiply-adds differently (`CODE.md`, "Measured results").
 """
 @inline function gh_rhs_at_point(::Type{T}, work, Hwork, inner, b::Int,
                                  var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
                                  ::Val{q}, ::Val{HASH},
                                  ::Val{DISS}) where {T,q,HASH,DISS}
-    inv_h² = inv_h * inv_h
-    w1 = derivative_weights(T, Val(q), Val(1))
-    w2 = derivative_weights(T, Val(q), Val(2))
-    wD = dissipation_weights(T, dissipation_rank(Val(q)))
-
-    # (1) the state at the point, the 30 first derivatives of `h`, and the
-    #     coefficients built from them once.
-    hv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (v - 1) * sv]),
-                              Val(NC)))
-    Πv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (NC + v - 1) * sv]),
-                              Val(NC)))
-    ∂h = ntuple(Val(3)) do d
-        inv_h * SVector{NC,T}(ntuple(Val(NC)) do v
-            axis_stencil(w1, work, var + (v - 1) * sv, st[d])
-        end)
-    end
-
-    g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(hv))
-    a_div = α / sqrtγ
-    A = (α * sqrtγ) * γu                          # A^{jk} = α√γ γ^{jk}
-    _, dβ, dA = metric_derivatives(gu4, α, β, γu, sqrtγ, ∂h)
-    divβ = dβ[1, 1] + dβ[2, 2] + dβ[3, 3]                     # ∂_i β^i
-    divA = SVector{3,T}(dA[1, 1, j] + dA[2, 2, j] + dA[3, 3, j] for j in 1:3)
-
-    # (2) one component at a time: nine stencils formed, contracted and
-    #     dropped, leaving two accumulators.
-    acc = ntuple(Val(NC)) do v
-        ∂h1 = ∂h[1][v]
-        ∂h2 = ∂h[2][v]
-        ∂h3 = ∂h[3][v]
-        Π_v = Πv[v]
-        bh = var + (v - 1) * sv                   # this component of `h`
-        bΠ = bh + NC * sv                         # and of `Π`
-
-        ∂ₜh_v = β[1] * ∂h1 + β[2] * ∂h2 + β[3] * ∂h3 + a_div * Π_v
-
-        ∂Π1 = inv_h * axis_stencil(w1, work, bΠ, st[1])
-        ∂Π2 = inv_h * axis_stencil(w1, work, bΠ, st[2])
-        ∂Π3 = inv_h * axis_stencil(w1, work, bΠ, st[3])
-        ∂ₜΠ_v = β[1] * ∂Π1 + β[2] * ∂Π2 + β[3] * ∂Π3 + divβ * Π_v +
-                divA[1] * ∂h1 + divA[2] * ∂h2 + divA[3] * ∂h3
-
-        ∂ₜΠ_v += A[1, 1] * (inv_h² * axis_stencil(w2, work, bh, st[1])) +
-                 A[2, 2] * (inv_h² * axis_stencil(w2, work, bh, st[2])) +
-                 A[3, 3] * (inv_h² * axis_stencil(w2, work, bh, st[3]))
-        ∂xy = inv_h² * mixed_stencil(w1, work, bh, st[1], st[2])
-        ∂xz = inv_h² * mixed_stencil(w1, work, bh, st[1], st[3])
-        ∂yz = inv_h² * mixed_stencil(w1, work, bh, st[2], st[3])
-        ∂ₜΠ_v += 2 * (A[1, 2] * ∂xy + A[1, 3] * ∂xz + A[2, 3] * ∂yz)
-
-        if DISS
-            ∂ₜh_v += εh * (axis_stencil(wD, work, bh, st[1]) +
-                           axis_stencil(wD, work, bh, st[2]) +
-                           axis_stencil(wD, work, bh, st[3]))
-            ∂ₜΠ_v += εh * (axis_stencil(wD, work, bΠ, st[1]) +
-                           axis_stencil(wD, work, bΠ, st[2]) +
-                           axis_stencil(wD, work, bΠ, st[3]))
-        end
-        (∂ₜh_v, ∂ₜΠ_v)
-    end
-    ∂ₜh = SVector{NC,T}(ntuple(v -> acc[v][1], Val(NC)))
-    ∂ₜΠ = SVector{NC,T}(ntuple(v -> acc[v][2], Val(NC)))
-
-    # (3) the source, from the state, its gradients and the coefficients —
-    #     the gauge source is read at the owned point, `Hsrc` having no
-    #     ghosts to read — or, for the algebraic source, evaluated from the
-    #     state and the `∂g` just formed (added 2026-10-02).
-    Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), hv, ∂ₜh, ∂h)
-    msrc = gh_node_source(g4, gu4, α, sqrtγ, _dg4(∂ₜh, ∂h), Hl, dHl, γ0, γ2)
-    return ∂ₜh, ∂ₜΠ + msrc
+    head = gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
+                       Val(q), Val(HASH), Val(DISS))
+    msrc = head.msrc
+    ∂ₜΠ = SVector{NC,T}(@ntuple 10 v ->
+        gh_rhs_pi(T, work, var, st, sv, v, inv_h, εh, head, Val(q), Val(DISS)) + msrc[v])
+    return head.∂ₜh, ∂ₜΠ
 end
 
 """
@@ -308,11 +414,15 @@ end
                    interior, t, ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS},
                    ::Val{INT})
 
-The right-hand side at one owned point: `F(u)` from
-[`gh_rhs_at_point`](@ref), modified inside the hole by `CODE.md`'s
-`(INTERIOR)`,
+The right-hand side at one owned point: `F(u)`, modified inside the hole by
+`CODE.md`'s `(INTERIOR)`,
 
     ∂_t u = w(r) · F(u)  −  ρ(r) · (u − u_exact(x, t)) .
+
+Without a hole (`INT === :none`), `F` is stored component by component as it
+is finished ([`gh_rhs_store!`](@ref), from 2026-10-05). The interior variants
+take it as two vectors ([`gh_rhs_at_point`](@ref)) to combine with the layer's
+terms.
 
 `du` is in **state layout** (no ghosts, so the global index is used as it
 comes); `work` is the ghosted working array (so the same index plus `G`).
@@ -353,7 +463,7 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
                                 ::Val{INT}) where {G,q,HASH,DISS,INT}
     I = @index(Global, NTuple)                    # (i1, i2, i3, block)
     b = I[4]
-    inner = ntuple(d -> I[d], Val(3))             # state-layout index
+    inner = (I[1], I[2], I[3])                    # state-layout index
     T = eltype(du)
 
     inv_h = inv(spacings[b])
@@ -384,17 +494,16 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
     # captured by its store, shared its name with the layer's, and every
     # right-hand side on the CPU allocated ~570 bytes a point through the
     # box while no device would compile it at all ("unsupported dynamic
-    # function invocation"). Hence `Fh`/`FΠ` here, `ρk`/`tk` in the levered
-    # core, and the `w`/`ρ` renaming below.
+    # function invocation"). Hence `ρk`/`tk` in the levered core and the
+    # `w`/`ρ` renaming below.
     if INT === :none
-        Fh, FΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
-                                 inv_h, γ0, γ2, εh, Val(q), Val(HASH),
-                                 Val(DISS))
-        ntuple(Val(NC)) do v
-            du[inner..., v, b] = Fh[v]
-            du[inner..., NC + v, b] = FΠ[v]
-            nothing
-        end
+        # No hole: `F` itself, each component stored as it is finished
+        # ([`gh_rhs_store!`](@ref), amended 2026-10-05). This branch forms no
+        # closure, so a device compiles it without calls whether or not the
+        # backend forces inlining (`CODE.md`, "The right-hand side on an H200").
+        o, sd = state_offset(du, I)
+        gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, var, st, sv, inv_h, γ0,
+                      γ2, εh, Val(q), Val(HASH), Val(DISS))
     else
         # The interior's view of the point (step 8d): the radius for step
         # 5's sphere, and for the tracked geometry the radius with the two

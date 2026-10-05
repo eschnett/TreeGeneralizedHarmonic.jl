@@ -315,7 +315,10 @@ It takes the coefficient set rather than `h`, as
 [`metric_derivatives`](@ref) does, because the streaming kernel of
 `CODE.md`'s "One right-hand-side evaluation" has already built it: the
 source is step 3 there, after the coefficients of step 1 and the
-per-component stencils of step 2.
+per-component stencils of step 2. **(Amended 2026-10-05:** the kernel calls
+[`gh_node_source_lean`](@ref), the same terms spelled to fit a GPU thread's
+registers, and computes it before the Π components. This is the reference that
+spelling is tested against, and what [`gh_node_rhs_expanded`](@ref) calls.**)**
 """
 @inline function gh_node_source(g4::SMatrix{4,4,T}, gu4::SMatrix{4,4,T},
                                 α::T, sqrtγ::T,
@@ -422,7 +425,10 @@ through [`metric_quantities`](@ref) is the independent check, and
 
 The right-hand side contracts these to four numbers — `∂_i β^i` and
 `∂_i A^{ij}` — and the unused components fall out of the inlined code, so
-the streaming kernel contracts rather than asking for a leaner shape.
+the streaming kernel contracted rather than asking for a leaner shape.
+**(Amended 2026-10-05:** on a device the generators below are closures and the
+27-entry `dA` is live at once, so the kernel now asks for the leaner shape,
+[`metric_divergences`](@ref). This is its reference.**)**
 """
 @inline function metric_derivatives(h::SVector{NC,T},
                                     ∂h::NTuple{3,SVector{NC,T}}) where {T}
@@ -515,6 +521,179 @@ If that assertion fires, one of the two has drifted.
     return dα, dβ, dsqrtγ, dγu
 end
 
+# --- the kernel's spellings (added 2026-10-05) --------------------------------
+#
+# `CODE.md`, "The right-hand side on an H200": on a device, `gh_node_source` and
+# `metric_derivatives` are where the right-hand side spills. Their 4×4×4 arrays,
+# built from generators, are live together, the peak is more than the 255
+# registers a thread has, and their closures are calls unless inlining is
+# forced. The two functions below are what the kernel calls instead. They are
+# the same terms, spelled with three rules:
+#
+#   * a symmetric tensor is held by its unique components, in `_pack10`'s slots;
+#   * the work is ordered so that intermediates die early;
+#   * every loop is unrolled by `@ntuple` with literal indices, so there are no
+#     closures and every index is a constant on any backend.
+#
+# They are summed in another order than the functions they spell, so they
+# agree with them to roundoff, not bit for bit; the tests say so on every
+# background.
+
+# Slot `(a, b)` of a packed symmetric tensor; the `(row, column)`, row ≥ column,
+# of packed slot `n` (the inverse of `_pairindex`); a left fold of three and of
+# four. Longer folds are `evolution.jl`'s `_fold`.
+@inline _slot(v, a, b) = @inbounds v[_pairindex(a, b)]
+@inline function _unpair(n::Integer)
+    n <= 4 && return (n, 1)
+    n <= 7 && return (n - 3, 2)
+    n <= 9 && return (n - 5, 3)
+    return (4, 4)
+end
+@inline _fold3(t) = (t[1] + t[2]) + t[3]
+@inline _fold4(t) = ((t[1] + t[2]) + t[3]) + t[4]
+
+"""
+    gh_node_source_lean(g4, gu4, α, sqrtγ, ∂ₜh, ∂h, Hl, dHl, γ0, γ2) -> SVector{10}
+
+[`gh_node_source`](@ref)'s `msrc_ab = −α√γ (S0_ab + Z_ab)`, spelled for a device
+(added 2026-10-05): the same terms, held by their unique components and ordered so
+that the live set fits in a GPU thread's registers. This is what the right-hand-side
+kernel calls.
+
+The arguments are the kernel's own:
+
+- the coefficient set `g4`, `gu4`, `α`, `sqrtγ` of [`metric_quantities`](@ref);
+- the packed `∂ₜh` and spatial gradients `∂h[i]` (no `_dg4` array);
+- the lowered gauge source `Hl` with `dHl[a, b] = ∂_a H_b`;
+- the damping parameters `γ0`, `γ2`.
+
+The order:
+
+1. `C2 + C2ᵀ`, one first index `a` at a time. `E = G ∂_a g` and the ten values of
+   `G ∂_a g G` give `C2[a, b]`; no 4×4×4 array is formed.
+2. The forty Christoffel symbols `Γ^a_bc`, `Γ^c = g^{de} Γ^c_de`, and per slot
+   `(ab)` the terms that read them: `−2Γ^x_ya Γ^y_xb`, `2Γ^c_ab H_c`,
+   `−Γ^c ∂_c g_ab` and `−(∂_a H_b + ∂_b H_a)`.
+3. The Gundlach–Pretorius damping.
+
+**Measured** (`CODE.md`, "The right-hand side on an H200"):
+
+- **H200:** alone in a kernel it is 0.18 ns a point against 2.0 for
+  `gh_node_source`, with 254 registers and no spill: 52 % of FP64 peak.
+- **CPU:** one call is 90 ns against 383.
+
+It agrees with `gh_node_source` to roundoff on every background
+(`test/pointwise_identity_tests.jl`). It is a third spelling of the validated
+algebra, tested against the second as the second is against the port.
+"""
+@inline function gh_node_source_lean(g4::SMatrix{4,4,T}, gu4::SMatrix{4,4,T},
+                                     α::T, sqrtγ::T, ∂ₜh::SVector{NC,T},
+                                     ∂h::NTuple{3,SVector{NC,T}},
+                                     Hl::SVector{4,T}, dHl::SMatrix{4,4,T},
+                                     γ0::T, γ2::T) where {T}
+    Gp = _pack10(gu4)
+    gp = _pack10(g4)
+    D = (∂ₜh, ∂h[1], ∂h[2], ∂h[3])             # D[a] = ∂_a g, packed
+    # (1) S = C2 + C2ᵀ, one first index at a time.
+    S = ((_lean_c2(Gp, D, Val(1)) + _lean_c2(Gp, D, Val(2))) +
+         _lean_c2(Gp, D, Val(3))) + _lean_c2(Gp, D, Val(4))
+    # (2) the Christoffel symbols and every term that reads them.
+    Γ = @ntuple 4 a -> _lean_christoffel(Gp, D, Val(a))
+    Γup = SVector{4,T}(@ntuple 4 c -> _fold(@ntuple 16 n ->
+        _slot(Gp, (n - 1) % 4 + 1, (n - 1) ÷ 4 + 1) *
+        _slot(Γ[c], (n - 1) % 4 + 1, (n - 1) ÷ 4 + 1)))
+    S = S + SVector{NC,T}(@ntuple 10 n -> _lean_gamma_terms(Γ, Γup, D, Hl, dHl, Val(n)))
+    # (3) the damping, with t_a = −α δ_a^t.
+    if γ0 != 0
+        GH = SVector{4,T}(@ntuple 4 c -> _fold4(@ntuple 4 x -> _slot(Gp, c, x) * Hl[x]))
+        Cup = Γup + GH
+        Cl = SVector{4,T}(@ntuple 4 c -> _fold4(@ntuple 4 x -> _slot(gp, c, x) * Cup[x]))
+        tC = -α * _fold4(@ntuple 4 x -> _slot(Gp, 1, x) * Cl[x])
+        S = S + SVector{NC,T}(@ntuple 10 n -> _lean_damping(Cl, tC, α, gp, γ0, γ2, Val(n)))
+    end
+    return -(α * sqrtγ) * S
+end
+
+# The `a`-th row and column of `C2 + C2ᵀ`, with `C2[a, b] = Σ_μν Cuu_μν ∂_μ g_νb` and
+# `Cuu = G ∂_a g G` (symmetric: ten values) — the only place `Cuu` exists.
+@inline function _lean_c2(Gp::SVector{NC,T}, D, ::Val{a}) where {T,a}
+    Da = D[a]
+    E = @ntuple 16 n -> _fold4(@ntuple 4 x -> _slot(Gp, (n - 1) % 4 + 1, x) *
+                                             _slot(Da, x, (n - 1) ÷ 4 + 1))
+    Cuu = SVector{NC,T}(@ntuple 10 n -> _fold4(@ntuple 4 y ->
+        E[_unpair(n)[1] + 4 * (y - 1)] * _slot(Gp, y, _unpair(n)[2])))
+    C2 = @ntuple 4 b -> _fold(@ntuple 16 m -> _slot(Cuu, (m - 1) % 4 + 1, (m - 1) ÷ 4 + 1) *
+                                              _slot(D[(m - 1) % 4 + 1], (m - 1) ÷ 4 + 1, b))
+    return SVector{NC,T}(@ntuple 10 n ->
+        (_unpair(n)[1] == a ? C2[_unpair(n)[2]] : zero(T)) +
+        (_unpair(n)[2] == a ? C2[_unpair(n)[1]] : zero(T)))
+end
+
+# `Γ^a_bc = g^{ax} Γ_{x,bc}`, `Γ_{x,bc} = ½(∂_b g_xc + ∂_c g_xb − ∂_x g_bc)`, packed
+# over `(bc)`.
+@inline function _lean_christoffel(Gp::SVector{NC,T}, D, ::Val{a}) where {T,a}
+    return SVector{NC,T}(@ntuple 10 n -> _fold4(@ntuple 4 x -> _slot(Gp, a, x) *
+        ((_slot(D[_unpair(n)[1]], x, _unpair(n)[2]) +
+          _slot(D[_unpair(n)[2]], x, _unpair(n)[1]) -
+          _slot(D[x], _unpair(n)[1], _unpair(n)[2])) / 2)))
+end
+
+# Slot `n = (ab)` of the reduced source's Christoffel terms and gauge-source
+# gradient: `−2Γ^x_ya Γ^y_xb − (∂_a H_b + ∂_b H_a) + 2Γ^c_ab H_c − Γ^c ∂_c g_ab`.
+@inline function _lean_gamma_terms(Γ, Γup, D, Hl, dHl, ::Val{n}) where {n}
+    a, b = _unpair(n)
+    t2 = _fold(@ntuple 16 m -> _slot(Γ[(m - 1) % 4 + 1], (m - 1) ÷ 4 + 1, a) *
+                                _slot(Γ[(m - 1) ÷ 4 + 1], (m - 1) % 4 + 1, b))
+    t4 = Γ[1][n] * Hl[1] + Γ[2][n] * Hl[2] + Γ[3][n] * Hl[3] + Γ[4][n] * Hl[4]
+    t5 = Γup[1] * D[1][n] + Γup[2] * D[2][n] + Γup[3] * D[3][n] + Γup[4] * D[4][n]
+    return -2 * t2 - (dHl[a, b] + dHl[b, a]) + 2 * t4 - t5
+end
+
+# Slot `n = (ab)` of the damping, `γ0 (t_a C_b + t_b C_a − (1 + γ2) g_ab t^c C_c)`.
+@inline function _lean_damping(Cl, tC, α, gp, γ0, γ2, ::Val{n}) where {n}
+    a, b = _unpair(n)
+    tl1 = -α
+    return γ0 * ((a == 1 ? tl1 * Cl[b] : zero(tC)) + (b == 1 ? tl1 * Cl[a] : zero(tC)) -
+                 (1 + γ2) * gp[n] * tC)
+end
+
+"""
+    metric_divergences(gu4, α, β, γu, sqrtγ, ∂h) -> (divβ, divA::SVector{3})
+
+`∂_i β^i` and `∂_i (α√γ γ^{ij})`, `j = 1:3` — the two contractions of
+[`metric_derivatives`](@ref) that the expanded momentum equation reads, and
+nothing else (added 2026-10-05). It is the same chain rule, computing only the
+rows `t` and `i` of `∂_i g^{ab}` that the contractions need, unrolled as
+[`gh_node_source_lean`](@ref) is. The right-hand-side kernel calls this instead
+of `metric_derivatives`, whose 27-entry `∂_i A^{jk}` it contracted to three
+numbers. It agrees with that contraction to roundoff (`test/pointwise_tests.jl`).
+"""
+@inline function metric_divergences(gu4::SMatrix{4,4,T}, α::T, β::SVector{3,T},
+                                    γu::SMatrix{3,3,T}, sqrtγ::T,
+                                    ∂h::NTuple{3,SVector{NC,T}}) where {T}
+    Gp = _pack10(gu4)
+    gutt = gu4[1, 1]
+    r1 = @ntuple 3 i -> _dgu_row(Gp, ∂h[i], Val(1))         # ∂_i g^{t·}
+    ri = @ntuple 3 i -> _dgu_row(Gp, ∂h[i], Val(i + 1))     # ∂_i g^{i·}
+    divβ = _fold3(@ntuple 3 i -> -(r1[i][i + 1] + β[i] * r1[i][1]) / gutt)
+    dα = @ntuple 3 i -> α * α * α * r1[i][1] / 2
+    dsqrtγ = @ntuple 3 i -> sqrtγ * _fold(@ntuple 9 m ->
+        γu[(m - 1) % 3 + 1, (m - 1) ÷ 3 + 1] *
+        _slot(∂h[i], (m - 1) % 3 + 2, (m - 1) ÷ 3 + 2)) / 2
+    divA = SVector{3,T}(@ntuple 3 k -> _fold3(@ntuple 3 i ->
+        dα[i] * sqrtγ * γu[i, k] + α * dsqrtγ[i] * γu[i, k] +
+        α * sqrtγ * (ri[i][k + 1] + β[k] * r1[i][i + 1] + β[i] * r1[i][k + 1] +
+                     β[i] * β[k] * r1[i][1])))
+    return divβ, divA
+end
+
+# Row `a` of `∂g^{ab} = −g^{ac} (∂g_cd) g^{db}`, from the packed inverse metric and
+# the packed derivative of the metric along one direction.
+@inline function _dgu_row(Gp::SVector{NC,T}, dg::SVector{NC,T}, ::Val{a}) where {T,a}
+    v = @ntuple 4 d -> _fold4(@ntuple 4 c -> _slot(Gp, a, c) * _slot(dg, c, d))
+    return SVector{4,T}(@ntuple 4 b -> -_fold4(@ntuple 4 d -> v[d] * _slot(Gp, d, b)))
+end
+
 """
     gh_node_rhs_expanded(h, Π, ∂h, ∂Π, ∂∂h, Hl, dHl, γ0, γ2) -> (∂ₜh, ∂ₜΠ)
 
@@ -565,7 +744,8 @@ what it is checked against.
     A = a_mul * γu                              # A^{jk} = α√γ γ^{jk}
 
     # The coefficient set is already in hand, so it is passed rather than
-    # rebuilt — the same call the streaming kernel of step 3 makes.
+    # rebuilt — the call the streaming kernel of step 3 made. (From 2026-10-05
+    # the kernel calls the lean spellings instead; this stays the reference.)
     _, dβ, dA = metric_derivatives(gu4, α, β, γu, sqrtγ, ∂h)
     divβ = dβ[1,1] + dβ[2,2] + dβ[3,3]          # ∂_i β^i
     divA = SVector{3,T}(dA[1,1,j] + dA[2,2,j] + dA[3,3,j] for j in 1:3)

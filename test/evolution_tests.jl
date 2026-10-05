@@ -324,6 +324,16 @@ end
     # the kernel without the Kreiss–Oliger stencils at all, and must give
     # the same numbers as one that computes them and multiplies by zero.
     # If it does not, the switch is not a switch but a second scheme.
+    #
+    # **To roundoff of each component, not to 1e-290 everywhere** (amended
+    # 2026-10-05). The two are two specialisations of one body, and since the
+    # right-hand side was written without closures the compiler contracts
+    # them differently in one place. The difference measured is `1.9e−68` on
+    # `Π_ty` and `Π_tz`, whose values are the roundoff of zero (`7e−18`
+    # against a scale of 2): a product of two roundoff-sized numbers rounded
+    # two ways. A second scheme would differ by a term, not by an ulp of the
+    # component, and the genuine `ε_KO = 10⁻³⁰⁰` contribution (`4e−318` on
+    # `h_tx`) is still inside the bound.
     T = Float64
     q = 4
     bg = GaugeWave(T(1 // 20), one(T))
@@ -346,7 +356,7 @@ end
         gh_rhs!(du, u, prob, zero(T))
         du
     end
-    @test maximum(abs, dus[1] - dus[2]) ≤ 1e-290
+    @test all(abs.(dus[1] .- dus[2]) .≤ 64 * eps(T) .* abs.(dus[1]) .+ 1e-290)
 end
 
 @testset "The right-hand side costs what CODE.md records" begin
