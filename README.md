@@ -20,7 +20,8 @@ finite-volume scheme; this package is general relativity, and the first
 step toward a production code.
 
 The proof of concept is a single **boosted, spinning black hole** crossing
-an adaptively refined box, with **no excision**: inside the horizon the
+an adaptively refined box, with **no excision** (since 2026-10-05 an
+excised variant is under study beside it): inside the horizon the
 right-hand side is modified by two smooth profiles of the distance to the
 hole's analytic center — a relaxation toward the analytic solution in a
 layer, and a switch-off around the singularity — and both depend on

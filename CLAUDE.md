@@ -32,7 +32,9 @@ Three rules follow from `CODE.md` and govern every change here:
   `interpolate` with `Lagrange(q + 2)`); what `src/horizon.jl` keeps is the
   order, the footprint guard as a TreeAMR `Region` and the refusal
   (amended 2026-09-26).
-- **The interior is pointwise and generic, and there is no excision.**
+- **The interior is pointwise and generic, and excision is a variant
+  under study** (amended 2026-10-05, Erik's decision; until then this
+  rule read "and there is no excision").
   Inside the horizon the right-hand side is modified by smooth profiles
   of the *depth* below a surface `m` cells inside the horizon — the
   analytic center's sphere for step 5's layer, the tracked apparent
@@ -42,9 +44,19 @@ Three rules follow from `CODE.md` and govern every change here:
   (`:fitted`), with a range projection deep inside as the insurance
   that reports where either fails. Those profiles depend on position,
   time and the tracked horizon, and on nothing about blocks, levels or
-  ghost widths. Do not add an excision mask or a one-sided stencil:
-  excision is `CODE.md`'s fallback, priced there and decided by step
-  8g's host-side test, not built.
+  ghost widths. **Excision** (`CODE.md`, "Excision", `PLAN.md` steps
+  X1–X3) is the one exception, and it is a variant of its own, `:excised`.
+  - Points beyond a surface well inside the horizon are not evolved, and
+    no kernel reads them.
+  - One-sided stencils exist only in its zone kernel, built from
+    `lagrange_derivative_weights` and rounded once.
+  - The excised set is decided by a per-point class array built with the
+    problem, never by a predicate evaluated at a stage's time.
+  - Every point whose stencils reach no excised point is evolved by
+    today's centered operator, bit for bit; the exterior never sees a
+    one-sided stencil.
+  - Do not add a mask or a one-sided stencil anywhere else, and do not
+    turn the layer variants into excision.
 - **Inherit GHSO2's algebra, do not re-derive it.** `pointwise.jl` is a
   port of `notes/pointwise-ghso2.jl`; a change to the equations there is
   a change to a validated result and needs the corresponding test
@@ -91,6 +103,14 @@ two sides of the layer equal; G5 is still open on the uniform growth that is
 left and on a drift of the horizon's `J` (`0.846` at `13 M`) that the moving
 spinning hole shows with and without it (`CODE.md`, "The trailing side (step
 8′)" and "Open questions").**
+**Excision is reopened (2026-10-05, Erik's decision) as an interior variant
+under study, `:excised`, for static holes first**: one-sided closures per
+stencil at a lego surface inside the horizon, in a zone kernel beside the
+unchanged main kernel, with no target. `PLAN.md`'s steps X1 (host-side
+models, the go/no-go), X2a (the stencil provider), X2b (the variant) and X3
+(the octant runs on Symmetry's H200) run as per-step agents on the
+integration branch `claude/excision-singularity-handling-30feec`. The design
+is `CODE.md`'s "Excision (added 2026-10-05)".
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the

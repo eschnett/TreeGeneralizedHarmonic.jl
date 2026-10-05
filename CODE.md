@@ -39,7 +39,10 @@ TreeAMR is under [Upstream prerequisites](#upstream-prerequisites).
 the momentum equation, not the flux form; three spatial dimensions only;
 no excision — inside the horizon the solution is *driven to the analytic
 one* by a pointwise damping layer and frozen around the singularity,
-with nothing in that decision knowing about blocks or levels; the
+with nothing in that decision knowing about blocks or levels **(amended
+2026-10-05**, Erik's decision: excision is reopened as an interior variant
+under study, `:excised`, beside the layer — see
+[Excision](#excision-added-2026-10-05)**)**; the
 proof-of-concept target is a **single black hole with nonzero boost and
 spin**; time integration through IMEXRungeKutta's RK4 by block owner
 (through OrdinaryDiffEq until 2026-09-26); the analysis quantities
@@ -98,6 +101,9 @@ research project; the inherited documents live in `notes/`.
   Lindblom–Scheel–Kidder–Owen–Rinne system is not implemented: it was
   the candidate cure for an excision instability that GHSO2 resolved
   inside the second-order form, and this package does not excise.
+  **(Amended 2026-10-05:** excision is under study as the `:excised`
+  variant, in the second-order form, with GHSO2's resolution of that
+  instability as its recipe — [Excision](#excision-added-2026-10-05).**)**
 - **Three spatial dimensions only** (decided). TreeAMR is `D`-generic
   and its siblings test in `D = 1, 2`; this package fixes `D = 3`, the
   spacetime metric has 10 components, and GHSO2's four-dimensional
@@ -111,7 +117,17 @@ research project; the inherited documents live in `notes/`.
   finite-difference GH code since Pretorius (2005), on centered stencils
   plus Kreiss–Oliger dissipation, and is *measured* (robust-stability
   tests) rather than proven.
-- **No singularity handling** (decided). Nothing is excised. Where a
+- **Singularity handling: the interior layer, and excision under study
+  (amended 2026-10-05**, Erik's decision; this bullet read "**No
+  singularity handling** (decided). Nothing is excised." until then**)**.
+  Excision is reopened as an interior variant, `:excised`, beside the
+  layer: points beyond a surface well inside the horizon are not evolved,
+  and evolved points whose stencils reach them use one-sided closures
+  instead — no target, no fit. Whether it is stable on a Cartesian lego
+  surface, and whether it holds the gauge as well as the layer does, is
+  what `PLAN.md`'s steps X1–X3 measure; the design is under
+  [Excision](#excision-added-2026-10-05). The rest of this bullet is the
+  layer's, as it stood. Where a
   run has a black hole, the right-hand side inside the horizon is
   modified point by point: driven toward the analytic solution in a
   layer well inside the horizon, switched off around the singularity
@@ -192,7 +208,7 @@ What **changes** because the mesh changes:
 |---|---|
 | gradient / divergence as two-pass kernels with face traces | centered stencils reading ghost zones; one fused kernel per RHS |
 | flux-conservative `∂_i F^i` for the energy estimate | the expanded form with compact second-derivative stencils (decided) |
-| SAT penalties for boundaries; excision faces | ghost-filling boundary hooks; a pointwise damping layer inside the horizon instead of excision |
+| SAT penalties for boundaries; excision faces | ghost-filling boundary hooks; a pointwise damping layer inside the horizon instead of excision (from 2026-10-05 also `:excised`: one-sided closures at a lego excision surface, under study) |
 | `ε μ⁻⁵ D⁶` dissipation normalised by the SBP spectral radius | the standard Kreiss–Oliger operator of order `q + 2` on a uniform block |
 | one mesh for the whole run | error-driven regridding that follows the hole; a fresh problem per chunk |
 | Tsit5 / Vern6–9 matched to the element order; a native stepper | RK4, fixed step (decided): OrdinaryDiffEq's until 2026-09-26, IMEXRungeKutta's by block owner since |
@@ -1104,10 +1120,19 @@ masked error and `2.8×` the shell's `C_a` on the static Kerr-Schild hole,
 `40×` on the spinning one — so **the analytic `:damped` layer stays the
 default wherever the chart's singular set fits inside the core, and
 `:fitted` is for the charts where it does not**, G5's included.
+**(Amended 2026-10-05:** the octant runs since have found where `:fitted`
+does not hold — Kerr-Schild `a = 9/10` at `h = 1/48` on the rotating
+octant, unstable at `cont = 1` and `2`, with `:damped` under-resolved next
+to the ring (2026-10-04, recorded on the branch
+`claude/octant-mode-spinning-bh-75bd22`, not yet on `main`) — and Erik
+reopened excision, as a variant beside the layer
+rather than step 8g's fallback; see [Excision](#excision-added-2026-10-05).**)**
 
 #### Step 5's layer: the analytic control
 
-**No excision** (decided). Inside the horizon the solution is not left
+**No excision** (decided; **amended 2026-10-05**: this is the *layer's*
+rule — the `:excised` variant under [Excision](#excision-added-2026-10-05)
+is the exception, and is under study). Inside the horizon the solution is not left
 to the Einstein equations alone: in a layer well inside the horizon it
 is *driven to the analytic solution*, and around the singularity the
 evolution is *switched off*. Both are decisions made **point by point**,
@@ -2378,6 +2403,159 @@ prescribed sources; whether exact interior and boundary data anchor the
 gauge better is **(predicted: partly — the drift rate falls but does not
 vanish)** and is the main risk to a long run. G4 records the rate; the
 damped harmonic gauge driver is the extension that would remove it.
+
+#### Excision (added 2026-10-05)
+
+**Excision is reopened as an interior variant under study (Erik's
+decision, 2026-10-05), for static holes first.** The layer needs a target —
+the analytic solution, or a fit of the evolved state — and fails where
+neither is good enough. Excision needs none. `PLAN.md`'s steps X1–X3 decide
+whether it works on this mesh: X1 by models on the host, X2 by building it,
+X3 by measuring it on the octant against `:damped` and `:fitted`. Nothing
+below is built yet; every number is **(predicted)** until a step measures
+it. Moving holes — points that leave the excised set on the trailing side
+and need values — are a later round.
+
+**The variant, `:excised`.** Points beyond the **excision surface** are
+not evolved: `du = 0`, `F` never evaluated, their data finite and never
+read. The surface is the layer's own outer surface: the sphere `r = r_1`
+of [step 5's layer](#step-5s-layer-the-analytic-control) about the
+analytic center, or the tracked offset surface `d = 0` of [the tracked
+geometry](#the-tracked-geometry) — the set `:pasted` already freezes,
+without the paste and without a layer inside it. `r_0` (the core surface)
+is only where the core rule puts the initial data inside. There is no
+target, no fit, no relaxation rate. For this round the geometry is
+**frozen for the whole run** **(proposed in review, 2026-10-05)**: built
+once from the case's sphere or the seed's shape, with the center's
+velocity zero. The track still updates, for the record and for an
+assertion that the found horizon stays `m h` outside the surface. So the
+excised set changes only when a problem is built, and no point leaves it.
+`regrid` and `adapt` are refused for `:excised` in this round. A level
+change near the surface would prolong stale excised data into evolved
+points, and the moving round has to solve that anyway.
+
+**Why step 8g's price does not apply (proposed 2026-10-05).** Step 8g
+priced excision as an *extrapolation fill* of the excised points within
+reach of evolved stencils. A fill that keeps the order needs a `3G` halo or
+a second ghost exchange, and depends on how the blocks are cut ([Possible
+extensions](#possible-extensions)). Extrapolating into the excised set
+and then applying the centered stencil *is* a one-sided stencil. Done **per
+stencil** rather than per excised point, it reads only the stencil's own
+side, inside the existing reach `G`:
+- no wider halo;
+- no second exchange;
+- the same operator wherever the block boundaries fall.
+
+**The closures.** At an evolved point, per axis and side, `k± ∈ 0…G`
+counts the consecutive non-excised points. A stencil whose taps reach past
+them uses the **closure** on the nodes `−k⁻ … k⁺`, capped at reach `G`.
+Its weights come from `lagrange_derivative_weights` (`src/stencils.jl`),
+built in `Rational` and rounded once into `T`.
+- At the first evolved point (`k⁻ = 0`) the reach-capped closure's order is
+  `q/2 + 1` for `∂` and `q/2` for `∂²`. It is centered again from
+  `k = q/2` on.
+- At an outflow boundary that order loss should be invisible outside the
+  horizon in the continuum, because the boundary's truncation error is
+  carried into the hole. What matters is stability, and what the closure
+  reflects into the outgoing grid-scale mode of [step 8a's
+  analysis](#kreissoliger-dissipation).
+- Mixed derivatives are nested. The outer sum along `i` uses the point's
+  `i`-closure; the inner sum along `j` uses the `j`-closure of the point
+  `x + a e_i` it is taken at.
+- Kreiss–Oliger dissipation near the surface needs a one-sided or
+  reduced-rank form that keeps the damping sign. Step X1 chooses it.
+- **Lopsided (upwinded) shift advection** inside the horizon is the
+  candidate cure for the grid-scale leakage. Inside the horizon `β`
+  points away from the hole, so the upwind side of `β^k ∂_k` *is* the
+  evolved side. A lopsided `D₁` also acts on the Nyquist mode, which every
+  centered `D₁` annihilates. It is a blend, `C²` in the depth below the
+  horizon, off outside it, so the exterior's operator is unchanged bit for
+  bit. X1 says whether it is needed; X2 builds it as an option, off by
+  default.
+
+**The outflow condition, and the lego staircase (predicted 2026-10-05; X1
+measures).** In the continuum, a surface inside the horizon needs no
+boundary condition where every characteristic speed along its normal
+points into the hole. That is `GHSO2`'s outflow class
+(`notes/methods-ghso2.md`), and near the horizon it holds for surfaces
+parallel to it. A closure along a *grid axis* sees that axis's speeds, not
+the normal's. For Kerr-Schild `a = 0`, along an axis at angle `θ` to the
+radial normal, the ratio `b/a` of shift to light speed is
+`H cos θ / √(1 + H sin²θ)` with `H = 2M/r`. Outflow along the axis needs
+that to exceed one, which is `cos²θ > r/(2M)`:
+- `r < M` at `45°`;
+- `r < 2M/3` on the cube diagonal;
+- at no depth for an axis nearly tangent to the surface.
+
+Weighting the closure faces by their projected area, **the fraction of
+inflow-like closures on a lego sphere of radius `r_E` is `r_E/(2M)`**: half
+of them at `r_E = M`. At such a face one characteristic enters from the
+excised side, and the closure there is an extrapolation at an inflow
+boundary. So whether lego excision is stable is the feasibility question,
+and step X1 answers it with a two-dimensional model before a kernel is
+written. It compares:
+- per-axis closures;
+- per-stencil extrapolation along the lattice direction nearest the normal,
+  with its sources inside the point's `G`-box — which is what Cartesian
+  excision codes have used — with and without lopsided advection.
+The normal-direction fill priced in [Possible
+extensions](#possible-extensions) stays the last resort.
+
+**On the mesh, and on a device (proposed 2026-10-05; step X2 decides the
+details).** These are the pieces:
+- **A class per stored point** — centered, excised or zone (a band point,
+  or an upwinded one) — in a small integer array.
+  - It is built when a problem is built: the excised bit on owned points,
+    from the masks' own predicate; then one ghost exchange through TreeAMR,
+    so that every ghost agrees with its owner and the octant's walls
+    mirror it; then the counts `k±`.
+  - **Within a run the classes are the single source of truth** for what
+    is excised, in every kernel.
+- **The main kernel** is unchanged except that it skips excised and zone
+  points (`du = 0` for the former).
+- **A zone kernel**, launched right after it, computes `F` at zone points
+  with the closures. It runs over all blocks with a block-uniform early
+  exit, since TreeAMR has no launch over a subset.
+  - The physics is one copy. `gh_rhs_at_point` takes a stencil *provider*:
+    the centered one is today's code, bit for bit; the closure one reads
+    `k±` and a small table.
+  - No kernel reads an excised value: zero-weight taps are branched out or
+    clamped to the point itself, because `0 · NaN = NaN`.
+  - The zone is a shell a few cells thick, around `10⁴`–`10⁵` points
+    against `10⁷` or more in the mesh. So it may be generic code without
+    costing the main kernel's register budget.
+- **The monitors that take stencils** — the gauge and ADM constraints and
+  Löhner `τ` — mask the excised set widened by their reach,
+  `max(G, ⌈√2 q/2⌉)` cells. This is a separate `monitor_mask`.
+- **The error, the speed, the non-finite count and the horizon finder's
+  guard** read every evolved point, the band included.
+- **No new state writer:** the step limiter's `:excised` method is a no-op.
+
+**Checks**, asserted wherever a problem is built:
+- the margin `m ≥ G + 1` between the surface and the horizon;
+- the singular set inside the core surface;
+- every block within `G + (q + 2)/2` cells of the surface, on either side,
+  on one level, so that no prolongation reads excised data into an evolved
+  stencil.
+
+**Record rows:**
+- the least margin of the outflow condition along the true normal, which
+  must stay positive;
+- the per-axis distribution: its minimum and the inflow-like count;
+- the band's point and non-finite counts.
+
+**The risks the steps are built to expose:**
+- the inflow-like closures above;
+- the **gauge drift**. GHSO2's excised hole drifted off the stationary
+  background at `≈ 0.14/M` under prescribed sources and failed near `45 M`
+  (`notes/sonic-surface.md`). This package's analytic layer holds the same
+  drift at `8·10⁻⁵/M` because it holds the gauge inside. Excision gives that
+  up **(predicted: the drift returns)**. Step X3's drift rows to `50 M`
+  measure it, and the damped harmonic gauge driver is the fix [Possible
+  extensions](#possible-extensions) names;
+- **closures without SBP**, whose stability rests on dissipation.
+
+GHSO2's recipe applies unchanged: `ε_KO ≈ 0.5` and `γ0 ≳ 1/M`.
 
 ## Initial data and backgrounds
 
@@ -3690,7 +3868,10 @@ What this package needs from TreeAMR. None blocks G0–G3.
 Two further items are *not* needed for the proof of concept and are
 recorded with the extensions that would need them: an interior-reading
 device boundary hook (radiative boundaries, excision) and excised leaves
-(excision).
+(excision). **(Amended 2026-10-05:** excision by per-stencil closures —
+[Excision](#excision-added-2026-10-05) — needs neither, **(predicted)**. A
+`map_blocks!` over a subset of the blocks would let the zone kernel skip
+the rest without a launch, and is a wish, not a prerequisite.**)**
 
 ## File layout
 
@@ -3713,10 +3894,11 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl` |
 | `src/fit.jl` | the fitted target (added in step 8e, after `tracking.jl` and before `driver.jl`): the fit's variables (`fit_variables`, `state_from_fit`), the real solid harmonics (`_solid_harmonic_fold`, `real_solid_harmonics`, `fit_directions`), the two samplers (`state_sampler`, `analytic_sampler`), the least squares (`solve_fit`, `fit_row_weights`), the validity sweep (`fit_sweep`), `FitParams` and `InteriorFit` with `build_fit`, `fit_residual` and `fit_valid`, the kernel-callable evaluator `fit_variables_at`/`fit_state`, and the kernel half (8e-ii): `derive_target_bounds`, the 40-variable cache (`target_cache`, `fit_target_kernel!`, `fill_target!`) and the initial data's `fitted_state_kernel!`. The variant's branch is in `evolution.jl` (`GHProblem`'s `target`/`fits`/`t_target`, `refill_target`), its residual in `constraints.jl`'s error kernel, its flow in `driver.jl` (`refit!`, the refill and the pieces of a moving chunk) |
 | `src/checkpoint.jl` | checkpoint and restart (added 2026-10-01, after `fit.jl` and before `driver.jl`): the file names and their rotation and `latest_checkpoint` (TreeHydro's), `plain_reals` for exact reals, `to_plain`/`from_plain` for the run state's own structs and `fit_from_plain` for an `InteriorFit`, `run_recipe` and `run_criterion`, `check_recipe`, `save_run`/`load_run` over TreeAMR's `save_checkpoint`/`load_checkpoint`, and `check_checkpoint_keywords`. `evolve!` writes and reads through it; `test/checkpoint_tests.jl` is its file |
+| `src/excision.jl` | the `:excised` variant's mesh half (planned 2026-10-05, step X2b): the per-point classes and the counts `k±`, the closure tables, the zone kernel and the record-time outflow monitor — see [Excision](#excision-added-2026-10-05) |
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written (added in step 8c′) — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. Step 8c adds the E3 target `CurvatureTarget` to `evolution_cases.jl`, its claims to `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. Step 8d adds `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and makes `evolution_cases.jl`'s shell norms the interior's own `shell_mask`. Step 8e adds `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and, for 8e-ii, the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and moves `fitted_fixture` into `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` gains a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`) |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. Step 8c adds the E3 target `CurvatureTarget` to `evolution_cases.jl`, its claims to `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. Step 8d adds `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and makes `evolution_cases.jl`'s shell norms the interior's own `shell_mask`. Step 8e adds `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and, for 8e-ii, the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and moves `fitted_fixture` into `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` gains a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`). Steps X1 and X2b (planned 2026-10-05) add the standalone `excision_model.jl` — the outflow margins and the one- and two-dimensional closure models — and `excision_tests.jl` |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
@@ -6812,7 +6994,14 @@ the design note that would start each:
   `N ≥ 6G + 2` refuses it, ×1.8–2.7 at `N = 32` — or a second ghost
   exchange per evaluation, and degree `q + 1` amplifies grid-scale noise
   15–320× at depth 2. Excised leaves are block-granular and serve static
-  holes only.
+  holes only. **(Amended 2026-10-05:** being built and measured as the
+  `:excised` variant, `PLAN.md`'s steps X1–X3, under
+  [Excision](#excision-added-2026-10-05). The price above is an
+  extrapolation fill's *per excised point*; one-sided closures *per stencil*
+  read only inside the existing reach `G`, so they need neither the halo,
+  the second exchange, the interior-reading hook nor excised leaves.
+  Moving holes, whose trailing side releases excised points, are the round
+  after the static one.**)**
 - **The damped harmonic gauge driver** (Lindblom–Szilágyi 2009;
   Szilágyi–Lindblom–Scheel 2009): `H_a` algebraic in `g` and
   `log(√γ/α)`, its gradient by the chain rule through `∂_a g`, no extra
@@ -6865,7 +7054,8 @@ the design note that would start each:
 
 Settled in review on 2026-09-16: the expanded form (the flux form is not
 implemented on the mesh); three dimensions only; no excision, the
-interior treated pointwise by profiles of the distance to the center;
+interior treated pointwise by profiles of the distance to the center
+(reopened 2026-10-05: `:excised` is under study, below);
 the proof-of-concept target a single boosted, spinning hole;
 OrdinaryDiffEq's RK4 for time integration (amended 2026-09-26:
 IMEXRungeKutta's RK4, by block owner); the analysis quantities as
@@ -7208,3 +7398,24 @@ on the static Kerr-Schild hole, and then run a boosted Kerr-Schild hole
 across the mesh with the analytic layer, against G5's harmonic `a = 7/10`
 rows; the damped harmonic gauge stays the extension for binaries, where no
 constants of the run make the data stationary.
+
+**Excision, reopened (2026-10-05, Erik's decision; nothing is built).** Can
+a static hole be excised on this mesh instead of driven by a layer? The
+design is under [Excision](#excision-added-2026-10-05): one-sided closures
+per stencil at a lego surface well inside the horizon, computed in a zone
+kernel beside the unchanged main kernel, with no target. `PLAN.md`'s steps
+answer it in order:
+- **X1**, the host-side analysis: the closure weights, the outflow margins
+  on the offset surfaces of every chart, and a one- and a two-dimensional
+  model of the closure. The two-dimensional model is the go/no-go — the
+  inflow-like closures of a lego staircase are a fraction `r_E/(2M)` of
+  them.
+- **X2a**, the stencil provider: the right-hand side's physics in one copy,
+  bit for bit.
+- **X2b**, the `:excised` variant.
+- **X3**, the static Kerr-Schild hole on the octant at `h = 1/16 … 1/32`
+  against the `:damped` and `:fitted` rows of "Robust stability on the
+  octant", the gauge drift to `50 M` included.
+
+Spinning holes wait for the rotating octant on `main`; moving holes wait
+for the static answer.
