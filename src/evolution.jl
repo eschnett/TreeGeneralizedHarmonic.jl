@@ -39,6 +39,11 @@
 # spacings and origins travel to the backend once per chunk, as TreeWave's
 # spacings do.
 #
+# Every stencil it takes comes from a **stencil provider** (step X2a): the
+# centered one, [`Centered`](@ref), is the arithmetic above bit for bit, and
+# step X2b's closures at an excision surface are another provider of the
+# same five methods, so the physics stays one copy.
+#
 # Two things this file does *not* do, and must not start doing: it never
 # mutates `u` (the right-hand side is a pure function of `(u, t)`,
 # TreeAMR's contract), and it never consults the tree — the schedule is
@@ -180,9 +185,99 @@ end
     end)
 end
 
+# --- the stencil provider (added in step X2a) --------------------------------
+#
+# `CODE.md`, "Excision": the physics is one copy. `gh_rhs_at_point` asks a
+# *provider* for every stencil it takes, and the provider decides which
+# weights and which taps: the centered one below is today's arithmetic, and
+# step X2b's closure provider reads the per-point codes `k±` and the closure
+# table at the points next to an excision surface. The right-hand side
+# itself — the coefficients, the streaming order, the source — is not
+# repeated.
+
+"""
+    StencilProvider
+
+What [`gh_rhs_at_point`](@ref) takes its stencils from (added in step X2a).
+A provider is an `isbits` value built per point, and it answers five
+questions, each about **one component at one point**, addressed as the
+stencils address the working array — by `base`, the linear index of that
+component at the point (`var + (v − 1)·sv` for `h_v`, plus `NC·sv` for
+`Π_v`):
+
+| method | returns | the caller scales by |
+|---|---|---|
+| `d1(S, work, base, d)` | the first derivative along `d`, unit spacing | `1/h` |
+| `d2(S, work, base, d)` | the second derivative along `d` | `1/h²` |
+| `dmix(S, work, base, i, j)` | `∂_i∂_j`, `i < j`: outer sum along `i`, inner along `j` | `1/h²` |
+| `ko(S, work, base, d)` | the Kreiss–Oliger contraction along `d` | `ε_KO/h` |
+| `adv(S, β_d, ∂f_d, work, base, d)` | the derivative that multiplies `β^d` | — |
+
+The first four are raw contractions on unit spacing, as
+[`derivative_weights`](@ref) and [`dissipation_weights`](@ref) are, so the
+caller's `1/h`, `1/h²` and `ε_KO/h` are applied where they always were.
+
+`adv` is the one that differs: it is asked for the derivative in the two
+advective terms `β^k ∂_k h_ab` and `β^k ∂_k Π_ab` — and **only** there —
+and it is handed the shift's component `β_d` and the *scaled* derivative
+`∂f_d` the right-hand side has already formed along `d` (for `h`, the one
+it also feeds the coefficients and `∂_i(α√γγ^{ij})∂_j h`; for `Π`,
+`d1/h`). It returns a scaled derivative. The centered provider returns
+`∂f_d` itself; step X2b's lopsided blend returns a mix of `∂f_d` and an
+upwinded derivative, the side read from the sign of `β_d` (`CODE.md`,
+"Excision", and [`lopsided_weights`](@ref)), and so needs `1/h` of its own.
+"""
+abstract type StencilProvider end
+
+"""
+    Centered(T, ::Val{q}, st) -> Centered{T,q}
+
+The centered stencils of order `q` — the provider every kernel uses today,
+and the one [`gh_rhs_at_point`](@ref)'s original signature builds (added in
+step X2a). It holds the working array's per-axis strides `st`
+([`work_strides`](@ref)) and the three `@generated` weight vectors,
+[`derivative_weights`](@ref) for `m = 1, 2` and
+[`dissipation_weights`](@ref) at rank `q/2 + 1`.
+
+Its methods are the [`axis_stencil`](@ref) and [`mixed_stencil`](@ref)
+calls the right-hand side made before the provider existed, with the same
+weights, strides and summation order, and its `adv` returns the `∂f_d` it
+is handed, so the kernel forms no new stencil. It is the same arithmetic
+in the same order: the refactor is invisible bit for bit (`CODE.md`, "One
+right-hand-side evaluation", measured in step X2a).
+"""
+struct Centered{T,q,n,m} <: StencilProvider
+    st::NTuple{3,Int}
+    w1::SVector{n,T}
+    w2::SVector{n,T}
+    wD::SVector{m,T}
+end
+
+@inline function Centered(::Type{T}, ::Val{q}, st::NTuple{3,Int}) where {T,q}
+    w1 = derivative_weights(T, Val(q), Val(1))
+    w2 = derivative_weights(T, Val(q), Val(2))
+    wD = dissipation_weights(T, dissipation_rank(Val(q)))
+    return Centered{T,q,q + 1,q + 3}(st, w1, w2, wD)
+end
+
+# The five methods. Their names are short because the right-hand side reads
+# as the equation with them; a function that calls them must not have a
+# local of the same name (`d1`, `d2` and `ko` are common ones elsewhere).
+@inline d1(S::Centered, work, base::Int, d::Int) =
+    axis_stencil(S.w1, work, base, S.st[d])
+@inline d2(S::Centered, work, base::Int, d::Int) =
+    axis_stencil(S.w2, work, base, S.st[d])
+@inline dmix(S::Centered, work, base::Int, i::Int, j::Int) =
+    mixed_stencil(S.w1, work, base, S.st[i], S.st[j])
+@inline ko(S::Centered, work, base::Int, d::Int) =
+    axis_stencil(S.wD, work, base, S.st[d])
+@inline adv(S::Centered, β_d, ∂f_d, work, base::Int, d::Int) = ∂f_d
+
 """
     gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
                     ::Val{q}, ::Val{HASH}, ::Val{DISS}) -> (∂ₜh, ∂ₜΠ)
+    gh_rhs_at_point(S::StencilProvider, T, work, Hwork, inner, b, var, sv,
+                    inv_h, γ0, γ2, εh, ::Val{HASH}, ::Val{DISS}) -> (∂ₜh, ∂ₜΠ)
 
 `F(u)` at one owned point: the fused right-hand side of `(EXPANDED)`, in
 `CODE.md`'s streaming order, with the Kreiss–Oliger term and the source
@@ -203,6 +298,16 @@ same tolerance.
 `sv` the per-variable one ([`work_strides`](@ref)); `γ0` is this point's
 constraint-damping rate, which is now a **profile** evaluated by the
 caller (`CODE.md`, "Gauge and constraint damping").
+
+**Every stencil comes from a provider** (added in step X2a). The second
+form takes one, `S` ([`StencilProvider`](@ref)), in place of `st` and
+`q`, and asks it for each `d1`, `d2`, `dmix`, `ko` and `adv`; the first
+form — the one every kernel calls — builds [`Centered`](@ref) from `st`
+and `q` and calls the second, so its callers did not change. The
+centered provider is today's stencils and its `adv` is the identity on the
+derivative it is handed, so the two forms are the same arithmetic in the
+same order, bit for bit; step X2b's closure provider is the second form at
+the points next to an excision surface (`CODE.md`, "Excision").
 
 What it computes:
 
@@ -231,10 +336,15 @@ means. The difference is `O(h^{q+1})`, the dissipation's own order
                                  var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
                                  ::Val{q}, ::Val{HASH},
                                  ::Val{DISS}) where {T,q,HASH,DISS}
+    return gh_rhs_at_point(Centered(T, Val(q), st), T, work, Hwork, inner, b,
+                           var, sv, inv_h, γ0, γ2, εh, Val(HASH), Val(DISS))
+end
+
+@inline function gh_rhs_at_point(S::StencilProvider, ::Type{T}, work, Hwork,
+                                 inner, b::Int, var::Int, sv::Int, inv_h, γ0,
+                                 γ2, εh, ::Val{HASH},
+                                 ::Val{DISS}) where {T,HASH,DISS}
     inv_h² = inv_h * inv_h
-    w1 = derivative_weights(T, Val(q), Val(1))
-    w2 = derivative_weights(T, Val(q), Val(2))
-    wD = dissipation_weights(T, dissipation_rank(Val(q)))
 
     # (1) the state at the point, the 30 first derivatives of `h`, and the
     #     coefficients built from them once.
@@ -244,7 +354,7 @@ means. The difference is `O(h^{q+1})`, the dissipation's own order
                               Val(NC)))
     ∂h = ntuple(Val(3)) do d
         inv_h * SVector{NC,T}(ntuple(Val(NC)) do v
-            axis_stencil(w1, work, var + (v - 1) * sv, st[d])
+            d1(S, work, var + (v - 1) * sv, d)
         end)
     end
 
@@ -256,7 +366,10 @@ means. The difference is `O(h^{q+1})`, the dissipation's own order
     divA = SVector{3,T}(dA[1, 1, j] + dA[2, 2, j] + dA[3, 3, j] for j in 1:3)
 
     # (2) one component at a time: nine stencils formed, contracted and
-    #     dropped, leaving two accumulators.
+    #     dropped, leaving two accumulators. The advective derivatives go
+    #     through the provider's `adv`, which the centered provider answers
+    #     with the derivative it is handed; `∂_i(α√γγ^{ij}) ∂_j h` keeps the
+    #     plain `∂h` (step X2a).
     acc = ntuple(Val(NC)) do v
         ∂h1 = ∂h[1][v]
         ∂h2 = ∂h[2][v]
@@ -265,29 +378,31 @@ means. The difference is `O(h^{q+1})`, the dissipation's own order
         bh = var + (v - 1) * sv                   # this component of `h`
         bΠ = bh + NC * sv                         # and of `Π`
 
-        ∂ₜh_v = β[1] * ∂h1 + β[2] * ∂h2 + β[3] * ∂h3 + a_div * Π_v
+        ∂ₜh_v = β[1] * adv(S, β[1], ∂h1, work, bh, 1) +
+                β[2] * adv(S, β[2], ∂h2, work, bh, 2) +
+                β[3] * adv(S, β[3], ∂h3, work, bh, 3) + a_div * Π_v
 
-        ∂Π1 = inv_h * axis_stencil(w1, work, bΠ, st[1])
-        ∂Π2 = inv_h * axis_stencil(w1, work, bΠ, st[2])
-        ∂Π3 = inv_h * axis_stencil(w1, work, bΠ, st[3])
-        ∂ₜΠ_v = β[1] * ∂Π1 + β[2] * ∂Π2 + β[3] * ∂Π3 + divβ * Π_v +
+        ∂Π1 = inv_h * d1(S, work, bΠ, 1)
+        ∂Π2 = inv_h * d1(S, work, bΠ, 2)
+        ∂Π3 = inv_h * d1(S, work, bΠ, 3)
+        ∂ₜΠ_v = β[1] * adv(S, β[1], ∂Π1, work, bΠ, 1) +
+                β[2] * adv(S, β[2], ∂Π2, work, bΠ, 2) +
+                β[3] * adv(S, β[3], ∂Π3, work, bΠ, 3) + divβ * Π_v +
                 divA[1] * ∂h1 + divA[2] * ∂h2 + divA[3] * ∂h3
 
-        ∂ₜΠ_v += A[1, 1] * (inv_h² * axis_stencil(w2, work, bh, st[1])) +
-                 A[2, 2] * (inv_h² * axis_stencil(w2, work, bh, st[2])) +
-                 A[3, 3] * (inv_h² * axis_stencil(w2, work, bh, st[3]))
-        ∂xy = inv_h² * mixed_stencil(w1, work, bh, st[1], st[2])
-        ∂xz = inv_h² * mixed_stencil(w1, work, bh, st[1], st[3])
-        ∂yz = inv_h² * mixed_stencil(w1, work, bh, st[2], st[3])
+        ∂ₜΠ_v += A[1, 1] * (inv_h² * d2(S, work, bh, 1)) +
+                 A[2, 2] * (inv_h² * d2(S, work, bh, 2)) +
+                 A[3, 3] * (inv_h² * d2(S, work, bh, 3))
+        ∂xy = inv_h² * dmix(S, work, bh, 1, 2)
+        ∂xz = inv_h² * dmix(S, work, bh, 1, 3)
+        ∂yz = inv_h² * dmix(S, work, bh, 2, 3)
         ∂ₜΠ_v += 2 * (A[1, 2] * ∂xy + A[1, 3] * ∂xz + A[2, 3] * ∂yz)
 
         if DISS
-            ∂ₜh_v += εh * (axis_stencil(wD, work, bh, st[1]) +
-                           axis_stencil(wD, work, bh, st[2]) +
-                           axis_stencil(wD, work, bh, st[3]))
-            ∂ₜΠ_v += εh * (axis_stencil(wD, work, bΠ, st[1]) +
-                           axis_stencil(wD, work, bΠ, st[2]) +
-                           axis_stencil(wD, work, bΠ, st[3]))
+            ∂ₜh_v += εh * (ko(S, work, bh, 1) + ko(S, work, bh, 2) +
+                           ko(S, work, bh, 3))
+            ∂ₜΠ_v += εh * (ko(S, work, bΠ, 1) + ko(S, work, bΠ, 2) +
+                           ko(S, work, bΠ, 3))
         end
         (∂ₜh_v, ∂ₜΠ_v)
     end

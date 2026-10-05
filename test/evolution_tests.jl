@@ -378,3 +378,213 @@ end
     @info "RHS throughput" q threads = Threads.nthreads() points ns_per_point = ns
     @test ns < 50_000
 end
+
+# --- the stencil provider (step X2a) ------------------------------------------
+#
+# `gh_rhs_at_point` asks a provider for every stencil (`CODE.md`, "One
+# right-hand-side evaluation", amended in step X2a). That the centered
+# provider changed no bit of any run is what the threading digest, the octant
+# CSV and every `isequal` claim of the suite say, compared against the tree
+# before it; what is claimed here is what those comparisons cannot see: that
+# the provider's methods are the stencils by an independent spelling, and
+# that the right-hand side asks a provider for exactly what step X2b's closure
+# provider will have to answer.
+
+using Random: Xoshiro
+
+# A provider for the host: the centered stencils, a log of every request
+# (which method, `h` or `Π`, which component, which axis or pair), `adv`'s
+# arguments, and an offset `δ_d` added to `adv`'s answer for one field's
+# advection (`which`). Its methods are the package's own functions, extended
+# for a type of this file's.
+struct ProbeProvider{T,C} <: TreeGeneralizedHarmonic.StencilProvider
+    inner::C
+    log::Vector{Any}
+    advargs::Vector{Any}
+    var::Int
+    sv::Int
+    δ::NTuple{3,T}
+    which::Symbol
+end
+
+function probe_field(S::ProbeProvider, base)
+    o = base - S.var
+    @assert o ≥ 0 && o % S.sv == 0
+    k = o ÷ S.sv
+    @assert k < 20
+    return (k < 10 ? :h : :Π), k % 10 + 1
+end
+
+function TreeGeneralizedHarmonic.d1(S::ProbeProvider, work, base::Int, d::Int)
+    push!(S.log, (:d1, probe_field(S, base)..., d))
+    return TreeGeneralizedHarmonic.d1(S.inner, work, base, d)
+end
+function TreeGeneralizedHarmonic.d2(S::ProbeProvider, work, base::Int, d::Int)
+    push!(S.log, (:d2, probe_field(S, base)..., d))
+    return TreeGeneralizedHarmonic.d2(S.inner, work, base, d)
+end
+function TreeGeneralizedHarmonic.dmix(S::ProbeProvider, work, base::Int, i::Int,
+                                      j::Int)
+    push!(S.log, (:dmix, probe_field(S, base)..., (i, j)))
+    return TreeGeneralizedHarmonic.dmix(S.inner, work, base, i, j)
+end
+function TreeGeneralizedHarmonic.ko(S::ProbeProvider, work, base::Int, d::Int)
+    push!(S.log, (:ko, probe_field(S, base)..., d))
+    return TreeGeneralizedHarmonic.ko(S.inner, work, base, d)
+end
+function TreeGeneralizedHarmonic.adv(S::ProbeProvider, β_d, ∂f_d, work,
+                                     base::Int, d::Int)
+    f, v = probe_field(S, base)
+    push!(S.log, (:adv, f, v, d))
+    push!(S.advargs, (f, v, d, base, β_d, ∂f_d))
+    return f === S.which ? ∂f_d + S.δ[d] : ∂f_d
+end
+
+# A working array of one block, `n³` stored points, holding a metric near
+# Minkowski with random `O(10⁻²)` offsets and a random `Π`: every coefficient
+# and every stencil nonzero, the shift included.
+function probe_work(::Type{T}, n; seed=20261005) where {T}
+    rng = Xoshiro(seed)
+    work = Array{T}(undef, n, n, n, 20, 1)
+    for k in 1:n, j in 1:n, i in 1:n, v in 1:20
+        work[i, j, k, v, 1] = T(1 // 50) * (rand(rng, T) - T(1 // 2))
+    end
+    return work
+end
+
+@testset "The centered provider is the stencils it replaced, bit for bit" begin
+    # Guards step X2a at its smallest scale. A provider method that read the
+    # wrong weight vector, stepped by the wrong axis's stride, swapped the
+    # mixed derivative's axes or summed in another order would change every
+    # run in the last place — and the threading digest compares a run only
+    # with itself. The reference is the host's cartesian `apply_stencil` and
+    # `apply_mixed_stencil`, which sum from the lowest offset with the inner
+    # sum along the second axis, as the kernel does (`CODE.md`,
+    # "Finite-difference stencils"), so the claim is `isequal`: at two orders,
+    # two precisions, every axis and pair, `h` and `Π` slots, two blocks.
+    # And `adv` is the identity on the derivative it is handed, reading
+    # nothing — a `NaN` comes back as itself.
+    TGH = TreeGeneralizedHarmonic
+    for T in (Float64, Float32), q in (2, 4)
+        G = q ÷ 2 + 1
+        n = 2G + 3
+        rng = Xoshiro(q)
+        work = rand(rng, T, n, n, n, 20, 2)
+        st, sv, sb = TGH.work_strides(work)
+        S = TGH.Centered(T, Val(q), st)
+        @test isbits(S)
+        w1 = derivative_weights(T, Val(q), Val(1))
+        w2 = derivative_weights(T, Val(q), Val(2))
+        wD = dissipation_weights(T, dissipation_rank(Val(q)))
+        ok = true
+        count = 0
+        for b in 1:2, v in (1, 7, 11, 20),
+            idx in ((G + 1, G + 1, G + 1), (n - G, G + 2, n ÷ 2 + 1),
+                    (n ÷ 2 + 1, n - G, G + 1))
+
+            base = 1 + (b - 1) * sb + (v - 1) * sv + (idx[1] - 1) * st[1] +
+                   (idx[2] - 1) * st[2] + (idx[3] - 1) * st[3]
+            ok &= work[base] === work[idx..., v, b]
+            for d in 1:3
+                line = ξ -> work[Base.setindex(idx, ξ, d)..., v, b]
+                ok &= isequal(TGH.d1(S, work, base, d),
+                              apply_stencil(w1, line, idx[d], 1))
+                ok &= isequal(TGH.d2(S, work, base, d),
+                              apply_stencil(w2, line, idx[d], 1))
+                ok &= isequal(TGH.ko(S, work, base, d),
+                              apply_stencil(wD, line, idx[d], 1))
+                count += 3
+            end
+            for (i, j) in ((1, 2), (1, 3), (2, 3))
+                f = (ξ, η) -> work[Base.setindex(Base.setindex(idx, ξ, i), η,
+                                                 j)..., v, b]
+                ok &= isequal(TGH.dmix(S, work, base, i, j),
+                              apply_mixed_stencil(w1, f, idx[i], idx[j], 1, 1))
+                count += 1
+            end
+        end
+        @test ok
+        @test count == 2 * 4 * 3 * 12
+        x = rand(rng, T)
+        @test TGH.adv(S, -one(T), x, work, 1, 2) === x
+        @test isequal(TGH.adv(S, one(T), T(NaN), work, 1, 3), T(NaN))
+    end
+end
+
+@testset "The right-hand side asks its provider for each stencil once, and adv for the advection" begin
+    # Guards the interface step X2b plugs its closure provider into. Every
+    # bit-for-bit claim about the centered provider would still hold if the
+    # right-hand side routed an advective derivative through `d1` (a lopsided
+    # `adv` would then miss it), asked `adv` for the `∂_i(α√γγ^{ij}) ∂_j h`
+    # term, handed it another derivative than the one it replaces, or used
+    # its answer anywhere but beside `β^d` — because the centered `adv`
+    # returns its argument. So a probe provider wrapping the centered one
+    # logs every request at one point (`q = 4`, with dissipation, no gauge
+    # source):
+    #   * `d1` of each of the twenty fields along each axis, `adv` of each in
+    #     the advection of `h` and of `Π`, `d2` and the three `dmix` pairs of
+    #     `h`, and `ko` of all twenty — each exactly once, nothing else;
+    #   * `adv` is handed `β^d` and the derivative `d1/h` of the same field;
+    #   * an offset `δ_d` added to `adv`'s answer for `Π` moves `∂ₜΠ` by
+    #     `Σ β^d δ_d` and leaves `∂ₜh` alone bit for bit, and for `h` moves
+    #     `∂ₜh` by the same.
+    # The probe's `F` is the built-in call's to roundoff, not bit for bit: the
+    # same body compiled for two providers (`CLAUDE.md`, "Two spellings of one
+    # expression").
+    TGH = TreeGeneralizedHarmonic
+    T = Float64
+    q = 4
+    G = q ÷ 2 + 1
+    n = 2G + 3
+    work = probe_work(T, n)
+    st, sv, _ = TGH.work_strides(work)
+    idx = (G + 2, G + 2, G + 2)
+    var = 1 + (idx[1] - 1) * st[1] + (idx[2] - 1) * st[2] + (idx[3] - 1) * st[3]
+    inner = (2, 2, 2)
+    inv_h = T(4)
+    γ0, γ2 = one(T), T(-1 // 2)
+    εh = T(1 // 2) * inv_h
+    probe(δ, which) = ProbeProvider{T,TGH.Centered{T,q,q + 1,q + 3}}(
+        TGH.Centered(T, Val(q), st), Any[], Any[], var, sv, δ, which)
+    run(S) = TGH.gh_rhs_at_point(S, T, work, nothing, inner, 1, var, sv, inv_h,
+                                 γ0, γ2, εh, Val(false), Val(true))
+
+    Fh, FΠ = TGH.gh_rhs_at_point(T, work, nothing, inner, 1, var, st, sv, inv_h,
+                                 γ0, γ2, εh, Val(q), Val(false), Val(true))
+    S0 = probe((zero(T), zero(T), zero(T)), :none)
+    Ph, PΠ = run(S0)
+    scale = max(maximum(abs, Fh), maximum(abs, FΠ))
+    @test maximum(abs, Ph - Fh) ≤ 64 * eps(T) * scale
+    @test maximum(abs, PΠ - FΠ) ≤ 64 * eps(T) * scale
+
+    want = Any[]
+    for f in (:h, :Π), v in 1:10, d in 1:3
+        push!(want, (:d1, f, v, d), (:adv, f, v, d), (:ko, f, v, d))
+    end
+    for v in 1:10, d in 1:3
+        push!(want, (:d2, :h, v, d))
+    end
+    for v in 1:10, ij in ((1, 2), (1, 3), (2, 3))
+        push!(want, (:dmix, :h, v, ij))
+    end
+    @test length(S0.log) == 240
+    @test sort(string.(S0.log)) == sort(string.(want))
+
+    _, _, _, β, _, _ = metric_quantities(_sym4(SVector{10,T}(work[idx..., 1:10, 1])))
+    C = TGH.Centered(T, Val(q), st)
+    handed = all(S0.advargs) do (f, v, d, base, β_d, ∂f_d)
+        isapprox(β_d, β[d]; rtol=64 * eps(T)) &&
+            isequal(∂f_d, inv_h * TGH.d1(C, work, base, d))
+    end
+    @test handed
+    @test minimum(abs, β) > 1e-4                  # the shift is not trivial
+
+    δ = (T(1 // 3), T(-2 // 3), T(5 // 4))
+    shift = β[1] * δ[1] + β[2] * δ[2] + β[3] * δ[3]
+    Qh, QΠ = run(probe(δ, :Π))
+    @test isequal(Qh, Ph)
+    @test maximum(abs, QΠ - PΠ .- shift) ≤ 64 * eps(T) * scale
+    Rh, _ = run(probe(δ, :h))
+    @test maximum(abs, Rh - Ph .- shift) ≤ 64 * eps(T) * scale
+    @test abs(shift) > 1e4 * 64 * eps(T) * scale  # and the offset is visible
+end
