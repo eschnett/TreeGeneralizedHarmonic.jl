@@ -26,7 +26,8 @@ and X3 below, static holes first, as per-step agents on the integration
 branch `claude/excision-singularity-handling-30feec`.** They supersede step
 8g's brief. **X1 is done and merged (2026-10-05): go for the static
 Kerr-Schild `a = 0` hole with per-axis closures and `:msn` dissipation,
-`ε_KO > 0` required, spinning holes not covered. X2a is next.**
+`ε_KO > 0` required, spinning holes not covered. X2a is done and merged
+(the stencil provider, no bit changed). X2b is next.**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1425,6 +1426,71 @@ there.
 
 The H200's register count and `ld.local` spills for the `:damped` `q = 4`
 kernel are measured in X3.
+
+**What step X2a hands over** (its report's section 6, 2026-10-05; the
+interface is `CODE.md`'s "One right-hand-side evaluation", "The stencils come
+from a provider"). The refactor changed no bit: the thread digest, one-chunk
+octant CSVs, eleven CPU and three Metal kernel variants are identical to the
+base.
+
+- **A closure provider subtypes `TreeGeneralizedHarmonic.StencilProvider`**
+  and implements all five methods with exactly these signatures:
+  - `d1(S, work, base::Int, d::Int)`, `d2(…)` and `ko(…)` — raw
+    contractions on unit spacing;
+  - `dmix(S, work, base::Int, i::Int, j::Int)` — the same, outer sum along
+    `i`, inner along `j`;
+  - `adv(S, β_d, ∂f_d, work, base::Int, d::Int)` — handed and returning a
+    **scaled** derivative, so a lopsided `adv` carries its own `1/h`.
+
+  The caller applies `1/h`, `1/h²` and `ε_KO/h` to the first four as before.
+- **Calling it.** The zone kernel calls `gh_rhs_at_point(S, T, work, Hwork,
+  inner, b, var, sv, inv_h, γ0, γ2, εh, Val(HASH), Val(DISS))`, with `var`,
+  `sv`, `inv_h`, `γ0` and `εh` computed exactly as `gh_rhs_kernel!` does
+  them. `q` enters only through the provider.
+- **What it is asked for, per point:**
+  - `d1` of all 20 fields along each axis (`h`'s feed the coefficients too);
+  - `adv` of all 20 along each axis;
+  - `d2` and `dmix` (pairs `(1,2)`, `(1,3)`, `(2,3)`) of `h` only;
+  - `ko` of all 20.
+
+  `base` is the component's linear index in `work`, so **the per-point
+  codes live in the provider**: `base` cannot be decoded into them. The
+  provider holds:
+  - the point's `k±` along the three axes;
+  - the class array, with the working array's spatial strides, plus the
+    point's index in it and `st`, for `dmix`'s per-outer-node `j`-codes;
+  - the table (a device array);
+  - `1/h`;
+  - the blend weight.
+- **The lopsided blend** is a provider that wraps `Centered` and overrides
+  only `adv`. It is used in the main kernel's `:excised` specialisation,
+  behind a `Val`, and in the closure provider.
+  - Where the weight is zero it must return `∂f_d` through a **branch**,
+    not as `(1 − λ) ∂f + λ L`, to keep the exterior bit for bit.
+  - Price the centered `d1/h` of `Π`, which is still formed where the blend
+    is full, across the main kernel's thick blend shell.
+- **Traps:**
+  - The module-level names `d1`, `d2` and `ko` collide with common locals
+    (`constraints.jl`, `interior.jl`, `ClosureTable`'s fields). A function
+    that calls them must not have a local of the same name.
+  - Providers are `isbits`, with `@inline` methods.
+  - `test/evolution_tests.jl`'s host-only `ProbeProvider` is a template for
+    the closure provider's host tests.
+  - "No excised tap ⇒ the centered `F`" was bit for bit on Apple silicon
+    for a non-inlined provider. Claim `isequal` where it holds and keep a
+    `64 eps` fallback for x86-64.
+- **Benchmarks:** at this machine's load the base alone varies 6–8 %, and
+  the refactor measured ±3 % with opposite signs in the two cases (read as
+  code layout, proposed). Interleave base and branch runs when the zone
+  launch is added.
+- **Environment:**
+  - a fresh resolve takes TreeAMR **0.1.7** (`[compat]` `0.1.4` allows it),
+    and the suite passes with it;
+  - running a single test file needs a scratch environment combining
+    `test/Project.toml`, the four `[sources]` and a path source for the
+    package;
+  - a Metal check needs a fresh resolve: the current Manifest pins LLVM 10,
+    which Metal 1.11.1 cannot use.
 
 ## Step X2b — The `:excised` variant
 
