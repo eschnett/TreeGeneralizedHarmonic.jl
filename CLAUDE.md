@@ -110,7 +110,9 @@ unchanged main kernel, with no target. `PLAN.md`'s steps X1 (host-side
 models, the go/no-go), X2a (the stencil provider), X2b (the variant) and X3
 (the octant runs on Symmetry's H200) run as per-step agents on the
 integration branch `claude/excision-singularity-handling-30feec`. The design
-is `CODE.md`'s "Excision (added 2026-10-05)".
+is `CODE.md`'s "Excision (added 2026-10-05)". X1, X2a and X2b are done: the
+variant runs on both geometries, with the exterior's operator bit for bit
+today's; X3 measures it on Symmetry's H200.
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -419,6 +421,33 @@ against the tree before it (`CODE.md`, "One right-hand-side evaluation").
 right-hand side asks for. No other provider exists yet: X2b adds the closure
 one (`CODE.md`, "Excision", "How the closure provider plugs in").
 
+From step X2b (2026-10-05) there is an **`:excised` variant**, for static
+holes, on both geometries (`CODE.md`, "Excision", "What step X2b built"):
+`Interior(…; variant = :excised)` excises `r < r_1`, `FittedSpec(…; variant
+= :excised)` the depth `d > 0` below the seed's offset surface, frozen for
+the run. Its parameters are `Excision(T; upwind, dissipation)`, a field of
+`Interior`, `FittedSpec` and `FittedInterior` (`GHCase`/`hole_case` take
+`excision`); a legacy `show` keeps every other interior's `repr` — the
+recipe's — byte for byte. `src/excision.jl` has `build_excision` (the
+`UInt8` classes per stored point: the masks' predicate on owned points, one
+ghost exchange of that bit, a `stored = true` pass marking excised, zone and
+centered; a census and the refusals), `check_excision_mesh` (one level
+within `(G + q + 2) h` of the surface), `check_excision_case` (`ε_KO > 0`,
+static, no bounds, `m ≥ ⌈√3 G⌉` with a `Horizon`), the providers
+`ClosureProvider` (`closure_provider`, the table as `closure_arrays`, a
+`NamedTuple` of device arrays) and `Lopsided`, `ExcisionBlend` and
+`blend_weight`, `gh_zone_kernel!` (launched by `gh_rhs!` after the main
+kernel, whose `:excised` branch writes centered points and `du = 0` at
+excised ones), `monitor_mask` (the default mask of the stencil monitors and
+the indicator) and `excision_rows` (the record's outflow rows, in the
+excision's own monitor field set). `GHProblem` carries an `ExcisionData` as
+`excision`. `stencils.jl` has `lopsided_centered_weights`. `evolve!` freezes
+the geometry, refuses `regrid`, `adapt`, the rates, `handover` and
+`target_source` for it, and records `excision_*` rows (and, tracked,
+`excision_horizon_margin`). `test/excision_tests.jl` is its file;
+`test/octant_runs.jl interior=excised` and `bench/stepping.jl
+BENCH_CASE=excised` are its runs.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -492,7 +521,15 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-After step X2a the suite is **6488 assertions in 30m09** at one thread and
+After step X2b the suite is **6579 assertions in 21m11** at one thread and
+**6587 in 17m39** at four (2026-10-05, the two at once, at a load of 7–25
+from other sessions): its 91 new claims are `excision_tests.jl`'s 84 —
+`44.6 s` / `32.8 s`, most of it the compilation of the excised kernels and
+of the tracked and restarted runs' paths — `type_tests.jl`'s `Float32`
+excised right-hand side (6, `6.1 s`) and `interior_tests.jl`'s acceptance
+of `:excised` beside the refusal of an unknown variant, which until X2b was
+asserted of `:excised` itself. The thread digest gained a seventh line.
+After step X2a the suite was **6488 assertions in 30m09** at one thread and
 **6496 in 25m26** at four (2026-10-05; four suites at once — the branch and
 its base, one and four threads — at a load of 5–16, so read the times as
 each other's and not as X1's): its 30 new claims are `evolution_tests.jl`'s
@@ -812,7 +849,12 @@ placements) in a scratch copy with `OrdinaryDiffEqLowOrderRK` and
 
 ```bash
 BENCH_MODE=step BENCH_CASE=wave,hole julia --project=. -t 4 bench/stepping.jl
+BENCH_MODE=step BENCH_CASE=excised BENCH_UPWIND=1,4 julia --project=. -t 4 bench/stepping.jl
 ```
+
+`BENCH_CASE=excised` (added in step X2b) is the hole's mesh with `r < 3/4`
+excised, and adds the zone kernel's own time, its points and its share of
+a right-hand side.
 
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a
@@ -835,10 +877,16 @@ or `ks`, `interior=damped|fitted`, margins, `fit_cont`), the mesh (`L`, `N`,
 `out=<dir>` (CSV, `records.csv`, `simwatch.toml`) and `checkpoint=<dir>`.
 On Symmetry they ran one H200 each from a copy with `CUDA` added to its
 `Project.toml` (`ks-octant`, `ks-study2`); `cfl = 1/2` is as accurate as
-`1/4` there and half the cost:
+`1/4` there and half the cost. From step X2b `interior=excised` takes
+`geometry=sphere|tracked`, `r_E=` (the sphere's surface, default `1`) or
+`margin=` (cells below `r = 2`), `r_0=` (the core rule's radius, default
+`r_E/2`), `upwind=<start>,<width>` (the lopsided blend, off by default; X1's
+profile is `1,4`) and `closure=msn|reduced|onesided`, and writes the
+excision rows into the CSV, `records.csv` and SimWatch's `extra.excision`:
 
 ```bash
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=fitted L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/smoke
+julia --project=. --threads=4 test/octant_runs.jl case=ks interior=excised L=8 N=16 roots=2 radii=4,2 t_end=1 out=out/smoke-excised
 julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
 ```
 
@@ -1476,6 +1524,27 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   frozen line the closure is unstable there. Do not run `:excised` on a
   spinning hole without that answered. And the closures need `ε_KO > 0`:
   without it the extrapolation family grows at `+1–4/M` on the surface.
+- **An excised problem reads the state when it is built** (step X2b):
+  `build_excision`'s refusal of a shift pointing into the excised set reads
+  `U.work`'s owned points, so `U` must hold the state when the `GHProblem`
+  is constructed — `fill_exact!` leaves it there, and a restart scatters the
+  file's `u` first. The classes are the single source of truth for the
+  life of a problem: never decide "excised" by a predicate in a kernel.
+- **An excised surface must lie inside one refinement level** (step X2b):
+  every leaf within `(G + q + 2) h` of it, on either side, on one level, or
+  `check_excision_mesh` refuses the problem — a coarse-fine face there
+  prolongs excised data into ghosts evolved stencils read. On the suite's
+  fixture at `N = 8` that is `0.47 ≤ r_E ≤ 0.78` at `q = 2`; at `q = 4` the
+  `9h` neighbourhood does not fit its fine cube at all.
+- **A new field on `Interior` or `FittedSpec` changes the recipe** (step
+  X2b): the checkpoint holds `repr(case.interior)`, so `excision` came with
+  a legacy `show` that prints the field-less layout for every interior
+  without it, and `excision_tests.jl` pins the strings. The next field needs
+  the same, or every older checkpoint refuses to restart.
+- **At `q = 2` the lopsided derivative of a first evolved point is its
+  closure** (step X2b): `lopsided_weights` starts at `−k_down = 0`, the same
+  three nodes. A zone face whose advected axes are all such faces does not
+  change when the blend is switched on.
 - **A 2D model of a 3D operator keeps its conservation form** (step X1).
   Evaluating the 3D divergences at `z = 0` leaves `∂_z` lower-order terms
   with no energy estimate, and the `:damped` control itself grew at

@@ -903,6 +903,19 @@ integration branch's `5dcddab` in a second checkout with the same manifest
   measured further; X3's H200 measurement of the `:damped` `q = 4` kernel's
   registers and spills is the check on a device**)**.
 
+**Two more providers, and a second launch (amended in step X2b).** The
+`:excised` variant ([Excision](#excision-added-2026-10-05), "What step X2b
+built") adds `ClosureProvider`, the closures at the evolved points next to
+an excision surface, and `Lopsided`, `Centered` with the lopsided advection
+blended into `adv`. `gh_rhs_kernel!` takes two more arguments, the class
+array and the blend — `nothing` for every other variant, which compiles to
+the code it was — and for an `:excised` problem `gh_rhs!` launches
+`gh_zone_kernel!` after it. **Every other run is the run it was (measured in
+step X2b)**, against `8fa6658`: the thread digest's six lines identical, the
+one-chunk octant runs identical in every column but the wall clock, and the right-hand side's cost within the
+machine's noise — under [Measured results](#measured-results), "Excision:
+the variant (step X2b)".
+
 ### The time step
 
     dt = cfl · minimum_spacing(forest) / λ_max,
@@ -1720,7 +1733,9 @@ substance, for two reasons that are both findings of the design review:
 **Three writers, and no fourth**: the right-hand side never mutates `u`
 (the integrator's arithmetic is the first writer); the `:pasted` paste of
 the ball `r < r_1`, from the step limiter, is the second; the range
-projection, from the stage limiter, is the third. Both limiters are
+projection, from the stage limiter, is the third. **(Amended in step X2b:**
+an `:excised` hole has neither — its step limiter is a no-op and a case
+with it refuses `bounds`, since a clamp would guard a set nothing reads.**)** Both limiters are
 integrator keywords (`stage_limiter`, `step_limiter`); under
 IMEXRungeKutta (from 2026-09-26) **both writers are one limiter,
 `gh_limiter!` — the projection, then the paste — passed as the stage and
@@ -1973,6 +1988,13 @@ radius the layer is placed inside (the analytic ones, or `r_in`, `r_out`),
 `shell_mask` the two bands; `find_gh_horizon` takes `center =`, the point
 its radii are measured from, and returns the radii about its own origin as
 `origin_r_min`, `origin_r_mean`, `origin_r_max`.
+
+**An excised tracked geometry is frozen (amended in step X2b).** For
+`FittedSpec(…; variant = :excised)` the geometry is built once, from the
+seed's shape at `t = 0` on the run's mesh, and never rebuilt: the finds
+still update the track every chunk, for the record and for the row
+`excision_horizon_margin`, which ends the run below `m − G/2` cells
+([Excision](#excision-added-2026-10-05), "What step X2b built").
 
 **Per chunk, in the driver.** The initial data goes through the core rule
 of the seed's geometry (`fill_exact!(…; interior)`); at every row the find
@@ -2504,7 +2526,11 @@ X3 by measuring it on the octant against `:damped` and `:fitted`. Nothing
 below is built yet; every number is **(predicted)** until a step measures
 it. **(Amended in step X1:** the closure weights are built, in
 `src/stencils.jl`, and X1's models have measured what is marked so; no
-kernel uses either yet.**)** Moving holes — points that leave the excised set on the trailing side
+kernel uses either yet.**)** **(Amended in step X2b:** the variant is built,
+on both geometries — what and how is under "What step X2b built" at the end
+of this section, and its numbers under [Measured
+results](#measured-results), "Excision: the variant (step X2b)"; X3 measures
+it on the octant.**)** Moving holes — points that leave the excised set on the trailing side
 and need values — are a later round.
 
 **The variant, `:excised`.** Points beyond the **excision surface** are
@@ -2795,7 +2821,9 @@ details).** These are the pieces:
 - the singular set inside the core surface;
 - every block within `G + (q + 2)/2` cells of the surface, on either side,
   on one level, so that no prolongation reads excised data into an evolved
-  stencil.
+  stencil. **(Amended in step X2b:** the build asserts `PLAN.md`'s wider
+  `(G + q + 2) h` — `6h` at `q = 2`, `9h` at `q = 4` — which also covers a
+  coarse neighbour's injected ghosts, `2G` fine cells deep.**)**
 
 **Record rows:**
 - the least margin of the outflow condition along the true normal, which
@@ -2815,6 +2843,108 @@ details).** These are the pieces:
 - **closures without SBP**, whose stability rests on dissipation.
 
 GHSO2's recipe applies unchanged: `ε_KO ≈ 0.5` and `γ0 ≳ 1/M`.
+
+**What step X2b built (amended in step X2b**, `src/excision.jl` and the
+variant through the package**).** The design above, with these choices:
+
+- **The variant and its parameters.** `:excised` is in `INTERIOR_VARIANTS`
+  and runs on both geometries: `Interior(…; variant = :excised)` excises
+  `r < r_1`, `FittedSpec(…; variant = :excised)` the depth `d > 0` below the
+  seed's offset surface. `r_0` — for the tracked geometry `thickness = n_L
+  h` — is the core rule's depth and nothing else. The parameters are
+  `Excision(T; upwind = (start, width) | nothing, dissipation = :msn)`, a
+  field `excision` of `Interior`, `FittedSpec` and `FittedInterior`
+  (refused for every other variant): the lopsided blend's start and width
+  in cells below the horizon, off by default (`width = 0`), and the
+  dissipation's closure. `GHCase` and `hole_case` take `excision` for the
+  sphere. **A legacy `show` keeps the `repr` of every interior without
+  excision parameters byte for byte the base's** — the recipe holds
+  `repr(case.interior)`, and the new field would otherwise have refused the
+  restart of every checkpoint written before it **(proposed in step X2b)**.
+- **The classes**, built once with the problem (`build_excision`): the
+  excised bit on owned points from the masks' predicate; one `fill_ghosts!`
+  of a one-variable `FieldSet{T}` with even parity, replaying the problem's
+  own schedule — a schedule belongs to a layout, not to a variable count —
+  with the outer faces' ghosts given the predicate at their own positions;
+  then a `stored = true` pass writing a `UInt8` per stored point: excised;
+  **zone**, an owned point some stencil of the right-hand side reads an
+  excised point through (the dissipation's `±G` along an axis, the mixed
+  derivatives' boxes of half-width `q/2`); centered. A ghost that is not
+  excised is marked centered, a placeholder nothing reads. The zone is the
+  closure points only; the lopsided blend's thick shell is the main
+  kernel's (X1's hand-over).
+- **The main kernel's `:excised` branch** reads the class at the point:
+  centered — the `:none` branch's call, `Centered`, or with the blend on
+  the `Lopsided` provider, `Centered` with `adv` overridden (the argument
+  itself through a branch where the weight is zero); excised — `du = 0`, no
+  `F`; zone — nothing written. **`gh_zone_kernel!`**, launched right after
+  it, runs over every owned point with a block-uniform early exit through a
+  device `Bool` per block, and calls `gh_rhs_at_point` with a
+  `ClosureProvider` built per zone point (`closure_provider`): its codes
+  `k±` scanned from the class array, at most `G` reads a side; the table
+  as a `NamedTuple` of device arrays (`closure_arrays`), which
+  KernelAbstractions adapts field by field where a struct would need an
+  Adapt rule this package does not depend on **(proposed in step X2b)**;
+  `d1`, `d2`, `ko` contracted over the row's own nodes from the first
+  product in ascending order; `dmix` nested, the inner closure's codes read
+  from the class array at each outer node rather than stored per point;
+  `adv` the table's lopsided row for the side `β_d` points to, blended.
+  `lopsided_centered_weights` (`@generated`) is the open-line lopsided row,
+  bit for bit the table's, so the two kernels' blends are one operator.
+- **The blend's weight** is `λ = smoothstep((d/h − start)/width)` with `d`
+  the depth below the horizon — the background's `horizon_min_radius` for
+  the sphere (a degree-0 shape with `r_in = r_out`, which the clamp makes
+  exact), the seed's shape for the tracked geometry — and `h` the surface's
+  spacing, one number, so that `λ` is a function of position the two
+  kernels evaluate alike (`ExcisionBlend`) **(proposed in step X2b)**.
+- **The monitors.** `monitor_mask(p, t)` — the excised set widened by
+  `W = max(G, ⌈√2 q/2⌉) h` (`2h` at `q = 2`, `3h` at `q = 4`), and on the
+  tracked shape by `r_out − r_in` more, which bounds how much farther along
+  the ray than `W` an excised point within `W` lies — is the default mask
+  of `gh_constraint!`, `adm_constraint!` and `gh_indicator!`
+  (`indicator_flags` takes a `mask`); the error, the speed, the non-finite
+  count, the validity monitor and the horizon guard keep `interior_mask`,
+  which counts the band. `W` strictly exceeds every monitor stencil's reach
+  (`√2 q/2 < ⌈√2 q/2⌉`), so the boundary's rounding cannot let a tap in. The
+  validity monitor's two bands are the band `[r_E, r_E + W)` and the `G h`
+  beyond it (`layer_mask(int, t; band)`, `shell_mask(…; band)`).
+- **The record's outflow rows** (`excision_rows`), every chunk, from the
+  state at the band's points: `excision_band` and
+  `excision_band_nonfinite`; `excision_normal_min`, the least `b_n/a_n − 1`
+  along the surface's normal (radial for the sphere, central differences of
+  the shape for the tracked geometry); X1's faces — an excised immediate
+  neighbour along an axis — `excision_faces`, their least ratio
+  `excision_axis_min` and the inflow-like ones `excision_inflow`
+  (`b/a < 1`); and `excision_into`, the (band point, closure axis `k_s < G`)
+  pairs whose shift points into the excised set, the build's refusal counted
+  every chunk. A tracked case adds `excision_horizon_margin`. Every other
+  variant's rows are `nothing`. They are written into a seven-variable
+  field set of the excision's own, not into new `diag` slots, so that no
+  other run's `diag` grows **(proposed in step X2b)**.
+- **The checks**, each refusing by name: the margin `m ≥ G + 1` and
+  `r_1 ≤ r_h,min − m h` (`offset ≥ m h` tracked) and the singular set inside
+  the core rule's surface (`check_interior_radii`'s `:excised` methods, with
+  no thickness requirement); every leaf within `(G + q + 2) h` of the surface
+  on one level (`check_excision_mesh`); `ε_KO > 0`, a static hole, no range
+  projection, and `m ≥ ⌈√3 G⌉` with a `Horizon` (`check_excision_case`);
+  and from the census, no inadmissible zone point, `ε_KO > 0` at every zone
+  point, and **no closure axis whose shift points into the excised set** —
+  the spinning holes' refusal, by the physics.
+- **The driver.** The geometry is built once — the case's sphere, or the
+  seed's shape at `t = 0` on the run's mesh — and a restart builds the same,
+  so there is no new carried state; a restart scatters the file's state
+  before the classes are built, since the shift's refusal reads it.
+  `regrid`, `adapt`, the rate keywords, `handover`, `target_source` and the
+  `Π` post-pass are refused, each saying why; `chunk_interior` returns the
+  interior unchanged; the level floor asks only for the margin. A tracked
+  case finds and tracks every chunk, and `excision_horizon_margin` — the
+  found horizon's least distance from the frozen surface, in cells — ends
+  the run, with its record written, below `m − G/2`, the jump test's half a
+  stencil **(proposed in step X2b)**. The step limiter's `:excised` method
+  is a no-op: no fourth writer.
+- `test/octant_runs.jl` takes `interior=excised` with `geometry=sphere|
+  tracked`, `r_E=` or `margin=`, `r_0=`, `upwind=<start>,<width>` and
+  `closure=`; `bench/stepping.jl` takes `BENCH_CASE=excised`.
 
 ## Initial data and backgrounds
 
@@ -3451,10 +3581,14 @@ the tests assert on them.
 | validity monitor | over the layer `r_0 ≤ r < r_1` and over the `G` points outside it: `min_detγ`, `min_α` (the *signed* lapse, negative where `g^{tt} > 0`), `max_h`, `max_Π` (the largest component magnitudes) — `min_detγ_layer` … `max_Π_shell` (added in step 8b); and over the whole evolved region, `min_detγ_evolved`, `min_α_evolved` — the lapse-collapse trigger's input (added in step 8d). On the tracked geometry the two bands are its own (`layer_mask`, `shell_mask`) | every chunk |
 | horizon track | for a case whose interior is a `FittedSpec` (added in step 8d; `nothing` otherwise): `track_source` (`:found`, `:coasting`), `track_center` and `track_velocity` (the tracked trajectory after this row's find), `track_r_min`, `track_r_max` (the found surface's radii about its own origin), **`track_offset`** (the tracked center's distance from the analytic one, in cells of the finest spacing — the number "good to about a cell" is read from), `track_misses`, `track_prediction` (the found origin's distance from where the track predicted it, in cells; `nothing` without a find), `track_trigger` (this row's find was forced by the lapse trigger) | every chunk, the find every `k`-th or when triggered |
 | tracked layer | the geometry the next chunk runs on: `layer_h` (the spacing its offset and ramp are stated in), `layer_offset = m h`, `layer_thickness = n_L h`, `layer_r_in`, `layer_r_out` (the shape's bounding radii), and `margin_efolds` — step 8a's leakage e-folds across the margin, the least of the six grid axes (added in step 8d) | every chunk |
+| excision | for an `:excised` case (added in step X2b; `nothing` otherwise), from the state at the band's points — the evolved points whose stencils take closures: `excision_band` (their number), `excision_band_nonfinite`, **`excision_normal_min`** (the least `b_n/a_n − 1` along the surface's normal, which must stay positive), `excision_faces`, `excision_axis_min`, `excision_inflow` (step X1's faces, an excised immediate neighbour along an axis: their number, least per-axis `b/a` and the inflow-like ones `b/a < 1`), `excision_into` (band point and closure axis pairs whose shift points into the excised set, the build's refusal); a tracked case adds `excision_horizon_margin`, the found horizon's least distance from the frozen surface in cells | every chunk |
 | fitted target | for a `:fitted` case (added in step 8e; `nothing` otherwise), of the fit built from this row's state: **`fit_valid`** (every point of the fit's validity sweep a Lorentzian metric — `fit_valid(fit)`; a fit that is not does not become the target), **`fit_residual`** (`fit_residual(fit).overall`, the fit's worst relative residual block by block against the data it was fitted to), and beside them the sweep's worst **`fit_min_detγ`**, `fit_min_α`, `fit_min_λ`, `fit_hits` (swept points the target's ranges would move) and `fit_refills` (the cache's mid-chunk refills in the chunk this row ends) **(proposed in step 8e)**; for `:fitted` the row `residual` is the layer's distance from its target (the cache), not from the analytic solution | every chunk |
 
 **Constraints.** Both kernels mask the interior `r < r_1` and write zero
-inside it; the modified region is not a numerical solution. Norms are
+inside it; the modified region is not a numerical solution. **(Amended in
+step X2b:** for an `:excised` hole their default mask, and the indicator's,
+is `monitor_mask` — the excised set widened by the stencils' reach `W` — so
+that no stencil reads an excised value.**)** Norms are
 `block_mapreduce` partials weighted by each block's `h³`, combined in
 block order, so they are bit-identical across thread counts. **(Amended
 2026-10-01:** they are TreeAMR's `mesh_mapreduce` — the same partials, the
@@ -4027,6 +4161,13 @@ a restart whose criterion differs is run, reported field by field, and says
 so in `criterion_changed`. The forest is not in either — a restart takes the
 file's — and `backend`, `maxpasses`, `find` and the observer decide no number
 once the initial data exist.
+
+**The interior's `repr` is unchanged by the `:excised` variant (amended in
+step X2b).** Its parameters are a field of `Interior` and `FittedSpec`, so
+an excised case's recipe holds them; an interior without them prints byte
+for byte as before the field existed (a legacy `show`), so every older
+checkpoint still restarts. An excised hole's geometry is frozen and rebuilt
+from the case on a restart, so it adds no run state.
 
 **Names, rotation, triggers, the observer — TreeHydro's.** The files are
 `"<prefix>.it<iteration>.h5"`, the cumulative step count zero-padded to ten
@@ -7487,6 +7628,151 @@ plane; `q = 4`):
 half beside the plane's runs) and **6466 in 15m12** (four, load 6–11). The
 `1671` new ones are `stencils_tests.jl`'s, `13.8 s` and `7.6 s` of it, most
 of that compiling the closure tables' `SArray`s at `q = 6, 8`.
+
+### Excision: the variant (step X2b)
+
+The `:excised` variant as built ([Excision](#excision-added-2026-10-05),
+"What step X2b built"), measured on the development machine (Apple silicon,
+12 CPU threads, Julia 1.13.1, TreeAMR 0.1.7), shared with other sessions at
+loads of 8 to over 100.
+
+**The suite's fixture** (`test/excision_tests.jl`): Kerr-Schild `a = 0` on
+step 5's fixture mesh at `q = 2`, `N = 8` — 120 blocks, 61 440 points,
+`h = 5/64` at the hole — with the ball `r < r_E = 3/4` excised (`m = 8`,
+`W = 2h`) **(measured in step X2b)**:
+- **3743 excised points, 2192 zone points in 32 of the 64 fine blocks, 55 505
+  centered.** Every stored point's class is the masks' predicate at its
+  position, ghosts and outer faces included, and the zone is the
+  enumeration of the right-hand side's taps.
+- **The outflow rows at `t = 0`**: 1758 faces, 648 of them inflow-like —
+  `0.369` against step X1's `r_E/(2M) = 0.375` — least `b/a = 0.290`, the
+  normal margin `b_n/a_n − 1 = 1.237` (`2M/r − 1` at the band), and no closure
+  axis whose shift points into the excised set.
+- **Bit for bit, on Apple silicon:** the centered points' `du` is the `:none`
+  kernel's on the same state at all 55 505 (claimed to `512 eps`); the closure
+  provider's whole `F` at 4508 centered points next to the band is the
+  centered provider's (claimed to `64 eps`), and each of its contractions is
+  `isequal` (claimed so); a `FittedInterior` holding the sphere gives the same
+  classes and `du`; `h = −η`, `Π = NaN` planted on every excised point leaves
+  every non-excised `du` `isequal` and every excised `du` zero. Every zone
+  point's `du` differs from the `:none` kernel's by at least `0.137` — the
+  closures replace reads of the core rule's data.
+- **The closures are exact** on polynomials of degree `q/2 + 1` at the faces,
+  edges and corners of excised half-spaces, `q = 2, 4`, to `10⁻¹²` of the
+  data, and `:msn` annihilates degree `< G` there.
+- **The lopsided blend** `upwind = (1, 4)`: every point above `r_h − h` keeps
+  the blend-free `du` bit for bit; all 29 858 centered points with weight
+  `≥ 1/100` move; 1910 of the 2192 zone points move, and the other 282 are
+  faces where at `q = 2` the lopsided row *is* the one-sided closure (both
+  start at the face). The two providers' lopsided derivatives are `isequal`.
+- **A run to `M/5`** (two chunks, 18 steps, `cfl = 1/4`): finite, the normal
+  margin `1.2367 → 1.2349`, nothing in the band non-finite. The masked error
+  is `1.20e−2` at `M/10` and `1.77e−2` at `M/5`, its L∞ `0.44` and `0.50` at
+  the band — the surface's one-sided truncation error at `q = 2`, which the
+  masked norm now counts — while **outside the `:damped` fixture's own
+  layer, `r ≥ 23/20`, the error is the `:damped` run's: `4.390e−3` against
+  `4.395e−3`, and the gauge constraint `3.582e−3` against `3.581e−3`.** A
+  chain of two one-chunk jobs is the run bit for bit.
+- **`Float32`**: one right-hand side within `8.0e−5` of the `Float64` one's
+  scale (`eps(Float32)/h²` of the near-hole data), the same classes.
+- **On a device**: on Metal at `Float32` (a scratch environment with
+  `Metal` 1.11.1, as `CLAUDE.md` asks) the classes, the census, the zone
+  kernel, the lopsided blend and the outflow monitor compile and run: the
+  classes are the CPU's, the outflow rows the CPU's to `Float32` roundoff,
+  and one right-hand side is within `6.5e−5` of the CPU's scale (`1.4e−4`
+  with the blend) — against `2.5e−4` for the `:damped` layer's own CPU–Metal
+  difference. The H200 at `Float64` is X3's.
+- The tracked geometry (`FittedSpec(; variant = :excised, margin = 16, n_L =
+  4)`, its surface at `r ≈ 3/4`): frozen, the found horizon `16.0` cells out
+  at every row.
+
+**Unchanged elsewhere** (against the integration branch's `8fa6658` in a
+scratch copy with the same manifest): `test/thread_workload.jl`'s six lines
+are identical, character for character, and its seventh — the excised
+right-hand side, classes, zone kernel and monitors — is identical at one and
+four threads. The one-chunk `test/octant_runs.jl` of X2a's check (`case=ks
+L=8 N=16 roots=2 radii=4,2 t_end=1/2 chunk=1/2 cfl=1/2`, four threads), for
+`:damped` with the default noise and for `:fitted` without: `octant.csv`
+identical in every column but `wall`, and `records.csv` identical in its 21
+columns, beside the eight new `excision_*` ones, which are `nothing`. The legacy `repr` of every interior without excision
+parameters is the base's, byte for byte (`excision_tests.jl` pins three).
+
+**The smoke run** (`test/octant_runs.jl case=ks interior=excised L=8 N=16
+roots=2 radii=4,2 t_end=1`, four threads, 22 blocks, 90 112 points, `h =
+1/16` at the hole, `q = 4`, the default sphere `r_E = 1`, `m = 16`, the
+algebraic source and `10⁻⁸` noise): finished, 110 steps; the band 1387
+points, none non-finite; the normal margin `0.7032`; 642 faces, least `b/a =
+0.217`, 291 inflow-like (`0.45` against `r_E/(2M) = 0.5`), none into the
+excised set; `M_irr − 1 = 4.0e−6` at `t = 1`; `simwatch.toml` carries
+`[extra.excision]` and the setup's geometry, `r_E`, margin, band width,
+blend and closure. The tracked geometry with the blend on (`geometry=tracked
+upwind=1,4 t_end=1/2 chunk=1/2 cfl=1/2`, 28 steps): the seed's surface at
+`r ≈ 1` frozen, `m = 16`, 1387 band points, 648 faces (least `b/a = 0.072`,
+297 inflow-like), the normal margin `0.684`, and the found horizon
+`16.00` cells outside the surface at both rows.
+
+**What it costs.** `bench/stepping.jl` (`BENCH_MODE=step`, `N = 16`, 512
+blocks, 2.1 million points, `q = 4`, `Float64`), minimum of five, in ms. The
+excised case is the hole's mesh with `r < 3/4` excised: 29 423 excised
+points, **14 162 zone points** in 32 of the 512 blocks.
+
+| row | right-hand side, 4 threads | zone kernel alone | per zone point | share of the right-hand side |
+|---|---|---|---|---|
+| `:damped` hole (the base row, last pair below) | 1444.5–1451.5 | — | — | — |
+| `:excised` | **1364.3** | **8.77** | **620 ns** | **0.64 %** |
+| `:excised`, `upwind = (1, 4)` | 1368.9 | 9.79 | 691 ns | 0.72 % |
+
+and at one thread (right-hand side, zone kernel, per zone point, share):
+`:damped` `4943.3`; `:excised` `4901.2`, `33.18`, **`2343 ns`**, **`0.68 %`**;
+with the blend `4918.6`, `37.77`, `2667 ns`, `0.77 %` (load 3–5).
+
+So **a zone point costs about what a whole right-hand side costs per point**
+— `2.34 µs` at one thread either way, of which the main kernel is about two
+thirds — for generic loops, the codes scanned from the class array and the
+nested mixed derivative's inner codes read per outer node; at `0.7 %` of a
+right-hand side it is not worth tuning, and on a device it is a launch over
+every block of which `32/512` do work. The excised right-hand side is
+`0.9 %` cheaper than the `:damped` layer's at one thread (no analytic
+`u_exact` in a layer, nothing evaluated at the excised points) and `6 %` at
+four, where the layer's expensive points sit in few blocks and so on few
+owner threads. **The lopsided blend costs `+0.3 %`** at one and four
+threads: here its shell, from the surface to one cell below the horizon, is
+494 476 points, a quarter of the mesh, at about `9 ns` each at four threads
+— the centered `d1/h` of `Π` still formed and a second contraction of
+`q + 1` points per advected derivative.
+
+**No other run moved in cost either.** The wave and the `:damped` hole on
+`8fa6658` and on the branch, interleaved base–branch–branch–base twice, four
+threads, minimum `rhs` and `imex_owner_step` in ms, the load falling from
+about 40 to 7 over the hour (the first branch run shared the machine with a
+Metal compile):
+
+| run | load | wave `rhs` | wave step | hole `rhs` | hole step |
+|---|---|---|---|---|---|
+| base | 20–64 | 1050.3 | 4029.0 | 1883.8 | 7254.6 |
+| branch | 14–39 | 1184.6 | 4787.4 | 2164.5 | 8320.9 |
+| branch | 25–40 | 1108.6 | 4274.9 | 1614.5 | 6530.5 |
+| base | 11–31 | 1062.1 | 4069.9 | 1723.5 | 7048.3 |
+| base | 25–30 | 1044.7 | 4256.0 | 1465.7 | 6133.1 |
+| branch | 11–24 | 957.4 | 3870.4 | 1461.7 | 5913.8 |
+| branch | 9–19 | 938.3 | 3805.2 | 1451.5 | 5875.4 |
+| base | 7–16 | 937.7 | 3805.8 | 1444.5 | 5827.0 |
+
+The last, quietest pair differs by `+0.06 %` (wave) and `+0.5 %` (hole);
+every other difference follows the load. The arithmetic is the same — the
+digests say so — and the kernel takes two more arguments that are
+`nothing`.
+
+**The suite.** **6579 assertions in 21m11** at one thread and **6587 in
+17m39** at four, the two at once at a load of 7–25 (6488 and 6496 after step
+X2a). The 91 new claims: `excision_tests.jl`'s 84, `44.6 s` at one thread and
+`32.8 s` at four in the suite (`1m41` alone, which compiles what the suite
+shares) — inside `PLAN.md`'s estimate of about 60 s, the tracked run and the
+restarted run being most of it; the
+`Float32` excised right-hand side in `type_tests.jl` (6, `6.1 s`); and in
+`interior_tests.jl` `:excised` accepted beside the refusal of an unknown
+variant, which until this step was asserted of `:excised`. The first
+four-thread run found that one: 6585 passed and it failed.
 
 ## Possible extensions
 
