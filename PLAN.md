@@ -27,7 +27,9 @@ branch `claude/excision-singularity-handling-30feec`.** They supersede step
 8g's brief. **X1 is done and merged (2026-10-05): go for the static
 Kerr-Schild `a = 0` hole with per-axis closures and `:msn` dissipation,
 `ε_KO > 0` required, spinning holes not covered. X2a is done and merged
-(the stencil provider, no bit changed). X2b is next.**
+(the stencil provider, no bit changed). X2b is done and merged (the
+`:excised` variant on both geometries, every other run bit for bit). X3 is
+next.**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1632,6 +1634,64 @@ is.
   t_end=1 out=…`;
 - `CODE.md`'s "Excision" amended with what was built, marked
   **(amended in step X2b)**.
+
+**What step X2b hands over** (its report's section 6, 2026-10-05; the
+numbers are `CODE.md`'s "Excision", "What step X2b built", and Measured
+results, "Excision: the variant (step X2b)").
+
+`:excised` runs on both geometries:
+- every other run is unchanged bit for bit;
+- the exterior's `du` is `:none`'s exactly at all 55 505 centered points of
+  the fixture;
+- a degenerate metric planted in the excised set changes no non-excised
+  `du`.
+
+Its run to `M/5` matches `:damped`'s error outside `r = 23/20` to 0.1 %. The
+zone kernel costs 620 ns a zone point at four threads, 0.64 % of a
+right-hand side; the blend adds 0.3 %.
+
+- **The depth scan** (`h = 1/16`, about `10 M` a row), with and without
+  `upwind=1,4`:
+
+  ```
+  julia --project=. --threads=<n> test/octant_runs.jl case=ks interior=excised geometry=sphere L=64 N=64 roots=2 radii=32,16,8 r_E=<1/2|3/4|1|5/4|3/2|13/8> t_end=10 chunk=1 cfl=1/2 [upwind=1,4] backend=cuda out=<dir>/rE<r>[-up] checkpoint=<dir>/ck-rE<r>[-up] walltime=<s>
+  ```
+
+  - The defaults give `q = 4`, `eps = 1/2`, the algebraic source, the finder
+    every chunk with the spin, noise `1e-8` and `:msn`.
+  - `r_0 = r_E/2` and the margin `m = ⌊(2 − r_E)·16⌋` (24 down to 6 cells)
+    are derived.
+  - `r_E = 13/8` is the shallowest the finder allows at `h = 1/16`
+    (`m = ⌈√3 G⌉ = 6`).
+  - **Pass `cfl=1/2`**: the script's default is `1/4`.
+- **The production rows:** the same with `N = 64, 96, 128` (`h = 1/16, 1/24,
+  1/32`), the chosen `r_E`, `t_end=24`, and one row to `50`.
+  - The tracked alternative is `geometry=tracked margin=<cells>`.
+  - The surface's `(G + q + 2) h` neighbourhood lies inside the finest cube
+    `[0, 8]³` for every `r_E` in the window.
+- **Compare on the shells outside the horizon, not on `err_l2`.** The
+  record's masked error now counts the band, where the one-sided closures'
+  truncation error is largest: on the `q = 2` fixture `err_linf` is `0.5`
+  there against `0.04` outside `r = 1.15`. The CSV's shells `[2, 2.25)`,
+  `[2.25, 3)`, … are what `CODE.md`'s `:damped`/`:fitted` tables use.
+- **CUDA at `Float64` is untested.** The kernels compiled and ran on Metal
+  at `Float32`, within `6.5e−5` of the CPU's scale. Run a short CUDA smoke
+  row first:
+  - the classes are `UInt8` device arrays;
+  - the closure table is a `NamedTuple` of `CuArray`s;
+  - the kernels to inspect for registers and spills are `gh_rhs_kernel!`
+    specialised for `:excised` and `gh_zone_kernel!`, beside the `:damped`
+    `q = 4` kernel (X2a's check).
+- **On the H200 the zone kernel launches over all blocks.** In the bench,
+  32 of 512 blocks do work. A subset launch stays a TreeAMR wish.
+- A spinning Kerr-Schild hole is refused at build time by the shift's sign
+  (checked at `a = 3/5`). Spinning rows are not part of X3.
+- **The monitor rows in the CSV and `simwatch.toml`'s `[extra.excision]`:**
+  - `excision_band` and `_band_nonfinite`;
+  - `_normal_min`, the outflow margin along the true normal;
+  - `_faces`, `_axis_min` and `_inflow`, X1's per-axis faces;
+  - `_into` (shift into the excised set, must stay 0);
+  - `_horizon_margin` when tracked; it ends a run below `m − G/2`.
 
 ## Step X3 — The static hole on the octant, on Symmetry's H200
 
