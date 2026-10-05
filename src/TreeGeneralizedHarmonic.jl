@@ -108,6 +108,8 @@ export horizon_min_radius, horizon_max_radius, singular_radius, hole_mass
 export hole_velocity
 export layer_spacing, check_interior_radii, layer_mask, shell_mask
 export geometry_radii, layer_radii
+# The `:excised` variant's parameters (step X2b)
+export Excision, excision_closure, upwind_on, excision_monitor_mask
 
 # The tracked geometry (step 8d): the real harmonics, the kernel argument, its
 # masks and its checks — and, in `tracking.jl`, the track it is built from
@@ -141,6 +143,11 @@ export dirichlet, has_outer_face, state_parity, even_parity
 # Evolution
 export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate
 export gh_step_limiter!, paste_interior!
+
+# Excision (step X2b): the classes, the closures, the zone kernel, the monitors
+export ExcisionData, build_excision, check_excision_mesh, check_excision_case
+export monitor_mask, excision_rows, excision_band_cells, closure_provider
+export ClosureProvider, Lopsided, ExcisionBlend, blend_weight
 
 # The time integrator (IMEXRungeKutta's RK4 by block owner, 2026-09-26)
 export state_partition, gh_limiter!, gh_integrator, gh_solve, ProblemRef
@@ -189,6 +196,10 @@ include("gauge.jl")
 include("initialdata.jl")
 include("boundaries.jl")
 include("evolution.jl")
+# After `evolution.jl` (its providers extend `d1`, `d2`, `dmix`, `ko` and
+# `adv`, and its zone kernel calls `gh_rhs_at_point`), before the monitors
+# that take its `monitor_mask` (added in step X2b).
+include("excision.jl")
 # After `evolution.jl` and `bounds.jl`: the integrator couples `gh_rhs!` to
 # the two limiters (added 2026-09-26, replacing OrdinaryDiffEq's RK4).
 include("stepping.jl")

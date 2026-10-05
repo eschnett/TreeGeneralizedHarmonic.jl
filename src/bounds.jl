@@ -887,9 +887,12 @@ function validity_rows(p, u, t)
     G = first(p.U.G)
     # The bands through the interior's own masks (amended in step 8d), so
     # that the tracked geometry's layer and shell are its surface's bands and
-    # the sphere's are step 8b's `ShellMask`s, value for value.
-    layer = _validity(p, u, layer_mask(int, T(t)))
-    shell = _validity(p, u, shell_mask(int, T(t), G * h))
+    # the sphere's are step 8b's `ShellMask`s, value for value. An excised
+    # hole has no layer: its "layer" is the evolved band `[r_E, r_E + W)` and
+    # its shell the `G h` beyond it (added in step X2b).
+    lmask, smask = _validity_bands(p.excision, int, T(t), G * h)
+    layer = _validity(p, u, lmask)
+    shell = _validity(p, u, smask)
     # The whole evolved region (added in step 8d): the minimum lapse over it
     # is the lapse-collapse trigger's input, and `det γ` comes with the pass.
     evolved = _validity(p, u, interior_mask(int, T(t)))

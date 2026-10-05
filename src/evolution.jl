@@ -463,7 +463,7 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
 @kernel function gh_rhs_kernel!(du, @Const(work), Hwork, @Const(origins),
                                 @Const(spacings), bg, damping, γ2, ε_KO,
                                 interior, t, tw, t_f, rate, trail, fitp,
-                                ::Val{G}, ::Val{q},
+                                cls, blend, ::Val{G}, ::Val{q},
                                 ::Val{HASH}, ::Val{DISS},
                                 ::Val{INT}) where {G,q,HASH,DISS,INT}
     I = @index(Global, NTuple)                    # (i1, i2, i3, block)
@@ -509,6 +509,39 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
             du[inner..., v, b] = Fh[v]
             du[inner..., NC + v, b] = FΠ[v]
             nothing
+        end
+    elseif INT === :excised
+        # **Excision (added in step X2b)**: the class of the point decides,
+        # and nothing else does — the classes are the single source of truth
+        # for what is excised, built once per problem (`build_excision`). A
+        # centered point is today's operator, the `:none` branch's call bit
+        # for bit — or, with the lopsided advection on, the same through the
+        # `Lopsided` provider, whose `adv` returns its argument through a
+        # branch where the blend is zero. An excised point's `du` is zero and
+        # `F` is not evaluated. A zone point is the zone kernel's, launched
+        # next, and nothing is written here. The class array has the working
+        # array's spatial strides and one variable.
+        cb = 1 + (b - 1) * sv + (I[1] + G[1] - 1) * st[1] +
+             (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
+        cl = cls[cb]
+        if cl == CLASS_CENTERED
+            Eh, EΠ = blend === nothing ?
+                     gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv, inv_h,
+                                     γ0, γ2, εh, Val(q), Val(HASH), Val(DISS)) :
+                     gh_rhs_at_point(Lopsided(T, Val(q), st, inv_h,
+                                              blend_weight(blend, x)),
+                                     T, work, Hwork, inner, b, var, sv, inv_h, γ0,
+                                     γ2, εh, Val(HASH), Val(DISS))
+            ntuple(Val(NC)) do v
+                du[inner..., v, b] = Eh[v]
+                du[inner..., NC + v, b] = EΠ[v]
+                nothing
+            end
+        elseif cl == CLASS_EXCISED
+            ntuple(Val(2 * NC)) do v
+                du[inner..., v, b] = zero(T)
+                nothing
+            end
         end
     else
         # The interior's view of the point (step 8d): the radius for step
@@ -764,7 +797,7 @@ the projection's gate lies deeper than every point an evolved stencil reads
 ([`check_bounds_gate`](@ref)), beside the interior's own radius checks and
 for the same reason.
 """
-struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A,X,Y}
+struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A,X,Y,Z}
     U::F
     schedule::S
     Hsrc::H                      # the sampled gauge source, or `nothing`
@@ -792,6 +825,9 @@ struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A,X,Y}
     # and the exact target (the latest fit evaluated in the kernel at `t`).
     trail::T
     target_exact::Bool
+    # The `:excised` variant's classes, closures and monitor (step X2b): an
+    # `ExcisionData` built with the problem, or `nothing`.
+    excision::Z
     hasdirichlet::Bool
     valG::Val{G}
     valq::Val{q}
@@ -884,13 +920,18 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         "cache field set, and this problem has none: pass `target = " *
         "target_cache(U)` and fill it (fill_target!), which is what evolve! " *
         "does (CODE.md, \"The fitted target\")."))
+    # The `:excised` variant's classes (step X2b), from the geometry and the
+    # state in `U`'s working array — built here, once, with the problem.
+    excision = INT === :excised ?
+               build_excision(U, schedule, case, interior; q=q, t=T(t)) : nothing
     return GHProblem{T,U.G,Int(q),HASH,DISS,INT,typeof(U),typeof(schedule),
                      typeof(Hsrc),typeof(diag),typeof(origins),
                      typeof(spacings),typeof(case),typeof(interior),
-                     typeof(accounting),typeof(target),typeof(fits)}(
+                     typeof(accounting),typeof(target),typeof(fits),
+                     typeof(excision)}(
         U, schedule, Hsrc, diag, origins, spacings, case, interior,
         accounting, target, fits, T(t_target), target_rate, T(trail),
-        target_exact, hasdirichlet, Val(U.G),
+        target_exact, excision, hasdirichlet, Val(U.G),
         Val(Int(q)), Val(HASH), Val(DISS), Val(INT))
 end
 
@@ -918,13 +959,21 @@ function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior;
     INT === :fitted && target === nothing && throw(ArgumentError(
         "a :fitted interior needs the problem's target cache; this problem " *
         "has none (see GHProblem's `target`)."))
+    # The excision is carried while the geometry is the one it was built for
+    # — which on a run is always, the geometry being frozen — rebuilt for
+    # another, and dropped for another variant (step X2b).
+    excision = INT !== :excised ? nothing :
+               p.excision !== nothing && p.excision.interior === interior ?
+               p.excision :
+               build_excision(p.U, p.schedule, p.case, interior; q=q, t=zero(T))
     return GHProblem{T,G,q,HASH,DISS,INT,typeof(p.U),typeof(p.schedule),
                      typeof(p.Hsrc),typeof(p.diag),typeof(p.origins),
                      typeof(p.spacings),typeof(p.case),typeof(interior),
-                     typeof(p.accounting),typeof(target),typeof(fits)}(
+                     typeof(p.accounting),typeof(target),typeof(fits),
+                     typeof(excision)}(
         p.U, p.schedule, p.Hsrc, p.diag, p.origins, p.spacings, p.case,
         interior, p.accounting, target, fits, T(t_target), target_rate,
-        T(trail), target_exact, p.hasdirichlet,
+        T(trail), target_exact, excision, p.hasdirichlet,
         p.valG, p.valq, p.valH, p.valdiss, Val(INT))
 end
 
@@ -1023,9 +1072,14 @@ function gh_rhs!(du, u, p::GHProblem, t)
                 gauge_work(p.Hsrc), p.origins, p.spacings, p.case.background,
                 p.case.γ0, p.case.γ2, p.case.ε_KO, p.interior, eltype(p.U.work)(t),
                 target_work(p.target), p.t_target, p.target_rate, p.trail,
-                _exact_fit(p), p.valG,
+                _exact_fit(p), excision_classes(p.excision),
+                excision_blend(p.excision), p.valG,
                 p.valq, p.valH,
                 p.valdiss, p.valint)
+    # The zone points of an excised hole (step X2b): the closures, on the
+    # working array the main kernel just read — after it, since the main
+    # kernel writes nothing there.
+    p.excision === nothing || gh_zone!(du, p, t)
     return nothing
 end
 
@@ -1058,6 +1112,10 @@ gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:frozen},
                  t) where {T,G,q,HASH,DISS} = nothing
 # The fitted layer writes nothing (step 8e): its target is a term of `du`.
 gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:fitted},
+                 t) where {T,G,q,HASH,DISS} = nothing
+# Nor does an excised hole (step X2b): its excised points have `du = 0`, and
+# there is no fourth writer of the state.
+gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:excised},
                  t) where {T,G,q,HASH,DISS} = nothing
 
 function gh_step_limiter!(u, integrator,
