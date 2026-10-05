@@ -435,6 +435,35 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             "never updated is the analytic seed carried along forever — step " *
             "5's layer with extra steps. Give the case `horizon = Horizon(T; " *
             "every ≥ 1, N, …)`, or use a :damped/:frozen/:pasted sphere."))
+    # **An excised hole (added in step X2b)** is static and its geometry is
+    # frozen for the run (`CODE.md`, "Excision"): built once from the case's
+    # sphere or the seed's shape, and never rebuilt. So the keywords that
+    # would move it, or treat its inside as a layer, are refused here, each
+    # saying why, before anything is built.
+    excised = interior_variant(case.interior) === :excised
+    if excised
+        regrid && throw(ArgumentError(
+            "regrid = true is refused for an :excised hole in this round: a " *
+            "level change near the surface would prolong stale excised data " *
+            "into evolved points, and the classes are built once, for one " *
+            "mesh (CODE.md, \"Excision\"). Run it on a fixed hierarchy."))
+        adapt && throw(ArgumentError(
+            "adapt = true is refused for an :excised hole in this round: the " *
+            "initial-data cycle chooses the mesh the surface must lie on one " *
+            "level of, and the excised geometry is frozen on the mesh it is " *
+            "given (CODE.md, \"Excision\"). Pass a fixed hierarchy."))
+        (ρ_max_factor === nothing && ρ_max_fixed === nothing) ||
+            throw(ArgumentError(
+                "an :excised hole has no layer and no relaxation rate: " *
+                "ρ_max_factor and ρ_max_fixed are the layer variants' keywords, " *
+                "and there is nothing inside its surface to relax."))
+        iszero(handover) || throw(ArgumentError(
+            "handover is the :fitted variant's: an :excised hole has no target " *
+            "to hand over to."))
+        target_source === :fit || throw(ArgumentError(
+            "target_source is the :fitted variant's: an :excised hole has no " *
+            "target cache to fill."))
+    end
     (regrid || adapt) && case.refinement === nothing && throw(ArgumentError(
         "evolve! was asked to $(regrid ? "regrid" : "adapt the initial data") " *
         "but this case carries no refinement parameters, so there are no " *
@@ -474,7 +503,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # from the hole's mass, and only where there is a hole, since a case
     # without an interior has neither a mass nor a layer to relax.
     ρ_max_default = ρ_max_factor === nothing && ρ_max_fixed === nothing &&
-                    case.interior !== nothing
+                    case.interior !== nothing && !excised
     ρ_max_factor = ρ_max_factor === nothing ? nothing : T(ρ_max_factor)
     # The rates as given, for the recipe: what the caller said, before the
     # default is resolved from the hole.
@@ -580,8 +609,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     geometry(f, t, track) = fitted_interior(spec, track, f, G; t=T(t), n_L=n_L)
     # On a restart, the geometry the next chunk runs on: `record!`'s
     # `track!` built it from the updated track at the checkpoint's time, on
-    # the mesh the checkpoint holds, which is the one the file has.
-    geom = fitted ? geometry(forest, t_saved, tr) : case.interior
+    # the mesh the checkpoint holds, which is the one the file has. **An
+    # excised geometry is frozen (step X2b)**: built once from the seed, at
+    # `t = 0`, on the run's one mesh — on a restart the same, so it is no
+    # carried state.
+    geom = !fitted ? case.interior :
+           excised ? geometry(forest, zero(T), seed_track(case, zero(T))) :
+           geometry(forest, t_saved, tr)
 
     # The fitted target (step 8e). Its ranges come from the seed's analytic
     # data on the offset surface unless the spec states them, and the first
@@ -795,6 +829,10 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # observer is not called at `t = 0`, the run not being there.
         passes, converged = saved.passes, saved.converged
         schedule = GhostSchedule(U, ops)
+        # An excised problem builds its classes from the state in the working
+        # array (the shift's refusal reads it), so the checkpoint's state is
+        # put there first (step X2b).
+        excised && scatter!(U, ck.u)
         tbounds = from_plain(Union{Nothing,StateBounds{T}}, saved.target_bounds;
                              path="run.target_bounds")
         fit_initial = fit_from_plain(T, saved.fit_initial; backend=backend,
@@ -806,11 +844,12 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         sample_t = from_plain(T, saved.sample_t)
         sample_track = fitted ? from_plain(HorizonTrack{T}, saved.sample_track;
                                            path="run.sample_track") : nothing
-        geom_sampled = fitted ? geometry(forest, sample_t, sample_track) : geom
+        geom_sampled = fitted && !excised ? geometry(forest, sample_t, sample_track) :
+                       geom
         nresamples = saved.nresamples
         t_chunk = from_plain(T, saved.t_chunk)
         ρ_chunk = from_plain(T, saved.rho_chunk)
-        int_chunk = case.interior === nothing ? nothing :
+        int_chunk = case.interior === nothing ? nothing : excised ? geom :
                     with_ρ_max(fitted ?
                                kgeom(geometry(forest, t_chunk,
                                               from_plain(HorizonTrack{T},
@@ -951,8 +990,10 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             lost = e
             tr = e.track
         end
+        # An excised geometry is frozen (step X2b): the track is the record's
+        # and the assertion's, below, and the geometry is not rebuilt.
         if lost === nothing
-            geom = geometry(mesh, t, tr)
+            excised || (geom = geometry(mesh, t, tr))
             check_interior_radii(mesh, kgeom(geom, T(t)), case.background, G;
                                  t=T(t), center=case.center)
             check_bounds_gate(mesh, geom, case.bounds, q; t=T(t))
@@ -973,6 +1014,20 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                 layer_thickness=R(geom.thickness), layer_r_in=R(geom.r_in),
                 layer_r_out=R(geom.r_out))
         return rows, lost
+    end
+
+    # **The found horizon stays `m h` outside a frozen excision surface (step
+    # X2b)**: the least distance from the surface's center to this row's found
+    # surface, less the surface's largest radius, in cells of its spacing —
+    # `m` for the seed itself — and whether it has fallen below `m − G/2`,
+    # the jump test's half a stencil (proposed in step X2b). `nothing` on a
+    # row without a successful find.
+    function horizon_margin(hz)
+        (excised && fitted && hz.success === true) || return (nothing, false)
+        c = center_at(geom.center, zero(T))
+        δ = sqrt(sum(abs2, SVector{3,T}(Tuple(hz.origin)) - c))
+        cells = R((T(hz.origin_r_min) - δ - (geom.r_out - geom.offset)) / geom.h)
+        return cells, cells < geom.margin - G / 2
     end
 
     function record!(p, t, u, dt, steps, λ, λ_end, cflnum)
@@ -1023,6 +1078,10 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         bh = acc === nothing ? (hits=nothing, nonfinite=nothing,
                                 r_max=nothing) : take_chunk!(acc)
         val = validity_rows(p, u, t)
+        # The outflow monitor of an excised hole (step X2b), `nothing` rows
+        # for every other variant, and a tracked one's horizon margin.
+        exr = excision_rows(p, u, t)
+        hmargin, hviolated = horizon_margin(hz)
         if fitted && spec.α_trigger > 0 && val.min_α_evolved !== nothing &&
            val.min_α_evolved < spec.α_trigger
             trigger_pending = true
@@ -1047,7 +1106,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                centroid_offset=centroid === nothing ? nothing :
                                R(centroid_offset(case, t, ind.centroid)),
                bounds_hits=bh.hits, bounds_nonfinite=bh.nonfinite,
-               bounds_r_max=bh.r_max, val..., trk..., fr...,
+               bounds_r_max=bh.r_max, val..., exr...,
+               excision_horizon_margin=hmargin, trk..., fr...,
                nblocks=nleaves(mesh), levels=forest_levels(mesh),
                h=R(minimum_spacing(T, mesh)),
                finite=evolved_nonfinite(p, u, t) == 0)
@@ -1055,6 +1115,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         observer === nothing || call_observer(observer, p, t, u, rec)
         lost === nothing ||
             throw(TrackLostError(lost.msg, lost.track, Any[records...]))
+        hviolated && throw(ArgumentError(
+            "the horizon found at t = $t lies $hmargin cells outside the frozen " *
+            "excision surface, below the margin m = $(geom.margin) less half a " *
+            "stencil G/2: the surface was built once from the seed (CODE.md, " *
+            "\"Excision\"), and a horizon that moved in this far has brought " *
+            "the finder's footprint and the centered operator's stencils near " *
+            "the excised set. The run's record up to this row was written."))
         return ind
     end
 
@@ -1197,7 +1264,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # while the surface has moved by a small fraction of a cell, and
         # re-sampled, by rebuilding the problem, once it has moved half of
         # one (proposed in step 8d).
-        if fitted
+        if fitted && !excised
             if p.Hsrc isa FieldSet &&
                surface_shift(geom_sampled, geom, tstart) > geom.h / 2
                 p = GHProblem(U, schedule, case; q=q, t=tstart,
@@ -1644,8 +1711,10 @@ chunk_interior(case::GHCase, dt, factor) = chunk_interior(case, dt, factor,
 function chunk_interior(case::GHCase, dt, factor, fixed; default::Bool=false,
                         interior=case.interior)
     # `interior` is the geometry this chunk runs on: the case's own sphere, or
-    # a tracked case's geometry built from the track (step 8d).
+    # a tracked case's geometry built from the track (step 8d). An excised
+    # one has no rate (step X2b).
     interior === nothing && return nothing
+    interior_variant(interior) === :excised && return interior
     fixed === nothing && return with_ρ_max(interior, factor / dt)
     fixed * dt ≤ 1 || throw(ArgumentError(default ?
         "the default relaxation rate ρ_max = 4/M = $fixed is above this " *
@@ -1697,6 +1766,11 @@ function discrete_gradient_momentum!(U::FieldSet{T,3}, case::GHCase{T}, t,
     interior isa FittedSpec && throw(ArgumentError(
         "the Π post-pass applies the core rule, which on a tracked case needs " *
         "the geometry: pass `interior = fitted_interior(…)` (step 8d)."))
+    interior_variant(interior) === :excised && throw(ArgumentError(
+        "the Π post-pass takes the centered first derivative at every point, " *
+        "and next to an excision surface that reads excised data, which no " *
+        "kernel may (CODE.md, \"Excision\"): it is refused for an :excised " *
+        "hole (step X2b)."))
     boundary = dirichlet(case, t)
     if boundary === nothing
         fill_ghosts!(U, schedule)
