@@ -44,6 +44,10 @@
 # step X2b's closures at an excision surface are another provider of the
 # same five methods, so the physics stays one copy.
 #
+# An `:excised` problem (step X2b) adds a second launch: the zone kernel of
+# `excision.jl`, at the evolved points next to the excision surface, with the
+# closures; the main kernel skips those points.
+#
 # Two things this file does *not* do, and must not start doing: it never
 # mutates `u` (the right-hand side is a pure function of `(u, t)`,
 # TreeAMR's contract), and it never consults the tree — the schedule is
@@ -420,8 +424,8 @@ end
 
 """
     gh_rhs_kernel!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
-                   interior, t, ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS},
-                   ::Val{INT})
+                   interior, t, tw, t_f, rate, trail, fitp, cls, blend,
+                   ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS}, ::Val{INT})
 
 The right-hand side at one owned point: `F(u)` from
 [`gh_rhs_at_point`](@ref), modified inside the hole by `CODE.md`'s
@@ -452,6 +456,14 @@ a [`HorizonDissipation`](@ref) evaluated per point by
 [`dissipation_rate`](@ref), which is the identity on a number; and the
 layer's `u_exact` is the interior's [`layer_target`](@ref), the background
 itself unless the interior names another metric (step 8c).
+
+**`:excised` (added in step X2b)** has a branch of its own, before the
+interior's: `cls` is the problem's class array and `blend` its lopsided
+blend (both `nothing` for every other variant). A centered point is the
+`:none` branch's `F` — through the [`Lopsided`](@ref) provider where the
+blend is on — an excised point's `du` is zero with `F` not evaluated, and a
+zone point is left to [`gh_zone_kernel!`](@ref), which [`gh_rhs!`](@ref)
+launches next (`CODE.md`, "Excision").
 
 **The three branches, in the order they must be in.** The core predicate
 is asked *before* any stencil is touched, because the frozen core holds
