@@ -3,6 +3,15 @@
 Read `CODE.md` first — it is the design document and states *why* things
 are the way they are. This file is only about mechanics.
 
+**Contents**
+
+- [What this package is](#what-this-package-is)
+- [Current state](#current-state)
+- [Commands](#commands)
+- [Things that will bite](#things-that-will-bite)
+- [Conventions](#conventions)
+- [Repository facts](#repository-facts)
+
 ## What this package is
 
 The third downstream application of
@@ -1468,6 +1477,10 @@ Match TreeAMR's, since the four packages are read together:
 - Spec-first: when the implementation shows `CODE.md` was wrong or
   incomplete, amend it and say so in it — "(amended in step N)",
   "(measured in step N)" — rather than diverging silently.
+- `CLAUDE.md` and `CODE.md` open with a **table of contents** (added
+  2026-10-05) of every heading below the title. A heading added or renamed
+  goes into it, linked by GitHub's anchor: lowercase, backticks and
+  punctuation dropped (an en dash too), spaces to hyphens.
 
 ## Repository facts
 
