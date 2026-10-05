@@ -549,9 +549,16 @@ import SpacetimeMetrics as SM
                                             r_1=one(T))
         @test_throws ArgumentError Interior(T; center=(0, 0, 0), r_0=one(T),
                                             r_1=T(1 // 2))
+        # An unknown variant is refused. Until step X2b this line named
+        # `:excised`, which was not one ("there is no excision"); it is one
+        # now (Erik's decision of 2026-10-05, `CODE.md`, "Excision"), and is
+        # accepted with its default parameters, so the refusal is asserted
+        # of a name that is not.
         @test_throws ArgumentError Interior(T; center=(0, 0, 0),
                                             r_0=T(1 // 10), r_1=one(T),
-                                            variant=:excised)
+                                            variant=:excision)
+        @test Interior(T; center=(0, 0, 0), r_0=T(1 // 10), r_1=one(T),
+                       variant=:excised).excision == Excision(T)
         @test_throws ArgumentError Interior(T; center=(0, 0, 0),
                                             r_0=T(1 // 10), r_1=one(T),
                                             w_ramp=zero(T))
