@@ -5,15 +5,19 @@
 #     BENCH_MODE=driver BENCH_CASE=wave,hole julia --project=. -t 64 bench/stepping.jl
 #
 #   BENCH_MODE     step | driver | scan   (default step)
-#   BENCH_CASE     wave | hole | wave,hole (default wave)
+#   BENCH_CASE     wave | hole | excised | wave,hole (default wave)
 #   BENCH_BACKEND  cpu | cuda | metal     (default cpu)
 #   BENCH_T        Float64 | Float32      (default Float64)
 #   BENCH_N        points per block edge  (default 16)
-#   BENCH_ROOTS_WAVE, BENCH_ROOTS_HOLE    roots per edge (default 8 and 2:
-#                                         512 blocks either way)
+#   BENCH_ROOTS_WAVE, BENCH_ROOTS_HOLE, BENCH_ROOTS_EXCISED
+#                  roots per edge (default 8, 2 and 2: 512 blocks each)
 #   BENCH_REPS     timed repetitions      (default 5)
 #   BENCH_TAG      label printed on every row
 #
+# excised (added in step X2b): the hole's mesh with the ball `r < 3/4`
+# excised (`interior = :excised`), and in step mode also the zone kernel
+# alone (`zone`), its points, and its cost per zone point and as a share of
+# the right-hand side; `BENCH_UPWIND=1,4` switches the lopsided blend on.
 # step: one right-hand side; IMEXRungeKutta's RK4 by owner and by broadcast,
 # each integrator built once and stepped; `gh_solve` over four steps (`init`
 # included); `init` alone, and with the previous integrator's scratch
@@ -71,6 +75,13 @@ function build(CASE; N=N, ROOTS=roots_for(CASE))
     if CASE == "wave"
         case = gauge_wave_case(T; ε_KO=T(1 // 2), γ0=one(T), γ2=zero(T))
         forest = gh_forest(T, case; N=N, roots=ROOTS)
+    elseif CASE == "excised"
+        up = haskey(ENV, "BENCH_UPWIND") ?
+             Tuple(parse.(Int, split(ENV["BENCH_UPWIND"], ","))) : nothing
+        case = hole_fixture(T; q=q, halfwidth=T(5), variant=:excised, r_1=T(3 // 4),
+                            excision=Excision(T; upwind=up))
+        forest = hole_forest(T, case; N=N, roots=ROOTS,
+                             radii=(T(6), T(3), T(3 // 2)))
     else
         case = hole_fixture(T; q=q, halfwidth=T(5))
         forest = hole_forest(T, case; N=N, roots=ROOTS,
@@ -114,6 +125,18 @@ function step_mode(CASE)
     du = similar(u)
     far = T(10^6) * dt
     trhs = timeit(() -> gh_rhs!(du, u, p, zero(T))); row("rhs", trhs)
+    if p.excision !== nothing
+        # The zone kernel alone, on the working array the right-hand side
+        # left behind (ghosts filled), and its share.
+        tz = timeit(() -> TreeGeneralizedHarmonic.gh_zone!(du, p, zero(T)))
+        row("zone", tz)
+        ex = p.excision
+        @printf("%s\tzone_points\t%d\t(excised %d, centered %d, zone blocks %d of %d)\n",
+                TAG, ex.nzone, ex.nexcised, ex.ncentered, ex.nzoneblocks, nblocks(U))
+        @printf("%s\tzone_per_point\t%.1f\t\tns  (%.2f %% of the rhs)\n", TAG,
+                1e9 * tz.min / ex.nzone, 100 * tz.min / trhs.min)
+        flush(stdout)
+    end
     if HAVE_IRK
         if backend isa CPU
             io = gh_integrator(p, copy(u), (zero(T), far); dt=dt)
