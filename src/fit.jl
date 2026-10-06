@@ -291,23 +291,48 @@ function real_solid_harmonics(lmax::Integer, ξ)
 end
 
 """
-    fit_directions(L) -> Vector{SVector{3,Float64}}
+    fit_directions(L; turns = 1) -> Vector{SVector{3,Float64}}
 
 The collocation directions: the points of `EquiangularGrid(L)` —
 `L + 1` midpoint colatitudes by `2L + 1` longitudes, no pole — as unit
 vectors, in the grid's `CartesianIndices` order (`ash_point_coord`).
+
+`turns = 4` (added 2026-10-05) closes the set under the quarter turn about
+`z`: each grid direction is followed by its three images `R n`, `R² n`,
+`R³ n`, `R(x, y, z) = (−y, x, z)`. The grid's `2L + 1` longitudes are never
+a multiple of four, so on its own it is not invariant under the turn, and a
+least-squares fit of a state that is — a rotating octant's — keeps the
+symmetry only where the state is exactly representable: the evolved state's
+grid-induced azimuthal content at `m = 24, 28` aliases into `m = 1, 3` on
+25 longitudes. On the closed set the least-squares problem is itself
+invariant, and its solution symmetric to roundoff. The grid is already
+symmetric under `z → −z`.
 """
-function fit_directions(L::Integer)
+function fit_directions(L::Integer; turns::Integer=1)
+    turns in (1, 4) || throw(ArgumentError(
+        "turns is 1 (the grid) or 4 (closed under the quarter turn about z), got $turns."))
     grid = EquiangularGrid(Int(L))
     dirs = SVector{3,Float64}[]
     for ij in CartesianIndices(ash_grid_size(grid))
         θ, φ = ash_point_coord(grid, ij)
         sθ, cθ = sincos(θ)
         sφ, cφ = sincos(φ)
-        push!(dirs, SVector{3,Float64}(sθ * cφ, sθ * sφ, cθ))
+        n = SVector{3,Float64}(sθ * cφ, sθ * sφ, cθ)
+        push!(dirs, n)
+        for _ in 2:turns
+            n = SVector{3,Float64}(-n[2], n[1], n[3])
+            push!(dirs, n)
+        end
     end
     return dirs
 end
+
+# The turns a fit's collocation set is closed under (added 2026-10-05): four
+# when the sampled state lives on a forest with a rotating seam, whose state is
+# symmetric under the quarter turn and whose fit must be too, and one otherwise
+# (an analytic sampler: an axisymmetric hole's data has no azimuthal content
+# the grid aliases).
+fit_turns(sampler) = 1
 
 # --- the samplers ------------------------------------------------------------------
 
@@ -356,6 +381,8 @@ struct StateSampler{F,T}
     t::T
     order::Int
 end
+
+fit_turns(s::StateSampler) = s.fs.forest.rotating[1] == 0 ? 1 : 4
 
 function state_sampler(fs::FieldSet{T,3}, q::Integer; t, order::Integer=1) where {T}
     fs.nvars == NFIT || throw(ArgumentError(
@@ -868,7 +895,8 @@ function build_fit(sampler, int::FittedInterior{T}, spec::FittedSpec;
     bd = _bounds_in(T, bounds)
     t = T(sampler.t)
     c = center_at(int.center, t)
-    ns = [SVector{3,T}(T(n[1]), T(n[2]), T(n[3])) for n in fit_directions(L)]
+    ns = [SVector{3,T}(T(n[1]), T(n[2]), T(n[3]))
+          for n in fit_directions(L; turns=fit_turns(sampler))]
     r1s = [shape_radius(int, n) - int.offset for n in ns]
     rbar = sum(r1s) / length(r1s)
     xs = [c + r1 * n for (r1, n) in zip(r1s, ns)]

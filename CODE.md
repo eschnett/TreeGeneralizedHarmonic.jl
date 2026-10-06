@@ -6931,6 +6931,89 @@ run at `h = 1/48` on one more cube (`32, 16, 8, 4`, the finest level
   finder at this resolution) and drifts at `7.8·10⁻⁸/M`; all 25 finds succeed.
   The layer next to the ring is under-resolved at `1/48`: on the equator it
   spans `0.95–1.25`, where Kerr-Schild's `H` falls from `3.3` to `1.3`.
+- **Nothing at `1/48` rescues `:fitted`** (2026-10-05, half-`M` screens on
+  `[0, 4]³` and jobs 570123, 570124): the band's `ℋ` scales with `ρ_max`
+  (`2/M`: `0.55×`, `8/M`: `2×`) and a thicker ramp at the same depth
+  (`m = 12`, `n_L = 22`) lowers it `2.6×`, but both rows run away outside the
+  horizon by `6–8 M`; the layer pulled away from the ring (`m = 10`,
+  `n_L = 14`) and the analytic data stopped 6 cells below the offset surface
+  (`fit_depth = 1/8`) are worse from the start.
+
+**`a = 9/10` at `h = 1/96` (measured 2026-10-05**, jobs 570115 and 570116**)**:
+one more level, the finest box `[0, 3]³` so that the whole hole is at one
+resolution — `roots = 4`, `N = 48` (the box needs one-unit blocks one level
+up), cubes `32, 16, 8, 4, 3`, 477 blocks, 52.8 M points, `dt = 1/333`,
+about `15 min` per `M` on an H200.
+
+- **`:damped` is clean** (`r_0 = 19/20`, `r_1 = 5/4`, `a09d48`'s radii in
+  `M`): stationary to `24 M`, `ℋ` `1.3·10⁻⁶` overall, `8·10⁻⁶` in the band
+  inside the horizon and `2.9·10⁻⁸` just outside it — `1000×` below `1/48`,
+  far more than the scheme's order, so `1/48` was outside the convergent
+  regime next to the ring.
+- **`:fitted` (`m = 24`, `n_L = 36`, the core surface 16 cells outside the
+  ring, `fit_cont = 1`, `lmax_fit = 12`) holds for `18 M` and then grows on
+  the axis.** Its band inside the horizon saturates at `ℋ ≈ 2.3·10⁻³` and the
+  first shell outside at `8.3·10⁻⁶` (`280×` `:damped`, a third of `:damped`
+  at `1/48`) by `7 M`; from `t ≈ 18 M` the gauge constraint and then `ℋ` grow
+  at the first evolved points on the `z` axis — `ℋ`'s L∞ `0.03`, `0.07`,
+  `0.82`, `2.95` at `20, 22, 23, 24 M` — while every shell, the horizon
+  (`J = 0.900007`, `M_irr` at Kerr's to `2·10⁻⁸`) and the far field are
+  unchanged. From the `22` and `24 M` checkpoints, with both constraints
+  evaluated everywhere and binned by depth below the horizon and polar angle:
+  at `22 M` the largest `|C_a|` (`2.6·10⁻³`) is a ring `0.15` off the axis
+  at the offset surface (`|cos θ| = 0.991`, depth 24 cells); at `24 M` it is
+  on the axis there (`x = y = 0`, `z = 1.19`, `|C| = 0.097`, `ℋ = 2.95`),
+  `37×` larger, and every bin with `|cos θ| < 0.75` is unchanged. **The
+  seam's interpolation is not the cause**: the exact state's value and
+  gradient interpolated beyond `x = 0`, beyond `y = 0` and beyond both, near
+  the pole and around the azimuth, have the same error as inside the
+  quadrant to three digits (`2.3·10⁻⁶`, `2.3·10⁻⁴` at `h = 1/24`). Left
+  open: the fit's or the tracked shape's representation at the pole of an
+  oblate `a = 9/10` horizon (`a = 3/5` `:fitted` ran to `64 M` on the same
+  octant), against the `:fitted` layer's outer edge on the axis.
+
+**The axis instability narrowed down (2026-10-05/06**, jobs 570249–570520,
+`spin-sync/` — a scratch copy of the package and of TreeAMR with experimental
+switches**)**. Each row is run A's mesh at `h = 1/96`, changed in one thing:
+
+| row | change | result |
+|---|---|---|
+| A2 | the fit's collocation closed under the quarter turn | A to 7 digits, the onset at `17–18 M` |
+| A3 | the two seam planes made identical after every stage (a TreeAMR `sync_seam!`), the axis projected | A to 7 digits |
+| A4 | both | A to 7 digits |
+| A5 | the target frozen at the initial fit, no refits | the same onset at `18 M` |
+| A6 | A's tracked geometry with the exact target (`variant = :damped`) | grows on the axis at the offset surface from `1 M` |
+| G5 | as A6, `n_L = 24` (core surface at the pole `0.94`) | grows in the band inside the horizon from `1 M` |
+| G4 | a spherical `:damped` layer with its edge at A's polar radius (`r_1 = 19/16`) | stable (noisy next to the ring) |
+| G2 | as A6, `m = 12` (edge `1.31` at the pole) | clean to `6 M`: `ℋ` `3.7·10⁻⁸` just outside the horizon |
+| A7 | `:fitted`, `m = 12`, `n_L = 36` | stable to `24 M`, no axis growth |
+
+- **Not the symmetry.** The fit was asymmetric — `EquiangularGrid(12)` has 25
+  longitudes, so the evolved state's grid-induced azimuthal content at
+  `m = 24, 28` aliases into `m = 1, 3`, and the fit of A's state broke the
+  quarter turn at `1.2·10⁻⁴` (the exact, axisymmetric data's fit: `5·10⁻¹⁴`);
+  closing the collocation set under the turn (`fit_directions(L; turns = 4)`,
+  automatic for a state on a rotating forest) brings it to `5·10⁻¹¹`. And A's
+  two seam planes, which must be each other's images, had drifted apart by
+  `O(1)` near the axis by `22 M`. But forcing either symmetry, or both, leaves
+  the growth unchanged: it is a symmetric mode, and the drift its consequence.
+- **Not the fit.** A frozen target grows the same way, and the exact target on
+  A's geometry grows sooner.
+- **The tracked, oblate layer `24` cells (`0.25 M`) below the horizon is
+  unstable at `a = 9/10`; `12` cells (`0.125 M`) is not.** A sphere with the
+  same polar edge is stable, so it is neither the polar radius nor the depth
+  of the core surface alone. Why `a = 9/10` is sensitive is open; one
+  suspect is the near-null inward speed of the outgoing characteristic between
+  the horizons, `|Δ|/(r² + a² + 2Mr) ≈ 0.03` at `r ≈ 1.2` (`a = 0`, `r = 1.5`:
+  `0.14`), which makes the layer's edge barely an outflow boundary.
+- **But `:fitted` at `m = 12` leaks.** A7 is stationary from `10 M` and stable
+  to `24 M`, but its fit target's mismatch reaches across a horizon only 12
+  cells away: `ℋ` `1.85·10⁻⁴` just outside it (B: `4.2·10⁻⁸`), the error there
+  `4.7·10⁻⁵` (B: `1.1·10⁻⁷`), and `J` drifts at `−4.4·10⁻⁷/M` (B:
+  `2.5·10⁻⁹/M`, `31×` below `1/48`'s `7.8·10⁻⁸`, order five). The tracked
+  `:damped` layer at `m = 12` (G2) has none of this. So at `a = 9/10`
+  `:fitted` has no margin that works so far: `24` cells is unstable on the
+  axis, `12` leaks; whether one in between does is the next screen.
 
 ## Possible extensions
 
