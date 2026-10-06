@@ -34,7 +34,9 @@ done and merged (2026-10-06): feasible — the excised static Kerr-Schild
 the horizon to three digits at `h = 1/32`, beats `:fitted`, and shows no
 gauge drift to `50 M`. The static round is complete. Erik's decision of
 2026-10-06: the static spinning hole at `a = 3/5`, with `main` merged
-first — steps X4–X7 below; X4 and X5 run now, in parallel.**
+first — steps X4–X7 below. X5 is done and merged (2026-10-06): go for
+`a = 3/5` with the hybrid rule (`hybrid-adv`). X4 is running; X6 starts
+from both.**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1848,6 +1850,77 @@ if a new family needs weights (with exact tests).
   `a = 3/5`, and from which `r_E`. If none, say so; X6 and X7 then wait for
   Erik;
 - the suite green at one and four threads.
+
+**What step X5 hands over** (its report's section 6, 2026-10-06; the
+numbers are `CODE.md`'s "Excision", "The frame-dragged faces (step X5)", and
+Measured results, "Excision: the frame-dragged faces (step X5)").
+
+**Go for Kerr-Schild `a = 3/5`**, with the rule `hybrid-adv`.
+- On the equatorial plane it is stable at every `r_E` from `0.65`, just
+  above the inner horizon, to the horizon, at `q = 2, 4`, `ε_KO = 1/2, 1`,
+  `h = 5/48 … 5/96`, with and without the blend.
+- Its rightmost eigenvalue is within `0.002/M` of the `:damped` layer's, and
+  its noise decays at the layer's rate to `100 M`.
+- The per-axis closures alone are unstable near the inner horizon, at
+  `+1.2` to `+4.8/M` from `r_E = 0.65`. Extrapolating the advection on
+  every closure axis is unstable too, at `+2.6` to `+18/M`, so the rule
+  must be selective.
+- `ε_KO > 0` is still required.
+
+- **The rule (`hybrid-adv`).** At a zone point and axis `d`, it applies when
+  a side `s` with `k_s < G` has `−s β^d < 0` in the build state: the shift
+  points into the excised set along that axis. `d1`, `d2`, `dmix` and `ko`
+  stay per-axis everywhere. **Only `adv`** along such an axis becomes
+  `inv_h · Σ_j w_j ũ(x + j e_d)`:
+  - `w` is the centered `D₁` weights;
+  - `ũ = u` at non-excised taps;
+  - at an excised tap `Q`, `ũ = Σ_i tab[i, k₀, n] · u(Q + (k₀ + i − 1) e)`;
+  - `e` is the nearest of the 26 lattice directions to the outward normal at
+    `Q`;
+  - `k₀` is the first non-excised step along `e`, and `n ≤ 3` the
+    consecutive non-excised sources inside the point's `G`-box;
+  - `tab = extrapolation_table(T, Val(q))` (`src/stencils.jl`, `isbits`,
+    `3 × G × 3`, 216 bytes at `q = 4`), which covers every
+    `k₀ + n − 1 ≤ G`. That is all that occurs at `a = 3/5`: X5 counted every
+    tap in 3D.
+
+  Kerr-Schild `a = 0` has no such axis, so its runs stay X2b's bit for bit.
+- **The per-point information**, built once from the frozen geometry and
+  the build state:
+  - three rule bits per zone point, set from the state's shift in the
+    census pass. They go beside the three-valued `UInt8` class or in a
+    second `UInt8` array;
+  - a direction code (0–25) per excised point within `q/2` of a zone point
+    along an axis, from the geometry's normal (the sphere: `x − c`; tracked:
+    `excision_normal`).
+
+  The kernel reads codes, never geometry. The sources' classes come from the
+  class array.
+- **Refusals and the record:**
+  - X2b's refusal of a shift into the excised set becomes a refusal only of
+    an excised tap with no source;
+  - `excision_into` keeps counting every chunk;
+  - add a count of rule axes whose current shift sign disagrees with the
+    build's, which must stay 0;
+  - report the faces per rule;
+  - no `z` axis is frame-dragged at `a = 3/5`.
+- **With the blend on**, the lopsided row at such an axis is the open row
+  with its excised taps extrapolated. That is what X5 measured, but the
+  blend is not needed.
+- **For X7:**
+  - sphere geometry, the algebraic source, `q = 4`, `cfl = 1/2`,
+    `ε_KO = 1/2`, blend off;
+  - **always pass `r_0=`** inside `(0.6, r_E)`: the default `r_E/2` lies
+    inside the ring below `r_E = 1.2` and is refused by name;
+  - the depth scan at `h = 1/24` over `r_E ∈ {0.70, 0.80, 0.90, 1.00,
+    1.133}` (26.4 down to 16 cells at the poles);
+  - production at **`r_E = 0.80`, `r_0 = 0.70`**: 24, 32 and 48 cells below
+    the poles at `h = 1/24, 1/32, 1/48`, `1.0 M` under `r₊`;
+  - normal outflow ends at `r_E = 0.641`.
+- **CLAUDE.md** has no X5 paragraph yet: X5 left it alone for X4's merge. X6
+  adds it beside its own. The `excision_model.jl` commands are in the
+  script's header. X1's `margins` is now `margins=margins`; bare `margins`
+  runs both parts.
 
 ## Step X6 — The frame-dragged faces in the zone kernel
 
