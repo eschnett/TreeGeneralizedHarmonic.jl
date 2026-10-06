@@ -35,8 +35,10 @@ the horizon to three digits at `h = 1/32`, beats `:fitted`, and shows no
 gauge drift to `50 M`. The static round is complete. Erik's decision of
 2026-10-06: the static spinning hole at `a = 3/5`, with `main` merged
 first — steps X4–X7 below. X5 is done and merged (2026-10-06): go for
-`a = 3/5` with the hybrid rule (`hybrid-adv`). X4 is running; X6 starts
-from both.**
+`a = 3/5` with the hybrid rule (`hybrid-adv`). X4 is done and merged
+(2026-10-06): the branch is on `main`'s spill-free kernel and the rotating
+octant, and the merged suite passes (6952 at one thread, 6960 at four). X6
+is next.**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1851,6 +1853,78 @@ if a new family needs weights (with exact tests).
   Erik;
 - the suite green at one and four threads.
 
+**What step X4 hands over** (its report's section 6, 2026-10-06; the
+numbers are `CODE.md`'s "One right-hand-side evaluation", "One design after
+`main`'s rewrite", "Excision", "What step X4 changed", and Measured results,
+"The merge with `main` and the rotating octant (step X4)").
+
+The integration branch is on `main`'s spill-free right-hand side and on the
+rotating octant (TreeAMR `0.1.7`).
+- `:damped` on the H200 is `main`'s kernel to `ptxas`'s report.
+- The excised right-hand side is `2.88 ns` a point on the octant, `3.9×`
+  faster than before.
+- The zone kernel is `238 ns` a zone point, `1.5 %` of a right-hand side.
+- The lopsided blend costs `+2.7 %`.
+- X2a's `+5 %` is gone.
+
+- **Where a closure provider and a per-face rule plug in.**
+  `gh_zone_kernel!` (`src/excision.jl`) builds `closure_provider(T, Val(G),
+  st, cls, cb, tab, inv_h, λ)` per zone point and calls `gh_rhs_store!(du,
+  o, sd, S, T, work, Hwork, inner, b, var, sv, inv_h, γ0, γ2, εh,
+  Val(HASH), Val(DISS))`.
+  - `main`'s head asks for `d1` of all 20 variables, plus `adv` and `ko` of
+    `h`. Each `Π` component then asks for `d1` of `h_v` again, `d1` of
+    `Π_v`, `d2` and the three `dmix` of `h_v`, and `adv` and `ko` of `Π_v`.
+  - A per-face rule is another row family chosen per (point, axis) inside
+    `closure_provider`. It is decided at build time and stored in extra
+    bits of the `UInt8` classes or in a second per-point array; the
+    classes stay the single source of truth.
+  - New table rows go in as extra fields of `closure_arrays`' `NamedTuple`.
+  - The zone set is `_reads_excised` (`±G` along axes, `q/2` boxes for the
+    mixed derivatives). A family that reads farther must widen it and
+    `closure_admissible`.
+  - The refusal to narrow is `build_excision`'s `ninto == 0` (census slot
+    `EXM_INTO`). The outflow rows come from `_outflow_kernel!`.
+- **What to claim bit for bit.** Any provider other than `Centered` changes
+  how LLVM fuses `muladd`s into FMAs around the head.
+  - Keep every non-zone point on the `:none` call, which also keeps a
+    blend weight of zero bit for bit.
+  - Claim only *contractions* as `isequal`.
+  - Claim `F` to roundoff on each variable's largest `|du|`. X4 held the
+    closure provider at points with no excised tap to `512 eps` (measured
+    `103`) for that reason.
+- **The nested mixed derivative is not symmetric** (measured in step X4).
+  Outer `i`, inner `j`, with `i < j`, is not invariant under `x ↔ y` or the
+  seam's quarter turn. At zone points the two nestings differ by `3·10⁻³`
+  (`5·10⁻¹⁴` under `:damped`), so the rotating octant reproduces the mirror
+  octant's excised `a = 0` record only to `1.4·10⁻³` in L∞ inside the
+  horizon at `t = 1`. Averaging both nestings made the two agree to every
+  printed digit on a scratch copy.
+  - **X6 builds the symmetrized zone-point mixed derivative,
+    `½(D_i D_j + D_j D_i)`** (proposed in step X4; taken into X6 by the
+    orchestrating session on 2026-10-06, for Erik to confirm in review). It changes X3's validated zone operator at
+    truncation level.
+  - X6 re-measures what it changes: the fixture's excised run against X2b's
+    record, the static `a = 0` excised row on the rotating octant against
+    the mirror octant's, and one short `a = 0` octant row against X3's.
+- **The rotating octant's mechanics:**
+  - the seam is `(1,2)`: `R` takes `e_x → e_y` and `e_y → −e_x`, and
+    `u(Rp) = Q u(p)` with `state_rotation`. There is a mirror at `z = 0`
+    only;
+  - every `FieldSet` over the forest needs `rotation=`; the classes' bit
+    field set is a scalar, `identity_rotation(forest, 1)`;
+  - the seam planes `x = 0` and `y = 0` are the same physical points;
+  - ghost classes across the seam are the rotated owner's;
+  - the census reads each owned point's own `β`, so it needs no rotation;
+  - `hole_case(…; octant = :rotating, …)`;
+  - `test/octant_runs.jl octant=rotating a=… interior=excised …`. With a
+    spin it measures margins against `r₊`, and the core rule's default
+    radius is `max(r_E/2, (r_E + a)/2)`.
+- **The `a = 3/5` smoke** (`h = 1/16`, `r_E = 1`, `r_0 = 0.8`, `m = 12`) is
+  refused at the build today: 72 pairs with the shift into the excised set,
+  least `b/a = −0.499`. SimWatch writes status `failed` with that message.
+  X6's rule lifts the refusal for what it covers.
+
 **What step X5 hands over** (its report's section 6, 2026-10-06; the
 numbers are `CODE.md`'s "Excision", "The frame-dragged faces (step X5)", and
 Measured results, "Excision: the frame-dragged faces (step X5)").
@@ -1931,6 +2005,10 @@ Starts from the integration branch with X4 and X5 merged. `CODE.md`:
 - the family X5 chose, in the zone kernel's closure provider, selected per
   face from the classes. The build records which rule each closure axis
   uses;
+- the zone points' mixed derivative symmetrized, `½(D_i D_j + D_j D_i)`
+  (X4's hand-over). The interior or excision parameters may carry a switch
+  for it, so the old nesting can still be compared; if so, it is on by
+  default;
 - X2b's build-time refusal of a shift into the excised set becomes a
   refusal only of what the chosen family does not cover;
 - the record's outflow rows report the faces per rule;
@@ -1938,8 +2016,15 @@ Starts from the integration branch with X4 and X5 merged. `CODE.md`:
 
 **Tests** (claims, priced):
 - every existing excision claim still holds;
-- a static `a = 0` excised run is bit for bit what it was, if `a = 0` has
-  no faces of the new kind (X1: it has none);
+- the frame-dragged rule changes nothing where no axis is frame-dragged: a
+  static `a = 0` excised right-hand side with the rule built in is bit for
+  bit the same build's without it (X1: `a = 0` has no such faces);
+- the symmetrized mixed derivative:
+  - is exact on polynomials to its degree;
+  - makes the rotating octant's excised `a = 0` right-hand side the mirror
+    octant's to roundoff;
+  - its change to the fixture's run against X2b's record, and to one short
+    `a = 0` octant row against X3's, is measured and recorded;
 - the new rule is exact on polynomials to its degree;
 - a planted degenerate metric in the excised set leaves every
   non-excised `du` `isequal`;
