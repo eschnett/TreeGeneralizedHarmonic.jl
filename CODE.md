@@ -115,6 +115,7 @@ research project; the inherited documents live in `notes/`.
   - [Excision: the variant (step X2b)](#excision-the-variant-step-x2b)
   - [Excision on the static hole (step X3)](#excision-on-the-static-hole-step-x3)
   - [Excision: the frame-dragged faces (step X5)](#excision-the-frame-dragged-faces-step-x5)
+  - [Excision: the frame-dragged faces in the zone kernel (step X6)](#excision-the-frame-dragged-faces-in-the-zone-kernel-step-x6)
 - [Possible extensions](#possible-extensions)
 - [Open questions](#open-questions)
 
@@ -1101,6 +1102,17 @@ before the merge (`b80f4ed`), the same manifest (TreeAMR 0.1.7, Julia
   side on the octant (it cost `+20 %`) and `+10.5 %` on the bench (`+10.8 %`).
   Under [Measured results](#measured-results), "The merge with `main` and the
   rotating octant (step X4)".
+
+**A third launch for a spinning hole (amended in step X6).** An `:excised`
+problem whose build found a frame-dragged axis launches `gh_dragged_kernel!`
+after the zone kernel: the same `gh_rhs_store!` with a fourth provider,
+`DraggedProvider` — the zone point's `ClosureProvider` with `adv` replaced
+along those axes by step X5's rule — at the zone points that have one, and
+nowhere else ([Excision](#excision-added-2026-10-05), "What step X6 built").
+The main kernel and the zone kernel are unchanged by it, the zone kernel's
+mixed derivative aside (symmetric in its two axes from X6). On the H200 the
+new kernel sits at 255 registers with a 1872-byte frame, the zone kernel's
+1504.
 
 ### The time step
 
@@ -2781,8 +2793,13 @@ with its excised taps extrapolated along the lattice direction nearest the
 surface's normal; on Kerr-Schild `a = 3/5`'s equatorial plane it is stable
 at every depth of the window, where the per-axis closures are not. The
 rule, the window and what X6 and X7 need are under "The frame-dragged faces
-(step X5)" at the end of this section.**)** Moving holes — points that leave
-the excised set on the trailing side and need values — are a later round.
+(step X5)" at the end of this section.**)** **(Amended in step X6:** the rule
+is built — in the zone kernel's second launch, from rule bits and direction
+codes built once with the problem — the zone points' mixed derivative is
+symmetric in its two axes, and the static `a = 3/5` hole runs on the rotating
+octant; "What step X6 built", at the end of this section.**)** Moving holes —
+points that leave the excised set on the trailing side and need values — are
+a later round.
 
 **The variant, `:excised`.** Points beyond the **excision surface** are
 not evolved: `du = 0`, `F` never evaluated, their data finite and never
@@ -3254,7 +3271,12 @@ branch; the excision's operator is X2b's, its arithmetic `main`'s.
   printed digits (`records.csv` to `10⁻¹²`). It costs a second nested sum at
   zone points only (the zone kernel is 1.5 % of a right-hand side on the
   octant), keeps the exactness of the closures, and changes X3's operator at
-  zone points, which is why X4 records it rather than building it.
+  zone points, which is why X4 records it rather than building it. **(Built
+  in step X6**, the default, `Excision(T; mixed = :symmetric)`: the two
+  octants, each stepped four times on its own, now hold one state to `0.8`
+  eps where the single nesting left `1.7·10⁻⁶`, and X3's smoke row changes
+  by at most `3.5·10⁻⁵` in the shells' `L2` norms outside the horizon —
+  "What step X6 built"**)**.
 
 **What step X3 measured, and the recommendation (amended in step X3).** The
 static Kerr-Schild `a = 0` hole on the octant, on Symmetry's H200s at
@@ -3429,9 +3451,14 @@ plane measured; it is not needed). Kerr-Schild `a = 0` has no such axis, so
 its runs are X2b's bit for bit. The criterion is `b/a < 0` and not the
 `b/a ≲ −1` where the plane fails: it is the frozen line's, it is the
 census X2b already computes, and the plane is as stable with it as with
-`b/a < 1/2`.
+`b/a < 1/2`. **(Built in step X6** as written, with the sources capped at `G`
+steps — the table's bound — and the rule a second launch of the zone
+kernel's; "What step X6 built", below.**)**
 
-**What X6 needs from the classes** (proposed in step X5):
+**What X6 needs from the classes** (proposed in step X5; **built in step
+X6**, the bits and the codes in one second `UInt8` array, the direction
+coded at every excised stored point, the weights a kernel argument beside
+the closure table — "What step X6 built", below):
 - **A rule bit per zone point and axis** (three bits), set at build from
   the state's shift where X2b's census now counts `excision_into`. The class
   is a `UInt8` with three values, so the bits fit beside it; or a second
@@ -3481,6 +3508,109 @@ geometry, as X3 ran:
   the plane (`1.88 → 1.53–1.58` at `q = 4`) and the H200 10–20 % (X3). Off,
   as X3 recommended.
 - **`ε_KO = 1/2`**, as X3 ran: `1` is as stable and shortens the step.
+
+**What step X6 built (amended in step X6**, `src/excision.jl`; its numbers
+under [Measured results](#measured-results), "Excision: the frame-dragged
+faces in the zone kernel (step X6)"**).** X5's rule in the zone kernel, the
+zone points' mixed derivative symmetric in its two axes, and the spinning
+hole on the rotating octant end to end:
+
+- **The codes.** `ExcisionData` carries `codes`, a `UInt8` array of the
+  classes' layout — a second array beside the three-valued classes rather
+  than bits in them, so that every `== CLASS_…` test of the classes stays as
+  it was **(proposed in step X6)**:
+  - at a **zone point**, three **rule bits** (bit `d − 1` for axis `d`), set
+    by the census where X2b refused: a side `s` with `k_s < G` whose `b/a =
+    −s β^d/(α√γ^{dd})` is negative in the state the problem is built on;
+  - at an **excised point**, the **direction code** `1…26` of the lattice
+    direction nearest the surface's outward normal there
+    (`lattice_direction`, `direction_code`: the largest `e·n/|e|`, the first
+    in step X5's order on a tie), written for **every** excised stored point,
+    ghosts included, by a fourth pass over the stored points from the frozen
+    geometry (`excision_normal`: radial for the sphere, the shape's gradient
+    for the tracked surface) **(proposed in step X6**: X5 asked for those
+    within `q/2` of a zone point along an axis; all of them is one pass with
+    no test, and a ghost's code is computed at its own position, which on
+    an octant is its owner's image, so that the direction turns with the
+    data across the seam and the mirror**)**.
+
+  The two sets are disjoint. The kernels read the codes and never the
+  geometry; the classes stay the only answer to "is it excised", and the
+  sources' classes are read from them.
+- **The provider.** `DraggedProvider` wraps a zone point's
+  `ClosureProvider` with the codes, `extrapolation_table(T, Val(q))` and the
+  point's rule bits. `d1`, `d2`, `dmix`, `ko` — and `adv` along an axis whose
+  bit is clear — are the closure provider's. Along an axis whose bit is
+  set, `adv` is `1/h` times the centered `D₁` contracted in `axis_stencil`'s
+  order with every excised tap `Q` replaced by `Σ_i w[i, k₀, n] u(Q + (k₀ + i
+  − 1) e)` (`_tap_sources`: `e` from `Q`'s code, `k₀` the first non-excised
+  step, `n ≤ 3` consecutive sources, every one inside the point's `G`-box
+  **and at most `G` steps out**, which is what `extrapolation_table` holds —
+  X5's census never needed more, and the cap makes the table's bound a
+  property of the scan **(proposed in step X6)**). Where the axis's centered
+  `D₁` reaches no excised point (`k_s = q/2`) it is the `∂f_d` it is handed.
+  With the lopsided blend on it is `(1 − λ)` that plus `λ` times the open
+  lopsided row filled the same way, as X5 measured. **At `q = 2` the sources
+  stop at `G = 2` steps, so there are two at most and the rule's
+  extrapolation is linear** (at `q = 4` it is quadratic wherever three fit:
+  nine taps in ten on `test/excision_tests.jl`'s ball).
+- **A second launch, not a branch** **(proposed in step X6)**.
+  `gh_dragged_kernel!` runs after `gh_zone_kernel!`, over the blocks holding a
+  frame-dragged axis (`drag.blocks`, a device `Bool` per block), and
+  overwrites the `du` of the zone points with a bit set — the zone kernel's
+  work there, 5–12 % of the zone at `a = 3/5`, is thrown away. So the zone kernel
+  is the same compiled code with and without the rule: "the rule changes
+  nothing where no axis is frame-dragged" is a statement about which points
+  the second launch writes, and needs nothing from the compiler ([One
+  right-hand-side evaluation](#one-right-hand-side-evaluation), "One design
+  after `main`'s rewrite": a second provider compiled into one body changes
+  how the head is fused). Where the build finds no frame-dragged axis
+  — Kerr-Schild `a = 0` — `drag` is `nothing` and the launch does not
+  happen, so those runs are the zone kernel's alone. On a device the second
+  kernel also keeps the rule's registers out of the zone kernel.
+- **The refusal is narrowed** to what the rule does not cover: an excised
+  tap the rule's stencils read — its centered `D₁`'s, to `q/2`, and with the
+  lopsided blend the lopsided row's, which reaches `G` into the excised side
+  of a frame-dragged axis — with no source (the census runs the kernel's own
+  `_tap_sources`). X5 met none at `a = 3/5`, nor does any surface the tests
+  or X7 build without the blend; on a coarse octant (`h = 1/4`, `r_E =
+  17/25`, `q = 4`) the blend's row has two, which `excision_tests.jl` uses
+  as its witness.
+- **The record** adds three outflow rows, every chunk, from the band:
+  `excision_dragged` (the (zone point, axis) pairs with a rule bit — a
+  constant of the problem), `excision_faces_dragged` (X1's faces on those
+  axes: the faces per rule are it and `excision_faces` less it) and
+  `excision_flips` (the axes whose shift's sign now disagrees with the bit,
+  pointing in without the rule or out with it), computed with the census's
+  own function. `excision_into` keeps counting the axes whose shift points
+  in. **The rule bits are the build state's, and a restart rebuilds them
+  from the state it restarts from** — the checkpoint holds no bits — **so a
+  chain of jobs is the uninterrupted run exactly while `excision_flips` is 0
+  at the checkpoint's row** (the checkpoint is written after the row); the
+  run is not stopped when it is not, and the record says so **(proposed in
+  step X6)**. `test/excision_tests.jl`'s spinning run and its chain of two
+  jobs are `isequal`.
+- **The mixed derivative** (X4's proposal, taken into X6 by the
+  orchestrating session, for Erik to confirm in review): `Excision(T; mixed
+  = :symmetric)` by default, `ClosureProvider{…,SYM}`'s `dmix` is `½(D_i D_j
+  + D_j D_i)` — the nesting along `i` and the one along `j`, each with its
+  inner closures at its own outer nodes — **wherever the point's `(q + 1)²`
+  box in the `(i, j)` plane meets the excised set; where it does not, both
+  nestings are the centered tensor product and the one along `i` is taken**,
+  `mixed_stencil`'s arithmetic, so that the closure provider's contractions
+  at a point with no excised tap stay `isequal` to `Centered`'s **(proposed
+  in step X6)**. `a + b == b + a` in floating point, so a point and its
+  image across the diagonal take the same value bit for bit; the operator is
+  equivariant under `x ↔ y` and the rotating seam's quarter turn, and the
+  rotating octant evolves as the mirror octant does. `mixed = :nested` is
+  steps X2b–X5's operator, bit for bit (measured: X3's smoke row identical
+  in every column), and **prints as `Excision` printed before the field**, so
+  that a checkpoint written before step X6 restarts when that is asked for by
+  name and its recipe refuses the new default **(proposed in step X6)**.
+  `test/octant_runs.jl` takes `mixed=`.
+- **`test/octant_runs.jl octant=rotating a=3/5 interior=excised …` runs**,
+  with SimWatch: the build no longer refuses, and the CSV, `records.csv` and
+  `[extra.excision]` carry the three rows.
 
 ## Initial data and backgrounds
 
@@ -9386,6 +9516,127 @@ thread (load 8–30; X3 recorded the same sources at four threads, 6587 in
 thread and **6812 in 18m31** at four, the two at once beside step X4's
 suites (load 8–32). The 225 new claims are `stencils_tests.jl`'s
 extrapolation, `1.3 s` of it.
+
+### Excision: the frame-dragged faces in the zone kernel (step X6)
+
+What step X6 built is under [Excision](#excision-added-2026-10-05), "What step
+X6 built": step X5's rule (`hybrid-adv`) in a second launch of the zone
+kernel, from rule bits and direction codes built once with the problem; the
+zone points' mixed derivative symmetric in its two axes; the spinning hole
+on the rotating octant end to end. On the development machine (Apple silicon,
+12 threads, Julia 1.13.1, TreeAMR 0.1.7) at a load of 4–10 from other
+sessions, and on one H200 (Symmetry `cn111`, job 570816, `h200debugq`, eight
+CPU threads; CUDA.jl 6.4.2, driver 595.45) from the copy `excision-x6/x6` with
+`CUDA` added.
+
+**The spinning hole runs.** `test/octant_runs.jl case=ks octant=rotating a=3/5
+interior=excised L=8 N=16 roots=2 radii=4,2 r_E=1 r_0=0.8 t_end=1 chunk=1/2
+cfl=1/2` — `h = 1/16` at the hole, `m = 12` cells below the poles, `q = 4`,
+the algebraic source, noise `10⁻⁸`, 56 steps:
+- the build finds **72 frame-dragged (zone point, axis) pairs** — the 72 X4
+  refused, least `b/a = −0.499` — every one along `y` (on the rotating
+  octant's quadrant frame dragging points the shift into the ball along `y`
+  only; the `x` ones are the other quadrants'), with 33 of the band's 642
+  faces on them; no excised tap without a source; 1387 band points, 2443
+  excised;
+- at every row the band is finite, the normal margin `+0.348`, the
+  frame-dragged axes 72, **the flips 0**; at `t = 1` ℋ just outside the
+  horizon is `7.29·10⁻⁵` (`2.87·10⁻³` over the mesh, the band's), `M_irr` is
+  Kerr's `+1.19·10⁻⁶`, `J` is `a + 5.07·10⁻⁶`, the horizon found every chunk;
+  105 s of wall clock at four threads, most of it compilation. SimWatch
+  writes `simwatch.toml` with the rows under `[excision]`;
+- **on the H200** the classes and the codes are the CPU's exactly, `du` is
+  within `1.08·10⁻¹²` of its scale `1.95` (X3: `1.5·10⁻¹²` at `a = 0`), the
+  outflow rows the CPU's; the same run on CUDA gives an `octant.csv` within
+  `3.2·10⁻⁹` relative of the CPU's (72 of 89 columns identical to ten digits)
+  and a `records.csv` within `1.5·10⁻¹¹`.
+
+**The symmetric mixed derivative.** What it changes, and what it buys:
+- **The two octants evolve as one.** X4's comparison (`a = 0`, `r_E = 1`, the
+  same mesh, `amplitude=0 cfl=1/2`, to `t = 1`), the rotating octant against
+  the mirror octant: with steps X2b–X5's nesting (`mixed=nested`) they differ
+  by `1.43·10⁻³` in the `L∞` norms inside the horizon and `9.5·10⁻⁵` in
+  ℋ's `L∞` in `[2, 2.25)` — X4's numbers, reproduced; **symmetric, by at most
+  `8.5·10⁻¹⁰`, the CSV's tenth digit** (75 of 89 columns identical), and the
+  record by `7·10⁻¹³`. In the suite, four RK4 steps of each octant on its own
+  (`q = 2`, `h = 5/64`): states `0.77` eps apart and their `du` `2.9·10³` eps
+  of each variable's largest value (symmetric), `1.7·10⁻⁶` and `1.5·10⁻³`
+  (nested). Host-side, `½(D_x D_y + D_y D_x)` at a point and at its image
+  across the diagonal is bit for bit the same on 253 (`q = 2`) and 668
+  (`q = 4`) points next to a tilted surface, where the nested sum differs at
+  every one.
+- **`mixed = :nested` is the old operator bit for bit**: X3's smoke row
+  (`case=ks interior=excised L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2`, the
+  default noise and `cfl = 1/4`) gives the base's (`5da40da`) `octant.csv` in
+  every column but the wall clock and its `records.csv` in every column, and
+  the fixture's run to `M/5` the base's state (one digest).
+- **Against X2b's fixture record** (`q = 2`, `r_E = 3/4`, to `M/5`): the
+  error outside `r = 23/20` is `4.389940·10⁻³` in both (X2b recorded
+  `4.390·10⁻³`; the two differ by `7·10⁻⁸` relative); in the band
+  `[3/4, 23/20)` the error falls from `0.0892` to `0.0869` in `L2` and from
+  `0.500` to `0.422` in `L∞`, and the masked error, which counts the band,
+  from `0.01768` to `0.01726`; the gauge constraint moves by `6·10⁻⁵`.
+- **Against X3's smoke row** (above), symmetric against the base at `t = 1`:
+  every shell from `r = 3` out the same to seven digits; `[2, 2.25)` and
+  `[2.25, 3)` within `3.5·10⁻⁵` in the `L2` norms (`1.8·10⁻⁴` in ℋ's `L∞`
+  just outside); the band inside the horizon within 1.2 %; the masked error
+  1.4 % in `L2`, 4.3 % in `L∞`; `M_irr − 1 = 3.99991·10⁻⁶` against
+  `3.99910·10⁻⁶` (X3 recorded `3.999·10⁻⁶`).
+
+**What the rule and the symmetry cost.** On the CPU, `bench/stepping.jl
+BENCH_CASE=excised` at four threads — the hole's mesh, 512 blocks of `16³`
+(2.1 M points), the ball `r < 3/4` excised at `h = 5/128`, 14 162 zone
+points in 32 blocks — and with `BENCH_A=3/5` the same hole spinning (core
+rule at `0.675`): base (`5da40da`) and step X6 interleaved base–X6–X6
+(`a = 3/5`)–X6–base–X6 (`a = 3/5`), minimum of ten, at a load of 8–12:
+
+| row | base | step X6, `a = 0` | step X6, `a = 3/5` |
+|---|---|---|---|
+| right-hand side | 1002.8, 991.6 ms | 994.1, 995.8 ms | 963.7, 1002.7 ms |
+| zone kernel | 7.16, 7.11 ms (505, 502 ns a zone point; 0.71 %) | 9.24, 9.21 ms (652, 651 ns; 0.93 %) | 9.11, 9.35 ms |
+| the rule's launch | — | — (not launched) | 2.48, 2.29 ms: 1700 frame-dragged points in 24 blocks, 1458, 1346 ns each; **0.26, 0.23 %** |
+
+The symmetric mixed derivative costs the zone kernel `+29 %` — a second
+nested sum wherever a point's box meets the excised set — which is `+0.2 %`
+of a right-hand side; the rule costs a quarter of a per cent. On the H200:
+
+| kernel, `q = 4`, `Float64` | registers | stack frame | spill stores / loads | `ld.local` / `st.local` | call sites (PTX) |
+|---|---|---|---|---|---|
+| zone kernel, step X6 (symmetric) | 255 | 1504 B | 2164 / 3828 B | 1 / 10 | 6 |
+| zone kernel, step X4 | 255 | 1512 B | 2140 / 3740 B | 1 / 10 | 6 |
+| frame-dragged kernel | 255 | 1872 B | 2668 / 5504 B | 265 / 37 | 7 |
+
+| octant, `a = 3/5`, `r_E = 1` | points | right-hand side | zone kernel | the rule's launch |
+|---|---|---|---|---|
+| the smoke's (`L = 8`, `N = 16`, 22 blocks) | 90 112 | 5.87 ms | 0.390 ms (281 ns a zone point, 6.6 %) | 0.397 ms (72 points, 6.8 %) |
+| X3's scan (`L = 64`, `N = 64`, 29 blocks) | 7.6 M | 22.6 ms (2.97 ns a point) | 0.379 ms (273 ns, 1.7 %) | 0.466 ms (72 points, 2.1 %) |
+
+against X4's `2.88` ns a point and `238` ns a zone point for the `a = 0`
+excised octant. On the device the zone kernel and the rule are latency, not
+throughput: a few dozen to a few thousand threads that each form a whole
+`F`, about `0.4–0.5 ms` a launch whatever the mesh, so their share falls as
+the mesh grows — `2.1 %` at 7.6 M points, and **(predicted)** `0.6 %` at
+X7's `h = 1/24` (25.7 M points) and `0.3 %` at `1/32` (60.8 M). The
+frame-dragged kernel's 265 `ld.local` are, as far as the PTX shows, its
+run-time indexing of the extrapolation table and its tap loop (not measured
+further: they run at a few dozen points).
+
+**The suite.** Before the step, on its base (`5da40da`, X4 with X5), **6952 assertions in
+19m31** at one thread and **6960 in 14m39** at four (the two at once, at a
+load of 4–9); after it, **7001 in 20m18** and **7009 in 15m42** (the two at
+once, a load of 7–10). The 49 new claims are `excision_tests.jl`'s, whose
+file went from `58.2 s` to `1m42` at one thread and from `49.3 s` to `1m24`
+at four: the new testsets are `9.7 s` / `6.0 s` (the spinning run and its
+chain of two jobs `6.5 s` / `2.9 s` of it), the seam's four steps on each
+octant in both nestings `+4.3 s` / `+2.8 s`, the coarse octant's refusal
+`+1.3 s` / `+1.1 s`, and the rest — about `28 s` at one thread — is the
+first compilation of the spinning problem's build and of the frame-dragged
+kernel, outside any testset. `test/thread_workload.jl`'s eighth line, the
+spinning hole's right-hand side, made the thread test `+5.9 s` / `+3.5 s`.
+Two strings changed, each saying so: the `repr` of an `:excised` interior
+carries the mixed derivative's field (the nested one prints as before), and
+X2b's refusal of the shift into the excised set became a build that counts
+frame-dragged axes plus the refusal of a tap without a source.
 
 ## Possible extensions
 

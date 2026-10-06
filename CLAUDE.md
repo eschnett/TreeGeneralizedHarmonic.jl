@@ -132,7 +132,17 @@ measured"). Erik chose it (2026-10-06, `a = 3/5`, steps X4–X7). **X4 is done
 are merged in, the provider is the argument of `main`'s head and Π
 functions, the `:damped` kernel is `main`'s on the H200 to the `ptxas`
 report and the excised right-hand side 3.9× faster there, and the excision's
-classes are exchanged across the rotating seam as a scalar.
+classes are exchanged across the rotating seam as a scalar. **X5 is done
+(2026-10-06)**: on Kerr-Schild `a = 3/5`'s equatorial plane the per-axis
+closures blow up near the inner horizon, where frame dragging turns the
+shift into the excised set, and the rule `hybrid-adv` — on such an axis the
+advection alone, extrapolated along the lattice direction nearest the
+normal — holds every depth of the window: go. **X6 is done (2026-10-06)**:
+the rule is in the zone kernel, as a second launch over the frame-dragged
+points, the zone points' mixed derivative is symmetric in its two axes (so
+the rotating octant evolves as the mirror octant does), and `test/octant_runs.jl
+octant=rotating a=3/5 interior=excised …` runs end to end, on the CPU and on
+an H200. X7 — the `a = 3/5` rows on Symmetry's H200s — is next.
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -532,6 +542,73 @@ beside `interior=excised …` (margins against `r₊`, the core rule's default
 radius outside the ring). `excision_tests.jl` has the seam's claim. A
 spinning hole is still refused at the build, by the frame-dragged faces.
 
+From step X5 (2026-10-06) there is the **frame-dragged faces' analysis**, and
+no kernel change (`CODE.md`, "Excision", "The frame-dragged faces (step X5)",
+and Measured results, "Excision: the frame-dragged faces (step X5)").
+`src/stencils.jl` has `extrapolation_weights(k₀, n)` — the Lagrange
+extrapolation to an excised point from the `n` consecutive nodes `k₀ … k₀ + n
+− 1` along a lattice direction — and `extrapolation_table(T, Val(q); degree =
+2)`, every such weight with `k₀ + n − 1 ≤ G` rounded once into an `isbits`
+`3 × G × 3` array (216 bytes at `q = 4`); `test/stencils_tests.jl` asserts both
+exactly (225 claims). `test/excision_model.jl` has `margins=window` (Kerr-Schild
+`a = 3/5`'s window on the sphere and the tracked surface at `h = 1/24 … 1/48`,
+the frame-dragged closure axes, and the 3D census of the rule's sources) and
+the `model2d=spin…` parts (`spinfaces`, `spineig`, `spincontrols`,
+`spinnoise`, `spinfine`: X1's plane with `a = 3/5`'s coefficients and the
+hybrid families). Its answer: **go for `a = 3/5` with `hybrid-adv`** —
+per-axis closures where the shift points out of the excised set, and on a
+closure axis where it points in, the advective derivative alone formed from
+the centered `D₁` with its excised taps extrapolated along the lattice
+direction nearest the normal. It is stable at every `r_E` from `0.65` to the
+horizon with the `:damped` layer's rightmost eigenvalue, where the per-axis
+closures blow up near the inner horizon and the extrapolation on every
+closure axis is unstable everywhere; `ε_KO > 0` is still required and the
+lopsided blend is not needed. X7's window is `r_E = 0.70 … 17/15` at
+`h = 1/24`, production `r_E = 0.80`, `r_0 = 0.70`.
+
+From step X6 (2026-10-06) the **frame-dragged faces have their rule in the
+zone kernel**, and the zone points' mixed derivative is symmetric (`CODE.md`,
+"Excision", "What step X6 built", and Measured results, "Excision: the
+frame-dragged faces in the zone kernel (step X6)"):
+- `ExcisionData` carries `codes`, a `UInt8` array of the classes' layout: at
+  a zone point the **rule bits** (bit `d − 1` for axis `d`), set by the
+  census from the build state's shift where X2b refused; at an excised point
+  the **direction code** `1…26` of the lattice direction nearest the
+  surface's normal there (`lattice_direction`, `direction_code`, step X5's
+  order), written by a fourth pass over every stored point
+  (`_direction_kernel!`). The kernels read codes, never the geometry; the
+  classes stay the only answer to "is it excised". `drag` is `(codes, ext,
+  blocks)` — `ext` the extrapolation table, `blocks` a device `Bool` per
+  block holding a frame-dragged axis — or `nothing`, and `ndragged` counts
+  the frame-dragged (zone point, axis) pairs.
+- `DraggedProvider` (`dragged_provider`) wraps a zone point's
+  `ClosureProvider` and changes `adv` along an axis whose bit is set, and
+  nothing else; `gh_dragged_kernel!` is a **second launch** after the zone
+  kernel, over the blocks in `drag.blocks`, overwriting only the zone points
+  with a bit set. So the zone kernel is the same compiled code with and
+  without the rule, and at `a = 0` (`drag === nothing`) it is not launched.
+  `gh_zone!(du, p, t; drag)` takes the rule's data as a keyword the tests
+  use.
+- The refusal of a shift into the excised set is now the refusal of an
+  excised tap the rule reads with no source in the point's `G`-box (its
+  centered `D₁`'s, and with the lopsided blend the lopsided row's, which
+  reaches `G` into the excised side). The record has `excision_dragged`,
+  `excision_faces_dragged` (the faces per rule) and `excision_flips` (axes
+  whose shift's sign disagrees with the build's bit, which must stay 0 —
+  and is what makes a restart, which rebuilds the bits from its own state,
+  the run).
+- `Excision(T; mixed = :symmetric | :nested)` (`MIXED_NESTINGS`,
+  `excision_mixed`), symmetric by default: `ClosureProvider{…,SYM}`'s `dmix`
+  is `½(D_i D_j + D_j D_i)` where its box meets the excised set and the
+  single nesting where it does not (there the two are one tensor product,
+  and the centered contraction stays `isequal`). `:nested` is steps
+  X2b–X5's operator and prints as `Excision` did before the field, so a
+  checkpoint they wrote restarts when it is asked for by name.
+- `test/octant_runs.jl` takes `mixed=` and writes the three new rows;
+  `bench/stepping.jl` takes `BENCH_A=3/5` for the excised case and times
+  the rule's launch; `test/thread_workload.jl` has an eighth line, the
+  spinning hole's excised right-hand side.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -605,7 +682,15 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-After step X4 the suite is **6727 assertions in 21m10** at one thread and
+After step X6 the suite is **7001 assertions in 20m18** at one thread and
+**7009 in 15m42** at four (2026-10-06, the two at once, at a load of 7–10;
+its base, X4 with X5, measured 6952 in 19m31 and 6960 in 14m39 the same
+afternoon). Its 49 new claims are `excision_tests.jl`'s: the file is `1m42` /
+`1m24` (it was `58.2 s` / `49.3 s`), of which the new testsets are `9.7 s` /
+`6.0 s`, the seam's evolution in both nestings `4.3 s` / `2.8 s`, and about
+`28 s` the first compilation of the spinning problem and of the
+frame-dragged kernel at file level. The thread digest gained an eighth line.
+After step X4 the suite was **6727 assertions in 21m10** at one thread and
 **6735 in 16m29** at four (2026-10-06, the two at once, at a load of 7–17
 shared with step X5's models): X3's 6579/6587, `main`'s 112 (the lean
 source's spellings), the rotating octant's 29 (`rotation_tests.jl`, `15.7 s`
@@ -831,6 +916,25 @@ julia --project=. --threads=4 test/excision_model.jl model1d=frozen,reflect,radi
 julia --project=. --threads=4 test/excision_model.jl model2d=eig q=2 n=24 eps=1/2
 ```
 
+Step X5 added its parts to the same script (2026-10-06), for Kerr-Schild
+`a = 3/5` (`a=` overrides the spin): `margins=window` (the window on the sphere
+and the tracked surface at `h = 1/24, 1/32, 1/48`, the frame-dragged closure
+axes and the 3D census of the rule's sources; bare `margins` now runs both
+`margins` parts, X1's being `margins=margins`), and `model2d`'s `spinfaces`,
+`spineig`, `spincontrols`, `spinnoise` and `spinfine` (`fam=` takes
+`hybrid`, `hybridlop`, `hybridadv`, `hybridadvlop` beside X1's families). The
+spectra at `n = 32, 48`, the controls and the noise ran on Symmetry's EPYC
+nodes, one process per `(q, ε_KO, r_E)` or family; the header has each
+command with its time:
+
+```bash
+julia --project=. --threads=4 test/excision_model.jl margins=window
+julia --project=. --threads=2 test/excision_model.jl model2d=spinfaces
+julia --project=. --threads=4 test/excision_model.jl model2d=spineig n=24
+julia --project=. --threads=4 test/excision_model.jl model2d=spineig n=24 rE=0.8
+julia --project=. --threads=64 test/excision_model.jl model2d=spinnoise
+```
+
 The `bounds` section (added in step 8b) has three rows, selectable as
 `bounds=<row>,…` so that they split across batch jobs: `cost` (the stage
 limiter against a right-hand side, seconds), and `damped6` and `pasted8` —
@@ -965,11 +1069,13 @@ placements) in a scratch copy with `OrdinaryDiffEqLowOrderRK` and
 ```bash
 BENCH_MODE=step BENCH_CASE=wave,hole julia --project=. -t 4 bench/stepping.jl
 BENCH_MODE=step BENCH_CASE=excised BENCH_UPWIND=1,4 julia --project=. -t 4 bench/stepping.jl
+BENCH_MODE=step BENCH_CASE=excised BENCH_A=3/5 julia --project=. -t 4 bench/stepping.jl
 ```
 
 `BENCH_CASE=excised` (added in step X2b) is the hole's mesh with `r < 3/4`
 excised, and adds the zone kernel's own time, its points and its share of
-a right-hand side.
+a right-hand side. `BENCH_A=3/5` (added in step X6) spins the hole and adds
+the frame-dragged rule's launch (`zone_dragged`), its points and its share.
 
 The GPU right-hand-side prototypes (added 2026-10-05) are `bench/rhs_lab.jl`:
 `key=value` options, one mode per round of `CODE.md`'s "The right-hand side on an
@@ -1017,7 +1123,11 @@ profile is `1,4`) and `closure=msn|reduced|onesided`, and writes the
 excision rows into the CSV, `records.csv` and SimWatch's `extra.excision`.
 From step X4 it takes `octant=rotating a=…` with it too (`margin=` then counts
 cells below `r₊`, and `r_0` defaults to `max(r_E/2, (r_E + a)/2)`, outside the
-ring); a spin is refused at the build until step X6:
+ring). From step X6 a spinning excised hole builds — its frame-dragged faces
+take step X5's rule — and `mixed=symmetric|nested` chooses the zone points'
+mixed derivative (symmetric by default, nested for comparison with X2b–X5);
+**always pass `r_0=` between the ring and the surface** at `a = 3/5` (X5:
+`(0.6 + r_E)/2`), and `cfl=1/2`:
 
 ```bash
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=fitted L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/smoke
@@ -1025,7 +1135,15 @@ julia --project=. --threads=4 test/octant_runs.jl case=ks interior=excised L=8 N
 julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
 julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=1/2 L=8 N=16 roots=1 radii=4,2,1 r_0=3/4 r_1=5/4 t_end=1/2 chunk=1/4 out=out/spin
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=excised octant=rotating L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/rot-excised
+julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=3/5 interior=excised L=8 N=16 roots=2 radii=4,2 r_E=1 r_0=0.8 t_end=1 chunk=1/2 cfl=1/2 out=out/smoke35
 ```
+
+Step X6's H200 check ran from `excision-x6/x6` on Symmetry, a copy with
+`CUDA` added, through `out/x6dev.sbatch` (`h200debugq`, eight CPUs): the
+device script `out/x6_device.jl` — the classes, the codes and `du` against the
+CPU, the zone and frame-dragged kernels' registers and spills, their times —
+on the smoke's octant and on X3's scan octant, and the `a = 3/5` smoke on
+CUDA.
 
 Step X4's H200 rows ran from `excision-x4/{main,base,x4}` on Symmetry, three
 copies with `CUDA` added (`main`, the integration branch before the merge,
@@ -1697,13 +1815,23 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   appending to its CSV. Give every run longer than an hour `checkpoint=` and a
   `walltime=`. And inside a `while read` loop `ssh` eats the loop's stdin —
   use `ssh -n`.
-- **The excision go is for Kerr-Schild `a = 0` only** (step X1). Its lego
-  faces all have the shift pointing out of the excised set (`b/a ≥ 0`),
-  which the per-axis closures hold. A spinning hole's faces include ones
-  where frame dragging points it in (`b/a < 0`, 2–18 % of them), and on the
-  frozen line the closure is unstable there. Do not run `:excised` on a
-  spinning hole without that answered. And the closures need `ε_KO > 0`:
-  without it the extrapolation family grows at `+1–4/M` on the surface.
+- **The excision go is for Kerr-Schild `a = 0` and `a = 3/5`** (step X1;
+  amended in steps X5 and X6). At `a = 0` every lego face has the shift
+  pointing out of the excised set (`b/a ≥ 0`), which the per-axis closures
+  hold. A spinning hole's faces include ones where frame dragging points it
+  in (`b/a < 0`, 2–18 % of them), and there the per-axis closure is unstable
+  on the frozen line and, near the inner horizon, on X5's plane; such an
+  axis's advection takes X5's rule from step X6 (the rule bits, the second
+  launch). It was measured for Kerr-Schild `a = 3/5` only: another spin or
+  chart needs X5's analysis first. The closures need `ε_KO > 0`: without it
+  the extrapolation family grows at `+1–4/M` on the surface. **At `q = 2` the
+  rule's extrapolation is linear** — its sources stop at `G = 2` steps — and
+  quadratic at `q = 4` where three fit.
+- **The rule bits are the build state's, and a restart rebuilds them from
+  its own** (step X6). The checkpoint holds no bits: a chain of jobs is the
+  uninterrupted run exactly while `excision_flips` is 0 at the checkpoint's
+  row, which the record says every chunk; a run is not stopped when it is
+  not. Read the row before trusting a chain of a spinning hole.
 - **A provider changes the code around the head, and with it the FMAs**
   (step X4). `metric_quantities` forms `g^{ab}` with StaticArrays' products,
   which are `muladd`s, and LLVM fuses them by context: `main`'s head compiled
@@ -1723,7 +1851,17 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   horizon at `t = 1` on the smoke's octant, `10⁻⁷` in `L2`), although the
   classes are, and the seam planes stay one state. Averaging both nestings at
   zone points removes it (proposed for X6, `CODE.md`, "Excision", "What step
-  X4 changed"). Do not read such a difference as a seam bug.
+  X4 changed"). Do not read such a difference as a seam bug. **(Built in step
+  X6**, the default: `½(D_i D_j + D_j D_i)` where the point's box meets the
+  excised set; the two octants' records then agree to the CSV's ten digits.
+  `Excision(T; mixed = :nested)` is the old operator, bit for bit.**)**
+- **A closure that assigns a name of its enclosing local scope rebinds it**
+  (found in step X6). `test/excision_tests.jl`'s `setup` assigned `U`, `p`
+  and `u`, the file's own fixture names, so every call replaced the fixture's
+  problem — or, where the build refused, its field set — and a testset that
+  read `p` afterwards read another problem; X6's first "the rule changes
+  nothing" failed by `O(1)` at 148 zone points for that reason alone. Inside
+  a testset's helper functions declare such names `local`.
 - **An excised problem reads the state when it is built** (step X2b):
   `build_excision`'s refusal of a shift pointing into the excised set reads
   `U.work`'s owned points, so `U` must hold the state when the `GHProblem`

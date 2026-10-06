@@ -661,9 +661,9 @@ bits — in place of the closure provider. Launched after the zone kernel,
 when the build found such an axis, with a block-uniform early exit through
 `dragblocks` (the blocks holding one), it overwrites the `du` the zone kernel
 wrote at those points and nothing else: a point whose rule bits are clear is
-not touched. The zone kernel's work at the overwritten points — a few per
-cent of the zone — is the price of keeping every other zone point's code
-the code it was.
+not touched. The zone kernel's work at the overwritten points — 5–12 % of
+the zone at `a = 3/5` — is the price of keeping every other zone point's
+code the code it was.
 """
 @kernel function gh_dragged_kernel!(du, @Const(work), Hwork, @Const(origins),
                                     @Const(spacings), damping, γ2, ε_KO, t,
