@@ -143,22 +143,21 @@ a branch** where `λ = 0` — so the exterior beyond the blend shell is today's
 operator bit for bit — and otherwise `(1 − λ) ∂f_d + λ L`, `L` the order-`q`
 lopsided derivative ([`lopsided_centered_weights`](@ref)) on the side the
 shift points to, scaled by `1/h` itself.
+
+**(Amended in step X4:** it holds the centered provider, `1/h` and `λ` and no
+weights — the two lopsided rows are `@generated` constants formed in `adv`, as
+[`Centered`](@ref)'s are in its methods — and the lopsided contraction is
+generated term by term, so that the main kernel's `:excised` branch forms no
+closure, which a device compiles as a call.**)**
 """
-struct Lopsided{T,q,C,n} <: StencilProvider
-    c::C
-    wp::SVector{n,T}
-    wm::SVector{n,T}
+struct Lopsided{T,q} <: StencilProvider
+    c::Centered{T,q}
     inv_h::T
     λ::T
 end
 
-@inline function Lopsided(::Type{T}, ::Val{q}, st::NTuple{3,Int}, inv_h,
-                          λ) where {T,q}
-    c = Centered(T, Val(q), st)
-    return Lopsided{T,q,typeof(c),q + 1}(c, lopsided_centered_weights(T, Val(q), Val(1)),
-                                         lopsided_centered_weights(T, Val(q), Val(-1)),
-                                         T(inv_h), T(λ))
-end
+@inline Lopsided(::Type{T}, ::Val{q}, st::NTuple{3,Int}, inv_h, λ) where {T,q} =
+    Lopsided{T,q}(Centered(T, Val(q), st), T(inv_h), T(λ))
 
 @inline d1(S::Lopsided, work, base::Int, d::Int) = d1(S.c, work, base, d)
 @inline d2(S::Lopsided, work, base::Int, d::Int) = d2(S.c, work, base, d)
@@ -166,12 +165,18 @@ end
     dmix(S.c, work, base, i, j)
 @inline ko(S::Lopsided, work, base::Int, d::Int) = ko(S.c, work, base, d)
 
-# `∑_k w[k] u[base + (lo + k − 1)·stride]`, left to right.
-@inline function _shifted_stencil(w::SVector{n}, work, base::Int, stride::Int,
-                                  lo::Int) where {n}
-    return _fold(ntuple(Val(n)) do k
-        @inbounds w[k] * work[base + (lo + k - 1) * stride]
-    end)
+# `∑_k w[k] u[base + (lo + k − 1)·stride]`, left to right from the first
+# product — the left fold the table's contraction in the zone kernel forms, so
+# the two kernels' blends are one operator. Generated with an explicit
+# `:inline` meta, as `axis_stencil` is (amended in step X4: it was an
+# `ntuple(Val(n)) do … end` folded by `_fold`, the same arithmetic, a closure).
+@generated function _shifted_stencil(w::SVector{n}, work, base::Int, stride::Int,
+                                     lo::Int) where {n}
+    ex = :(w[1] * work[base + lo * stride])
+    for k in 2:n
+        ex = :($ex + w[$k] * work[base + (lo + $(k - 1)) * stride])
+    end
+    return Expr(:block, Expr(:meta, :inline), :(@inbounds $ex))
 end
 
 @inline function adv(S::Lopsided{T,q}, β_d, ∂f_d, work, base::Int,
@@ -179,10 +184,10 @@ end
     iszero(S.λ) && return ∂f_d
     stride = S.c.st[d]
     L = β_d ≥ 0 ?
-        S.inv_h * _shifted_stencil(S.wp, work, base, stride,
-                                   lopsided_first(Val(q), Val(1))) :
-        S.inv_h * _shifted_stencil(S.wm, work, base, stride,
-                                   lopsided_first(Val(q), Val(-1)))
+        S.inv_h * _shifted_stencil(lopsided_centered_weights(T, Val(q), Val(1)), work,
+                                   base, stride, lopsided_first(Val(q), Val(1))) :
+        S.inv_h * _shifted_stencil(lopsided_centered_weights(T, Val(q), Val(-1)), work,
+                                   base, stride, lopsided_first(Val(q), Val(-1)))
     return (one(T) - S.λ) * ∂f_d + S.λ * L
 end
 
@@ -239,8 +244,11 @@ class array `cls`, with its codes `k±` read from it along the three axes.
 """
 @inline function closure_provider(::Type{T}, ::Val{G}, st::NTuple{3,Int}, cls,
                                   cbase::Int, tab, inv_h, λ) where {T,G}
-    km = ntuple(d -> _run(cls, cbase, -st[d], Val(G)), Val(3))
-    kp = ntuple(d -> _run(cls, cbase, st[d], Val(G)), Val(3))
+    # Spelled out rather than `ntuple(d -> …, Val(3))`: no closure (step X4).
+    km = (_run(cls, cbase, -st[1], Val(G)), _run(cls, cbase, -st[2], Val(G)),
+          _run(cls, cbase, -st[3], Val(G)))
+    kp = (_run(cls, cbase, st[1], Val(G)), _run(cls, cbase, st[2], Val(G)),
+          _run(cls, cbase, st[3], Val(G)))
     return ClosureProvider{T,G,typeof(cls),typeof(tab)}(st, cls, cbase, km, kp,
                                                         tab, T(inv_h), T(λ))
 end
@@ -360,13 +368,19 @@ end
                     ::Val{HASH}, ::Val{DISS})
 
 `F(u)` at the **zone** points of an `:excised` problem with the closures
-(added in step X2b): [`gh_rhs_at_point`](@ref)'s provider form with a
+(added in step X2b): [`gh_rhs_store!`](@ref)'s provider form with a
 [`ClosureProvider`](@ref), everything else — `γ0`, `ε_KO/h`, the gauge source
 — computed exactly as [`gh_rhs_kernel!`](@ref) computes it. Launched right
 after the main kernel, over every owned point of every block, with a
 block-uniform early exit through `zoneblocks` (TreeAMR has no launch over a
 subset of blocks), and writing `du` at zone points only — the main kernel
 wrote every other point.
+
+**(Amended in step X4:** the store, not the two-vector form: `main`'s head and
+Π components through the closure provider, each component stored as it is
+finished, and no closure in the kernel's own body. The provider's contractions
+stay generic — run-time loops over the table's rows — since the zone is a
+shell of `10⁴`–`10⁵` points.**)**
 """
 @kernel function gh_zone_kernel!(du, @Const(work), Hwork, @Const(origins),
                                  @Const(spacings), damping, γ2, ε_KO, t,
@@ -383,7 +397,7 @@ wrote every other point.
              (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
         if cls[cb] == CLASS_ZONE
             T = eltype(du)
-            inner = ntuple(d -> I[d], Val(3))
+            inner = (I[1], I[2], I[3])
             inv_h = inv(spacings[b])
             var = 1 + (b - 1) * sb + (I[1] + G[1] - 1) * st[1] +
                   (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
@@ -392,13 +406,9 @@ wrote every other point.
             εh = dissipation_rate(ε_KO, t, x) * inv_h
             S = closure_provider(T, Val(G[1]), st, cls, cb, tab, inv_h,
                                  blend_weight(blend, x))
-            Zh, ZΠ = gh_rhs_at_point(S, T, work, Hwork, inner, b, var, sv, inv_h,
-                                     γ0, γ2, εh, Val(HASH), Val(DISS))
-            ntuple(Val(NC)) do v
-                du[inner..., v, b] = Zh[v]
-                du[inner..., NC + v, b] = ZΠ[v]
-                nothing
-            end
+            o, sd = state_offset(du, I)
+            gh_rhs_store!(du, o, sd, S, T, work, Hwork, inner, b, var, sv, inv_h, γ0,
+                          γ2, εh, Val(HASH), Val(DISS))
         end
     end
 end
