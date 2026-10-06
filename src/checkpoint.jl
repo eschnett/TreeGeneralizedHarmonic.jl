@@ -372,13 +372,16 @@ function run_recipe(::Type{T}, case::GHCase; q, ops, chunk, cfl, adapt, adm_ever
                     handover, target_source, target_rate, fit_initial_blend,
                     trail_ramp, target_exact, refill_cells) where {T}
     r(x) = x === nothing ? nothing : plain_reals(T(x))
+    # The rotating seam (added 2026-10-04) only where there is one, so that a
+    # checkpoint written before it still restarts.
+    seam = seam_dims(case) === nothing ? (;) : (; rotating=case.rotating)
     return (; float_type=type_name(T), q=Int(q),
             ops=(; family=Symbol(ops.family), prolongation=Int(ops.prolongation),
                  restriction=Int(ops.restriction)),
             background=repr(case.background),
             box=plain_reals([x for ext in case.box for x in ext]),
             periodic=case.periodic,
-            reflecting=Tuple(x for faces in case.reflecting for x in faces),
+            reflecting=Tuple(x for faces in case.reflecting for x in faces), seam...,
             epsilon_KO=repr(case.ε_KO), gamma0=repr(case.γ0),
             gamma2=r(case.γ2), center=repr(case.center), interior=repr(case.interior),
             horizon=repr(case.horizon), bounds=repr(case.bounds),

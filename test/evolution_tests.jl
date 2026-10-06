@@ -324,6 +324,16 @@ end
     # the kernel without the Kreiss–Oliger stencils at all, and must give
     # the same numbers as one that computes them and multiplies by zero.
     # If it does not, the switch is not a switch but a second scheme.
+    #
+    # **To roundoff of each component, not to 1e-290 everywhere** (amended
+    # 2026-10-05). The two are two specialisations of one body, and since the
+    # right-hand side was written without closures the compiler contracts
+    # them differently in one place. The difference measured is `1.9e−68` on
+    # `Π_ty` and `Π_tz`, whose values are the roundoff of zero (`7e−18`
+    # against a scale of 2): a product of two roundoff-sized numbers rounded
+    # two ways. A second scheme would differ by a term, not by an ulp of the
+    # component, and the genuine `ε_KO = 10⁻³⁰⁰` contribution (`4e−318` on
+    # `h_tx`) is still inside the bound.
     T = Float64
     q = 4
     bg = GaugeWave(T(1 // 20), one(T))
@@ -346,7 +356,7 @@ end
         gh_rhs!(du, u, prob, zero(T))
         du
     end
-    @test maximum(abs, dus[1] - dus[2]) ≤ 1e-290
+    @test all(abs.(dus[1] .- dus[2]) .≤ 64 * eps(T) .* abs.(dus[1]) .+ 1e-290)
 end
 
 @testset "The right-hand side costs what CODE.md records" begin
@@ -523,7 +533,11 @@ end
     # source):
     #   * `d1` of each of the twenty fields along each axis, `adv` of each in
     #     the advection of `h` and of `Π`, `d2` and the three `dmix` pairs of
-    #     `h`, and `ko` of all twenty — each exactly once, nothing else;
+    #     `h`, and `ko` of all twenty — each exactly once, nothing else, but
+    #     for `d1` of `h`, which is asked exactly twice: by the head, for the
+    #     coefficients and the advection, and by the Π component, for
+    #     `∂_i(α√γγ^{ij}) ∂_j h` (`main`'s kernel re-forms it rather than keep
+    #     thirty values live across the source; amended in step X4);
     #   * `adv` is handed `β^d` and the derivative `d1/h` of the same field;
     #   * an offset `δ_d` added to `adv`'s answer for `Π` moves `∂ₜΠ` by
     #     `Σ β^d δ_d` and leaves `∂ₜh` alone bit for bit, and for `h` moves
@@ -544,7 +558,7 @@ end
     inv_h = T(4)
     γ0, γ2 = one(T), T(-1 // 2)
     εh = T(1 // 2) * inv_h
-    probe(δ, which) = ProbeProvider{T,TGH.Centered{T,q,q + 1,q + 3}}(
+    probe(δ, which) = ProbeProvider{T,TGH.Centered{T,q}}(
         TGH.Centered(T, Val(q), st), Any[], Any[], var, sv, δ, which)
     run(S) = TGH.gh_rhs_at_point(S, T, work, nothing, inner, 1, var, sv, inv_h,
                                  γ0, γ2, εh, Val(false), Val(true))
@@ -560,6 +574,7 @@ end
     want = Any[]
     for f in (:h, :Π), v in 1:10, d in 1:3
         push!(want, (:d1, f, v, d), (:adv, f, v, d), (:ko, f, v, d))
+        f === :h && push!(want, (:d1, f, v, d))
     end
     for v in 1:10, d in 1:3
         push!(want, (:d2, :h, v, d))
@@ -567,7 +582,7 @@ end
     for v in 1:10, ij in ((1, 2), (1, 3), (2, 3))
         push!(want, (:dmix, :h, v, ij))
     end
-    @test length(S0.log) == 240
+    @test length(S0.log) == 270
     @test sort(string.(S0.log)) == sort(string.(want))
 
     _, _, _, β, _, _ = metric_quantities(_sym4(SVector{10,T}(work[idx..., 1:10, 1])))

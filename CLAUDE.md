@@ -3,6 +3,15 @@
 Read `CODE.md` first — it is the design document and states *why* things
 are the way they are. This file is only about mechanics.
 
+**Contents**
+
+- [What this package is](#what-this-package-is)
+- [Current state](#current-state)
+- [Commands](#commands)
+- [Things that will bite](#things-that-will-bite)
+- [Conventions](#conventions)
+- [Repository facts](#repository-facts)
+
 ## What this package is
 
 The third downstream application of
@@ -118,7 +127,12 @@ Kerr-Schild `a = 0` hole is stable at every depth of X1's window; excised at
 1/16 … 1/32` (to three digits at `1/32`), beats `:fitted`, and holds the
 gauge to `50 M` as the layer does; the next round is Erik's call (proposed:
 the static spinning hole — `CODE.md`, "Excision", "What step X3
-measured").
+measured"). Erik chose it (2026-10-06, `a = 3/5`, steps X4–X7). **X4 is done
+(2026-10-06)**: `main`'s spill-free right-hand side and the rotating octant
+are merged in, the provider is the argument of `main`'s head and Π
+functions, the `:damped` kernel is `main`'s on the H200 to the `ptxas`
+report and the excised right-hand side 3.9× faster there, and the excision's
+classes are exchanged across the rotating seam as a scalar.
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -390,6 +404,39 @@ Measured results from "Robust stability on the octant" on hold the numbers —
 among them the `:fitted` setup to use: `h = 1/24` at the hole, `m = 16`,
 `n_L = 20`, `fit_cont = 2`.
 
+From 2026-10-04 a **spinning** hole has an octant too, on **TreeAMR 0.1.7**'s
+rotating seam (M12): `GHCase(; rotating = (d1, d2))` (stored as `(0, 0)` for
+none, so the case stays `isbits`), `gh_forest` passing it, `state_rotation`
+for the state and `identity_rotation` for every `G = 0` set at every
+`FieldSet` site (beside the parities; `hostcopy` keeps it), `GHProblem`
+refusing a forest whose seam is not the case's, the ceiling skipping the
+seam's faces, `add_noise!` leaving both seam planes alone, and
+`hole_case(; octant = :rotating)` — the seam `(1, 2)` with the mirror at
+`z = 0`, for a hole at the origin, at rest, any spin along `z`
+(`octant = true` is `:reflecting`). The horizon finder works through the
+seam unchanged. `test/rotation_tests.jl` is its file (29 claims, `9.4 s` at
+four threads inside the suite, which then measured **4824 assertions in
+13m21**); `CODE.md`, "The rotating octant", has the numbers.
+
+From 2026-10-05 the right-hand side is **fast on a device**. `CODE.md`, "The
+right-hand side on an H200", found the kernel uninlined and spilling at 8.5 ns a
+point on an H200, and it now runs at 1.1, and 1.7× faster on the CPU. What changed:
+
+- **`pointwise.jl`** has `gh_node_source_lean`: the source held by unique
+  components, phase-ordered and unrolled by `@ntuple`, a third spelling tested
+  against `gh_node_source`. Beside it, `metric_divergences` forms the two
+  contractions of `metric_derivatives` the kernel reads.
+- **`evolution.jl`** splits the body:
+  - `gh_rhs_head` — the state, `∂h`, the coefficients, `∂ₜh`, the source and the
+    divergences;
+  - `gh_rhs_pi` — one Π component.
+
+  The kernel without an interior stores as it goes (`gh_rhs_store!`); the
+  interior variants collect through `gh_rhs_at_point`. `axis_stencil` and
+  `mixed_stencil` are `@generated`.
+- **The investigation's prototypes** are `bench/rhs_lab.jl` and its companions
+  (see "Commands").
+
 From step X1 (2026-10-05, the first of the excision round, `PLAN.md`'s
 X1–X3 on the integration branch `claude/excision-singularity-handling-30feec`)
 there are **closures** and their **analysis**, and no kernel uses either yet.
@@ -468,6 +515,23 @@ costs 16–24 % on the H200; there is no gauge drift to `50 M`. No source
 changed in this step;
 `test/octant_study.jl` prints the drift of `h_tt` and the outflow rows.
 
+From step X4 (2026-10-06) the integration branch carries `main` (the
+spill-free right-hand side) and the rotating octant, and they are **one
+design** (`CODE.md`, "One right-hand-side evaluation", "One design after
+`main`'s rewrite", and "Excision", "What step X4 changed"): the provider is
+the argument of `gh_rhs_head(S, …)` and `gh_rhs_pi(S, …)`, and
+`gh_rhs_store!(du, o, sd, S, …)` and `gh_rhs_at_point(S, …)` are built on
+them; `main`'s signatures (`st`, `Val(q)`) build `Centered{T,q}`, which holds
+the strides only. The main kernel's `:excised` branch is the `:none` call at a
+centered point — also where the lopsided blend's weight is zero — and the
+zone kernel stores through `gh_rhs_store!` with `ClosureProvider`; no branch
+of either forms a closure. `build_excision`'s bit field set has the identity
+rotation (a scalar), so `hole_case(; octant = :rotating, interior =
+:excised)` builds, and `test/octant_runs.jl` takes `octant=rotating a=…`
+beside `interior=excised …` (margins against `r₊`, the core rule's default
+radius outside the ring). `excision_tests.jl` has the seam's claim. A
+spinning hole is still refused at the build, by the frame-dragged faces.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -541,7 +605,18 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-After step X3 the suite is **6579 assertions in 17m07** at one thread and
+After step X4 the suite is **6727 assertions in 21m10** at one thread and
+**6735 in 16m29** at four (2026-10-06, the two at once, at a load of 7–17
+shared with step X5's models): X3's 6579/6587, `main`'s 112 (the lean
+source's spellings), the rotating octant's 29 (`rotation_tests.jl`, `15.7 s`
+/ `9.8 s`) and the seam's 7 in `excision_tests.jl` (`1.5 s` / `1.4 s`; the
+file is now `56.0 s` / `46.5 s`). Two claims changed with `main`'s head,
+each stated in its test: the probe sees `d1` of `h` asked twice (270
+requests, not 240), and the closure provider's `F` at a point with no
+excised tap is `Centered`'s to 512 eps of each variable's largest `|du|`
+(measured 103) instead of bit for bit — its every contraction still is. The
+merge of `main` alone measured 6699 in 19m30 at four threads.
+After step X3 the suite was **6579 assertions in 17m07** at one thread and
 **6587 in 12m41** at four (2026-10-05/06, load 2–6): X2b's counts, since no
 source changed — the step ran on Symmetry's H200s and recorded what it
 measured.
@@ -565,8 +640,23 @@ After step X1 the suite was **6458 assertions in 22m46** at one thread and
 step's own 2D models): its 1671 new claims are `stencils_tests.jl`'s
 closures, `13.8 s` / `7.6 s`, cheap rational checks, most of the time
 compiling the closure tables' `SArray`s at `q = 6, 8`. Before it the suite
-was 4787 in 19m23 and 4795 in 15m59 (the same day). Earlier:
-the suite was **4690 assertions in 18m43** at one thread and **4698 in
+was 4787 in 19m23 and 4795 in 15m59 (the same day).
+On `main`, before step X4 merged it here, the suite was **4907 assertions in
+15m32** at four threads after the lean right-hand side (2026-10-05, development machine loaded 9–12; the one-thread
+suite was not rerun). It also passes on an EPYC node, x86-64, where the
+contraction differences live (Symmetry cn079, 26m21 at four threads). Its 112 new claims are the two kernel spellings:
+
+- their identity with the port on every background
+  (`pointwise_identity_tests.jl`);
+- their allocation and their kernel launch (`pointwise_tests.jl`);
+- their types, `Float32x2` included (`type_tests.jl`).
+
+One claim was relaxed: `evolution_tests.jl`'s dissipation switch, from `1e−290`
+everywhere to roundoff of each component. Its two specialisations now round a
+product of two roundoff-sized numbers differently (`1.9e−68` on components that
+are zero).
+
+Earlier: the suite was **4690 assertions in 18m43** at one thread and **4698 in
 12m59** at four after TreeAMR 0.1.4's two features (2026-10-01, on a machine
 loaded 6–10 by other work — read the times against that): `mesh_mapreduce`
 changed no count, and `checkpoint_tests.jl` is 78 new claims in `2m02` /
@@ -662,7 +752,8 @@ julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])'
 The clean-checkout check, which is what the `[sources]` pins exist for: a
 tree with no `Manifest.toml` resolves the four pinned packages from
 GitHub and TreeAMR from the General registry (from 2026-09-26, at `0.1.3`,
-and from 2026-10-01 at `0.1.4`; also between 2026-09-21 and 2026-09-23),
+from 2026-10-01 at `0.1.4` and from 2026-10-04 at `0.1.7`; also between
+2026-09-21 and 2026-09-23),
 and HDF5 with its binary library from General too (2026-10-01), and passes. From 2026-09-21 it is a real check —
 every source is public, so it works anonymously, which is what CI does:
 
@@ -880,6 +971,22 @@ BENCH_MODE=step BENCH_CASE=excised BENCH_UPWIND=1,4 julia --project=. -t 4 bench
 excised, and adds the zone kernel's own time, its points and its share of
 a right-hand side.
 
+The GPU right-hand-side prototypes (added 2026-10-05) are `bench/rhs_lab.jl`:
+`key=value` options, one mode per round of `CODE.md`'s "The right-hand side on an
+H200", listed in its header. Like `bench/stepping.jl` on a device, it runs from a
+copy with `CUDA` added — on Symmetry `rhs-gpu-lab`, one H200 a job in `h200debugq`.
+`bench/rhs_lab_source.jl` is the lean source it measures. `bench/rhs_lab_cpu.jl`
+checks and times that source on the CPU in the package's own environment, and
+`bench/sass_stats.jl` counts the instructions of a SASS dump it writes:
+
+```bash
+julia --project=. bench/rhs_lab.jl mode=round9 N=32 roots=8
+```
+
+```bash
+julia --project=. bench/rhs_lab_cpu.jl
+```
+
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
 real): the suite and the long studies run there as one SLURM job each on a
 64-core EPYC node, which is what makes them parallel — a node *core* is
@@ -896,7 +1003,8 @@ skill has the rest of the cluster's mechanics.
 
 The octant runs (added 2026-10-02) are `test/octant_runs.jl`, one run per
 call, `key=value` options listed in its header — the case (`case=minkowski`
-or `ks`, `interior=damped|fitted`, margins, `fit_cont`), the mesh (`L`, `N`,
+or `ks`, `interior=damped|fitted`, margins, `fit_cont`; from 2026-10-04
+`octant=reflecting|rotating` and the spin `a=`, which needs `rotating`), the mesh (`L`, `N`,
 `roots`, `radii`), the run (`t_end`, `cfl`, `chunk`), noise, `backend=cuda`,
 `out=<dir>` (CSV, `records.csv`, `simwatch.toml`) and `checkpoint=<dir>`.
 On Symmetry they ran one H200 each from a copy with `CUDA` added to its
@@ -906,13 +1014,26 @@ On Symmetry they ran one H200 each from a copy with `CUDA` added to its
 `margin=` (cells below `r = 2`), `r_0=` (the core rule's radius, default
 `r_E/2`), `upwind=<start>,<width>` (the lopsided blend, off by default; X1's
 profile is `1,4`) and `closure=msn|reduced|onesided`, and writes the
-excision rows into the CSV, `records.csv` and SimWatch's `extra.excision`:
+excision rows into the CSV, `records.csv` and SimWatch's `extra.excision`.
+From step X4 it takes `octant=rotating a=…` with it too (`margin=` then counts
+cells below `r₊`, and `r_0` defaults to `max(r_E/2, (r_E + a)/2)`, outside the
+ring); a spin is refused at the build until step X6:
 
 ```bash
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=fitted L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/smoke
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=excised L=8 N=16 roots=2 radii=4,2 t_end=1 out=out/smoke-excised
 julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
+julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=1/2 L=8 N=16 roots=1 radii=4,2,1 r_0=3/4 r_1=5/4 t_end=1/2 chunk=1/4 out=out/spin
+julia --project=. --threads=4 test/octant_runs.jl case=ks interior=excised octant=rotating L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/rot-excised
 ```
+
+Step X4's H200 rows ran from `excision-x4/{main,base,x4}` on Symmetry, three
+copies with `CUDA` added (`main`, the integration branch before the merge,
+the step's head), through `out/x4dev.sbatch` (the device script
+`out/x4_device.jl` — registers and spills, the right-hand side against the
+CPU, its time — on the smoke's and on X3's scan octant) and
+`out/x4bench.sbatch` (`bench/stepping.jl`'s hole and excised cases,
+interleaved).
 
 Step X3's rows (added in step X3) ran from `excision-x3` on Symmetry, a
 copy with `CUDA` added, through a job script there (`out/x3/rows.sbatch`)
@@ -947,8 +1068,9 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   0.1.3 for its M11 interpolation; from 2026-09-23 to then TreeAMR was
   pinned too). `SpacetimeMetrics`, `ApparentHorizonFinder`,
   `KorzynskiSpin` and `IMEXRungeKutta` are what `Project.toml`'s `[sources]` entries resolve, and TreeAMR is
-  General's release under `[compat]` `0.1.4` (from 2026-10-01, for M9a's
-  checkpoints; `0.1.3` before) — so `~/src/jl/…` is *not*
+  General's release under `[compat]` `0.1.7` (from 2026-10-04, for M12's
+  rotating seam; `0.1.4` from 2026-10-01, for M9a's checkpoints; `0.1.3`
+  before) — so `~/src/jl/…` is *not*
   what the tests see; an unpushed change there is invisible here, a pushed
   change to TreeAMR's `main` is invisible too until it is *released*, and
   the local SpacetimeMetrics checkout has been behind `main` before. Read
@@ -1421,14 +1543,34 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `Float64`'s expense. The type-generic discipline stays anyway: a
   decimal literal in a `T` expression is a leak — `T(1//2)`, not `0.5`;
   `oftype(x, 2)` inside closures.
-- **The RHS kernel is written in streaming order, and stays that way.**
-  Coefficients and `∂_i h` once per point; then per component, stencils
-  formed and consumed immediately; then the source. Never build an
-  `SVector` of all derivatives — that is about 140 `Float64` values,
-  over a GPU thread's 255 registers, and it spills. GHAccel's ten-field
-  kernel fit only as fully scalarised generated code; spills show as
-  `ld.local` in the PTX. GPU kernel *efficiency* beyond this order is a
-  research project, not a milestone; G6 measures, it does not tune.
+- **The RHS kernel is written in streaming order, and stays that way**
+  (amended 2026-10-05).
+  - **The head, once per point:** the state, `∂_i h`, the coefficient set,
+    `∂ₜh` (stored at once), the source and the two divergences.
+  - **Then a run-time loop over the ten Π components,** each formed from its own
+    stencils, combined and stored. Nothing of `F` stays live longer than it
+    takes to store it.
+  - **The source comes before the Π components.** Computed last, as until
+    2026-10-05, it was live with the ten accumulators and spilled.
+
+  Never build an `SVector` of all derivatives: that is about 140 `Float64`
+  values, over a GPU thread's 255 registers, and it spills. GHAccel's ten-field
+  kernel fit only as fully scalarised generated code. Spills show as `STL`/`LDL`
+  in the SASS (`bench/sass_stats.jl`).
+- **On a device a closure is a call** (found 2026-10-05).
+  - **Why:** KernelAbstractions' default `CUDABackend()` does not force inlining,
+    and TreeAMR launches with it whatever backend a field set was built with.
+  - **What becomes a call** in a kernel's path: an `ntuple(Val(n)) do … end`, a
+    StaticArrays generator `SVector(f(i) for i in 1:3)`, or a `@generated`
+    method whose body lacks an `:inline` meta. Its `SVector` arguments then
+    travel through the stack: 8 KB of local memory a thread, and most of the
+    right-hand side's 8.5 ns a point before 2026-10-05.
+  - **How to write kernel-path code instead:** `Base.Cartesian.@ntuple`/`@nexprs`
+    with literal counts, small tuples spelled out, and a generated body returning
+    `Expr(:block, Expr(:meta, :inline), …)`.
+  - **The symptom** is a `CALL` to `julia_…` in the SASS
+    (`bench/rhs_lab.jl mode=baseline` writes it, `bench/sass_stats.jl` counts it).
+    On the CPU the same closures cost 7× (`bench/rhs_lab_cpu.jl`).
 - **Hooks depend on time.** `dirichlet(case, t)` is built at each call.
   It goes to `fill_ghosts!` inside the RHS, to `regrid!`, and to
   `adapt_to_initial_data!`, each with that call's `t`. Forgetting the
@@ -1562,6 +1704,26 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   frozen line the closure is unstable there. Do not run `:excised` on a
   spinning hole without that answered. And the closures need `ε_KO > 0`:
   without it the extrapolation family grows at `+1–4/M` on the surface.
+- **A provider changes the code around the head, and with it the FMAs**
+  (step X4). `metric_quantities` forms `g^{ab}` with StaticArrays' products,
+  which are `muladd`s, and LLVM fuses them by context: `main`'s head compiled
+  around the closure provider gives `β` 2.8 eps off `Centered`'s at the same
+  point, and around `Lopsided` at `λ = 0` (whose `adv` branches) differed in
+  the last place at 496 of the fixture's 25 165 points beyond the blend.
+  So the exterior goes through the `:none` call itself — the main kernel
+  branches on `λ = 0` before choosing a provider — and a claim that a
+  provider "is" `Centered` is a claim about its contractions (`isequal`) and
+  about `F` to roundoff, not bit for bit. A per-face rule added to the zone
+  kernel must leave every point that is not a zone point on the `:none` call.
+- **The zone kernel's mixed derivative is nested in one order** (measured in
+  step X4): outer `i`, inner `j`, `i < j`, so near the surface `D_x D_y ≠
+  D_y D_x` and the excised operator is not symmetric under `x ↔ y`, nor under
+  the rotating seam's quarter turn. On the rotating octant the excised hole
+  is then not the mirror octant's (`1.4·10⁻³` in the `L∞` norms inside the
+  horizon at `t = 1` on the smoke's octant, `10⁻⁷` in `L2`), although the
+  classes are, and the seam planes stay one state. Averaging both nestings at
+  zone points removes it (proposed for X6, `CODE.md`, "Excision", "What step
+  X4 changed"). Do not read such a difference as a seam bug.
 - **An excised problem reads the state when it is built** (step X2b):
   `build_excision`'s refusal of a shift pointing into the excised set reads
   `U.work`'s owned points, so `U` must hold the state when the `GHProblem`
@@ -1626,6 +1788,10 @@ Match TreeAMR's, since the four packages are read together:
 - Spec-first: when the implementation shows `CODE.md` was wrong or
   incomplete, amend it and say so in it — "(amended in step N)",
   "(measured in step N)" — rather than diverging silently.
+- `CLAUDE.md` and `CODE.md` open with a **table of contents** (added
+  2026-10-05) of every heading below the title. A heading added or renamed
+  goes into it, linked by GitHub's anchor: lowercase, backticks and
+  punctuation dropped (an en dash too), spaces to hyphens.
 
 ## Repository facts
 

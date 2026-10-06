@@ -69,6 +69,7 @@ import IMEXRungeKutta as IRK
 using SpacetimeMetrics: AbstractMetric, GaugeWave, Harmonic, KerrSchild,
                         Minkowski, ShiftedMinkowski, dmetric, gauge_source_grad
 using StaticArrays: SArray, SMatrix, SVector
+using Base.Cartesian: @nexprs, @ntuple
 
 # Devices
 export hostcopy
@@ -78,6 +79,7 @@ export pack_g, pack_sym
 export metric_quantities, metric_derivatives, metric_derivatives_along
 export adm_from_metric, adm_vars_from_state, gauge_constraint_at_node
 export gh_node_rhs, gh_node_source, gh_node_rhs_expanded
+export gh_node_source_lean, metric_divergences
 
 # Stencils
 export derivative_weights, dissipation_weights, dissipation_rank
@@ -138,7 +140,8 @@ export BoundsAccounting, take_chunk!, apply_bounds!, gh_stage_limiter!
 export validity_rows, evolved_nonfinite
 
 # Boundaries: the Dirichlet hook, and the parities of the reflecting faces
-export dirichlet, has_outer_face, state_parity, even_parity
+export dirichlet, has_outer_face, state_parity, even_parity, state_rotation,
+       identity_rotation
 
 # Evolution
 export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate

@@ -55,6 +55,69 @@ restart through TreeAMR 0.1.4's M9a, see [Checkpoint and
 restart](#checkpoint-and-restart)**)**; GPU kernel efficiency is a later
 research project; the inherited documents live in `notes/`.
 
+**Contents**
+
+- [Goals](#goals)
+- [Scope and non-goals](#scope-and-non-goals)
+- [Lineage: what is inherited and what changes](#lineage-what-is-inherited-and-what-changes)
+- [The equations](#the-equations)
+- [Discretization](#discretization)
+  - [Field sets and layout](#field-sets-and-layout)
+  - [Finite-difference stencils](#finite-difference-stencils)
+  - [Kreiss–Oliger dissipation](#kreissoliger-dissipation)
+  - [The interface-order rule, and what it costs a second-order system](#the-interface-order-rule-and-what-it-costs-a-second-order-system)
+  - [One right-hand-side evaluation](#one-right-hand-side-evaluation)
+  - [The time step](#the-time-step)
+- [Gauge and constraint damping](#gauge-and-constraint-damping)
+- [Boundaries](#boundaries)
+  - [Periodic](#periodic)
+  - [Outer boundary: Dirichlet from the background, at the current time](#outer-boundary-dirichlet-from-the-background-at-the-current-time)
+  - [Reflecting faces: symmetry planes (added 2026-10-02)](#reflecting-faces-symmetry-planes-added-2026-10-02)
+  - [The rotating octant: a quarter turn about `z` (added 2026-10-04)](#the-rotating-octant-a-quarter-turn-about-z-added-2026-10-04)
+  - [The interior: a pointwise damping layer](#the-interior-a-pointwise-damping-layer)
+    - [The design, as steps 8a–8f leave it (rewritten in step 8f)](#the-design-as-steps-8a8f-leave-it-rewritten-in-step-8f)
+    - [Step 5's layer: the analytic control](#step-5s-layer-the-analytic-control)
+    - [The margin](#the-margin)
+    - [The spinning harmonic chart](#the-spinning-harmonic-chart)
+    - [Why touch the interior, and why relax](#why-touch-the-interior-and-why-relax)
+    - [The profiles and the rate](#the-profiles-and-the-rate)
+    - [The layer for an inexact target](#the-layer-for-an-inexact-target)
+    - [The range projection](#the-range-projection)
+    - [The tracked geometry](#the-tracked-geometry)
+    - [The fitted target](#the-fitted-target)
+    - [What the layer costs](#what-the-layer-costs)
+    - [Excision (added 2026-10-05)](#excision-added-2026-10-05)
+- [Initial data and backgrounds](#initial-data-and-backgrounds)
+- [Refinement and regridding](#refinement-and-regridding)
+- [Time integration](#time-integration)
+- [Analysis quantities](#analysis-quantities)
+- [Precision, threads, devices](#precision-threads-devices)
+- [I/O and viewers](#io-and-viewers)
+- [Checkpoint and restart](#checkpoint-and-restart)
+- [Upstream prerequisites](#upstream-prerequisites)
+- [File layout](#file-layout)
+- [Milestones](#milestones)
+- [Measured results](#measured-results)
+  - [What the suite costs, and where (measured 2026-09-19 on Symmetry)](#what-the-suite-costs-and-where-measured-2026-09-19-on-symmetry)
+  - [The range projection (step 8b)](#the-range-projection-step-8b)
+  - [The layer against an inexact target (step 8c)](#the-layer-against-an-inexact-target-step-8c)
+  - [The default rate (step 8c′)](#the-default-rate-step-8c)
+  - [The tracked geometry (step 8d)](#the-tracked-geometry-step-8d)
+  - [The fitted target, host half (step 8e-i)](#the-fitted-target-host-half-step-8e-i)
+  - [The fitted variant, kernel half (step 8e-ii)](#the-fitted-variant-kernel-half-step-8e-ii)
+  - [The generic interior: the measurement matrix (step 8f)](#the-generic-interior-the-measurement-matrix-step-8f)
+  - [The moving hole (step 8)](#the-moving-hole-step-8)
+  - [The trailing side (step 8′)](#the-trailing-side-step-8)
+  - [Robust stability on the octant (measured 2026-10-02)](#robust-stability-on-the-octant-measured-2026-10-02)
+  - [The right-hand side on an H200 (measured 2026-10-05)](#the-right-hand-side-on-an-h200-measured-2026-10-05)
+  - [The merge with `main` and the rotating octant (step X4)](#the-merge-with-main-and-the-rotating-octant-step-x4)
+  - [Excision: the analysis (step X1)](#excision-the-analysis-step-x1)
+  - [Excision: the variant (step X2b)](#excision-the-variant-step-x2b)
+  - [Excision on the static hole (step X3)](#excision-on-the-static-hole-step-x3)
+  - [Excision: the frame-dragged faces (step X5)](#excision-the-frame-dragged-faces-step-x5)
+- [Possible extensions](#possible-extensions)
+- [Open questions](#open-questions)
+
 ## Goals
 
 - **A proof of concept of a black-hole GH code on TreeAMR.** A boosted,
@@ -756,6 +819,46 @@ per evaluation. **(Amended in step 5:** the interior's `Val` carries the
 well, because the three variants differ inside the kernel, so a `Bool`
 would have needed a second parameter beside it.**)**
 
+**(Measured on the H200 2026-10-05**, in [The right-hand side on an
+H200](#the-right-hand-side-on-an-h200-measured-2026-10-05)**.)**
+
+- The black-box attempts are worth little: the workgroup shape under 10 %; the
+  split 6 % once the source fits in registers.
+- What the kernel needed was inlining forced on the device and a register-lean
+  spelling of the source: 8.5 → 1.2 ns a point.
+- The order above changes once the source is lean: the source moves before the Π
+  components (step 3 becomes step 2), and the per-component streaming stays.
+
+**(Implemented 2026-10-05.)** The kernel's order is now:
+
+1. **The head.** Load `h` and `Π` at the point, form the thirty `∂_i h` and the
+   coefficient set.
+2. **`∂ₜh`, complete with its dissipation,** stored at once.
+3. **The source**, [`gh_node_source_lean`](#the-right-hand-side-on-an-h200-measured-2026-10-05),
+   from `∂ₜh`.
+4. **`∂_i β^i` and `∂_i(α√γγ^{ij})`** from `metric_divergences`, which forms only
+   those four numbers.
+5. **A run-time loop over the ten Π components.** Each forms its nine stencils of
+   `h_v` (`∂_i h_v` again, from cached loads, rather than thirty values kept live
+   across the source) and its seven of `Π_v`, adds its source component and is
+   stored.
+
+In the code, steps 1–4 are `gh_rhs_head`, step 5's component is `gh_rhs_pi` and
+the store is `gh_rhs_store!`, all in `src/evolution.jl`. The interior variants
+combine `F` with the layer before storing, so they take it as two vectors from
+`gh_rhs_at_point`: the same two functions, with the components unrolled.
+
+Nothing in the kernel without an interior forms a closure:
+
+- its loops are `Base.Cartesian.@ntuple` and `@nexprs`;
+- the stencils are `@generated` with an explicit `:inline` meta;
+- the gauge sources are spelled out.
+
+So a device compiles it without a single call into Julia code whether or not the
+backend forces inlining. Measured: 8.48 → 1.08 ns a point on the H200; the
+numbers are under [The right-hand side on an
+H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).
+
 The kernel is *block-local*: it reads its own block's stored points and
 nothing else, so it runs on every backend unchanged. Per-block spacings
 and origins travel to the backend once per chunk, as TreeWave's spacings
@@ -924,6 +1027,80 @@ step X2b)**, against `8fa6658`: the thread digest's six lines identical, the
 one-chunk octant runs identical in every column but the wall clock, and the right-hand side's cost within the
 machine's noise — under [Measured results](#measured-results), "Excision:
 the variant (step X2b)".
+
+**One design after `main`'s rewrite (amended in step X4).** Step X4 merged
+`main`'s spill-free kernel (above, "Implemented 2026-10-05") into the
+excision round. The provider is now the argument of `main`'s two functions:
+`gh_rhs_head(S, …)` asks it for the thirty `d1` of `h`, the advection of
+`h` (`adv`) and the dissipation of `h` (`ko`), and `gh_rhs_pi(S, …)` for one
+Π component's `d1` of `h` and `Π`, `d2`, the three `dmix`, the advection of
+`Π` and its `ko`. `gh_rhs_store!(du, o, sd, S, …)` (the head, then a run-time
+loop over the components, each stored as it is finished) and
+`gh_rhs_at_point(S, …)` (the same, unrolled, as two vectors) are built on
+them, and `main`'s signatures with `st` and `Val(q)` build `Centered` and call
+the provider form. So:
+- **`d1` of `h` is asked twice** per component and axis, by the head and by
+  the Π component (`main` re-forms it rather than keep thirty values live
+  across the source); a provider must answer both alike, which one whose
+  methods are functions of `(work, base, d)` does.
+- **`Centered{T,q}` holds the strides and nothing else** **(proposed in step
+  X4)**: its methods form `derivative_weights` and `dissipation_weights` —
+  `@generated` constants — inside, so that inlined they *are* `main`'s
+  `axis_stencil` and `mixed_stencil` calls. X2a's `Centered` carried the three
+  weight vectors as fields, 160 bytes a point that a device which does not
+  inline passes through the stack.
+- **The main kernel's branches**: `:none` is `main`'s
+  `gh_rhs_store!(du, o, sd, T, …, Val(q), …)`; `:excised` calls the same
+  function with the same arguments at a centered point, writes zeros by a
+  run-time loop at an excised one, and nothing at a zone point; inside the
+  lopsided blend's shell it calls the store with `Lopsided`. The layer
+  variants are `main`'s, through `gh_rhs_at_point`. No branch forms a closure.
+- **The zone kernel** stores through `gh_rhs_store!(…, ClosureProvider, …)`;
+  the closure provider's own contractions stay generic loops over the table,
+  since the zone is a shell.
+- **Where the blend's weight is zero the main kernel takes the `:none` call,
+  not `Lopsided` at `λ = 0`** **(proposed in step X4)**. The arithmetic of the
+  two is the same — `adv` returns its argument through a branch — but
+  `metric_quantities` forms `g^{ab}` with StaticArrays' products, which are
+  `muladd`s, and LLVM fuses them into FMAs by the code around them: the head
+  compiled around a provider with a branch in `adv` differed from the
+  blend-free one in the last place at 496 of the fixture's 25 165 points
+  beyond the blend's shell. The same is why **the closure provider's `F` at a
+  point with no excised tap is no longer bit for bit `Centered`'s** (it was
+  on Apple silicon through X3): every contraction still is, `β` differs by
+  2.8 eps and `A^{ij}` by 6.8, and in a stationary background, where `F` is
+  the small difference of `O(1)` terms, that is up to 103 eps of each
+  variable's largest `|du|` on the fixture (1682 of 4508 points; the test
+  holds it to 512, as the suite's other comparisons of two specialisations).
+  No production path evaluates the closure provider at such a point.
+
+**Measured (step X4)**, against `main` (`cbe3662`) and the integration branch
+before the merge (`b80f4ed`), the same manifest (TreeAMR 0.1.7, Julia
+1.13.1):
+- **Every other run is `main`'s.** `test/thread_workload.jl` at four threads
+  prints `main`'s six lines character for character (its seventh, the excised
+  right-hand side, has X2b's counts and classes); the one-chunk octant runs
+  (`case=ks L=8 N=16 roots=2 radii=4,2 t_end=1/2 chunk=1/2 cfl=1/2`), `:damped`
+  with the default noise and `:fitted` without, give `main`'s `octant.csv` in
+  every cell but the wall clock and `main`'s `records.csv` in every column
+  `main` has.
+- **On the H200 the `:damped` kernel is `main`'s**, PTX and all: 255 registers,
+  a 6576-byte frame, 5700/8480 bytes of spill stores/loads, 50 `ld.local`, 119
+  `st.local` and 47 call sites in 8015 lines of PTX, in both; its right-hand
+  side on `bench/stepping.jl`'s hole (512 blocks of `16³`) 17.71 and 17.72 ms
+  against `main`'s 17.66 and 17.66 and the integration branch's 30.35, and on
+  X3's scan octant (`N = 64`, 7.6 M points) 5.28 ns a point against `main`'s
+  5.29 and 11.40. **X2a's `+5 %` is gone** with the rest of the integration
+  branch's kernel: the provider costs nothing `ptxas` or the clock can see.
+- **The excised kernels are `main`'s kind now.** The `:excised` main kernel: a
+  1544-byte frame (8800 before), 2692/3700 bytes of spills (192/192), 5 call
+  sites (131); 1.50 ns a point on the scan octant (9.73) and the right-hand
+  side 2.88 (11.14). The zone kernel: 1512 bytes (9984), 2140/3740 (172/172), 6
+  call sites (112); 238 ns a zone point on the octant (382) and 70.7 on the
+  bench's 512 small blocks (140). The blend costs `+2.7 %` of a right-hand
+  side on the octant (it cost `+20 %`) and `+10.5 %` on the bench (`+10.8 %`).
+  Under [Measured results](#measured-results), "The merge with `main` and the
+  rotating octant (step X4)".
 
 ### The time step
 
@@ -1174,6 +1351,57 @@ printed digit at every row; the octant costs `75 s` against `491 s`. The
 frozen core, the layer, the sampled gauge source and the `γ0` profile need
 nothing of their own at the walls. The suite's version is the `q = 2`
 fixture to `1/5 M` (`3.6·10⁻¹⁴`).
+
+### The rotating octant: a quarter turn about `z` (added 2026-10-04)
+
+A spinning hole has no mirror in `x` or `y`, so the octant above refuses it.
+It does have every rotation about its axis, and TreeAMR 0.1.7's M12 makes
+one of them a seam: `rotating = (d1, d2)` evolves only the quadrant of the
+`(d1, d2)` plane, glues the low face of `d1` to the low face of `d2`, and
+fills the ghosts across it from the data a quarter turn away, `u(Rp) = Q
+u(p)`, with `R` taking `e_{d1}` to `e_{d2}` and `e_{d2}` to `−e_{d1}`.
+Together with the mirror at `z = 0` (equatorial symmetry, which a spin
+along `z` keeps) it is an octant again, a quarter of the bitant proposed
+under "Robust stability on the octant". A case's `rotating` is that pair,
+`(0, 0)` for none so that the case stays `isbits`; it is refused on a
+periodic or reflecting dimension and between unequal widths, and `GHProblem`
+refuses a forest whose seam is not the case's. `hole_case(; octant =
+:rotating)` builds the seam `(1, 2)` with the mirror at `z = 0`, and needs
+the axisymmetric hole — at the origin, at rest, any spin along `z` — and
+refuses any other; `octant = true` is `:reflecting` and still refuses a
+spin, naming `:rotating`.
+
+**The map is the tensor's.** A quarter turn sends every Cartesian
+component to plus or minus one other: with `(d1, d2) = (1, 2)`, index `x`
+of the turned tensor is `−y` of the original and `y` is `+x`, so `h_tx →
+−h_ty`, `h_ty → h_tx`, `h_xx ↔ h_yy`, `h_xy → −h_xy`, `h_xz → −h_yz`, `h_yz
+→ h_xz`, and `h_tt`, `h_tz`, `h_zz` stay (`state_rotation`; the same for
+`Π`). The `G = 0` field sets are declared with the identity
+(`identity_rotation`), as they are declared even. Over a forest without a
+seam both are `nothing`, and a checkpoint's recipe carries `rotating` only
+where there is a seam, so older checkpoints still restart.
+
+**The two seam planes are the same points.** Vertex centering owns the low
+plane of `x` and of `y` (TreeAMR's decision), both evolved, from ghosts
+that are each other's images. `add_noise!` leaves both unperturbed, as it
+projects odd components to zero on a mirror's wall: independent draws there
+would be a solution that disagrees with itself. The refinement ceiling
+skips the seam's faces as it skips reflecting ones.
+
+**(Measured 2026-10-04**, `test/rotation_tests.jl`**.)** Kerr-Schild at
+`a = 3/10` (the ring inside `r_0 = 7/20`, `r_1 = 11/10` eight cells inside
+`r₊ = 1.954`), `q = 2`, uniform at `h = 5/48`: the analytic state is its own
+image under the map to `2·10⁻¹⁶`; after one ghost fill every stored point
+— owned, mirrored, turned or the hook's — holds the exact state to
+`1.3·10⁻¹⁴` relative (the worst next to the ring, where the solution is
+`350`), and `1.3` with every variable declared to turn into itself; after
+two chunks (`t = 1/5`) the rotating octant `[0, 5/2]³` is the box `[−5/2,
+5/2]³` to `2.6 eps` relative at every point outside the core, the layer
+residual agreeing to `10⁻¹⁴`. The horizon finder needs nothing of its own:
+TreeAMR's `interpolate` turns the finder's sphere into the quadrant, and
+`M_irr` and `J` on the octant are the box's to `10⁻¹⁰` (`J = 0.29994`,
+Kerr's `0.3`). A restart chain on the rotating octant is the uninterrupted
+run bit for bit (checked by hand, not in the suite).
 
 ### The interior: a pointwise damping layer
 
@@ -2543,7 +2771,9 @@ it on the octant.**)** **(Amended in step X3:** measured on the octant on
 Symmetry's H200s — feasible for the static Kerr-Schild `a = 0` hole, as
 accurate outside the horizon as the `:damped` layer at `r_E = M/2`, and with
 no gauge drift to `50 M`; the recommendation is under "What step X3
-measured" at the end of this section.**)** **(Amended in step X5:** the spinning
+measured" at the end of this section.**)** **(Amended in step X4:** on
+`main`'s spill-free right-hand side, 3.9× faster on the H200, and on the
+rotating octant too — "What step X4 changed", before X3's.**)** **(Amended in step X5:** the spinning
 hole's frame-dragged faces — closure axes whose shift points into the
 excised set — have a rule: the per-axis closures everywhere else, and on
 such an axis the advective derivative formed from the centered stencil
@@ -2974,6 +3204,57 @@ variant through the package**).** The design above, with these choices:
 - `test/octant_runs.jl` takes `interior=excised` with `geometry=sphere|
   tracked`, `r_E=` or `margin=`, `r_0=`, `upwind=<start>,<width>` and
   `closure=`; `bench/stepping.jl` takes `BENCH_CASE=excised`.
+
+**What step X4 changed (amended in step X4).** Step X4 merged `main`'s
+spill-free right-hand side and the rotating octant into the integration
+branch; the excision's operator is X2b's, its arithmetic `main`'s.
+- **The kernels** are those of [One right-hand-side
+  evaluation](#one-right-hand-side-evaluation), "One design after `main`'s
+  rewrite": the closure provider plugs into `gh_rhs_head(S, …)` and
+  `gh_rhs_pi(S, …)` through `gh_rhs_store!(du, o, sd, S, …)`, and the main
+  kernel's `:excised` branch is the `:none` call at a centered point — also
+  inside the blend's start, where the weight is zero. Every excision claim of
+  X2b holds as it did, but one: the closure provider at a point with no
+  excised tap is `Centered`'s to roundoff, not bit for bit (`main`'s head is
+  compiled around it with other FMA fusions). The planted degenerate metric
+  still changes no non-excised `du`, and the centered points' `du` is the
+  `:none` kernel's at all 55 505 points of the fixture.
+- **The rotating octant** ([The rotating
+  octant](#the-rotating-octant-a-quarter-turn-about-z-added-2026-10-04)).
+  The classes' bit is exchanged as a scalar — even parity, the identity
+  rotation — so a ghost across the seam holds the class of the owned point
+  it is the image of, and the two owned seam planes have one class at each
+  point (`test/excision_tests.jl` says both). `hole_case(; octant =
+  :rotating, interior = :excised)` and `test/octant_runs.jl octant=rotating
+  a=… interior=excised …` build; at `a = 3/5` the build refuses the case by
+  the physics, as X2b's refusal says — on the smoke's octant (`h = 1/16`,
+  `r_E = 1`) 72 (zone point, closure axis) pairs with the shift into the
+  excised set, the least `b/a = −0.499`.
+- **The nested mixed derivative is not symmetric under `x ↔ y` (measured in
+  step X4).** At a zone point `dmix(S, …, i, j)` takes the outer sum along `i`
+  with the point's `i`-closure and the inner sum along `j` with each outer
+  node's `j`-closure, always `i < j`. Near the surface the closures of the two
+  axes differ, so `D_x(D_y f) ≠ D_y(D_x f)` at the truncation level, and the
+  discrete operator is not equivariant under the diagonal reflection — nor,
+  since a quarter turn is that reflection composed with a mirror, under the
+  rotating seam's quarter turn. Measured on the smoke's octant (`a = 0`,
+  `r_E = 1`, `h = 1/16`, `q = 4`) at `t = 1`: the evolved state violates the
+  diagonal reflection by `3.0·10⁻³` at zone points and `1.9·10⁻⁴` elsewhere,
+  on the mirror and on the rotating octant alike, where `:damped`'s does by
+  `5·10⁻¹⁴`. The mirror octant is the full box's solution (the operator is
+  mirror-equivariant); the rotating octant imposes a symmetry the operator
+  lacks, so the two differ at that level: the record's `L∞` norms inside the
+  horizon by `1.4·10⁻³` relative, the shells outside it by `9.5·10⁻⁵`, the
+  `L2` norms by `10⁻⁷`; the classes, the census and the first row are the
+  same. Not an instability, and not a seam defect: the two owned seam planes
+  stay one state to `1.6·10⁻¹³`. **Proposed in step X4, for X6: the zone
+  points' mixed derivative as the mean of both nestings, `½(D_i D_j + D_j
+  D_i)`**, which on a scratch copy took the diagonal violation to `5·10⁻¹⁴`
+  at zone points and made the two octants' records agree to the CSV's ten
+  printed digits (`records.csv` to `10⁻¹²`). It costs a second nested sum at
+  zone points only (the zone kernel is 1.5 % of a right-hand side on the
+  octant), keeps the exactness of the closures, and changes X3's operator at
+  zone points, which is why X4 records it rather than building it.
 
 **What step X3 measured, and the recommendation (amended in step X3).** The
 static Kerr-Schild `a = 0` hole on the octant, on Symmetry's H200s at
@@ -3736,6 +4017,10 @@ faster than `Float64` (not investigated), and its error is
 roundoff-dominated (`1.9e−5` against
 `1.7e−6` on the hole). None of this is tuned: G6's kernel efficiency is
 still a research project, and these are the numbers it starts from.
+**(Taken up 2026-10-05**, in [The right-hand side on an
+H200](#the-right-hand-side-on-an-h200-measured-2026-10-05): on the device the
+kernel is not inlined and spills 8 KB a thread; inlined, with a register-lean
+source, it is 7× faster.**)**
 
 **Block size and block count (measured 2026-09-26**, `bench/stepping.jl`'s
 `scan` mode, `q = 4` throughout — fourth-order centred differences, sixth-order
@@ -4273,7 +4558,15 @@ break it:
   picoseconds per point against the roofline in the format of
   `notes/ghaccel-bench.jl`, whose numbers (25.8 % of the H200 roofline,
   49.6 % on an A40, for 10 fields) are the reference this kernel is
-  compared to. **(Measured in step X3**, `ptxas`'s report on the H200 at
+  compared to. **(Measured 2026-10-05**, in [The right-hand side on an
+  H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).**)**
+  - **The arithmetic:** 3867 FP64 instructions a point, about 6.5 kflop, inside the
+    prediction.
+  - **The cost was neither the arithmetic nor the traffic:** the kernel held 255
+    registers and spilled 3.8–8 KB a thread, at about 5 % of FP64 peak.
+  - **The lean source alone:** 52 % of FP64 peak.
+  - **Around the kernel,** TreeAMR's scatter and ghost fill run at 0.65–1 TB/s.
+  **(Measured in step X3**, `ptxas`'s report on the H200 at
   `Float64`, `q = 4`**:** every right-hand-side kernel — `:damped`, `:excised`
   with and without the blend, the excision's zone kernel — uses all 255
   registers with a stack frame of 8.8–10.6 kB and 170–320 bytes of spills
@@ -4526,7 +4819,46 @@ What this package needs from TreeAMR. None blocks G0–G3.
    launches with KernelAbstractions' default workgroup, and GHAccel
    measured the workgroup shape of a 3D stencil kernel as worth about
    10 % of peak. A `workgroupsize` keyword passed through to the launch
-   is the whole request.
+   is the whole request. **(Measured 2026-10-05**, [The right-hand side on an
+   H200](#the-right-hand-side-on-an-h200-measured-2026-10-05)**.)**
+   - **The right-hand side no longer needs the knob.** Now that its kernel forms
+     no closure, KA's default workgroup is within 1 % of the best shape at
+     `N = 32` and `128`, and 2.7 % at `16`. Forcing inlining changes nothing
+     (1.075 against 1.077 ns a point).
+   - **Two halves of the request are still worth having, second to item 5.**
+     `map_blocks!` launches with `get_backend(fs.work)`, a default
+     `CUDABackend()`, so the backend a field set was built with — its
+     `always_inline` and a static workgroup — never reaches the launch.
+     Keeping it matters to the kernels that still have closures: the interior
+     variants' layers and the monitors. Before this package's kernel was
+     rewritten, forcing inlining was worth 1.6×, and a static workgroup 20 %
+     to the prototypes.
+5. **TreeAMR's copy kernels at bandwidth: the first thing TreeAMR should change
+   for a device** (added 2026-10-05).
+   - **What is left of an evaluation is TreeAMR's.** After this package's kernel
+     went from 8.5 to 1.1 ns a point, `scatter!` and `fill_ghosts!` are 0.73 of
+     `gh_rhs!`'s 1.81 ns at `N = 32`, 1.39 of 2.61 at `N = 16`, and 0.41 of 1.70
+     at `N = 128`.
+   - **Both run far below the H200's 4.8 TB/s.** The scatter moves 320 B a point
+     at 0.96 TB/s, and the transfer kernel its ghost data at 0.65 TB/s.
+   - **Why:** both launch over a 5-D `CartesianIndices` with run-time sizes. KA
+     forms that index with integer divisions for every element, about 1200 SASS
+     instructions to copy one value.
+   - **What it would buy:** a scatter with the strides known is 2.4× faster
+     (0.14 ns a point, measured in `bench/rhs_lab.jl`'s `round5`). A fill at
+     copy bandwidth would be about 4× faster, which at `N = 16` saves more than
+     the whole kernel costs.
+
+   In order:
+   1. **`scatter!` and `gather!`** with an index that is cheap to form: a
+      linear range over owned points, variables and blocks, divided by
+      constants, or the block size as a type parameter.
+   2. **`transfer_kernel!` the same** for its copy groups (`Ps = (1, 1, 1)`,
+      the bulk of a uniform fill): a linear source and target offset per
+      transfer, and no `stencil_sum` for a copy.
+   3. **Then a state that lives in the working array**, for a native stepper
+      that writes the next stage's input straight into it (the stage vectors
+      as field sets). That removes the scatter altogether.
 
 Two further items are *not* needed for the proof of concept and are
 recorded with the extensions that would need them: an interior-reading
@@ -4547,7 +4879,7 @@ the rest without a launch, and is a wish, not a prerequisite.**)**
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
 | `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the **five** `Val`s and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. Step 5 split the streaming body out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and added `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c) |
-| `src/boundaries.jl` | the time-dependent Dirichlet hook |
+| `src/boundaries.jl` | the time-dependent Dirichlet hook, and the declarations TreeAMR's symmetries ask of every field set: the parities of the reflecting faces (`state_parity`, `even_parity`, added 2026-10-02) and the signed maps of the rotating seam (`state_rotation`, `identity_rotation`, added 2026-10-04) |
 | `src/bounds.jl` | the range projection (added in step 8b): `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
 | `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii and the hole's mass (`hole_mass`, added in step 8c′), and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes. **Step 8d adds the tracked geometry's kernel side**: the real harmonics (`real_harmonic_index`, `real_from_complex`/`complex_from_real`, the recurrence `shape_series`, `shape_bounds`), the analytic horizon of the seed (`analytic_horizon_radius`), `FittedSpec` — what a case holds — and `FittedInterior` — the kernel argument — with `interior_point`, `fitted_geometry`, `core_position`, `ShapeMask`, `ShapeBand`, `geometry_spacing` and its `check_interior_radii`; and the protocol both geometries speak (`in_layer(int, t, x)`, `interior_point`, `is_outside`, `geometry_radii`, `layer_radii`, `layer_mask`, `shell_mask`) |
 | `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4), or `hole_forest`'s nested shells around a hole (added in step 5, **here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
@@ -7594,7 +7926,11 @@ is `:damped`'s to two digits.
   outside the horizon `2.6×`.
 
 **Proposed next (2026-10-04): a spinning hole on a bitant.** Written for the
-session that picks this up; nothing of it is built.
+session that picks this up; nothing of it is built. **(Amended 2026-10-04:
+the static spinning hole runs on the *rotating octant* instead —
+`hole_case(; octant = :rotating)`, TreeAMR 0.1.7's quarter-turn seam with
+the mirror at `z = 0`, a quarter of the bitant; see "The rotating octant".
+The bitant remains the domain of a hole that moves in the plane.)**
 
 - **A bitant, not an octant.** A spin along `z` keeps only the `z → −z`
   mirror, and so does a boost in the `x`–`y` plane: the domain is
@@ -7625,6 +7961,547 @@ session that picks this up; nothing of it is built.
   over once they take the bitant. TreeAMR `main`'s second-derivative
   interpolation can replace the state sampler's differenced gradient when it
   is released; nothing here needs it sooner.
+
+**A spinning hole on the rotating octant, `a = 3/5` (measured 2026-10-04**,
+jobs 569778 and 569779, `spin-a06`**)**. Erik's first spinning reference: not
+`a = 9/10` at `h ≈ 1/48`, but `a = 3/5` at `h = 1/32`, `:damped` and
+`:fitted` side by side, everything else the `a = 0` rows `dA128` and `fR32`
+— the octant `[0, 64]³`, cubes `32, 16, 8`, `N = 128` (60.8 M points),
+`q = 4`, `cfl = 1/2`, the algebraic source, `24 M`, the finder with the spin
+every chunk — on the rotating octant (`test/octant_runs.jl octant=rotating
+a=3/5`). Kerr-Schild `a = 3/5` has `r₊ = 1.8` at the poles, `√(2 r₊) = 1.897`
+on the equator, and its ring at `0.6`. Two settings follow from the ring:
+
+- `:damped` keeps `r_0 = 3/4`, `r_1 = 3/2` — the ring inside `r_0`, `r_1`
+  9.6 cells inside the horizon at the poles.
+- `:fitted` keeps `m = 20` but takes `n_L = 18`, not `fR32`'s 24: the
+  analytic initial data fill the layer down to the core surface, and
+  `m + n_L = 44` cells below the equator's `1.897` is `0.52`, inside the
+  ring; at 38 cells the core surface is `0.71` there. `lmax_fit = 12` (the
+  spinning hole's, above), `fit_cont = 1`.
+
+Both run to `24 M` in `2 h 35` on one H200 each. At `24 M`, point-weighted
+L2 in the shells of `test/octant_runs.jl` (the first from the equatorial
+radius; the band `in` is the evolved region inside it):
+
+| | `ℋ` in | `ℋ [1.90, 2.25)` | `ℋ [2.25, 3)` | error in | error `[1.90, 2.25)` | error `[2.25, 3)` |
+|---|---|---|---|---|---|---|
+| `:damped` | `3.95·10⁻⁶` | `6.41·10⁻⁷` | `1.55·10⁻⁷` | `5.0·10⁻⁶` | `1.35·10⁻⁶` | `4.75·10⁻⁷` |
+| `:fitted` | `1.43·10⁻³` | `2.04·10⁻⁶` | `1.39·10⁻⁷` | `2.7·10⁻⁴` | `1.41·10⁻⁶` | `4.41·10⁻⁷` |
+| `dA128` (`a = 0`) | `1.77·10⁻⁶` | `4.30·10⁻⁷` | `1.31·10⁻⁷` | `2.2·10⁻⁶` | `5.24·10⁻⁷` | `1.89·10⁻⁷` |
+| `fR32` (`a = 0`) | `1.65·10⁻⁴` | `1.11·10⁻⁶` | `1.34·10⁻⁷` | `1.7·10⁻⁵` | `4.82·10⁻⁷` | `1.89·10⁻⁷` |
+
+- **The spin changes nothing qualitative outside the horizon.** Both runs'
+  constraints are stationary from `t ≈ 6–8 M` to `64 M` (both rows were
+  continued from their `24 M` checkpoints, jobs 569811 and 569812): `ℋ` just
+  outside the horizon `6.41 → 6.47·10⁻⁷` (`:damped`) and `2.04·10⁻⁶`
+  throughout (`:fitted`, `3.2×` — `a = 0`: `2.6×`), and from `2.25` out the
+  two agree to two digits. Every find succeeds (65 of 65), every fit is
+  valid, the projection never fires, and `:fitted`'s band inside the horizon
+  and its fit residual (`6.9·10⁻³`) are constant from `t = 2 M`. The spinning
+  hole's own error is `2–2.6×` the `a = 0` hole's from `2.25` to `8`, and
+  `ℋ` just outside the horizon `1.5×`.
+- **The spin drifts, linearly, as truncation error at order four.**
+  `:damped`'s `J` rises from `a + 8·10⁻⁹` at a constant rate to `64 M` —
+  `5.42`, `5.11`, `5.16·10⁻⁸/M` over `8–24`, `24–40`, `40–64 M`
+  (`+3.6·10⁻⁶` at `64 M`) — and `M_irr` falls with it, about `−0.2 δJ` at
+  constant mass (`−2.7·10⁻⁷` at `64 M`). The convergence rows `h = 1/16` and
+  `1/24` (`N = 64, 96`, the same radii in `M`, `margin = 4` for the check;
+  jobs 569813 and 569814) give the same constant rates, `1.1–1.4·10⁻⁶` and
+  `1.6–1.75·10⁻⁷`, and orders `3.99–4.07` from `1/24` to `1/32` in every
+  interval, `4.16` for `J − a` at `24 M` and `4.02` for `dM_irr/dt`; every
+  shell's `ℋ` and error from `2.25` out converge at `3.98–4.17`. `1/16` is not
+  in the asymptotic regime (orders `4.6–8.7` from it, and `145×` the `1/32`
+  `ℋ` just outside the horizon by `8 M`): `r_1 = 3/2` is only 4.8 of its cells
+  inside the horizon at the poles. The drift is the scheme's, as `a = 0`'s
+  mass drift is (`1.3·10⁻⁹/M`); it is four orders below G5's moving hole's.
+  `:fitted`'s `J` wanders by `±2·10⁻⁷` to `15 M` and then drifts at
+  `4.1·10⁻⁸/M`, `0.8×` `:damped`'s.
+- **The error grows with the drift, so the variants' error ratio is the ratio
+  of their drifts.** The error outside the horizon grows linearly in every
+  run, the slightly different hole spreading outward, at order four: in the
+  first shell `:fitted`/`:damped` goes `1.65×` (`8 M`), `1.04×` (`24 M`),
+  `0.88×` (`40 M`), `0.81×` (`64 M`), toward the drifts' `0.80`. So a
+  comparison of the two by their error must name its time; by `ℋ` it need not.
+- **`:fitted` is worse inside than at `a = 0`.** The evolved band inside
+  the horizon is `9×` `fR32`'s `ℋ`, and the fit's residual `9×` `fR32`'s
+  `7.5·10⁻⁴` — the shorter ramp, the band reaching deeper (from `1.27`
+  rather than `1.375`) and an oblate hole in the `cont = 1` ansatz, not
+  separated here.
+- **The far field settles by `64 M`**: the start-up pulse passes `r ≥ 8` at
+  about `24 M` for `:fitted` (`ℋ 1.2·10⁻¹⁰`, then `1.0·10⁻¹⁰`) and both rows
+  end at `1.0–1.3·10⁻¹⁰` there, three orders below the first shell.
+
+**`a = 9/10` at `h = 1/48` (measured 2026-10-04**, jobs 569826, 569855,
+569856, `spin-a06`**)**. Kerr-Schild `a = 9/10` has `r₊ = 1.436` at the poles,
+`1.695` on the equator and its ring at `0.9`, which leaves `0.79` below the
+equator for a `:fitted` margin and ramp — 25 cells at `h = 1/32` — so the rows
+run at `h = 1/48` on one more cube (`32, 16, 8, 4`, the finest level
+`[0, 4]³`, `N = 96`, 31.9 M points, `2 h` for `24 M` on an H200).
+
+- **`:fitted` at `m = 16`, `n_L = 18` (the core surface at `0.986` on the
+  equator, 4 cells outside the ring), `lmax_fit = 12` is unstable, at either
+  `fit_cont`.** With `fit_cont = 2` the band inside the horizon grows `2–4×`
+  per `M` from `t = 0` (`ℋ` `3.9·10⁻³` at `1 M`, `0.65` at `7 M`), the fit's
+  residual with it (`0.034 → 0.46`), and it crosses the horizon — the first
+  shell outside `1600×` in `6 M` — and ends in a `DomainError` in the kernel
+  at `7.5 M`; every fit stays valid, every find succeeds and the projection
+  never fires. `fit_cont = 1` grows the same way (`ℋ 0.14`, L∞ `178` at `8 M`;
+  cancelled). So the curvature fit is not the cause.
+- **`:damped` runs** (`r_0 = 19/20`, the ring inside the core; `r_1 = 5/4`,
+  8.9 cells inside the poles' horizon, a 14-cell ramp), stationary from `8 M`
+  to `24 M` — but at a high level: `ℋ` `3.7·10⁻³` in the band inside the
+  horizon and `2.4·10⁻⁵` just outside it (`37×` the `a = 3/5` hole's at
+  `h = 1/32`), the error there `5.4·10⁻⁶` (`4×`), the layer's residual against
+  the truth `5.2` (`a = 3/5`: `0.15`). `J` starts `7·10⁻⁶` above `a` (the
+  finder at this resolution) and drifts at `7.8·10⁻⁸/M`; all 25 finds succeed.
+  The layer next to the ring is under-resolved at `1/48`: on the equator it
+  spans `0.95–1.25`, where Kerr-Schild's `H` falls from `3.3` to `1.3`.
+
+### The right-hand side on an H200 (measured 2026-10-05)
+
+An investigation of how the right-hand side can be evaluated faster on a GPU, made
+as an analysis and changing nothing in `src/`. Scope (Erik's):
+
+- `q = 4`, no interior (`INT = :none`), one H200, `Float64`;
+- the state's storage, the ghosts and the time integration are open to change.
+
+It takes up [Possible extensions](#possible-extensions)' research item and answers
+[Open questions](#open-questions) 3.
+
+**Setup.**
+
+- **Hardware and versions:** `main` at `acc30ba` on one H200 (Symmetry cn111,
+  `h200debugq`): TreeAMR 0.1.7, CUDA.jl 6.4.2, KernelAbstractions 0.9.43,
+  Julia 1.13.1.
+- **Case:** the gauge wave with `ε_KO = 1/2`, `γ0 = 1` (no gauge source), on a
+  uniform periodic mesh. The main mesh is 512 blocks of `32³` (16.8 M points); also
+  8 × `128³` (the octant runs' `N`) and 512 × `16³`.
+- **Timing:** the minimum of eight calls, in nanoseconds per owned point.
+- **Correctness:** every prototype was compared with `gh_rhs!` on the same filled
+  working array. `h` agrees bit for bit without inlining and to `2·10⁻³²` relative
+  with it. `Π` agrees to `7.1·10⁻¹³` of `max |∂ₜΠ|`. That is also what the
+  package's *own* kernel shows when it is merely compiled with inlining forced:
+  contraction differences of one body at two call sites ("Two spellings of one
+  expression are not bit-identical"), not a different scheme.
+- **Where the code is:** the prototypes are raw CUDA.jl kernels and KA kernels in
+  `bench/rhs_lab.jl`, whose modes `baseline`, `variants` and `round3` … `round9` are
+  the rounds below. It runs from a copy of the package with CUDA added to its
+  `Project.toml` (on Symmetry `rhs-gpu-lab`, jobs 570186–570203). Its companions:
+  - `bench/rhs_lab_source.jl`, the lean source, shared by the GPU and CPU scripts;
+  - `bench/rhs_lab_cpu.jl`, the source's CPU check and timing, in the package's own
+    environment;
+  - `bench/sass_stats.jl`, which counts a SASS dump's instructions.
+
+**Where the time goes.** The kernel is nine tenths of an evaluation, and the mesh
+pattern around it is small today:
+
+| per owned point, ns | 512 × `16³` | 512 × `32³` | 8 × `128³` |
+|---|---|---|---|
+| `gh_rhs!` | 9.94 | 9.21 | 9.31 |
+| — the kernel (`map_blocks!`) | 8.55 | 8.48 | 8.90 |
+| — `scatter!` | 0.36 | 0.34 | 0.33 |
+| — `fill_ghosts!` | **1.03** | 0.40 | 0.08 |
+| RK4 step (IMEXRungeKutta, broadcast) | 40.4 | 37.4 | 37.8 |
+
+A step is 4.06 right-hand sides, and the stage arithmetic is 0.54 ns a point a step.
+An evaluation launches 28 kernels (26 transfer groups, the scatter, the kernel), each
+4 µs of host time, and the GPU is busy 97 % of it: launch overhead is not a cost here.
+The workgroup shape moves the kernel by less than 10 % (`(32, 8, 1)` and `(32, 4, 1)`
+best, `(8, 8, 2)` worst).
+
+**Why the kernel is slow: on a device it is not inlined.** KA launches it with a
+default `CUDABackend()`, whose `always_inline = false` leaves GPUCompiler to Julia's
+inlining heuristics. These keep as real functions:
+
+- the `ntuple(Val(n)) do … end` blocks of `gh_rhs_at_point`;
+- `mixed_stencil`'s closures;
+- the StaticArrays generator closures of `gh_node_source` and `metric_derivatives`.
+
+A device call passes its `SVector` and `SArray` arguments through the stack, and a
+closure that indexes an `SVector` with its argument indexes memory. The SASS:
+
+| `gpu_gh_rhs_kernel_` | as compiled | with `always_inline = true` |
+|---|---|---|
+| instructions (callees included) | 11 224 | 10 992, straight line |
+| call sites | 162, about 140 into Julia closures | 0 to Julia code |
+| registers, local memory per thread | 255, 8.1 KB | 255, 3.8 KB |
+| spill stores / loads (`STL` / `LDL`) | 2417 / 2020 | 914 / 990 |
+| FP64 instructions (`DFMA` + `DMUL` + `DADD`) | — | 3867 (2656 + 930 + 281) |
+| global loads (`LDG`) | — | 871 |
+| kernel | 8.48 ns/pt | 5.0–5.4 ns/pt |
+
+At 255 registers a 256-thread block fills an SM, so there are eight warps. The local
+memory per SM is 1–2 MB, beyond L1 (256 KB) and beyond an SM's share of L2 (50 MB
+for 132). So the spills go to HBM — inferred, not counted: no `ncu`.
+
+In the inlined build the ~1900 spill instructions move about 15 KB a point. At HBM
+bandwidth that alone is 70 ms of the kernel's 72. The FP64 pipes are about 5 %
+busy. So neither the arithmetic nor the traffic of [Precision, threads,
+devices](#precision-threads-devices)' budget is what the kernel costs, and **the
+stencils are not the problem.** Ablations of the inlined kernel (raw CUDA, static
+strides):
+
+| | ns/pt |
+|---|---|
+| state, `∂_i h`, the dissipation of `h`, the coefficients and `∂ₜh` only | 0.32 |
+| everything but the source | 1.20 |
+| everything but the Π stencils | 2.54 |
+| everything | 4.30 |
+
+The source alone in a kernel of its own, with nothing else live, still holds 255
+registers and 1.8 KB of local memory and costs 2.02 ns/pt. `gh_node_source` builds
+`Clul`, `Cluu`, `Γlll` and `Γ4` as 64-entry `SArray{Tuple{4,4,4}}` from generators,
+and nothing between Julia, LLVM and `ptxas` reorders that DAG to shorten live
+ranges.
+
+**The lever: a register-lean spelling of the source.** It keeps `gh_node_source`'s
+terms and changes three things about how they are formed:
+
+- **Unique components.** Symmetric tensors are held by their unique components:
+  `∂_a g_bc` and `Γ^a_bc` as four `SVector{10}`s in `_pack10`'s slots.
+- **Phases ordered so that intermediates die.**
+  1. `S = C2 + C2ᵀ`, one first index `a` at a time. `E = G D_a` (4×4) and
+     `Cuu = E G` (ten values) give `C2[a, b] = Σ_μν Cuu_μν D_μ[ν, b]`. No 4×4×4
+     array is ever formed.
+  2. The forty `Γ^a_bc = Σ_x G^{ax} ½(D_b[x,c] + D_c[x,b] − D_x[b,c])` and
+     `Γ^c = Σ G^{de} Γ^c_de`, then per packed `(ab)`:
+     `−2 Σ_xy Γ^x_ya Γ^y_xb − (∂_a H_b + ∂_b H_a) + 2 Σ_c Γ^c_ab H_c − Σ_c Γ^c ∂_c g_ab`.
+  3. The damping.
+  4. `−α√γ S`.
+- **No closures.** Every loop is unrolled with literal indices by
+  `Base.Cartesian.@ntuple`.
+
+It agrees with `gh_node_source` to `8·10⁻¹⁶` relative, the worst of 200 random
+Lorentzian states (`bench/rhs_lab_cpu.jl`). It is not a re-derivation: it is a third spelling of the validated algebra,
+to be tested against `gh_node_source` and `gh_node_rhs` as the second spelling is
+tested against the first. Measured:
+
+| `N = 32` | ns/pt | registers, local |
+|---|---|---|
+| source alone, `gh_node_source` | 2.02 | 255, 1792 B |
+| source alone, lean | **0.178** | 254, 40 B |
+| fused kernel, package source, reordered (below) | 3.81 | 255, 3.3 KB |
+| fused kernel, lean source, reordered | **1.21** (1.32 at `16³`, 1.49 at `128³`) | 255, 2.0 KB |
+| two kernels: pointwise and source, then the Π principal part | 0.85 + 0.29 = 1.14 | |
+| three kernels: stencils and coefficients, the source, the Π principal part | 0.67 + 0.18 + 0.29 = 1.14 | |
+
+The lean source does 1879 FP64 instructions a point: 3.1 kflop in 0.178 ns,
+17.7 TFLOP/s, **52 % of the H200's FP64 peak**. The package's spelling of the same
+terms takes 2.02 ns, eleven times as long.
+
+On the CPU (development machine, one thread, `bench/rhs_lab_cpu.jl`), each
+inlined into its caller as in the kernel:
+
+| | ns per call |
+|---|---|
+| `gh_node_source` | 383–396 |
+| the closure-free lean source | 90 |
+| the first lean version, each loop an `ntuple` do-block | 2.6–2.7 µs |
+
+So the closure-free spelling is 4.3× faster than `gh_node_source` on the CPU. The
+do-block version was also 46 ns/pt on the device without forced inlining: its
+closures were calls on both backends.
+
+**The fused kernel's order matters once the source is lean.** The package's kernel
+with only `gh_node_source` replaced runs at 7.56 ns/pt inlined and 49 ns/pt without.
+`CODE.md`'s streaming order puts the source last, as step 3. The fast kernel keeps
+the per-component stencil streaming but moves the source before the Π components:
+
+1. load the state and form `∂_i h` and the coefficient set;
+2. form `∂ₜh` with its dissipation and **store it**;
+3. form the source;
+4. run a *runtime* `for` loop over the ten Π components, each formed, combined with
+   its source component and stored.
+
+As a KA kernel (static workgroup, `N = 32`):
+
+| | ns/pt |
+|---|---|
+| the order above, static strides (`Val(N)`), stencils without the zero weights | **1.21** |
+| … with strides from `size(work)` | 1.26 |
+| … with the Π components unrolled by `ntuple` | 1.29 |
+| … with all stencil weights, zeros included | 1.21 |
+| … with the source after the Π components (the package's order) | 1.34 |
+| dynamic strides, unrolled, all weights, source last, together | 3.48 |
+| the order above without `always_inline` | 51 (3.10 with the closure-free source) |
+
+**KernelAbstractions is not the obstacle, and the launch must be configured.**
+Written as KA kernels over `@index(Global, NTuple)`, the three-kernel split matches
+raw CUDA exactly: 1.15 ns/pt at `N = 32` and 1.29–1.31 at `N = 128`. That needs two
+things:
+
+- **a static workgroup**, `kernel(backend, (32, 4, 1, 1))`. A dynamic one costs
+  about 20 % (1.38 ns/pt);
+- **forced inlining.** Without it the split runs at 48–50 ns/pt.
+
+The package cannot ask for either today. `launch_by_owner!` launches with
+`get_backend(fs.work)`, a default `CUDABackend()`, and a field set does not keep the
+backend it was built with. GHSO2 met the same trap on the CPU (`get_backend(::Array)`
+always returns the dynamic `CPU()`). There are two ways out:
+
+- **TreeAMR keeps the backend**, its flags and a workgroup, and `map_blocks!`
+  launches with it — upstream, by the mesh rule;
+- **every helper the kernel reaches is written without closures**, as the lean
+  source is. Measured for the source alone: 0.22 ns/pt without the flag, 0.18 with
+  it.
+
+**The design's other ideas, measured.**
+
+| idea (where it was proposed) | measured | verdict |
+|---|---|---|
+| Stencil/algebra split ("One right-hand-side evaluation", black-box attempt) | package source: 3.2 + 0.29 against 4.3 fused (inlined); lean source: 1.14 against 1.21 | 6 % once the source fits; the Π principal part alone is a spill-free 0.29 ns/pt kernel at ~80 % of L1 load bandwidth |
+| Workgroup shape (black-box attempt; GHAccel's 10 %) | within 10 % for a spilling kernel; static against dynamic is ~20 % for the split | set a static `(32, 4, 1)`; no further tuning |
+| `Float32` (black-box attempt) | not measured: `Float64` is the requirement (1.4–1.6× in September) | — |
+| Shared-memory staging of one variable's ghosted block ([Possible extensions](#possible-extensions)) | Π principal part, one component's `h` and `Π` tiles at a time: 0.95–1.59 ns/pt against 0.28 through L1 | **no**: L1 already holds the reuse |
+| Fusing the scatter and the stage update into the kernel (GHSO2's "Tier 5") | scatter plus stage arithmetic ≈ 0.48 ns/pt per right-hand side | second order now; ~10–15 % of a step after the kernel (below) |
+| Generated code for the source's register schedule | the hand-written lean source, 11× the source and 7× the kernel | **yes**, and no generator is needed |
+| Kernel or scatter-and-ghost pattern first ([Possible extensions](#possible-extensions)) | the kernel is 92 % of an evaluation | the kernel, then the pattern |
+| `Int32`, arrays, `div` (GHAccel) | static against dynamic strides: no difference while spilling, 4 % in the lean kernel | minor |
+| Skipping the stencils' zero weights (new; IEEE forbids dropping `0·x`, so a fifth of the first derivative's loads and over a third of the mixed derivative's are zeros) | Π principal part 0.283 against 0.309 ns/pt; nothing elsewhere | minor |
+| `maxregs` (new) | always slower: the fused kernel 5.95 at 128 and 5.72 at 168 against 4.30 | no |
+| One Π component per thread (new) | 0.31–0.43 against 0.28–0.31 ns/pt | no |
+
+The algebraic Kerr-Schild source has `gh_node_source`'s structure — an `SMatrix`
+generator over closures. It adds 0.47 ns/pt to the fused lean kernel and costs 0.54
+ns/pt in the source's own kernel against 0.18 without it, so it wants the same
+treatment. So does `metric_derivatives`: the stencils-and-coefficients kernel still
+spills 1.26 KB.
+
+**Around the kernel: storage, ghosts and time integration.** Once the kernel is
+1.2 ns/pt, the pattern around it is 40 % of an evaluation at `N = 32` and two thirds
+at `N = 16`:
+
+| per owned point, ns | `16³` | `32³` | `128³` |
+|---|---|---|---|
+| TreeAMR `scatter!` | 0.36 | 0.34 | 0.33 |
+| the same with static strides | 0.19 | 0.14 | 0.12 |
+| TreeAMR `fill_ghosts!` | 1.03 | 0.40 | 0.08 |
+| copy floor: 20 values in, 20 out | 0.10 | 0.088 | 0.086 |
+| one stage broadcast, `y + c k` | 0.12 | 0.12 | 0.12 |
+| stage update and scatter in one kernel | 0.41 | 0.35 | 0.32 |
+| the fused lean kernel, for scale | 1.32 | 1.21 | 1.49 |
+
+**TreeAMR's copy kernels run far below bandwidth.**
+
+- The scatter moves 320 B a point at 0.96 TB/s, and the ghost fill's transfer kernel
+  0.65–0.68 TB/s, of the H200's 4.8 TB/s.
+- Both index through KA's 5-D `CartesianIndices` with run-time sizes. Their SASS is
+  about 1200 instructions for one element, with integer division sequences.
+- A static-stride scatter is 2.4× faster. A fill at copy bandwidth would be about 4×
+  faster, which at `16³` saves more than the whole lean kernel costs.
+- That is TreeAMR's: precomputed or static indexing for its copy groups.
+
+**Storage.**
+
+- **Block size.** On the device `N ≥ 32`: at `16³` the fill is as dear as the
+  kernel. At `128³` the fill is negligible, but the stencil kernels are 5–25 %
+  slower (the fused lean kernel 1.49 against 1.21) because their strides reach
+  further. With an efficient fill, `32`–`64` is the range to use.
+- **Layout.** The variable-major block layout `(i, j, k, v, b)` stays: warps
+  coalesce along `i` and every component is a dense 3-D array. Padding the stored
+  `x` extent (39 at `N = 32`) so that owned rows start on 128 B would save L1
+  wavefronts on the stencil loads without an `x` offset — about half of them — for
+  perhaps 10 % on the stencil kernels **(predicted, not measured)**.
+- **A ghosted state.** The integrator's stage vectors are field sets, so there is
+  no scatter. The cost is `(N + 2G + 1)³/N³` of memory per stage vector — 1.81 at
+  `N = 32`, 1.16 at `N = 128` — unless the stage arithmetic skips the ghosts.
+
+**Time integration.** A native RK4 whose stage update is the right-hand side's
+epilogue never stores `k`. The kernel writes `acc += b Δt k`, and writes the next
+stage's input `y + a Δt k` straight into a second working array — double-buffered,
+since neighbours still read the current one.
+
+- **What it saves:** about 640 B a point a stage against 960, so 0.1–0.2 ns/pt a
+  stage and **10–15 % of a step** once the kernel is 1.2 ns/pt. It removes passes,
+  not much traffic.
+- **What it would change:** the range projection is pointwise and would go into the
+  same epilogue. That merges two of [the state's three
+  writers](#the-range-projection) into one kernel, which is a
+  decision for review.
+
+**The projection (predicted)**, per owned point at `N = 32`, from the measured
+pieces:
+
+| ns/pt | today | kernel fixed | and TreeAMR's copies at bandwidth | and a ghosted state with a fused stepper |
+|---|---|---|---|---|
+| kernel | 8.48 | 1.21 | 1.21 | ~1.3 with the epilogue |
+| scatter | 0.34 | 0.34 | 0.14 | 0 |
+| ghost fill | 0.40 | 0.40 | ~0.1 | ~0.1 |
+| right-hand side | 9.21 | 1.95 | 1.45 | ~1.4 |
+| RK4 step | 37.4 | ~8.3 | ~6.3 | ~5.6 |
+
+That is 4.5× to 7× per step. At `128³` the first column's change alone gives about
+8 ns/pt.
+
+**The order of the work (proposed).**
+
+1. **The lean, closure-free source in `pointwise.jl`.** It is a third spelling,
+   tested to roundoff against `gh_node_source` on every background of
+   `pointwise_backgrounds.jl` and against the forward-mode pass. It helps the CPU
+   too. **(Done 2026-10-05:** `gh_node_source_lean`.**)**
+2. **The kernel in the order above**, with `Val(N)` for static strides and linear
+   `@inbounds` stores. This amends "One right-hand-side evaluation": the source
+   moves from step 3 to step 2, and the per-component streaming stays. **(Done
+   2026-10-05, without `Val(N)`:** static strides are worth 4 %, and a kernel
+   specialised on the block size would be compiled again at every `N` the suite
+   runs.**)**
+3. **Forced inlining and a static workgroup** on the device, through TreeAMR keeping
+   the backend a field set was built with, or the kernel's remaining closures
+   rewritten.
+   - Steps 1–3 together are measured: **8.5 → 1.2 ns/pt**.
+   - Steps 1–2 alone are 3.1 ns/pt.
+
+   **(Done 2026-10-05 by the second route:** nothing in the kernel is a closure
+   any more, and forcing inlining changes nothing — below.**)**
+4. **TreeAMR's scatter and transfer kernels at bandwidth:** 0.74 → ~0.25 ns/pt at
+   `N = 32`, and more at `N = 16`. Upstream. **(The first change TreeAMR should
+   make:** [Upstream prerequisites](#upstream-prerequisites), item 5.**)**
+5. **`metric_derivatives` and the algebraic gauge source made lean** like the
+   source. **(Half done 2026-10-05:** `metric_divergences` forms the contraction
+   alone; the algebraic source has lost its closures but not its spills.**)**
+6. **Then, if its 10–15 % is wanted, a native stepper** with a ghosted state and the
+   stage update fused into the right-hand side.
+
+Not worth doing, measured: shared-memory staging of the principal part, `maxregs`,
+one component per thread, further workgroup tuning.
+
+**Implemented (2026-10-05).** Items 1–3, and half of 5, are in `src/`.
+
+The package's own `gh_rhs!`, through `map_blocks!` and KernelAbstractions'
+default backend (H200 job 570217, cn111):
+
+| per owned point, ns | 512 × `16³` | 512 × `32³` | 8 × `128³` |
+|---|---|---|---|
+| the kernel, before → after | 8.55 → **1.21** | 8.48 → **1.08** | 8.90 → **1.28** |
+| `gh_rhs!`, before → after | 9.94 → **2.61** | 9.21 → **1.81** | 9.31 → **1.70** |
+| of which TreeAMR's `scatter!` and `fill_ghosts!`, unchanged | 1.39 | 0.73 | 0.41 |
+
+- **Forcing inlining changes nothing now:** 1.075 against 1.077 ns at `32³`, with
+  `du` bit for bit the same.
+- **The kernel's SASS:** 5992 instructions, 2872 of them FP64, 255 registers, and no
+  call into Julia code. Its 32 call sites are CUDA's division and square-root slow
+  paths and the exception paths. Some spilling is left (298 `LDL` and 232 `STL`,
+  static): the head still spills a little, as the prototypes' K1a did.
+- **`bench/stepping.jl` on the H200** (512 × `16³`):
+  - the gauge wave's right-hand side 20.7 → 5.47 ms, and its RK4 step 84.3 → 22.7 ms;
+  - the hole fixture 28.8 → 17.8 ms and 116 → 72 ms. Its `:damped` layer branch
+    still collects `F` and evaluates the analytic solution's dual pass.
+- **The driver's records** (`BENCH_MODE=driver`): the hole's `err_l2 =
+  1.690514e−06` equals September's to every printed digit, and the wave's is
+  `7.683712e−09`.
+- **On the CPU** (development machine, four threads, loaded 9–12), the right-hand
+  side is faster too: the gauge wave's (64 × `16³`) 140 → 84 ms, the hole
+  fixture's (512 × `16³`) 1521 → 1187 ms.
+
+What is left of an evaluation is TreeAMR's: the scatter and the ghost fill are 40 %
+of `gh_rhs!` at `32³` and 53 % at `16³`.
+
+**Not measured.**
+
+- A hole: the interior branches, the sampled gauge source and the `:fitted` cache
+  reads are outside this scope. The layer kernels run the new head and Π functions
+  but keep their own shape.
+- `ncu` counters: occupancy and HBM traffic above are inferred from registers,
+  local memory and SASS counts.
+- `Float32`, more than one GPU, and the monitor kernels.
+
+### The merge with `main` and the rotating octant (step X4)
+
+Step X4 merged `main` (`cbe3662`, the spill-free right-hand side of the
+previous section) and the rotating octant (`0a96f27`) into the excision
+round's integration branch, and unified the kernel: the stencil provider is
+the argument of `main`'s `gh_rhs_head` and `gh_rhs_pi` ([One right-hand-side
+evaluation](#one-right-hand-side-evaluation), "One design after `main`'s
+rewrite"; [Excision](#excision-added-2026-10-05), "What step X4 changed").
+Compared against `main` and against the integration branch before the merge
+(`b80f4ed`), with one manifest (TreeAMR 0.1.7, KernelAbstractions 0.9.43,
+Julia 1.13.1; on the H200 CUDA.jl 6.4.2, driver 595.45, X3's).
+
+**On the CPU** (development machine, Apple silicon, four threads):
+- `test/thread_workload.jl` prints `main`'s six lines character for
+  character; the seventh, the excised right-hand side, has the base's zone
+  (2192), excised (3743) and zone-block (32) counts, its classes' digest, its
+  outflow rows and its gauge constraint to every printed digit, and another
+  `du` digest (`main`'s source is summed in another order).
+- The one-chunk octant runs (`case=ks L=8 N=16 roots=2 radii=4,2 t_end=1/2
+  chunk=1/2 cfl=1/2`) — `:damped` with the default noise, `:fitted` without
+  — give `main`'s `octant.csv` in every cell but the wall clock, and
+  `main`'s `records.csv` in every column `main` has.
+- The excised fixture: the centered points' `du` is the `:none` kernel's at
+  55 505 of 55 505 points; with the lopsided blend, the 25 165 points beyond
+  its start are the blend-free run's bit for bit (496 were not before the
+  main kernel took the `:none` call there); the closure provider at the 4508
+  centered points next to the band is `Centered`'s at 2826, and within 103
+  eps of each variable's largest `|du|` at the rest.
+
+**On one H200** (Symmetry `cn111`, jobs 570646 and 570647, `h200q`, eight CPU
+threads; `excision-x4/{main,base,x4}`, each a copy with `CUDA` added). The
+octant is X3's scan mesh (`L = 64`, `N = 64`, 29 blocks, 7.6 M points,
+`r_E = 1`); the bench is `bench/stepping.jl`'s 512 blocks of `16³`, minimum
+of ten, interleaved base–main–X4–X4–main–base and base–X4–X4–base:
+
+| kernel, `q = 4`, `Float64` | registers | stack frame | spill stores / loads | `ld.local` / `st.local` | call sites (PTX) |
+|---|---|---|---|---|---|
+| `:damped`, `main` | 255 | 6576 B | 5700 / 8480 B | 50 / 119 | 47 |
+| `:damped`, step X4 | 255 | 6576 B | 5700 / 8480 B | 50 / 119 | 47 |
+| `:damped`, before the merge | 255 | 10 640 B | 296 / 320 B | 361 / 582 | 143 |
+| `:excised`, step X4 | 255 | 1544 B | 2692 / 3700 B | 1 / 10 | 5 |
+| `:excised`, before | 255 | 8800 B | 192 / 192 B | 311 / 495 | 131 |
+| `:excised` with the blend, step X4 | 255 | 2104 B | 5672 / 8212 B | 2 / 20 | 11 |
+| `:excised` with the blend, before | 255 | 9112 B | 316 / 316 B | 311 / 519 | 135 |
+| zone kernel, step X4 | 255 | 1512 B | 2140 / 3740 B | 1 / 10 | 6 |
+| zone kernel, before | 255 | 9984 B | 172 / 172 B | 311 / 607 | 112 |
+| zone kernel with the blend, step X4 | 255 | 1688 B | 2780 / 6128 B | 1 / 10 | 10 |
+
+| right-hand side | `main` | before the merge | step X4 |
+|---|---|---|---|
+| `:damped`, octant, ns a point (kernel alone) | 5.29 (3.96) | 11.40 (10.07) | 5.28 (3.96) |
+| `:excised`, octant (kernel; zone kernel) | — | 11.14 (9.73; 0.53 ms, 382 ns a zone point) | **2.88** (1.50; 0.33 ms, 238 ns, 1.5 %) |
+| `:excised` with the blend, octant | — | 13.39 (`+20.2 %`) | 2.95 (`+2.7 %`) |
+| hole, bench, ms | 17.66, 17.66 | 30.35, 30.35 | 17.71, 17.72 |
+| excised, bench, ms (zone kernel) | — | 31.91, 31.89 (2.0; 140 ns a zone point) | **14.80**, 14.81 (1.0; 70.7 ns) |
+| excised with the blend, bench, ms | — | 35.37, 35.35 (`+10.8 %`) | 16.43, 16.28 (`+10.5 %`) |
+| excised, bench, RK4 step, ms | — | 129.0 | 60.4 |
+
+- **The `:damped` kernel is `main`'s**: the same `ptxas` report and PTX
+  statistics, the same time to 0.3 %. **X2a's `+5 %` is gone**: `main`'s head
+  and Π components compiled through the slim `Centered` are `main`'s code.
+  (`main`'s `:damped` branch still collects `F` as two vectors and spills
+  5.7 kB a thread; that is `main`'s, recorded and not changed here.)
+- **The excised right-hand side is 3.9× faster on the octant** and 2.2× on the
+  bench — the main kernel stores through `main`'s spill-free path, the zone
+  kernel through the same head and Π components — and the blend's cost fell
+  from a fifth of a right-hand side to `2.7 %` on the octant.
+- **The device agrees with the CPU** as before: the largest difference of
+  `du` is `1.49·10⁻¹²` against a scale of `0.31` (`:damped` `1.50·10⁻¹²` of
+  `0.28`, the same as `main`'s), the classes are the CPU's exactly.
+
+**The excised hole on the rotating octant** (`test/octant_runs.jl
+case=ks interior=excised L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2
+cfl=1/2 amplitude=0`, `octant=reflecting` against `octant=rotating`, `a = 0`,
+`r_E = 1`, `m = 16`; the finder every chunk): the classes and the census are
+the mirror octant's at every stored point, the first row is identical, and
+at `t = 1` the record agrees to `10⁻⁷` in every `L2` norm, to `9.5·10⁻⁵` in
+the `L∞` norms of the shells outside the horizon and to `1.4·10⁻³` in those
+inside it — the nested mixed derivative's `x ↔ y` asymmetry, `3.0·10⁻³` at
+zone points on both octants, which the rotating seam turns into a difference
+between them ([Excision](#excision-added-2026-10-05), "What step X4
+changed"). With the mixed derivative averaged over both nestings (a scratch
+copy, proposed for X6) the two records agree to the CSV's ten digits. The two
+seam planes stay one state to `1.6·10⁻¹³` (`3.6·10⁻¹⁴` at zone points) as
+built. At `a = 3/5` the build refuses the case by name: 72 (zone point,
+closure axis) pairs with the shift into the excised set, the least `b/a =
+−0.499` (SimWatch's status `failed`, with the message).
+
+**The suite**: **6727 assertions in 21m10** at one thread and **6735 in
+16m29** at four (the two at once, the machine loaded 7–17 by step X5's
+models), all green — X3's counts, `main`'s 112, the rotating octant's 29 and
+the seam's 7. Two claims changed with `main`'s head, each saying so in its
+test: `evolution_tests.jl`'s probe sees `d1` of `h` asked twice per component
+and axis (270 requests, not 240), and `excision_tests.jl`'s closure provider
+at a point with no excised tap is `Centered`'s to 512 eps of each variable's
+largest `|du|` (measured 103), its every contraction still `isequal`.
 
 ### Excision: the analysis (step X1)
 
@@ -8583,7 +9460,13 @@ the design note that would start each:
   and a change to TreeAMR's RHS contract); generated code for the
   register schedule of the source algebra; and the question the traffic
   estimate above raises, whether TreeAMR's scatter-and-ghost pattern or
-  the kernel is the first thing to change.
+  the kernel is the first thing to change. **(Investigated 2026-10-05**, in [The
+  right-hand side on an H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).**)**
+  - Shared-memory staging is slower than L1.
+  - The source's register schedule is the lever, and a hand-written spelling
+    suffices.
+  - The kernel comes first; then TreeAMR's scatter and transfer kernels; the fused
+    stage update last, at 10–15 % of a step.
 - **A truncation-error indicator** in place of Löhner's — Richardson
   between a block and its restriction, which TreeAMR's operators make
   cheap — if the calibration in G4 shows Löhner's thresholds to be
@@ -8751,7 +9634,13 @@ first touch them:
    algebra is 505 ns and the stencils the rest, and the mesh pattern
    around it adds another 616. A host CPU says nothing about spills, so
    the question stays open for the H200; what G2 adds to it is that the
-   split it would be measured against is 3:1 and not 1:1.
+   split it would be measured against is 3:1 and not 1:1. **(Answered on the
+   H200 2026-10-05**, in [The right-hand side on an
+   H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).**)**
+   - The split is worth 1.25× with the package's source and 6 % with a
+     register-lean one, so the fused kernel stays.
+   - The spills come from the source and from closures left uninlined on the
+     device, not from the stencils.
 4. **In-kernel evaluation of `SpacetimeMetrics`** on the H200 (G6); the
    structure does not depend on it, the cost does.
 5. **The defaults** — `q = 4`, `N = 32`, `cfl = 1/4`, `ε_KO = 0.5`,

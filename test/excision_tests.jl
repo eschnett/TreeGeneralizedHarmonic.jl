@@ -201,15 +201,25 @@ const TGHx = TreeGeneralizedHarmonic
         # ascending order must be `axis_stencil`'s and `mixed_stencil`'s
         # arithmetic, so that a centered point reached by the closure provider
         # — the inner closures of a nested mixed derivative, a zone point's
-        # far side — is today's. Each contraction is claimed `isequal`; the
-        # whole `F` is `isequal` where the platform gives it (Apple silicon)
-        # and held to `64 eps` otherwise, since it is one body compiled for two
-        # providers (`CLAUDE.md`, "Two spellings of one expression").
+        # far side — is today's. Each contraction is claimed `isequal`. The
+        # whole `F` is one body compiled for two providers (`CLAUDE.md`, "Two
+        # spellings of one expression"): it was `isequal` on Apple silicon
+        # until step X4, and since `main`'s head (merged in step X4) the two
+        # heads — one around the closure provider's loops over its table, one
+        # around the centered provider's unrolled stencils — fuse
+        # `metric_quantities`' StaticArrays `muladd`s differently (`β` by 2.8
+        # eps, `A^{ij}` by 6.8). In a stationary background `F` is the small
+        # difference of `O(1)` terms, so that is up to 238 eps of `F`'s own
+        # largest value at these points: the whole `F` is held to roundoff as
+        # the suite's other comparisons of two specialisations are, 512 eps of
+        # each variable's largest `|du|` on the mesh (measured: 103, at 1682
+        # of the 4508 points; amended in step X4).
         C = TGHx.Centered(T, Val(q), st)
         nc = 0
         each = true
         bitwise = true
-        worst = 0.0
+        nbitwise = 0
+        dmax = zeros(20)
         for b in 1:nblocks(U), I in owned
             cls(ex, I, b) == TGHx.CLASS_CENTERED || continue
             # Centered points next to the band: their taps are evolved points
@@ -241,16 +251,19 @@ const TGHx = TreeGeneralizedHarmonic
             F0 = TGHx.gh_rhs_at_point(T, U.work, Hw, Tuple(I), b, var, st, sv, inv_h,
                                       γ0, case.γ2, εh, Val(q), Val(true), Val(true))
             bitwise &= isequal(F1, F0)
-            sc = max(maximum(abs, F0[1]), maximum(abs, F0[2]))
-            worst = max(worst, max(maximum(abs, F1[1] - F0[1]),
-                                   maximum(abs, F1[2] - F0[2])) / sc)
+            nbitwise += isequal(F1, F0)
+            dmax .= max.(dmax, abs.(vcat(F1[1], F1[2]) .- vcat(F0[1], F0[2])))
             nc += 1
         end
+        vscale = [maximum(abs, A[:, :, :, v, :]) for v in 1:20]
+        worst = maximum(dmax ./ vscale)
         @info "the closure provider's F at $nc centered points next to the band: " *
-              (bitwise ? "bit for bit" : "$(worst / eps(T)) eps") * " the centered one's"
+              (bitwise ? "bit for bit" :
+               "$nbitwise bit for bit, the rest within $(worst / eps(T)) eps of " *
+               "each variable's largest |du|") * " the centered one's"
         @test nc > 1000
         @test each
-        @test bitwise || worst ≤ 64 * eps(T)
+        @test bitwise || worst ≤ 512 * eps(T)
     end
 
     @testset "no kernel reads an excised value" begin
@@ -543,6 +556,108 @@ const TGHx = TreeGeneralizedHarmonic
         @test occursin("refused for an :excised hole",
                        msg(() -> discrete_gradient_momentum!(U, case, zero(T), q,
                                                              p.schedule)))
+    end
+
+    @testset "the classes agree across the rotating octant's seam, and with the mirror octant" begin
+        # Guards the excision on TreeAMR 0.1.7's rotating seam (step X4). The
+        # class field set's bit is a scalar — even under a mirror, turned into
+        # itself by a quarter turn — and without a rotation map TreeAMR
+        # refuses the field set over a seam; with the wrong sign the ghosts
+        # across the seam would hold minus the excised bit, which reads as
+        # evolved, and the points next to the seam would take centered
+        # stencils through excised values. On the rotating octant `[0, 5/2]³`
+        # (uniform, `h = 5/64`, the fixture's spacing at the hole; `a = 0`)
+        # with the ball `r < 3/4` excised:
+        #   * every stored point whose image under the quarter turns about `z`
+        #     and the mirror at `z = 0` is an owned point — the ghosts across
+        #     the seam, the wall's and the blocks' own — has that owned point's
+        #     excised bit, found by position;
+        #   * the two owned seam planes `x = 0` and `y = 0`, the same points a
+        #     quarter turn apart, have the same class — excised, zone or
+        #     centered — point by point;
+        #   * at `a = 0` the mirror octant is the same problem: its classes are
+        #     the rotating octant's at every stored point, its census is the
+        #     same, and one right-hand side agrees at every owned point — to
+        #     roundoff, 512 eps of each variable's largest `|du|`, since the
+        #     ghosts across the seam and across the mirror are copied from
+        #     different owned points of the same solution.
+        mk(oct) = kerr_schild_case(T; halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=r_E,
+                                   chunk=T(1 // 10), interior=:excised, octant=oct)
+        function octant_problem(c)
+            f = gh_forest(T, c; N=N, roots=4)
+            Uo = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
+                             parity=state_parity(f), rotation=state_rotation(f))
+            fill_exact!(Uo, c, zero(T))
+            po = GHProblem(Uo, GhostSchedule(Uo, ops), c; q=q)
+            uo = statevector(Uo)
+            gather!(uo, Uo)
+            return po, uo
+        end
+        pr, ur = octant_problem(mk(:rotating))
+        pm, um = octant_problem(mk(:reflecting))
+        Ur, er = pr.U, pr.excision
+        @test TGHx.seam_dims(Ur.forest) == (1, 2)
+        hs = minimum_spacing(T, Ur.forest)
+        # The owned points' classes by their integer position `x/h`.
+        owned_cls = Dict{NTuple{3,Int},UInt8}()
+        for b in 1:nblocks(Ur), I in owned
+            x = coordinates(Ur, b, Tuple(I) .+ G)
+            owned_cls[ntuple(d -> round(Int, x[d] / hs), 3)] =
+                er.classes[I[1] + G, I[2] + G, I[3] + G, b]
+        end
+        # The image of a position in the evolved octant: the quarter turn
+        # `(x, y) → (y, −x)` until both are non-negative, then the mirror in z.
+        function image(k)
+            for _ in 1:4
+                (k[1] ≥ 0 && k[2] ≥ 0) && break
+                k = (k[2], -k[1], k[3])
+            end
+            return (k[1], k[2], abs(k[3]))
+        end
+        nseam = 0
+        nexc = 0
+        bad = 0
+        for b in 1:nblocks(Ur), S in CartesianIndices(size(er.classes)[1:3])
+            x = coordinates(Ur, b, Tuple(S))
+            k = ntuple(d -> round(Int, x[d] / hs), 3)
+            c = get(owned_cls, image(k), nothing)
+            c === nothing && continue           # beyond the outer faces
+            excised = er.classes[S, b] == TGHx.CLASS_EXCISED
+            bad += excised != (c == TGHx.CLASS_EXCISED)
+            if k[1] < 0 || k[2] < 0
+                nseam += 1
+                nexc += excised
+            end
+        end
+        @test bad == 0
+        @test nseam > 1000 && nexc > 100        # the seam's ghosts reach the ball
+        planes = 0
+        same = 0
+        zones = 0
+        for (k, c) in owned_cls
+            k[1] == 0 && k[2] > 0 || continue
+            planes += 1
+            same += owned_cls[(k[2], 0, k[3])] == c
+            zones += c == TGHx.CLASS_ZONE
+        end
+        @test planes > 0 && same == planes && zones > 0
+        em = pm.excision
+        @test er.classes == em.classes
+        @test (er.nzone, er.nexcised, er.ncentered, er.nzoneblocks) ==
+              (em.nzone, em.nexcised, em.ncentered, em.nzoneblocks)
+        dur = similar(ur)
+        gh_rhs!(dur, ur, pr, zero(T))
+        dum = similar(um)
+        gh_rhs!(dum, um, pm, zero(T))
+        Ar = statearray(dur, Ur)
+        Am = statearray(dum, pm.U)
+        nbit = count(((I, b),) -> all(v -> isequal(Ar[I, v, b], Am[I, v, b]), 1:20),
+                     Iterators.product(owned, 1:nblocks(Ur)))
+        worst = maximum(v -> maximum(abs, Ar[:, :, :, v, :] - Am[:, :, :, v, :]) /
+                             maximum(abs, Am[:, :, :, v, :]), 1:20)
+        @info "the rotating octant's excised du: $nbit of $(N^3 * nblocks(Ur)) " *
+              "points bit for bit the mirror octant's, worst $(worst / eps(T)) eps"
+        @test worst ≤ 512 * eps(T)
     end
 
     @testset "a run to M/5 is finite with a positive normal margin, and restarts as the run" begin
