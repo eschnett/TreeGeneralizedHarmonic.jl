@@ -30,13 +30,17 @@ const TGHx = TreeGeneralizedHarmonic
     forest = hole_fixture_forest(T, case; N=N)
 
     # A problem on the fixture's mesh with the case's initial data, and its
-    # state vector.
+    # state vector. Its names are `local`: `U`, `p` and `u` are also this
+    # file's own, and a closure that assigns a name of its enclosing scope
+    # rebinds it — every `setup` until step X6 replaced the fixture's
+    # problem with the one it built, or with a half-built field set where it
+    # refused (no testset read them afterwards until X6's).
     function setup(c; interior=c.interior, perturb=nothing)
-        U = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3))
+        local U = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3))
         fill_exact!(U, c, zero(T); interior=interior)
         perturb === nothing || perturb(U)
-        p = GHProblem(U, GhostSchedule(U, ops), c; q=q, interior=interior)
-        u = statevector(U)
+        local p = GHProblem(U, GhostSchedule(U, ops), c; q=q, interior=interior)
+        local u = statevector(U)
         gather!(u, U)
         return p, u
     end
@@ -171,8 +175,15 @@ const TGHx = TreeGeneralizedHarmonic
                         end
                         kos = max(kos, abs(TGHx.ko(S, work, base + wsv, d)))
                     end
+                    # The mixed derivative symmetric in its two axes (the
+                    # default from step X6) and nested along the lower axis
+                    # (steps X2b–X5, `mixed = :nested`): both exact.
+                    Sn = TGHx.closure_provider(T, Val(GG), wst, cl, base, tab, one(T),
+                                               one(T), Val(false))
                     for (i, j) in ((1, 2), (1, 3), (2, 3))
                         worst = max(worst, abs(TGHx.dmix(S, work, base, i, j) -
+                                               dpoly(x, unit(i) .+ unit(j))))
+                        worst = max(worst, abs(TGHx.dmix(Sn, work, base, i, j) -
                                                dpoly(x, unit(i) .+ unit(j))))
                     end
                     npts += 1
@@ -507,10 +518,25 @@ const TGHx = TreeGeneralizedHarmonic
               "8, 0.0, 0.5, 1.0, 3, 0.1, Val{:fitted}(), nothing, " *
               "StateBounds{Float64}(0.02, 50.0, 0.01, 1000.0, 10.0, 100.0, 0.9), " *
               "true, 1)"
-        @test occursin("Excision{Float64, :msn}(1.0, 4.0, Val{:msn}())",
+        # From step X6 the parameters include the zone points' mixed derivative,
+        # `mixed = :symmetric` by default, which prints as a fourth field;
+        # `mixed = :nested`, the operator of steps X2b–X5, prints as the struct
+        # did before the field, so that a checkpoint those steps wrote restarts
+        # under its own operator when it is asked for (and its recipe refuses
+        # the new default).
+        @test occursin("Excision{Float64, :msn}(1.0, 4.0, Val{:msn}(), true)",
                        repr(Interior(T; center=(0, 0, 0), r_0=0.4, r_1=0.75,
                                      variant=:excised,
                                      excision=Excision(T; upwind=(1, 4)))))
+        @test occursin("Excision{Float64, :msn}(1.0, 4.0, Val{:msn}())",
+                       repr(Interior(T; center=(0, 0, 0), r_0=0.4, r_1=0.75,
+                                     variant=:excised,
+                                     excision=Excision(T; upwind=(1, 4),
+                                                       mixed=:nested))))
+        @test repr(Excision(Float32; mixed=:nested)) ==
+              "Excision{Float32, :msn}(0.0f0, 0.0f0, Val{:msn}())"
+        @test excision_mixed(Excision(T)) === :symmetric
+        @test_throws ArgumentError Excision(T; mixed=:outer)
         @test_throws ArgumentError Interior(T; center=(0, 0, 0), r_0=0.4, r_1=1.15,
                                             excision=Excision(T))
     end
@@ -519,7 +545,8 @@ const TGHx = TreeGeneralizedHarmonic
         # Guards the checks the design rests on, each where it is asserted:
         # the surface on one level, the singular set inside the core rule's
         # sphere, the margin, `ε_KO > 0`, `m ≥ ⌈√3 G⌉` with a horizon finder,
-        # the shift into the excised set (a spinning hole), the range
+        # an excised tap of a frame-dragged axis with no source (until step
+        # X6: the shift into the excised set, a spinning hole), the range
         # projection, and the driver's keywords and the Π post-pass.
         msg(f) = try
             f()
@@ -541,9 +568,31 @@ const TGHx = TreeGeneralizedHarmonic
         @test occursin("⌈√3 G⌉",
                        msg(mk(hole_fixture(T; q=q, variant=:excised, r_1=r_E, margin=3,
                                            horizon=Horizon(T; every=1, N=12)))))
-        @test occursin("shift points into the excised set",
-                       msg(mk(hole_fixture(T; q=q, a=T(3 // 5), variant=:excised,
-                                           r_0=T(31 // 50), r_1=T(19 // 25)))))
+        # The shift pointing into the excised set — X2b's refusal of a spinning
+        # hole — is from step X6 a frame-dragged axis with a rule of its own,
+        # and what is refused is what the rule does not cover: an excised tap
+        # with no source along its direction inside the point's `G`-box. On a
+        # coarse rotating octant (`q = 4`, `h = 1/4`, `r_E = 17/25`, under
+        # three cells) the lopsided blend's row, which reaches `G` into the
+        # excised side of a frame-dragged axis, has two such taps; the same
+        # surface without the blend builds.
+        @test mk(hole_fixture(T; q=q, a=T(3 // 5), variant=:excised, r_0=T(31 // 50),
+                              r_1=T(19 // 25)))()[1].excision.ndragged > 0
+        coarse(up) = () -> begin
+            local c = kerr_schild_case(T; a=T(3 // 5), halfwidth=T(5 // 2), r_0=T(16 // 25),
+                                 r_1=T(17 // 25), chunk=T(1 // 10), interior=:excised,
+                                 octant=:rotating, margin=4,
+                                 excision=Excision(T; upwind=up))
+            local f = gh_forest(T, c; N=10, roots=1)
+            local Uc = FieldSet{T}(f, 20; G=3, centering=vertexcentered(3),
+                             parity=state_parity(f), rotation=state_rotation(f))
+            fill_exact!(Uc, c, zero(T))
+            GHProblem(Uc, GhostSchedule(Uc, Operators(prolongation=6, restriction=6)),
+                      c; q=4).excision
+        end
+        @test occursin("there is no non-excised point along the lattice direction",
+                       msg(coarse((0, 1))))
+        @test coarse(nothing)().ndragged == 2
         @test occursin("no range projection",
                        msg(() -> hole_fixture(T; q=q, variant=:excised, r_1=r_E,
                                               bounds=default_bounds(T; M=1,
@@ -558,7 +607,7 @@ const TGHx = TreeGeneralizedHarmonic
                                                              p.schedule)))
     end
 
-    @testset "the classes agree across the rotating octant's seam, and with the mirror octant" begin
+    @testset "the classes agree across the rotating octant's seam and with the mirror octant, and the two octants evolve as one" begin
         # Guards the excision on TreeAMR 0.1.7's rotating seam (step X4). The
         # class field set's bit is a scalar — even under a mirror, turned into
         # itself by a quarter turn — and without a rotation map TreeAMR
@@ -581,8 +630,10 @@ const TGHx = TreeGeneralizedHarmonic
         #     roundoff, 512 eps of each variable's largest `|du|`, since the
         #     ghosts across the seam and across the mirror are copied from
         #     different owned points of the same solution.
-        mk(oct) = kerr_schild_case(T; halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=r_E,
-                                   chunk=T(1 // 10), interior=:excised, octant=oct)
+        mk(oct; mixed=:symmetric) =
+            kerr_schild_case(T; halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=r_E,
+                             chunk=T(1 // 10), interior=:excised, octant=oct,
+                             excision=Excision(T; mixed=mixed))
         function octant_problem(c)
             f = gh_forest(T, c; N=N, roots=4)
             Uo = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
@@ -658,6 +709,36 @@ const TGHx = TreeGeneralizedHarmonic
         @info "the rotating octant's excised du: $nbit of $(N^3 * nblocks(Ur)) " *
               "points bit for bit the mirror octant's, worst $(worst / eps(T)) eps"
         @test worst ≤ 512 * eps(T)
+        # **The two octants evolve as one (step X6).** On the analytic state
+        # above both octants' ghosts hold the same solution, so one right-hand
+        # side cannot tell an operator that is symmetric in `x ↔ y` from one
+        # that is not; an evolution can, since the rotating seam forces the
+        # quarter turn's symmetry on the state and the mirror octant does not.
+        # With the zone points' mixed derivative symmetric (the default from
+        # X6) the two octants, each stepped four times on its own, hold the
+        # same state to roundoff (measured `0.77` eps of each variable's
+        # largest value) and the same right-hand side on it (`2.9·10³` eps:
+        # the states' roundoff over `h²`); with steps X2b–X5's single nesting
+        # (`mixed = :nested`) they differ at the truncation level, `1.7·10⁻⁶`
+        # and `1.5·10⁻³` — X4's `1.4·10⁻³` at `t = 1` in its making.
+        rel(A, B) = maximum(v -> maximum(abs, A[:, :, :, v, :] - B[:, :, :, v, :]) /
+                                 maximum(abs, B[:, :, :, v, :]), 1:20)
+        dt = gh_dt(pm, um; cfl=T(1 // 4))
+        function evolved(po, uo)
+            v = gh_solve(po, uo, (zero(T), 4dt); dt=dt)
+            dv = similar(v)
+            gh_rhs!(dv, v, po, 4dt)
+            return statearray(v, po.U), statearray(dv, po.U)
+        end
+        (sr, fr), (sm, fm) = evolved(pr, ur), evolved(pm, um)
+        su, sf = rel(sr, sm), rel(fr, fm)
+        (snr, fnr), (snm, fnm) = evolved(octant_problem(mk(:rotating; mixed=:nested))...),
+                                 evolved(octant_problem(mk(:reflecting; mixed=:nested))...)
+        nu, nf = rel(snr, snm), rel(fnr, fnm)
+        @info "four steps on each octant: the states differ by $(su / eps(T)) eps and " *
+              "their du by $(sf / eps(T)) eps (symmetric); by $nu and $nf (nested)"
+        @test su ≤ 64 * eps(T) && sf ≤ 2^15 * eps(T)
+        @test nu > 1e-8 && nf > 1e-5
     end
 
     @testset "a run to M/5 is finite with a positive normal margin, and restarts as the run" begin
@@ -675,6 +756,9 @@ const TGHx = TreeGeneralizedHarmonic
         @test all(r -> r.excision_band == ex.nzone && r.excision_band_nonfinite == 0,
                   rows)
         @test all(r -> r.excision_normal_min > 1 && r.excision_into == 0, rows)
+        # Kerr-Schild `a = 0` has no frame-dragged axis (step X6).
+        @test all(r -> r.excision_dragged == 0 && r.excision_faces_dragged == 0 &&
+                       r.excision_flips == 0, rows)
         @test all(r -> r.residual == 0, rows)
         # Outside the step-5 fixture's own layer, `r ≥ 23/20`, the error is
         # the `:damped` fixture's: `4.390e−3` against `4.395e−3` at `M/5`
@@ -691,6 +775,417 @@ const TGHx = TreeGeneralizedHarmonic
         first_ = evolve!(T, case; forest=deepcopy(forest), common...)
         @test !first_.finished
         second = evolve!(T, case; common..., restart_file=latest_checkpoint(pre))
+        @test second.finished
+        @test isequal(second.u, run.u)
+        @test isequal(second.records, run.records)
+    end
+
+    # --- step X6: the frame-dragged faces in the zone kernel, and the mixed
+    # derivative symmetric in its two axes (`CODE.md`, "Excision", "What step
+    # X6 built"). The spinning hole is Kerr-Schild `a = 3/5` on the rotating
+    # octant `[0, 5/2]³` (uniform, `h = 5/64`, the fixture's spacing at the
+    # hole) with the ball `r < 19/25` excised and the core rule's sphere at
+    # `31/50`, between the ring and the surface: 33 frame-dragged axes.
+
+    @testset "the symmetric mixed derivative takes one value across the diagonal, bit for bit, and the nested one does not" begin
+        # Guards the symmetrization (step X6, proposed in step X4). Near the
+        # surface the `x`- and `y`-closures differ, so `D_x D_y ≠ D_y D_x` at
+        # the truncation level, and an operator with one nesting is not
+        # equivariant under the reflection `x ↔ y` — nor under the rotating
+        # octant's quarter turn. `½(D_x D_y + D_y D_x)` at a point is the same
+        # arithmetic as at its mirror image on the mirrored data, `a + b ==
+        # b + a`, so it must agree bit for bit; the nested sum must not. On one
+        # host block with an excised half-space that is not symmetric across
+        # the diagonal (`2i + j + k ≤ c`) and smooth data that is not either,
+        # at every evolved point whose `(x, y)` box meets the excised set; and
+        # `∂_x∂_z` at a point is `∂_y∂_z` at its image in both nestings.
+        for qq in (2, 4)
+            GG = qq ÷ 2 + 1
+            n = 4GG + 9
+            r = qq ÷ 2
+            tab = TGHx.closure_arrays(T, Val(qq), :msn, TreeGeneralizedHarmonic.CPU())
+            c0 = 2n
+            excised(I) = 2I[1] + I[2] + I[3] ≤ c0
+            f(x) = sin(0.4 * x[1] - 0.3 * x[2] + 0.2 * x[3]) + 0.01 * x[1]^2 * x[2]
+            sw(I) = (I[2], I[1], I[3])
+            work = (Array{T}(undef, n, n, n, 1, 1), Array{T}(undef, n, n, n, 1, 1))
+            cl = (Array{UInt8}(undef, n, n, n, 1), Array{UInt8}(undef, n, n, n, 1))
+            for I in CartesianIndices((n, n, n)), (k, J) in ((1, Tuple(I)), (2, sw(Tuple(I))))
+                work[k][I, 1, 1] = excised(J) ? T(NaN) : f(T.(J))
+                cl[k][I, 1] = excised(J) ? TGHx.CLASS_EXCISED : TGHx.CLASS_ZONE
+            end
+            wst, _, _ = TGHx.work_strides(work[1])
+            base(I) = 1 + (I[1] - 1) * wst[1] + (I[2] - 1) * wst[2] + (I[3] - 1) * wst[3]
+            npts = 0
+            sym = true
+            nested_diff = 0
+            others = true
+            for I in CartesianIndices((n, n, n))
+                t = Tuple(I)
+                (all(d -> GG < t[d] ≤ n - GG, 1:3) && !excised(t)) || continue
+                any(excised((t[1] + a, t[2] + b, t[3])) for a in (-r):r, b in (-r):r) ||
+                    continue
+                for SYM in (true, false)
+                    SA = TGHx.closure_provider(T, Val(GG), wst, cl[1], base(t), tab, one(T),
+                                               zero(T), Val(SYM))
+                    SB = TGHx.closure_provider(T, Val(GG), wst, cl[2], base(sw(t)), tab,
+                                               one(T), zero(T), Val(SYM))
+                    xy = isequal(TGHx.dmix(SA, work[1], base(t), 1, 2),
+                                 TGHx.dmix(SB, work[2], base(sw(t)), 1, 2))
+                    SYM ? (sym &= xy) : (nested_diff += !xy)
+                    others &= isequal(TGHx.dmix(SA, work[1], base(t), 1, 3),
+                                      TGHx.dmix(SB, work[2], base(sw(t)), 2, 3))
+                end
+                npts += 1
+            end
+            @info "q = $qq: the (x, y) mixed derivative at $npts points next to the " *
+                  "surface; the nested one differs from its diagonal image at " *
+                  "$nested_diff of them"
+            @test npts > 100
+            @test sym && others
+            @test nested_diff > npts ÷ 2
+        end
+    end
+
+    @testset "the frame-dragged rule's advection is exact on polynomials to its degree, and reads no excised value" begin
+        # Guards `DraggedProvider` (step X6, step X5's rule): along a
+        # frame-dragged axis the advection is the centered `D₁` — with the
+        # lopsided blend at full weight the open lopsided row — with each
+        # excised tap extrapolated along its direction code from up to three
+        # sources inside the point's `G`-box. A tap read at the wrong index, a
+        # source outside the box or on the excised set, weights of the wrong
+        # `(k₀, n)` or a stencil row of the wrong offset would show on a
+        # quadratic, which three sources extrapolate exactly (at `q = 4`; at
+        # `q = 2` there are two at most), and on a linear function where a tap
+        # has two; a cubic, which they do not extrapolate, must show that the
+        # extrapolation is used. On one host
+        # block with an excised ball off the lattice's symmetry, the direction
+        # codes from its radial normal, every closure axis's bit set, every
+        # excised value `NaN`.
+        for qq in (2, 4)
+            GG = qq ÷ 2 + 1
+            n = 6GG + 9
+            tab = TGHx.closure_arrays(T, Val(qq), :msn, TreeGeneralizedHarmonic.CPU())
+            ext = TGHx.extrapolation_table(T, Val(qq))
+            ctr = (n / 2 + 0.37, n / 2 - 0.21, n / 2 + 0.13)
+            R = 2GG + 1.3
+            excised(I) = sum(abs2, I .- ctr) < R^2
+            rng = Xoshiro(10 + qq)
+            mons = [(a, b, c) for a in 0:3 for b in 0:3 for c in 0:3 if a + b + c ≤ 3]
+            coef = [T(rand(rng, -9:9)) / 8 for _ in mons]
+            P(x, deg) = sum(coef[m] * prod(x[k]^p[k] for k in 1:3)
+                            for (m, p) in enumerate(mons) if sum(p) ≤ deg)
+            dP(x, deg, d) = sum(coef[m] * p[d] * x[d]^(p[d] - 1) *
+                                prod(k == d ? 1 : x[k]^p[k] for k in 1:3)
+                                for (m, p) in enumerate(mons) if sum(p) ≤ deg && p[d] > 0)
+            work = Array{T}(undef, n, n, n, 3, 1)
+            cl = Array{UInt8}(undef, n, n, n, 1)
+            codes = zeros(UInt8, n, n, n, 1)
+            for I in CartesianIndices((n, n, n))
+                t = Tuple(I)
+                ex_ = excised(t)
+                cl[I, 1] = ex_ ? TGHx.CLASS_EXCISED : TGHx.CLASS_ZONE
+                for (v, deg) in enumerate((1, 2, 3))
+                    work[I, v, 1] = ex_ ? T(NaN) : P(T.(t), deg)
+                end
+                if ex_
+                    nr = (t .- ctr) ./ sqrt(sum(abs2, t .- ctr))
+                    codes[I, 1] = TGHx.direction_code(T.(nr)...)
+                end
+            end
+            wst, wsv, _ = TGHx.work_strides(work)
+            scale = maximum(abs, filter(isfinite, work))
+            nsrc = zeros(Int, 4)
+            nstencil = zeros(Int, 3)               # by the fewest sources of a tap
+            worst2 = 0.0
+            worst1 = 0.0
+            cubic = 0.0
+            for I in CartesianIndices((n, n, n))
+                t = Tuple(I)
+                (all(d -> GG < t[d] ≤ n - GG, 1:3) && !excised(t)) || continue
+                b0 = 1 + (t[1] - 1) * wst[1] + (t[2] - 1) * wst[2] + (t[3] - 1) * wst[3]
+                for λ in (zero(T), one(T))
+                    C0 = TGHx.closure_provider(T, Val(GG), wst, cl, b0, tab, one(T), λ)
+                    any(d -> max(C0.km[d], C0.kp[d]) < GG, 1:3) && continue  # inadmissible
+                    rule = sum((min(C0.km[d], C0.kp[d]) < GG) << (d - 1) for d in 1:3)
+                    S = dragged_provider(C0, codes, ext, rule)
+                    for d in 1:3, β in (-one(T), one(T))
+                        ks, s = C0.km[d] < GG ? (C0.km[d], -1) : (C0.kp[d], 1)
+                        # The taps the rule reads on the excised side: the
+                        # centered `D₁`'s to `q/2`, and at full blend the
+                        # lopsided row's too — to `G` when `β` points there
+                        # (its upwind side), to `q/2 − 1` when it does not.
+                        reach = !iszero(λ) && β * s > 0 ? GG : qq ÷ 2
+                        ks < reach || continue
+                        fewest = 3
+                        for j in (ks + 1):reach
+                            cQ = b0 + s * j * wst[d]
+                            cl[cQ] == TGHx.CLASS_EXCISED || continue
+                            o = s * j
+                            _, m, _ = TGHx._tap_sources(cl, codes, cQ, wst, d == 1 ? o : 0,
+                                                        d == 2 ? o : 0, d == 3 ? o : 0,
+                                                        Val(GG), Val(3))
+                            nsrc[m + 1] += 1
+                            fewest = min(fewest, m)
+                        end
+                        fewest == 0 && continue          # the build refuses these
+                        nstencil[fewest] += 1
+                        x = T.(t)
+                        for (v, deg) in enumerate((1, 2, 3))
+                            # (`∂f_d`, the closure's own derivative, enters
+                            # only where the centered `D₁` reaches no excised
+                            # tap, and then at the blend's weight, zero here.)
+                            got = TGHx.adv(S, β, zero(T), work, b0 + (v - 1) * wsv, d)
+                            err = abs(got - dP(x, deg, d))
+                            deg == 1 && fewest ≥ 2 && (worst1 = max(worst1, err))
+                            deg == 2 && fewest == 3 && (worst2 = max(worst2, err))
+                            deg == 3 && (cubic = max(cubic, err))
+                        end
+                    end
+                end
+            end
+            @info "q = $qq: excised taps with 0, 1, 2, 3 sources $(nsrc); stencils by " *
+                  "their fewest $(nstencil); a cubic's worst error $(cubic / scale)"
+            # At `q = 2` the sources stop at `G = 2` steps (`k₀ + n − 1 ≤ G`,
+            # `extrapolation_table`), so two at most and the rule is linear.
+            @test nstencil[min(GG, 3)] > 100 && (GG == 2 || nstencil[2] > 0)
+            @test worst1 ≤ 1e-12 * scale && worst2 ≤ 1e-12 * scale
+            @test cubic > 1e-6 * scale
+        end
+    end
+
+    c35 = kerr_schild_case(T; a=T(3 // 5), halfwidth=T(5 // 2), r_0=T(31 // 50),
+                           r_1=T(19 // 25), chunk=T(1 // 10), interior=:excised,
+                           octant=:rotating)
+    f35 = gh_forest(T, c35; N=N, roots=4)
+    function spin_problem(c)
+        Us = FieldSet{T}(f35, 20; G=G, centering=vertexcentered(3),
+                         parity=state_parity(f35), rotation=state_rotation(f35))
+        fill_exact!(Us, c, zero(T))
+        ps = GHProblem(Us, GhostSchedule(Us, ops), c; q=q)
+        us = statevector(Us)
+        gather!(us, Us)
+        return ps, us
+    end
+    p35, u35 = spin_problem(c35)
+    e35 = p35.excision
+    U35 = p35.U
+    du35 = similar(u35)
+    gh_rhs!(du35, u35, p35, zero(T))
+    A35 = statearray(du35, U35)
+    codes35 = Array(e35.codes)
+    cls35(I, b) = e35.classes[I[1] + G, I[2] + G, I[3] + G, b]
+    rule35(I, b) = Int(codes35[I[1] + G, I[2] + G, I[3] + G, b])
+
+    @testset "a spinning hole builds: its frame-dragged axes are the state's, along x and y only, and their taps have sources" begin
+        # Guards the build of step X6: the rule bits and direction codes are
+        # built once, from the state and the frozen geometry, and the kernel
+        # reads nothing else. A bit that is not the census's criterion — the
+        # shift of the state pointing into the excised set along a closure
+        # axis, `b/a < 0` on the side whose run is shorter than `G` — would
+        # change the operator where X5 did not ask; a direction code that is
+        # not the lattice direction nearest the surface's normal would
+        # extrapolate along another line. Enumerated on the host at every
+        # owned zone point and every stored excised point. X5's numbers: no
+        # `z` axis is frame-dragged at `a = 3/5`, and on this octant's
+        # quadrant the shift's frame-dragged part points into the ball along
+        # `y` only (the `x` ones are the other quadrants').
+        st35, _, _ = TGHx.work_strides(U35.work)
+        S35 = statearray(u35, U35)
+        cl = Array(e35.classes)
+        bad = 0
+        peraxis = zeros(Int, 3)
+        nzone = 0
+        for b in 1:nblocks(U35), I in owned
+            cls35(I, b) == TGHx.CLASS_ZONE || continue
+            nzone += 1
+            cb = 1 + (b - 1) * prod(size(cl)[1:3]) + (I[1] + G - 1) * st35[1] +
+                 (I[2] + G - 1) * st35[2] + (I[3] + G - 1) * st35[3]
+            hv = SVector{10,T}(ntuple(v -> S35[I, v, b], 10))
+            _, _, α, β, γu, _ = TGHx.metric_quantities(TGHx._sym4(hv))
+            want = 0
+            for d in 1:3, s in (-1, 1)
+                k = TGHx._run(cl, cb, s * st35[d], Val(G))
+                k < G && -s * β[d] / (α * sqrt(γu[d, d])) < 0 && (want |= 1 << (d - 1))
+            end
+            bad += want != rule35(I, b)
+            for d in 1:3
+                peraxis[d] += (want >> (d - 1)) & 1
+            end
+        end
+        @test bad == 0 && nzone == e35.nzone
+        @test peraxis == [0, e35.ndragged, 0] && e35.ndragged == 33
+        @test e35.drag !== nothing
+        badcode = 0
+        nexc = 0
+        for b in 1:nblocks(U35), S in CartesianIndices(size(cl)[1:3])
+            cl[S, b] == TGHx.CLASS_EXCISED || continue
+            nexc += 1
+            x = coordinates(U35, b, Tuple(S))
+            nr = TGHx.excision_normal(p35.interior, zero(T), x)
+            badcode += codes35[S, b] != TGHx.direction_code(nr[1], nr[2], nr[3])
+        end
+        @test badcode == 0 && nexc > e35.nexcised
+        r = excision_rows(p35, u35, zero(T))
+        @test r.excision_dragged == e35.ndragged == r.excision_into
+        @test r.excision_flips == 0 && r.excision_band == e35.nzone
+        @test 0 < r.excision_faces_dragged < r.excision_faces
+        @test r.excision_normal_min > 0 && r.excision_axis_min < 0
+        @test all(isfinite, du35)
+    end
+
+    @testset "the frame-dragged rule changes nothing where no axis is frame-dragged" begin
+        # Guards "the exterior is unchanged" one level in (step X6): the rule
+        # is a second launch over the zone points with a bit set, and a zone
+        # point with none must keep exactly the `du` the zone kernel gave it.
+        # At `a = 0` the build finds no frame-dragged axis and launches no
+        # rule; launched all the same, over every zone block, it must change
+        # nothing. At `a = 3/5`, without the rule, every zone point whose bits
+        # are clear must keep its `du` bit for bit, and so must a
+        # frame-dragged one whose centered `D₁` reaches no excised point
+        # (`k_s = q/2`); the rest change. The rule being a launch of its own,
+        # the zone kernel is the same compiled code with and without it, so
+        # these are claims about which points the second launch writes — not
+        # about how the compiler contracts the head around a second provider
+        # (`CLAUDE.md`, "A provider changes the code around the head").
+        @test ex.drag === nothing && ex.ndragged == 0
+        duA = similar(u)
+        gh_rhs!(duA, u, p, zero(T))
+        duB = copy(duA)
+        TGHx.gh_zone!(duB, p, zero(T);
+                      drag=(codes=ex.codes, ext=TGHx.extrapolation_table(T, Val(q)),
+                            blocks=ex.zoneblocks))
+        @test isequal(duA, duB)
+        dA = similar(u35)
+        gh_rhs!(dA, u35, p35, zero(T))
+        @test isequal(dA, du35)
+        dB = copy(dA)
+        TGHx.gh_zone!(dB, p35, zero(T); drag=nothing)
+        Bn = statearray(dB, U35)
+        st35, _, _ = TGHx.work_strides(U35.work)
+        cl = Array(e35.classes)
+        clear_same = 0
+        nclear = 0
+        reach_changed = 0
+        nreach = 0
+        noreach_same = 0
+        nnoreach = 0
+        other_same = 0
+        nother = 0
+        for b in 1:nblocks(U35), I in owned
+            same = all(v -> isequal(A35[I, v, b], Bn[I, v, b]), 1:20)
+            if cls35(I, b) != TGHx.CLASS_ZONE
+                nother += 1
+                other_same += same
+                continue
+            end
+            rb = rule35(I, b)
+            if rb == 0
+                nclear += 1
+                clear_same += same
+                continue
+            end
+            cb = 1 + (b - 1) * prod(size(cl)[1:3]) + (I[1] + G - 1) * st35[1] +
+                 (I[2] + G - 1) * st35[2] + (I[3] + G - 1) * st35[3]
+            reaches = any(d -> (rb >> (d - 1)) & 1 == 1 &&
+                               min(TGHx._run(cl, cb, -st35[d], Val(G)),
+                                   TGHx._run(cl, cb, st35[d], Val(G))) < q ÷ 2, 1:3)
+            if reaches
+                nreach += 1
+                reach_changed += !same
+            else
+                nnoreach += 1
+                noreach_same += same
+            end
+        end
+        @info "a = 3/5 without the rule: $clear_same of $nclear zone points with no " *
+              "frame-dragged axis unchanged, $noreach_same of $nnoreach whose D₁ reaches " *
+              "no excised point, $reach_changed of $nreach others changed"
+        @test clear_same == nclear > 200 && other_same == nother
+        @test noreach_same == nnoreach && reach_changed == nreach > 0
+    end
+
+    @testset "no kernel reads an excised value on the spinning hole" begin
+        # Guards the rule's extrapolation against reading the excised set: a
+        # degenerate metric planted on every excised owned point — and through
+        # the ghost exchange on every excised ghost, across the seam too — must
+        # leave every non-excised `du` bit for bit, and every excised one zero.
+        u2 = copy(u35)
+        S2 = statearray(u2, U35)
+        η = (1, 0, 0, 0, -1, 0, 0, -1, 0, -1)
+        for b in 1:nblocks(U35), I in owned
+            cls35(I, b) == TGHx.CLASS_EXCISED || continue
+            for v in 1:10
+                S2[I, v, b] = η[v]
+                S2[I, 10 + v, b] = T(NaN)
+            end
+        end
+        du2 = similar(u35)
+        gh_rhs!(du2, u2, p35, zero(T))
+        B = statearray(du2, U35)
+        same = 0
+        zero_ = 0
+        for b in 1:nblocks(U35), I in owned
+            if cls35(I, b) == TGHx.CLASS_EXCISED
+                zero_ += all(v -> B[I, v, b] === zero(T), 1:20)
+            else
+                same += all(v -> isequal(A35[I, v, b], B[I, v, b]), 1:20)
+            end
+        end
+        @test same == e35.nzone + e35.ncentered
+        @test zero_ == e35.nexcised
+    end
+
+    @testset "the spinning hole's centered points are the unexcised operator's" begin
+        # Guards the main kernel at `a = 3/5`: the rule lives in the zone
+        # kernel and nowhere else, so every centered point is the `:none`
+        # kernel's `F` on the same state (to 512 eps, two specialisations).
+        none = kerr_schild_case(T; a=T(3 // 5), halfwidth=T(5 // 2), chunk=T(1 // 10),
+                                interior=nothing, octant=:rotating)
+        Un = FieldSet{T}(f35, 20; G=G, centering=vertexcentered(3),
+                         parity=state_parity(f35), rotation=state_rotation(f35))
+        pn = GHProblem(Un, GhostSchedule(Un, ops), none; q=q)
+        dun = similar(u35)
+        gh_rhs!(dun, u35, pn, zero(T))
+        C = statearray(dun, Un)
+        worst = 0.0
+        scale = 0.0
+        nbit = 0
+        for b in 1:nblocks(U35), I in owned
+            cls35(I, b) == TGHx.CLASS_CENTERED || continue
+            worst = max(worst, maximum(v -> abs(A35[I, v, b] - C[I, v, b]), 1:20))
+            scale = max(scale, maximum(v -> abs(A35[I, v, b]), 1:20))
+            nbit += all(v -> isequal(A35[I, v, b], C[I, v, b]), 1:20)
+        end
+        @info "a = 3/5: $nbit of $(e35.ncentered) centered points bit for bit the " *
+              ":none kernel's, worst $(worst / (eps(T) * scale)) eps"
+        @test worst ≤ 512 * eps(T) * scale
+    end
+
+    @testset "the spinning hole runs to M/5 with the frame-dragged rows, no flips, and restarts as the run" begin
+        # Guards the driver's path with the rule (step X6): the rule bits are
+        # the build state's and a restart rebuilds them from the file's state,
+        # so a chain is the run exactly when no axis's shift has changed its
+        # sign (`excision_flips == 0` at the checkpoint's row). Two chunks of
+        # `M/10` on the rotating octant, and the chain of two one-chunk jobs.
+        common = (forest=deepcopy(f35), q=q, ops=ops, t_end=T(1 // 5))
+        run = evolve!(T, c35; common...)
+        rows = run.records
+        @test length(rows) == 3
+        @test all(r -> r.finite && r.excision_band_nonfinite == 0, rows)
+        @test all(r -> r.excision_dragged == e35.ndragged == r.excision_into &&
+                       r.excision_flips == 0, rows)
+        @test all(r -> r.excision_faces_dragged == rows[1].excision_faces_dragged > 0,
+                  rows)
+        @test all(r -> r.excision_normal_min > 0, rows)
+        @info "the spinning hole to M/5" err_l2 = [r.err_l2 for r in rows] gauge_l2 =
+            [r.gauge_l2 for r in rows] axis_min = [r.excision_axis_min for r in rows]
+        pre = joinpath(mktempdir(), "spin")
+        ck = (q=q, ops=ops, t_end=T(1 // 5), checkpoint_path_prefix=pre,
+              max_walltime_seconds=1e-9, checkpoint_sync_to_disk=false)
+        first_ = evolve!(T, c35; forest=deepcopy(f35), ck...)
+        @test !first_.finished
+        second = evolve!(T, c35; ck..., restart_file=latest_checkpoint(pre))
         @test second.finished
         @test isequal(second.u, run.u)
         @test isequal(second.records, run.records)

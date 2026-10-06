@@ -112,6 +112,7 @@ export layer_spacing, check_interior_radii, layer_mask, shell_mask
 export geometry_radii, layer_radii
 # The `:excised` variant's parameters (step X2b)
 export Excision, excision_closure, upwind_on, excision_monitor_mask
+export MIXED_NESTINGS, excision_mixed           # the mixed derivative's nesting (step X6)
 
 # The tracked geometry (step 8d): the real harmonics, the kernel argument, its
 # masks and its checks — and, in `tracking.jl`, the track it is built from
@@ -151,6 +152,8 @@ export gh_step_limiter!, paste_interior!
 export ExcisionData, build_excision, check_excision_mesh, check_excision_case
 export monitor_mask, excision_rows, excision_band_cells, closure_provider
 export ClosureProvider, Lopsided, ExcisionBlend, blend_weight
+# The frame-dragged faces' rule in the zone kernel (step X6)
+export DraggedProvider, dragged_provider, lattice_direction, direction_code
 
 # The time integrator (IMEXRungeKutta's RK4 by block owner, 2026-09-26)
 export state_partition, gh_limiter!, gh_integrator, gh_solve, ProblemRef

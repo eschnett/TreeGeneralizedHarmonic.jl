@@ -228,14 +228,48 @@ function excised_workload(; q=2, N=8)
 end
 
 """
+One right-hand side of an excised **spinning** hole (added in step X6),
+reduced to a printed line: Kerr-Schild `a = 3/5` on the rotating octant
+`[0, 5/2]³` at `q = 2`, `N = 8`, the ball `r < 19/25` excised. It puts on
+the path what the line above does not reach: the direction codes' pass over
+every stored point, the rule bits the census sets, the frame-dragged
+kernel's second launch, the classes' exchange across the rotating seam, and
+the outflow monitor's frame-dragged rows.
+"""
+function dragged_workload(; q=2, N=8)
+    T = Float64
+    case = kerr_schild_case(T; a=T(3 // 5), halfwidth=T(5 // 2), r_0=T(31 // 50),
+                            r_1=T(19 // 25), chunk=T(1 // 10), interior=:excised,
+                            octant=:rotating)
+    forest = gh_forest(T, case; N=N, roots=4)
+    fs = FieldSet{T}(forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3),
+                     parity=state_parity(forest), rotation=state_rotation(forest))
+    fill_exact!(fs, case, zero(T))
+    ops = Operators(prolongation=q + 2, restriction=q + 2)
+    problem = GHProblem(fs, GhostSchedule(fs, ops), case; q=q)
+    u = statevector(fs)
+    gather!(u, fs)
+    du = similar(u)
+    gh_rhs!(du, u, problem, zero(T))
+    ex = problem.excision
+    rows = excision_rows(problem, u, zero(T))
+    return [string("dragged zone ", ex.nzone, " axes ", ex.ndragged, " codes ",
+                   digest(string(vec(Array(ex.codes)))), " du ", digest(du),
+                   " faces ", rows.excision_faces_dragged, " flips ",
+                   rows.excision_flips, " axis ", repr(rows.excision_axis_min))]
+end
+
+"""
 The digest lines the threading test compares, as a `Vector{String}`.
 
 One workload, not two: unlike TreeWave's pair of cases this package has a
 single right-hand side, and what varies between them would be the physics
 rather than the parallel structure. The cycle above already visits every
 loop that threads — and from step X2b one excised right-hand side, whose
-classes, zone kernel and monitors are loops of their own.
+classes, zone kernel and monitors are loops of their own, and from step X6 a
+spinning one, whose direction codes, rule bits and frame-dragged kernel are
+too.
 """
-thread_digests() = vcat(gh_workload(), excised_workload())
+thread_digests() = vcat(gh_workload(), excised_workload(), dragged_workload())
 
 abspath(PROGRAM_FILE) == abspath(@__FILE__) && foreach(println, thread_digests())

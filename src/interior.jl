@@ -121,7 +121,7 @@ makes "`w ∈ [0, 1]` everywhere" a property rather than a near-property.
 end
 
 """
-    Excision(T = Float64; upwind = nothing, dissipation = :msn)
+    Excision(T = Float64; upwind = nothing, dissipation = :msn, mixed = :symmetric)
 
 The parameters of the `:excised` variant (added in step X2b; `CODE.md`,
 "Excision"), carried by the interior or the spec that asks for it, so that a
@@ -137,44 +137,84 @@ every other number of the interior:
   of [`DISSIPATION_CLOSURES`](@ref); `:msn`, the default, is step X1's
   choice, the only one negative semidefinite in `l²` on any excised
   pattern.
+- `mixed` is the zone points' mixed derivative, one of
+  [`MIXED_NESTINGS`](@ref) (added in step X6): `:symmetric`, the default,
+  `½(D_i D_j + D_j D_i)` of the two nested closures wherever they differ —
+  the operator symmetric in its two axes, and so equivariant under `x ↔ y`
+  and the rotating octant's quarter turn — or `:nested`, steps X2b–X5's
+  outer sum along `i < j` only, kept so that the two can be compared
+  (`CODE.md`, "Excision", "What step X6 built").
 
 The cells are the excision geometry's own spacing, the level the surface
-lies on. `isbits`: the closure kind is a type parameter.
+lies on. `isbits`: the closure kind is a type parameter, the nesting a
+`Bool` (`symmetric`).
+
+**`mixed = :nested` prints as the struct did before the field existed**
+(proposed in step X6): a checkpoint's recipe holds `repr(case.interior)`, so
+a run written by steps X2b–X5 restarts under its own operator when that is
+asked for by name, and its recipe refuses a restart under the new default —
+the operator it would continue with is not the one it ran.
 """
 struct Excision{T,K}
     upwind_start::T
     upwind_width::T
     valclosure::Val{K}
+    symmetric::Bool
 end
 
-function Excision(::Type{T}=Float64; upwind=nothing,
-                  dissipation::Symbol=:msn) where {T}
+"""
+    MIXED_NESTINGS
+
+The zone points' mixed derivatives an [`Excision`](@ref) can ask for (added
+in step X6): `:symmetric`, the mean of the two nestings, and `:nested`, the
+outer sum along the lower axis.
+"""
+const MIXED_NESTINGS = (:symmetric, :nested)
+
+function Excision(::Type{T}=Float64; upwind=nothing, dissipation::Symbol=:msn,
+                  mixed::Symbol=:symmetric) where {T}
     dissipation in DISSIPATION_CLOSURES || throw(ArgumentError(
         "the dissipation's closure at the excision surface is one of " *
         "$(DISSIPATION_CLOSURES), got :$dissipation; step X1 chose :msn, the " *
         "only one with the damping sign in l² on any excised pattern " *
         "(CODE.md, \"Excision\")."))
+    mixed in MIXED_NESTINGS || throw(ArgumentError(
+        "the zone points' mixed derivative is one of $(MIXED_NESTINGS), got " *
+        ":$mixed: :symmetric averages the two nestings of the closures, so that " *
+        "the operator is symmetric in its two axes, and :nested is steps " *
+        "X2b–X5's outer sum along the lower axis (CODE.md, \"Excision\")."))
     s, w = upwind === nothing ? (zero(T), zero(T)) :
            (T(upwind[1]), T(upwind[2]))
     (s ≥ 0 && w ≥ 0) || throw(ArgumentError(
         "the lopsided advection's blend starts `start` cells below the horizon " *
         "and rises to full over `width` cells, both non-negative, got upwind " *
         "= $upwind; `nothing` (width 0) switches it off."))
-    return Excision{T,dissipation}(s, w, Val(dissipation))
+    return Excision{T,dissipation}(s, w, Val(dissipation), mixed === :symmetric)
 end
 
 Excision(::Type{T}, ex::Excision{S,K}) where {T,S,K} =
-    Excision{T,K}(T(ex.upwind_start), T(ex.upwind_width), Val(K))
+    Excision{T,K}(T(ex.upwind_start), T(ex.upwind_width), Val(K), ex.symmetric)
+
+# The nested mixed derivative prints without its field, as the struct printed
+# before step X6 added it (see the docstring).
+function Base.show(io::IO, ex::Excision{T,K}) where {T,K}
+    ex.symmetric && return invoke(show, Tuple{IO,Any}, io, ex)
+    return _show_legacy(io, ex, Excision{T,K},
+                        (ex.upwind_start, ex.upwind_width, ex.valclosure))
+end
 
 """
     excision_closure(ex::Excision) -> Symbol
     upwind_on(ex::Excision) -> Bool
+    excision_mixed(ex::Excision) -> Symbol
 
-The dissipation's closure kind, and whether the lopsided advection blend is
-switched on (`width > 0`).
+The dissipation's closure kind, whether the lopsided advection blend is
+switched on (`width > 0`), and the zone points' mixed derivative (one of
+[`MIXED_NESTINGS`](@ref), added in step X6).
 """
 excision_closure(::Excision{T,K}) where {T,K} = K
 upwind_on(ex::Excision) = ex.upwind_width > 0
+excision_mixed(ex::Excision) = ex.symmetric ? :symmetric : :nested
 
 # The excision parameters an interior or spec carries: its own for
 # `:excised`, refused for every other variant, and the default where an

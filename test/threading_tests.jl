@@ -30,9 +30,10 @@ include("thread_workload.jl")
     # a different count. A reduction partitioned by thread rather than by
     # block would pass every other test in this suite and fail here.
     reference = thread_digests()
-    # Setup, two chunks, two regrids, the state the last regrid moved, and
-    # one excised right-hand side (added in step X2b).
-    @test length(reference) == 7
+    # Setup, two chunks, two regrids, the state the last regrid moved, one
+    # excised right-hand side (added in step X2b) and one of a spinning hole
+    # with frame-dragged axes (step X6).
+    @test length(reference) == 8
     # A regrid that actually changed the mesh, and a chunk that ran on one
     # with a coarse-fine face — without both, the digests would be a claim
     # about a uniform mesh.

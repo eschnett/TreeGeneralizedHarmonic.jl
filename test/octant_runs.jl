@@ -38,7 +38,9 @@
 #   case=minkowski|ks               flat space, or the Kerr-Schild hole
 #   octant=reflecting|rotating      three mirrors (a = 0 only), or the quarter turn
 #                                   about z and the mirror at z = 0 (any a; every
-#                                   interior, :excised included — step X4)
+#                                   interior, :excised included — step X4; a
+#                                   spinning :excised hole's frame-dragged faces
+#                                   take step X5's rule from step X6)
 #   a=0                             the hole's spin along z, in M (ks only; a ≠ 0
 #                                   needs octant=rotating, and r_0 > a for :damped,
 #                                   which the ring of radius a must be inside)
@@ -68,6 +70,9 @@
 #                                   start + width (step X1's 1,4); off by default
 #   closure=msn                     :excised: the dissipation's closure, msn,
 #                                   reduced or onesided
+#   mixed=symmetric                 :excised: the zone points' mixed derivative,
+#                                   symmetric in its two axes (step X6's default)
+#                                   or nested (steps X2b–X5's, for comparison)
 #   n_L=0 lmax_fit=8                :fitted only: the ramp in cells (0: step 8c's
 #                                   rule) and the fit's degree
 #   fit_cont=1                      :fitted only: the fit's radial order, 1 (values
@@ -178,7 +183,8 @@ case = if hole
         # `m` cells below the horizon, frozen; no layer, no target, no bounds.
         up = haskey(OPTIONS, "upwind") ? Tuple(rat.(split(OPTIONS["upwind"], ','))) :
              nothing
-        exc = Excision(T; upwind=up, dissipation=Symbol(opt("closure", "msn")))
+        exc = Excision(T; upwind=up, dissipation=Symbol(opt("closure", "msn")),
+                       mixed=Symbol(opt("mixed", "symmetric")))
         # On the rotating octant with a spin (step X4) the margins are taken
         # against the horizon's least radius, `r₊` at the poles, and the core
         # rule's default radius encloses the ring `r = a` (the singular set
@@ -247,7 +253,8 @@ hole && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin,
                  "excised, r_E = $(case.interior.r_1) (m = $(case.interior.margin)), " *
                  "core rule r_0 = $(case.interior.r_0)") *
                 ", upwind $(upwind_on(case.interior.excision) ? (case.interior.excision.upwind_start, case.interior.excision.upwind_width) : "off"), " *
-                "closure :$(excision_closure(case.interior.excision))" :
+                "closure :$(excision_closure(case.interior.excision)), " *
+                "mixed :$(excision_mixed(case.interior.excision))" :
                 case.interior isa FittedSpec ?
                 "fitted target, tracked, margin $(case.interior.margin)" :
                 "damped layer, r_0 = $(case.interior.r_0), r_1 = $(case.interior.r_1)",
@@ -281,10 +288,14 @@ hole && append!(cols, ["err_l2", "err_linf", "residual", "drift", "err_l2_vol"])
 # The excision rows (step X2b): the band's points and non-finite values, the
 # normal outflow margin, the faces, their least b/a and the inflow-like ones,
 # the closure axes whose shift points into the excised set, and — tracked —
-# the found horizon's distance from the frozen surface in cells.
+# the found horizon's distance from the frozen surface in cells. From step X6
+# the frame-dragged axes (the rule bits of the build), the faces on them — the
+# faces per rule are those and `excision_faces` less them — and the axes whose
+# shift's sign now disagrees with their bit, which must stay 0.
 const EXCISION_COLS = ["excision_band", "excision_band_nonfinite",
                        "excision_normal_min", "excision_faces", "excision_axis_min",
-                       "excision_inflow", "excision_into", "excision_horizon_margin"]
+                       "excision_inflow", "excision_into", "excision_horizon_margin",
+                       "excision_dragged", "excision_faces_dragged", "excision_flips"]
 excised && append!(cols, EXCISION_COLS)
 for ℓ in 0:(nlev - 1), c in ("ham_l2", "ham_linf", "mom_l2", "mom_linf", "gauge_l2",
                              "gauge_linf")
@@ -363,6 +374,7 @@ if hole
         setup["upwind"] = upwind_on(ex) ? [Float64(ex.upwind_start),
                                            Float64(ex.upwind_width)] : "off"
         setup["closure"] = String(excision_closure(ex))
+        setup["mixed"] = String(excision_mixed(ex))
     end
 end
 simwatch_update!(sw; force=true, status="starting", time_end=Float64(t_end),
@@ -413,7 +425,9 @@ function observe(p, t, u, rec)
         append!(row, [x === nothing ? "" : x for x in exv])
         extra["excision"] = Dict{String,Any}(
             "note" => "the band: the evolved points next to the excision surface, " *
-                      "where the closures are; normal outflow needs normal_min > 0",
+                      "where the closures are; normal outflow needs normal_min > 0; " *
+                      "dragged: the frame-dragged axes (step X5's rule), whose shift " *
+                      "pointed into the excised set at the build; flips must stay 0",
             (c[10:end] => x for (c, x) in zip(EXCISION_COLS, exv) if x !== nothing)...)
     end
     levels = Dict{String,Any}()
@@ -583,7 +597,8 @@ fields = (:t, :steps, :err_l2, :err_linf, :residual, :drift, :gauge_l2, :horizon
           :track_r_min, :fit_valid, :fit_residual, :bounds_hits, :variant,
           :excision_band, :excision_band_nonfinite, :excision_normal_min,
           :excision_faces, :excision_axis_min, :excision_inflow, :excision_into,
-          :excision_horizon_margin)
+          :excision_horizon_margin, :excision_dragged, :excision_faces_dragged,
+          :excision_flips)
 open(joinpath(outdir, "records.csv"), "w") do io
     println(io, join(fields, ','))
     for rec in out.records

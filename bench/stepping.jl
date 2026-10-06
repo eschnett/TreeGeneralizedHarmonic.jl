@@ -18,6 +18,11 @@
 # excised (`interior = :excised`), and in step mode also the zone kernel
 # alone (`zone`), its points, and its cost per zone point and as a share of
 # the right-hand side; `BENCH_UPWIND=1,4` switches the lopsided blend on.
+# `BENCH_A=3/5` (added in step X6) spins the hole, its core rule's sphere at
+# `0.675` between the ring and the surface, so that the frame-dragged axes
+# take step X5's rule: the rows add the zone kernel with the rule's second
+# launch (`zone_dragged`), the rule's own share, and its cost per
+# frame-dragged point.
 # step: one right-hand side; IMEXRungeKutta's RK4 by owner and by broadcast,
 # each integrator built once and stepped; `gh_solve` over four steps (`init`
 # included); `init` alone, and with the previous integrator's scratch
@@ -78,7 +83,9 @@ function build(CASE; N=N, ROOTS=roots_for(CASE))
     elseif CASE == "excised"
         up = haskey(ENV, "BENCH_UPWIND") ?
              Tuple(parse.(Int, split(ENV["BENCH_UPWIND"], ","))) : nothing
-        case = hole_fixture(T; q=q, halfwidth=T(5), variant=:excised, r_1=T(3 // 4),
+        a = T(eval(Meta.parse(get(ENV, "BENCH_A", "0"))))
+        case = hole_fixture(T; q=q, a=a, halfwidth=T(5), variant=:excised,
+                            r_1=T(3 // 4), r_0=iszero(a) ? T(2 // 5) : T(27 // 40),
                             excision=Excision(T; upwind=up))
         forest = hole_forest(T, case; N=N, roots=ROOTS,
                              radii=(T(6), T(3), T(3 // 2)))
@@ -128,13 +135,27 @@ function step_mode(CASE)
     if p.excision !== nothing
         # The zone kernel alone, on the working array the right-hand side
         # left behind (ghosts filled), and its share.
-        tz = timeit(() -> TreeGeneralizedHarmonic.gh_zone!(du, p, zero(T)))
+        tz = timeit(() -> TreeGeneralizedHarmonic.gh_zone!(du, p, zero(T); drag=nothing))
         row("zone", tz)
         ex = p.excision
         @printf("%s\tzone_points\t%d\t(excised %d, centered %d, zone blocks %d of %d)\n",
                 TAG, ex.nzone, ex.nexcised, ex.ncentered, ex.nzoneblocks, nblocks(U))
         @printf("%s\tzone_per_point\t%.1f\t\tns  (%.2f %% of the rhs)\n", TAG,
                 1e9 * tz.min / ex.nzone, 100 * tz.min / trhs.min)
+        if ex.drag !== nothing
+            # The frame-dragged rule (step X6): its second launch over the
+            # blocks holding a frame-dragged axis, by difference.
+            td = timeit(() -> TreeGeneralizedHarmonic.gh_zone!(du, p, zero(T)))
+            row("zone_dragged", td)
+            cds = Array(ex.codes)
+            cls = Array(ex.classes)
+            npd = count(i -> cls[i] == TreeGeneralizedHarmonic.CLASS_ZONE && cds[i] != 0,
+                        eachindex(cls))
+            @printf("%s\tdragged_points\t%d\t(%d axes, blocks %d)\n", TAG, npd,
+                    ex.ndragged, count(Array(ex.drag.blocks)))
+            @printf("%s\tdragged_per_point\t%.1f\t\tns  (the rule %.2f %% of the rhs)\n",
+                    TAG, 1e9 * (td.min - tz.min) / npd, 100 * (td.min - tz.min) / trhs.min)
+        end
         flush(stdout)
     end
     if HAVE_IRK
