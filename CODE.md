@@ -3007,7 +3007,10 @@ static hole (step X3)".
   `0.14/M` and failed near `45 M`; here, to `50 M`, the drift of `h_tt` at
   the horizon peaks near `40 M` and turns down exactly as the layer's does,
   at `1.4×` the layer's at `h = 1/16` and `1.0×` at `1/24` and `1/32`;
-  `M_irr` is flat to `10⁻⁸`, and ℋ near the hole changes by less than 0.4 % between
+  `M_irr` peaks at `26 M` and then falls at `−3.7·10⁻⁹/M` (B; `−5.0·10⁻⁹/M`
+  for A), below the truncation drift `:damped` has at this `h` (`2·10⁻⁸/M`)
+  **(corrected in review**: this sentence said "flat to `10⁻⁸`"; the
+  numbers are the Measured results entry's**)**, and ℋ near the hole changes by less than 0.4 % between
   `24` and `50 M`. The static gauge source holds the gauge without a layer
   inside; the damped harmonic gauge driver is not needed for this.
 - **Cost**: an excised run at `r_E = M/2` costs what a `:damped` one costs

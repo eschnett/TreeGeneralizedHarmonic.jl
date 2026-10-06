@@ -29,7 +29,11 @@ Kerr-Schild `a = 0` hole with per-axis closures and `:msn` dissipation,
 `ε_KO > 0` required, spinning holes not covered. X2a is done and merged
 (the stencil provider, no bit changed). X2b is done and merged (the
 `:excised` variant on both geometries, every other run bit for bit). X3 is
-next.**
+done and merged (2026-10-06): feasible — the excised static Kerr-Schild
+`a = 0` hole at `r_E = M/2`, without the blend, matches `:damped` outside
+the horizon to three digits at `h = 1/32`, beats `:fitted`, and shows no
+gauge drift to `50 M`. The round is complete; the next one (static
+spinning holes, proposed in step X3) is Erik's decision.**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
