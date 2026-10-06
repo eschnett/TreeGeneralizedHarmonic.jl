@@ -341,7 +341,7 @@ end
 # constraint, the ADM split of the metric and the source through its own
 # entry point — every exported function of `pointwise.jl`, once.
 const GH_NIN = 2 * NC + 3 * NC + 3 * NC + 6 * NC + 4 + 16              # 160
-const GH_NOUT = 2 * NC + 5 * NC + 5 + 3 + 9 + 27 + 9 + 27 + 9 + 4 + 13 + NC  # 186
+const GH_NOUT = 2 * NC + 5 * NC + 5 + 3 + 9 + 27 + 9 + 27 + 9 + 4 + 13 + NC + NC + 4  # 200
 
 function gh_pointwise_all(h::SVector{NC,T}, Π::SVector{NC,T},
                           ∂h::NTuple{3,SVector{NC,T}},
@@ -362,6 +362,9 @@ function gh_pointwise_all(h::SVector{NC,T}, Π::SVector{NC,T},
     C = gauge_constraint_at_node(g4, dgsm, gu4 * Hl)
     αa, βa, γa = adm_from_metric(g4)
     msrc2 = gh_node_source(g4, gu4, α, sqrtγ, dgl, Hl, dHl, γ0, γ2)
+    # The kernel's spellings (added 2026-10-05): what the right-hand side calls.
+    msrc3 = gh_node_source_lean(g4, gu4, α, sqrtγ, ∂ₜh, ∂h, Hl, dHl, γ0, γ2)
+    divβ, divA = metric_divergences(gu4, α, β, γu, sqrtγ, ∂h)
     return (∂ₜh..., ∂ₜΠ...,
             dtg..., Fx..., Fy..., Fz..., msrc...,
             α, sqrtγ, β...,
@@ -369,7 +372,8 @@ function gh_pointwise_all(h::SVector{NC,T}, Π::SVector{NC,T},
             γ3..., ∂γ..., K...,
             C...,
             αa, βa..., γa...,
-            msrc2...)
+            msrc2...,
+            msrc3..., divβ, divA...)
 end
 
 @inline function gh_unpack_inputs(read, ::Type{T}) where {T}
@@ -475,7 +479,11 @@ end
     call_flux() = gh_node_rhs(h, Π, ∂h[1], ∂h[2], ∂h[3], Hl, dHl, γ0, γ2)
     call_derivs() = metric_derivatives(h, ∂h)
     call_adm() = adm_vars_from_state(h, Π, ∂h[1], ∂h[2], ∂h[3])
-    for f in (call_expanded, call_flux, call_derivs, call_adm)
+    # The kernel's spellings (added 2026-10-05).
+    g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(h))
+    call_lean() = gh_node_source_lean(g4, gu4, α, sqrtγ, Π, ∂h, Hl, dHl, γ0, γ2)
+    call_div() = metric_divergences(gu4, α, β, γu, sqrtγ, ∂h)
+    for f in (call_expanded, call_flux, call_derivs, call_adm, call_lean, call_div)
         f()                                     # compile before measuring
         @test @allocated(f()) == 0
     end

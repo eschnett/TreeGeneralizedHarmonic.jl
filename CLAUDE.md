@@ -3,6 +3,15 @@
 Read `CODE.md` first — it is the design document and states *why* things
 are the way they are. This file is only about mechanics.
 
+**Contents**
+
+- [What this package is](#what-this-package-is)
+- [Current state](#current-state)
+- [Commands](#commands)
+- [Things that will bite](#things-that-will-bite)
+- [Conventions](#conventions)
+- [Repository facts](#repository-facts)
+
 ## What this package is
 
 The third downstream application of
@@ -362,6 +371,25 @@ Measured results from "Robust stability on the octant" on hold the numbers —
 among them the `:fitted` setup to use: `h = 1/24` at the hole, `m = 16`,
 `n_L = 20`, `fit_cont = 2`.
 
+From 2026-10-05 the right-hand side is **fast on a device**. `CODE.md`, "The
+right-hand side on an H200", found the kernel uninlined and spilling at 8.5 ns a
+point on an H200, and it now runs at 1.1, and 1.7× faster on the CPU. What changed:
+
+- **`pointwise.jl`** has `gh_node_source_lean`: the source held by unique
+  components, phase-ordered and unrolled by `@ntuple`, a third spelling tested
+  against `gh_node_source`. Beside it, `metric_divergences` forms the two
+  contractions of `metric_derivatives` the kernel reads.
+- **`evolution.jl`** splits the body:
+  - `gh_rhs_head` — the state, `∂h`, the coefficients, `∂ₜh`, the source and the
+    divergences;
+  - `gh_rhs_pi` — one Π component.
+
+  The kernel without an interior stores as it goes (`gh_rhs_store!`); the
+  interior variants collect through `gh_rhs_at_point`. `axis_stencil` and
+  `mixed_stencil` are `@generated`.
+- **The investigation's prototypes** are `bench/rhs_lab.jl` and its companions
+  (see "Commands").
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -435,7 +463,22 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4690 assertions in 18m43** at one thread and **4698 in
+The suite is **4907 assertions in 15m32** at four threads after the lean
+right-hand side (2026-10-05, development machine loaded 9–12; the one-thread
+suite was not rerun). It also passes on an EPYC node, x86-64, where the
+contraction differences live (Symmetry cn079, 26m21 at four threads). Its 112 new claims are the two kernel spellings:
+
+- their identity with the port on every background
+  (`pointwise_identity_tests.jl`);
+- their allocation and their kernel launch (`pointwise_tests.jl`);
+- their types, `Float32x2` included (`type_tests.jl`).
+
+One claim was relaxed: `evolution_tests.jl`'s dissipation switch, from `1e−290`
+everywhere to roundoff of each component. Its two specialisations now round a
+product of two roundoff-sized numbers differently (`1.9e−68` on components that
+are zero).
+
+The suite was **4690 assertions in 18m43** at one thread and **4698 in
 12m59** at four after TreeAMR 0.1.4's two features (2026-10-01, on a machine
 loaded 6–10 by other work — read the times against that): `mesh_mapreduce`
 changed no count, and `checkpoint_tests.jl` is 78 new claims in `2m02` /
@@ -729,6 +772,22 @@ placements) in a scratch copy with `OrdinaryDiffEqLowOrderRK` and
 
 ```bash
 BENCH_MODE=step BENCH_CASE=wave,hole julia --project=. -t 4 bench/stepping.jl
+```
+
+The GPU right-hand-side prototypes (added 2026-10-05) are `bench/rhs_lab.jl`:
+`key=value` options, one mode per round of `CODE.md`'s "The right-hand side on an
+H200", listed in its header. Like `bench/stepping.jl` on a device, it runs from a
+copy with `CUDA` added — on Symmetry `rhs-gpu-lab`, one H200 a job in `h200debugq`.
+`bench/rhs_lab_source.jl` is the lean source it measures. `bench/rhs_lab_cpu.jl`
+checks and times that source on the CPU in the package's own environment, and
+`bench/sass_stats.jl` counts the instructions of a SASS dump it writes:
+
+```bash
+julia --project=. bench/rhs_lab.jl mode=round9 N=32 roots=8
+```
+
+```bash
+julia --project=. bench/rhs_lab_cpu.jl
 ```
 
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
@@ -1244,14 +1303,34 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `Float64`'s expense. The type-generic discipline stays anyway: a
   decimal literal in a `T` expression is a leak — `T(1//2)`, not `0.5`;
   `oftype(x, 2)` inside closures.
-- **The RHS kernel is written in streaming order, and stays that way.**
-  Coefficients and `∂_i h` once per point; then per component, stencils
-  formed and consumed immediately; then the source. Never build an
-  `SVector` of all derivatives — that is about 140 `Float64` values,
-  over a GPU thread's 255 registers, and it spills. GHAccel's ten-field
-  kernel fit only as fully scalarised generated code; spills show as
-  `ld.local` in the PTX. GPU kernel *efficiency* beyond this order is a
-  research project, not a milestone; G6 measures, it does not tune.
+- **The RHS kernel is written in streaming order, and stays that way**
+  (amended 2026-10-05).
+  - **The head, once per point:** the state, `∂_i h`, the coefficient set,
+    `∂ₜh` (stored at once), the source and the two divergences.
+  - **Then a run-time loop over the ten Π components,** each formed from its own
+    stencils, combined and stored. Nothing of `F` stays live longer than it
+    takes to store it.
+  - **The source comes before the Π components.** Computed last, as until
+    2026-10-05, it was live with the ten accumulators and spilled.
+
+  Never build an `SVector` of all derivatives: that is about 140 `Float64`
+  values, over a GPU thread's 255 registers, and it spills. GHAccel's ten-field
+  kernel fit only as fully scalarised generated code. Spills show as `STL`/`LDL`
+  in the SASS (`bench/sass_stats.jl`).
+- **On a device a closure is a call** (found 2026-10-05).
+  - **Why:** KernelAbstractions' default `CUDABackend()` does not force inlining,
+    and TreeAMR launches with it whatever backend a field set was built with.
+  - **What becomes a call** in a kernel's path: an `ntuple(Val(n)) do … end`, a
+    StaticArrays generator `SVector(f(i) for i in 1:3)`, or a `@generated`
+    method whose body lacks an `:inline` meta. Its `SVector` arguments then
+    travel through the stack: 8 KB of local memory a thread, and most of the
+    right-hand side's 8.5 ns a point before 2026-10-05.
+  - **How to write kernel-path code instead:** `Base.Cartesian.@ntuple`/`@nexprs`
+    with literal counts, small tuples spelled out, and a generated body returning
+    `Expr(:block, Expr(:meta, :inline), …)`.
+  - **The symptom** is a `CALL` to `julia_…` in the SASS
+    (`bench/rhs_lab.jl mode=baseline` writes it, `bench/sass_stats.jl` counts it).
+    On the CPU the same closures cost 7× (`bench/rhs_lab_cpu.jl`).
 - **Hooks depend on time.** `dirichlet(case, t)` is built at each call.
   It goes to `fill_ghosts!` inside the RHS, to `regrid!`, and to
   `adapt_to_initial_data!`, each with that call's `t`. Forgetting the
@@ -1398,6 +1477,10 @@ Match TreeAMR's, since the four packages are read together:
 - Spec-first: when the implementation shows `CODE.md` was wrong or
   incomplete, amend it and say so in it — "(amended in step N)",
   "(measured in step N)" — rather than diverging silently.
+- `CLAUDE.md` and `CODE.md` open with a **table of contents** (added
+  2026-10-05) of every heading below the title. A heading added or renamed
+  goes into it, linked by GitHub's anchor: lowercase, backticks and
+  punctuation dropped (an en dash too), spaces to hyphens.
 
 ## Repository facts
 
