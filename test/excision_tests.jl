@@ -1105,11 +1105,19 @@ const TGHx = TreeGeneralizedHarmonic
         @test noreach_same == nnoreach && reach_changed == nreach > 0
     end
 
-    @testset "no kernel reads an excised value on the spinning hole" begin
+    @testset "no kernel reads an excised value on the spinning hole, and nothing but the integrator writes its state" begin
         # Guards the rule's extrapolation against reading the excised set: a
         # degenerate metric planted on every excised owned point — and through
         # the ghost exchange on every excised ghost, across the seam too — must
         # leave every non-excised `du` bit for bit, and every excised one zero.
+        # And against a fourth writer: the right-hand side with the rule's
+        # launch leaves its state alone, and so does the `:excised` limiter.
+        w = copy(u35)
+        dw = similar(u35)
+        gh_rhs!(dw, w, p35, zero(T))
+        @test isequal(w, u35) && isequal(dw, du35)
+        gh_limiter!(w, nothing, p35, zero(T))
+        @test isequal(w, u35)
         u2 = copy(u35)
         S2 = statearray(u2, U35)
         η = (1, 0, 0, 0, -1, 0, 0, -1, 0, -1)
