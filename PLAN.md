@@ -32,8 +32,9 @@ Kerr-Schild `a = 0` hole with per-axis closures and `:msn` dissipation,
 done and merged (2026-10-06): feasible — the excised static Kerr-Schild
 `a = 0` hole at `r_E = M/2`, without the blend, matches `:damped` outside
 the horizon to three digits at `h = 1/32`, beats `:fitted`, and shows no
-gauge drift to `50 M`. The round is complete; the next one (static
-spinning holes, proposed in step X3) is Erik's decision.**
+gauge drift to `50 M`. The static round is complete. Erik's decision of
+2026-10-06: the static spinning hole at `a = 3/5`, with `main` merged
+first — steps X4–X7 below; X4 and X5 run now, in parallel.**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1730,6 +1731,191 @@ X3)", and the recommendation:
 
 **Accept**: every row run or its failure diagnosed; the tables in
 `CODE.md`; the suite green at one and four threads.
+
+## Steps X4–X7 — Excision of a static spinning hole, `a = 3/5` (added 2026-10-06)
+
+Erik's decision of 2026-10-06, after X3: go on to the spinning hole, **at
+`a = 3/5` as the stepping stone** (not `9/10`), **with sufficient
+resolution**, and **bring `main` into the integration branch first**.
+`main` carries the GPU kernel rewrite: PR #4, 92c7f0f, "Evaluate the
+right-hand side without spills or calls on a device".
+
+Two things stand between the static round and this one:
+- **X1 found the per-axis closures unstable** on the lego faces where frame
+  dragging turns the shift *into* the excised set along the face's axis
+  (`b/a < 0`, 2–14 % of the faces at Kerr-Schild `a = 3/5`). X2b refuses
+  such a case at build time.
+- **The rotating octant**, the only octant a spinning hole fits, is on the
+  branch `claude/octant-mode-spinning-bh-75bd22` (0a96f27), not on the
+  integration branch. That branch's `CODE.md` holds the `a = 3/5` reference
+  rows: `:damped` and `:fitted` at `h = 1/32` to `64 M`, and the
+  convergence pair `1/16`, `1/24`. They are what X7 is compared with.
+
+The steps:
+- **X4** (sync) and **X5** (host analysis) are independent and run as two
+  agents at once, like 8a and 8b.
+- **X6** starts from both, merged into the integration branch.
+- **X7** runs on Symmetry's H200s, with SimWatch status for every run.
+
+The sharp edges of steps X1–X3 hold throughout.
+
+## Step X4 — The integration branch on `main` and on the rotating octant
+
+`CODE.md`: on `main`, the GPU kernel work's sections (read `git show
+origin/main:CODE.md`). On the integration branch: "One right-hand-side
+evaluation" (the stencil provider) and "Excision". On the rotating-octant
+branch: its "rotating octant" section and its `a = 3/5` and `a = 9/10`
+records.
+
+**Changes.**
+1. **Merge `origin/main` (cbe3662) into the step branch.** The conflict that
+   matters is `src/evolution.jl`. `main`'s spill-free right-hand side and
+   the excision round's stencil provider (X2a), main-kernel `:excised`
+   branch and zone kernel (X2b) must become one design:
+   - `main`'s device performance is kept for every existing variant;
+   - the excision invariants hold: the exterior bit for bit against
+     `main`'s own centered kernel, no excised value read, no fourth writer;
+   - the zone kernel may stay generic, since it is a thin shell.
+
+   Where the provider cannot be `main`'s arithmetic bit for bit, say why
+   and hold it to roundoff. Resolve `CODE.md` and `CLAUDE.md` by keeping
+   both sides' content.
+2. **Then merge `claude/octant-mode-spinning-bh-75bd22` (0a96f27)**, its
+   committed head only.
+   - **Do not touch its worktree** (`.claude/worktrees/
+     optimistic-ramanujan-852fdf`), whose uncommitted changes belong to
+     another session.
+   - Reconcile `hole_case`/`GHCase` (`octant = :rotating`, `a`, beside
+     `excision`), `test/octant_runs.jl` (`octant=rotating a=` beside
+     `interior=excised …`), `CODE.md` and `CLAUDE.md`.
+   - Make `build_excision`'s one-variable class field set correct on the
+     rotating octant: its parity and its seam rotation, for a scalar. The
+     classes must be consistent across the seam, and a test must say so.
+3. **TreeAMR 0.1.7** (the seam) becomes the `[compat]` floor if the rotating
+   branch needs it.
+
+**Accept:**
+- the suite green at one and four threads;
+- the thread digest against `main`'s for the lines both have;
+- the excision tests unchanged in strength;
+- a static `a = 0` excised row on the rotating octant with the same
+  classes and the same record as on the mirror octant, where the two are
+  comparable;
+- on an H200: the right-hand side's ns per point and the register and
+  spill counts of `:damped`, the `:excised` main kernel and the zone kernel,
+  against `main`'s recorded numbers, and whether X2a's `+5 %` is gone;
+- `CODE.md` amended **(amended in step X4)**.
+
+## Step X5 — The frame-dragged faces: a closure, and the go/no-go for `a = 3/5`
+
+`CODE.md`: "Excision", "Excision: the analysis (step X1)", and the
+rotating-octant branch's `a = 3/5` record (`git show
+claude/octant-mode-spinning-bh-75bd22:CODE.md`). **No kernel change.**
+
+**Changes** — `test/excision_model.jl` grows, and so does `src/stencils.jl`
+if a new family needs weights (with exact tests).
+1. **`margins` at Kerr-Schild `a = 3/5`**, for the sphere `r_E` and the
+   tracked offset surface, at `h = 1/24, 1/32, 1/48`:
+   - the window — normal outflow to the inner horizon, which is at `0.632`
+     on the equator, with the ring at `0.6` and the core rule's surface
+     outside the ring;
+   - the `b/a < 0` face fraction and its least value against `r_E`;
+   - the depth in cells at the poles (`r₊ = 1.8`) and on the equator
+     (`1.897`) for each `h`.
+2. **`model2d` on Kerr-Schild `a = 3/5`'s equatorial plane**, where frame
+   dragging is in the plane, keeping X1's conservation form. Compare
+   (a) per-axis closures (X1's), (b) per-stencil extrapolation along the
+   lattice direction nearest the normal, with sources inside the point's
+   `G`-box (X1's `extrap`), and (c) a **hybrid**: per-axis where the
+   face's shift points out of the excised set, the extrapolation where it
+   points in.
+   - Each with and without lopsided advection, at `ε_KO = 1/2, 1` and
+     `q = 4` (and 2), over the window's `r_E`, against the `:damped` layer
+     on the same plane.
+   - Dense spectra and noise evolutions, as X1's `eig` and `noise`.
+   - Add another family if one of these fails and a better one is
+     visible.
+
+**Records**: `CODE.md`'s "Excision" and a Measured results entry,
+"Excision: the frame-dragged faces (step X5)". The step decides:
+- the family X6 builds, as a per-face rule X6 can implement from the
+  per-point classes;
+- the `r_E` window and the resolutions X7 should run;
+- whether lopsided advection is needed here.
+
+**Accept:**
+- a **go/no-go with the plane's numbers**: which family is stable at
+  `a = 3/5`, and from which `r_E`. If none, say so; X6 and X7 then wait for
+  Erik;
+- the suite green at one and four threads.
+
+## Step X6 — The frame-dragged faces in the zone kernel
+
+Starts from the integration branch with X4 and X5 merged. `CODE.md`:
+"Excision", X5's records, "One right-hand-side evaluation" as X4 left it.
+
+**Changes:**
+- the family X5 chose, in the zone kernel's closure provider, selected per
+  face from the classes. The build records which rule each closure axis
+  uses;
+- X2b's build-time refusal of a shift into the excised set becomes a
+  refusal only of what the chosen family does not cover;
+- the record's outflow rows report the faces per rule;
+- `test/octant_runs.jl octant=rotating a=3/5 interior=excised …` runs.
+
+**Tests** (claims, priced):
+- every existing excision claim still holds;
+- a static `a = 0` excised run is bit for bit what it was, if `a = 0` has
+  no faces of the new kind (X1: it has none);
+- the new rule is exact on polynomials to its degree;
+- a planted degenerate metric in the excised set leaves every
+  non-excised `du` `isequal`;
+- one `a = 3/5` excised right-hand side and a short run on the rotating
+  octant, finite, with the new rows.
+
+**Accept:**
+- the above;
+- the suite green at one and four threads;
+- a local smoke run at `a = 3/5` that writes `simwatch.toml`;
+- `CODE.md` amended **(amended in step X6)**.
+
+## Step X7 — The static `a = 3/5` hole on the rotating octant, on the H200s
+
+`CODE.md`: "Excision" with X5's window, the rotating octant's `a = 3/5`
+reference rows, and X3's entry (the method).
+
+**Resolution** (Erik: "ensure you have sufficient resolution"):
+- the reference `a = 3/5` convergence pair found `h = 1/16` outside the
+  asymptotic regime, so production runs at **`h = 1/24, 1/32, 1/48`** (an
+  extra cube for `1/48`);
+- the excision surface sits **at least about 16 cells** below the horizon
+  at the poles at the coarsest production `h`, and the depth scan decides
+  how much more.
+
+**Rows**: Kerr-Schild `a = 3/5`, static, on the rotating octant, with the
+algebraic source, `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, and `amplitude = 0` for
+the convergence rows. Each row has its own `out=` with `simwatch.toml` and
+its own `checkpoint=`/`walltime=`.
+1. **The depth scan** at `h = 1/24` across X5's window, about `10 M` a row,
+   with and without the blend if X5 asks.
+2. **Production** at the chosen `r_E`: `h = 1/24, 1/32, 1/48` to `24 M`,
+   and the `1/32` row to `64 M`, against the reference rows. Report:
+   - the shells' `ℋ` and error with their orders;
+   - `J` and `M_irr` and their drifts. The reference `:damped` has `J`
+     rising at `5.2·10⁻⁸/M` at `h = 1/32`, as truncation error at order
+     four;
+   - the band;
+   - the outflow rows, with the faces per rule.
+3. **Cost** on the H200.
+
+**Records**: a Measured results entry, "Excision of the static spinning
+hole (step X7)", and the recommendation: `a = 9/10` (which X1's window puts
+at about `h ≲ 1/40` there), moving holes, or stop. Delete the run's
+checkpoints on Symmetry once the CSVs, records and `simwatch.toml` are copied
+back (Erik's instruction of 2026-10-06 for X3's).
+
+**Accept**: every row run or its failure diagnosed; the tables in `CODE.md`;
+the suite green at one and four threads.
 
 ## Step 9 — Infrastructure and the H200 (G6)
 
