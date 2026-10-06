@@ -270,7 +270,7 @@ is a call on a device whether or not inlining is forced.
     msrc = gh_node_source_lean(g4, gu4, α, sqrtγ, ∂ₜh, ∂h, Hl, dHl, γ0, γ2)
 
     # (4) the coefficients of the Π components.
-    A = (α * sqrtγ) * γu                          # A^{jk} = α√γ γ^{jk}
+    A = _scale(α * sqrtγ, γu)                     # A^{jk} = α√γ γ^{jk}
     divβ, divA = metric_divergences(gu4, α, β, γu, sqrtγ, ∂h)
     return (; ∂ₜh, msrc, β, divβ, divA, A)
 end
@@ -410,58 +410,20 @@ contracted into fused multiply-adds differently (`CODE.md`, "Measured results").
 end
 
 """
-    gh_rhs_kernel!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
-                   interior, t, ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS},
-                   ::Val{INT})
+    gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO, interior,
+                  t, tw, t_f, rate, trail, fitp, I, ::Val{G}, ::Val{q}, ::Val{HASH},
+                  ::Val{DISS}, ::Val{INT})
 
-The right-hand side at one owned point: `F(u)`, modified inside the hole by
-`CODE.md`'s `(INTERIOR)`,
-
-    ∂_t u = w(r) · F(u)  −  ρ(r) · (u − u_exact(x, t)) .
-
-Without a hole (`INT === :none`), `F` is stored component by component as it
-is finished ([`gh_rhs_store!`](@ref), from 2026-10-05). The interior variants
-take it as two vectors ([`gh_rhs_at_point`](@ref)) to combine with the layer's
-terms.
-
-`du` is in **state layout** (no ghosts, so the global index is used as it
-comes); `work` is the ghosted working array (so the same index plus `G`).
-`Hwork` is the gauge source's working array or `nothing`.
-
-The **five** `Val`s are built once per chunk in [`GHProblem`](@ref) and
-resolved when the kernel compiles: the ghost width, the difference order,
-whether there is a gauge source, whether there is dissipation, and — added
-in step 5 — which of `CODE.md`'s interior variants is running, `:none`
-meaning there is no hole. Building them per evaluation would recompile or
-dispatch dynamically at every RK stage (`CLAUDE.md`).
-
-**The interior's fifth `Val` is the variant and not a `Bool`
-(proposed in step 5.)** `CODE.md` and `PLAN.md` call it "has interior";
-`:none`, `:damped`, `:pasted` and `:frozen` say that and *which*, in one
-parameter, and the three variants differ in the kernel — `:frozen` has
-`ρ ≡ 0` and `:pasted` freezes the whole ball `r < r_1` — so a `Bool` would
-have needed a second parameter beside it.
-
-`ε_KO` is the case's Kreiss–Oliger amplitude, a number or — from step 8c —
-a [`HorizonDissipation`](@ref) evaluated per point by
-[`dissipation_rate`](@ref), which is the identity on a number; and the
-layer's `u_exact` is the interior's [`layer_target`](@ref), the background
-itself unless the interior names another metric (step 8c).
-
-**The three branches, in the order they must be in.** The core predicate
-is asked *before* any stencil is touched, because the frozen core holds
-finite but stale data on which `F` may be `NaN` and `0 · NaN = NaN`
-(`CLAUDE.md`). Outside `r_1` the answer is `F` itself and not `1·F − 0·(…)`,
-which also saves the analytic solution's dual pass at every point of the
-evolved region — `u_exact` is evaluated in the layer and nowhere else.
+The right-hand side at the one owned point `I = (i1, i2, i3, block)`: the body
+[`gh_rhs_kernel!`](@ref) had until 2026-10-05, moved here unchanged so that the
+kernel can run it for one point (`W = 1`: every device, and the types SIMD.jl has
+no lanes for) or for each point of a group of `W` that straddles the hole's layer
+([`gh_rhs_lanes!`](@ref)). The kernel's docstring describes it.
 """
-@kernel function gh_rhs_kernel!(du, @Const(work), Hwork, @Const(origins),
-                                @Const(spacings), bg, damping, γ2, ε_KO,
-                                interior, t, tw, t_f, rate, trail, fitp,
-                                ::Val{G}, ::Val{q},
-                                ::Val{HASH}, ::Val{DISS},
-                                ::Val{INT}) where {G,q,HASH,DISS,INT}
-    I = @index(Global, NTuple)                    # (i1, i2, i3, block)
+@inline function gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2,
+                               ε_KO, interior, t, tw, t_f, rate, trail, fitp, I,
+                               ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS},
+                               ::Val{INT}) where {G,q,HASH,DISS,INT}
     b = I[4]
     inner = (I[1], I[2], I[3])                    # state-layout index
     T = eltype(du)
@@ -633,6 +595,152 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
             end
         end
     end
+    return nothing
+end
+
+"""
+    gh_rhs_lanes!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO, interior,
+                  t, tw, t_f, rate, trail, fitp, I, ::Val{W}, ::Val{G}, ::Val{q},
+                  ::Val{HASH}, ::Val{DISS}, ::Val{INT})
+
+The right-hand side at the `W` owned points `I[1] … I[1] + W − 1` of one row, as
+one evaluation on SIMD.jl's `Vec{W,T}` lanes (added 2026-10-05; `CODE.md`, "The
+right-hand side on a CPU"). The package's own [`gh_rhs_store!`](@ref) and
+[`gh_rhs_at_point`](@ref) run with `Vec{W,T}` for `T`, reading the working array
+through [`Lanes`](@ref): every stencil load is a load of `W` neighbouring values
+and every store a store of `W`. Each lane does its point's scalar operations in the
+scalar order, so `du` is the scalar kernel's to roundoff: bit for bit on the gauge
+wave, and about an eps of the terms on a hole, where StaticArrays' `muladd`s are
+fused into FMAs differently in the two contexts (`test/simd_tests.jl`).
+
+- The damping rate and the Kreiss–Oliger amplitude are evaluated per lane, at each
+  lane's position: a profile varies along the row.
+- **Without a hole** the `W` points take [`gh_rhs_store!`](@ref), as one point does.
+- **With a hole**, the `W` points take the lanes when every one of them is outside
+  the layer — most of the mesh — and [`gh_rhs_point!`](@ref) one at a time
+  otherwise, so that the frozen core, the layer and its target are the scalar
+  code's, branch for branch.
+
+A lane's `sqrt` is the instruction, so a degenerate metric gives a `NaN` here where
+the scalar code throws a `DomainError`; the record's `finite` and the next chunk's
+speed check read it.
+"""
+@inline function gh_rhs_lanes!(du, work, Hwork, origins, spacings, bg, damping, γ2,
+                               ε_KO, interior, t, tw, t_f, rate, trail, fitp, I,
+                               ::Val{W}, ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS},
+                               ::Val{INT}) where {W,G,q,HASH,DISS,INT}
+    b = I[4]
+    inner = (I[1], I[2], I[3])                    # the first lane's index
+    T = eltype(du)
+    V = Vec{W,T}
+    inv_h = inv(spacings[b])
+    st, sv, sb = work_strides(work)
+    var = 1 + (b - 1) * sb +
+          (I[1] + G[1] - 1) * st[1] + (I[2] + G[2] - 1) * st[2] +
+          (I[3] + G[3] - 1) * st[3]
+    # Each lane's position, and the two profiles there.
+    xs = ntuple(l -> point_position(origins, spacings, b, (I[1] + l - 1, I[2], I[3])),
+                Val(W))
+    γ0 = Vec(ntuple(l -> damping_rate(damping, t, xs[l]), Val(W)))
+    εh = Vec(ntuple(l -> dissipation_rate(ε_KO, t, xs[l]), Val(W))) * inv_h
+    wl = lanes(Val(W), work)
+    Hl = lanes(Val(W), Hwork)
+    dl = lanes(Val(W), du)
+    o, sd = state_offset(du, I)
+    if INT === :none
+        gh_rhs_store!(dl, o, sd, V, wl, Hl, inner, b, var, st, sv, inv_h, γ0, V(γ2),
+                      εh, Val(q), Val(HASH), Val(DISS))
+    elseif all(ntuple(l -> is_outside(interior, interior_point(interior, t, xs[l])),
+                      Val(W)))
+        ∂ₜh, ∂ₜΠ = gh_rhs_at_point(V, wl, Hl, inner, b, var, st, sv, inv_h, γ0, V(γ2),
+                                   εh, Val(q), Val(HASH), Val(DISS))
+        @nexprs 10 v -> (dl[o + (v - 1) * sd] = ∂ₜh[v])
+        @nexprs 10 v -> (dl[o + (NC + v - 1) * sd] = ∂ₜΠ[v])
+    else
+        for l in 1:W
+            gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
+                          interior, t, tw, t_f, rate, trail, fitp,
+                          (I[1] + l - 1, I[2], I[3], b), Val(G), Val(q), Val(HASH),
+                          Val(DISS), Val(INT))
+        end
+    end
+    return nothing
+end
+
+"""
+    gh_rhs_kernel!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
+                   interior, t, tw, t_f, rate, trail, fitp, ::Val{G}, ::Val{q},
+                   ::Val{HASH}, ::Val{DISS}, ::Val{INT}, ::Val{W})
+
+The right-hand side at one owned point: `F(u)`, modified inside the hole by
+`CODE.md`'s `(INTERIOR)`,
+
+    ∂_t u = w(r) · F(u)  −  ρ(r) · (u − u_exact(x, t)) .
+
+Without a hole (`INT === :none`), `F` is stored component by component as it
+is finished ([`gh_rhs_store!`](@ref), from 2026-10-05). The interior variants
+take it as two vectors ([`gh_rhs_at_point`](@ref)) to combine with the layer's
+terms.
+
+`du` is in **state layout** (no ghosts, so the global index is used as it
+comes); `work` is the ghosted working array (so the same index plus `G`).
+`Hwork` is the gauge source's working array or `nothing`.
+
+The **six** `Val`s are built once per chunk in [`GHProblem`](@ref) and
+resolved when the kernel compiles: the ghost width, the difference order,
+whether there is a gauge source, whether there is dissipation, — added
+in step 5 — which of `CODE.md`'s interior variants is running, `:none`
+meaning there is no hole, and — added 2026-10-05 — the SIMD width `W`. Building
+them per evaluation would recompile or dispatch dynamically at every RK stage
+(`CLAUDE.md`).
+
+**`W` points at a time on the CPU** (added 2026-10-05; `CODE.md`, "The right-hand
+side on a CPU"). With `W = 1` — every device, and the types SIMD.jl has no lanes
+for — each work item is its point ([`gh_rhs_point!`](@ref)). With `W > 1` the launch
+is the same, `(N, N, N, nblocks)`, and only a *leader* works
+([`is_lane_leader`](@ref)): the item at the start of each group of `W` along the
+first axis, which evaluates the group on SIMD lanes ([`gh_rhs_lanes!`](@ref)). A
+row whose length `W` does not divide ends in an **overlapping** group, the last `W`
+points of the row: the points it shares with the group before are computed again
+and stored again with the same bits, so no lane is ever outside the row and nothing
+is masked. The other items do nothing, and cost less than one percent.
+
+**The interior's fifth `Val` is the variant and not a `Bool`
+(proposed in step 5.)** `CODE.md` and `PLAN.md` call it "has interior";
+`:none`, `:damped`, `:pasted` and `:frozen` say that and *which*, in one
+parameter, and the three variants differ in the kernel — `:frozen` has
+`ρ ≡ 0` and `:pasted` freezes the whole ball `r < r_1` — so a `Bool` would
+have needed a second parameter beside it.
+
+`ε_KO` is the case's Kreiss–Oliger amplitude, a number or — from step 8c —
+a [`HorizonDissipation`](@ref) evaluated per point by
+[`dissipation_rate`](@ref), which is the identity on a number; and the
+layer's `u_exact` is the interior's [`layer_target`](@ref), the background
+itself unless the interior names another metric (step 8c).
+
+**The three branches, in the order they must be in.** The core predicate
+is asked *before* any stencil is touched, because the frozen core holds
+finite but stale data on which `F` may be `NaN` and `0 · NaN = NaN`
+(`CLAUDE.md`). Outside `r_1` the answer is `F` itself and not `1·F − 0·(…)`,
+which also saves the analytic solution's dual pass at every point of the
+evolved region — `u_exact` is evaluated in the layer and nowhere else.
+"""
+@kernel function gh_rhs_kernel!(du, @Const(work), Hwork, @Const(origins),
+                                @Const(spacings), bg, damping, γ2, ε_KO,
+                                interior, t, tw, t_f, rate, trail, fitp,
+                                ::Val{G}, ::Val{q},
+                                ::Val{HASH}, ::Val{DISS},
+                                ::Val{INT}, ::Val{W}) where {G,q,HASH,DISS,INT,W}
+    I = @index(Global, NTuple)                    # (i1, i2, i3, block)
+    if W == 1
+        gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
+                      interior, t, tw, t_f, rate, trail, fitp, I, Val(G), Val(q),
+                      Val(HASH), Val(DISS), Val(INT))
+    elseif is_lane_leader(I[1], size(du, 1), W)
+        gh_rhs_lanes!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
+                      interior, t, tw, t_f, rate, trail, fitp, I, Val(W), Val(G),
+                      Val(q), Val(HASH), Val(DISS), Val(INT))
+    end
 end
 
 """
@@ -757,8 +865,15 @@ makes one per run. For a case with bounds the constructor also asserts that
 the projection's gate lies deeper than every point an evolved stencil reads
 ([`check_bounds_gate`](@ref)), beside the interior's own radius checks and
 for the same reason.
+
+`simd_width` is how many neighbouring points the kernel evaluates at once on SIMD
+lanes (added 2026-10-05; `CODE.md`, "The right-hand side on a CPU"): `nothing`, the
+default, is the host's ([`default_simd_width`](@ref) — four `Float64` on AVX2 and
+aarch64, eight with AVX-512, one on a device), and `1` is the scalar kernel. The
+lanes compute the scalar kernel's numbers to roundoff, and the same numbers at any
+thread count.
 """
-struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A,X,Y}
+struct GHProblem{T,G,q,HASH,DISS,INT,W,F,S,H,D,O,V,C,I,A,X,Y}
     U::F
     schedule::S
     Hsrc::H                      # the sampled gauge source, or `nothing`
@@ -792,13 +907,16 @@ struct GHProblem{T,G,q,HASH,DISS,INT,F,S,H,D,O,V,C,I,A,X,Y}
     valH::Val{HASH}
     valdiss::Val{DISS}
     valint::Val{INT}
+    # The SIMD width of the kernel (added 2026-10-05): `W` points at a time on the
+    # CPU, `1` on a device (`lanes.jl`, `default_simd_width`).
+    valsimd::Val{W}
 end
 
 function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
                    t=zero(T), interior=case.interior, margin_check=true,
                    accounting=nothing, target=nothing, fits=nothing,
                    t_target=zero(T), target_rate::Bool=false, trail=zero(T),
-                   target_exact::Bool=false) where {T}
+                   target_exact::Bool=false, simd_width=nothing) where {T}
     q ≥ 2 && iseven(q) || throw(ArgumentError(
         "the finite-difference order must be even and at least 2, so that " *
         "the centered stencils have an integer half-width q/2 and CODE.md's " *
@@ -878,14 +996,18 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         "cache field set, and this problem has none: pass `target = " *
         "target_cache(U)` and fill it (fill_target!), which is what evolve! " *
         "does (CODE.md, \"The fitted target\")."))
-    return GHProblem{T,U.G,Int(q),HASH,DISS,INT,typeof(U),typeof(schedule),
+    # The kernel's SIMD width (added 2026-10-05): the host's, unless the caller
+    # asks for another — `simd_width = 1` is the scalar kernel.
+    W = simd_width === nothing ? default_simd_width(T, backend, U.forest.N) :
+        check_simd_width(simd_width, T, backend, U.forest.N)
+    return GHProblem{T,U.G,Int(q),HASH,DISS,INT,W,typeof(U),typeof(schedule),
                      typeof(Hsrc),typeof(diag),typeof(origins),
                      typeof(spacings),typeof(case),typeof(interior),
                      typeof(accounting),typeof(target),typeof(fits)}(
         U, schedule, Hsrc, diag, origins, spacings, case, interior,
         accounting, target, fits, T(t_target), target_rate, T(trail),
         target_exact, hasdirichlet, Val(U.G),
-        Val(Int(q)), Val(HASH), Val(DISS), Val(INT))
+        Val(Int(q)), Val(HASH), Val(DISS), Val(INT), Val(W))
 end
 
 """
@@ -903,23 +1025,24 @@ the gauge source, which is the most expensive setup phase there is and
 which nothing about a new `ρ_max` invalidates. It shares the run's
 [`BoundsAccounting`](@ref) too, which is what that record is for.
 """
-function with_interior(p::GHProblem{T,G,q,HASH,DISS}, interior;
+function with_interior(p::GHProblem{T,G,q,HASH,DISS,INT0,W}, interior;
                        fits=p.fits, target=p.target,
                        t_target=p.t_target,
                        target_rate::Bool=p.target_rate, trail=p.trail,
-                       target_exact::Bool=p.target_exact) where {T,G,q,HASH,DISS}
+                       target_exact::Bool=p.target_exact) where {T,G,q,HASH,DISS,
+                                                                 INT0,W}
     INT = interior_variant(interior)
     INT === :fitted && target === nothing && throw(ArgumentError(
         "a :fitted interior needs the problem's target cache; this problem " *
         "has none (see GHProblem's `target`)."))
-    return GHProblem{T,G,q,HASH,DISS,INT,typeof(p.U),typeof(p.schedule),
+    return GHProblem{T,G,q,HASH,DISS,INT,W,typeof(p.U),typeof(p.schedule),
                      typeof(p.Hsrc),typeof(p.diag),typeof(p.origins),
                      typeof(p.spacings),typeof(p.case),typeof(interior),
                      typeof(p.accounting),typeof(target),typeof(fits)}(
         p.U, p.schedule, p.Hsrc, p.diag, p.origins, p.spacings, p.case,
         interior, p.accounting, target, fits, T(t_target), target_rate,
         T(trail), target_exact, p.hasdirichlet,
-        p.valG, p.valq, p.valH, p.valdiss, Val(INT))
+        p.valG, p.valq, p.valH, p.valdiss, Val(INT), p.valsimd)
 end
 
 """
@@ -1013,15 +1136,17 @@ function gh_rhs!(du, u, p::GHProblem, t)
     else
         fill_ghosts!(p.U, p.schedule)
     end
-    map_blocks!(gh_rhs_kernel!, p.U, statearray(du, p.U), p.U.work,
-                gauge_work(p.Hsrc), p.origins, p.spacings, p.case.background,
-                p.case.γ0, p.case.γ2, p.case.ε_KO, p.interior, eltype(p.U.work)(t),
-                target_work(p.target), p.t_target, p.target_rate, p.trail,
-                _exact_fit(p), p.valG,
-                p.valq, p.valH,
-                p.valdiss, p.valint)
+    map_blocks!(gh_rhs_kernel!, p.U, gh_rhs_kernel_args(p, du, t)...)
     return nothing
 end
+
+# The kernel's arguments, in one place (added 2026-10-05): `gh_rhs!` and the
+# benchmarks that launch the kernel by itself (`bench/`) build them alike.
+gh_rhs_kernel_args(p::GHProblem, du, t) =
+    (statearray(du, p.U), p.U.work, gauge_work(p.Hsrc), p.origins, p.spacings,
+     p.case.background, p.case.γ0, p.case.γ2, p.case.ε_KO, p.interior,
+     eltype(p.U.work)(t), target_work(p.target), p.t_target, p.target_rate, p.trail,
+     _exact_fit(p), p.valG, p.valq, p.valH, p.valdiss, p.valint, p.valsimd)
 
 """
     gh_step_limiter!(u, integrator, p::GHProblem, t)

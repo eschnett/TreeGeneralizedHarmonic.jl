@@ -390,6 +390,26 @@ point on an H200, and it now runs at 1.1, and 1.7× faster on the CPU. What chan
 - **The investigation's prototypes** are `bench/rhs_lab.jl` and its companions
   (see "Commands").
 
+From 2026-10-05 the right-hand side runs on **SIMD lanes on the CPU** (`CODE.md`,
+"The right-hand side on a CPU"): the kernel evaluates `W` neighbouring points along
+the first axis at once as SIMD.jl's `Vec{W,T}` (SIMD.jl is a dependency), through the
+package's own algebra, on every branch — no hole, a hole's evolved region (a group
+with a point in the layer or the core falls back to the scalar code point by point),
+the sampled and the algebraic gauge sources. `W` is the sixth kernel `Val`, chosen by
+`GHProblem` (`default_simd_width`: 4 `Float64` on AVX2 and aarch64, 8 with AVX-512,
+1 on a device or for a software type; `simd_width = 1` asks for the scalar kernel,
+also through `evolve!`). A row that `W` does not divide ends in an **overlapping**
+group. `src/lanes.jl` has the width, `Lanes` (an array read `W` elements at a time)
+and the leader rule; the kernel's body is `gh_rhs_point!` (one point) and
+`gh_rhs_lanes!` (a group). `pointwise.jl`'s algebra and the algebraic source asked
+three things of their number type that a `Vec` lacks, now spelled `_scale`,
+`_anynonzero` and `_select`. `test/simd_tests.jl` is its file, and
+`bench/rhs_cpu_lab.jl` the lab that measured it. Measured: the kernel 2.2–2.4× on
+Zen 3 (four lanes) and 2.2–2.8× on Skylake-AVX512 (eight), the gauge wave's RK4 step
+1.42× at 64 threads; the hole fixture's step only 1.08×, because on a refined mesh
+TreeAMR's prolongation is 145 of a 200 ms `gh_rhs!` — that, not the kernel, is a
+hole's next lever. Devices run the `W = 1` kernel at PR #4's speed.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -788,6 +808,18 @@ julia --project=. bench/rhs_lab.jl mode=round9 N=32 roots=8
 
 ```bash
 julia --project=. bench/rhs_lab_cpu.jl
+```
+
+The CPU right-hand-side lab (added 2026-10-05) is `bench/rhs_cpu_lab.jl`, the
+measurements of `CODE.md`'s "The right-hand side on a CPU": where `gh_rhs!` goes,
+the kernel at each SIMD width (`simd_width`), checked against the scalar one, the
+stencils without their zero weights (`LAB_ZW=1`), the native code, the head's pieces
+and a profile of the ghost fill — modes and variables in its header; `LAB_CASE=hole`
+for the hole fixture. It runs in the package's own environment, pinned on Symmetry as
+`bench/stepping.jl` is; `BENCH_SIMD=1` gives `bench/stepping.jl` the scalar kernel:
+
+```bash
+LAB_MODE=breakdown,simd julia --project=. -t 4 bench/rhs_cpu_lab.jl
 ```
 
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
@@ -1353,9 +1385,10 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   platform's, not the physics'. `interior_tests.jl` asks for
   `g_tt = −1 + 2γ²M/δ` at a transverse offset `δ` instead.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
-  dissipation" and — from step 5 — the interior *variant* (`:none`,
+  dissipation", — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in
-  one parameter) are `Val` parameters built in `GHProblem`'s constructor.
+  one parameter) and — from 2026-10-05 — the SIMD width `W` are `Val`
+  parameters built in `GHProblem`'s constructor.
   Building them per evaluation recompiles or dispatches dynamically on
   every RK stage. The price is paid at compile time instead: a test row
   at a new `q` is a new kernel, which is most of what
@@ -1365,6 +1398,23 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   against it — and `with_interior` shares the field sets and the sampled
   gauge source rather than rebuilding the problem, which would re-sample
   `H_a`.
+- **On the CPU the kernel's algebra runs on SIMD lanes, so it must stay generic
+  in its number type** (added 2026-10-05). Everything `gh_rhs_head` and
+  `gh_rhs_pi` reach — `metric_quantities`, the lean source, `metric_divergences`,
+  the gauge sources, the damping and dissipation profiles' *results* — is evaluated
+  with `T = Vec{W,T}`, which is not a `Number`. So: **no branch on a computed value**
+  (`if x > 0`, `?:` — a lane condition has a value per lane; use `_select`, and
+  `_anynonzero` for "is it zero"); **no scalar times a static array** (`a * M`;
+  use `_scale`, which is also closure-free for a device); **no literal converted to
+  `T`** (`SMatrix{4,4,T}(-1, 0, …)`; use `one(T)`, `zero(T)`, `T(x)`). A violation
+  is a `MethodError` or a `TypeError` at the first CPU evaluation, which
+  `test/simd_tests.jl` makes on every branch. Two consequences to know: a lane's
+  `sqrt` is the instruction, so a degenerate metric in the evolved region gives a
+  `NaN` (read by the record's `finite` and the next chunk's speed check) where the
+  scalar code throws a `DomainError` — `simd_width = 1` restores the throw; and the
+  lanes are the scalar kernel to **roundoff, not bits** (StaticArrays' `muladd`s are
+  fused into FMAs by context): bitwise on the gauge wave, 1.0–2.0 eps of the terms
+  on a hole. Bit-identity across thread counts is unaffected — a block is one thread's.
 - **KernelAbstractions refuses a `return` statement anywhere in a kernel
   body**, closures included. That is why the streaming right-hand side
   lives in `gh_rhs_at_point`, a plain `@inline` function: the frozen
