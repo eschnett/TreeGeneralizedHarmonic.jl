@@ -681,6 +681,11 @@ background at any position from its own mass and spin (`spin = (0, 0, a)`).
 `interior = :excised` (added in step X2b) excises the ball `r < r_1`;
 `r_0` is then only where the core rule puts the initial data inside it, and
 `excision` its [`Excision`](@ref) parameters (the default when `nothing`).
+It takes either octant (amended in step X4): on the rotating one the
+excision's classes are exchanged across the seam as a scalar, and a spinning
+hole there is refused by [`build_excision`](@ref) where frame dragging turns
+the shift into the excised set — the physics of `PLAN.md`'s steps X5–X6, not
+the octant.
 """
 function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                    chunk,

@@ -110,6 +110,7 @@ research project; the inherited documents live in `notes/`.
   - [The trailing side (step 8′)](#the-trailing-side-step-8)
   - [Robust stability on the octant (measured 2026-10-02)](#robust-stability-on-the-octant-measured-2026-10-02)
   - [The right-hand side on an H200 (measured 2026-10-05)](#the-right-hand-side-on-an-h200-measured-2026-10-05)
+  - [The merge with `main` and the rotating octant (step X4)](#the-merge-with-main-and-the-rotating-octant-step-x4)
   - [Excision: the analysis (step X1)](#excision-the-analysis-step-x1)
   - [Excision: the variant (step X2b)](#excision-the-variant-step-x2b)
   - [Excision on the static hole (step X3)](#excision-on-the-static-hole-step-x3)
@@ -1025,6 +1026,80 @@ step X2b)**, against `8fa6658`: the thread digest's six lines identical, the
 one-chunk octant runs identical in every column but the wall clock, and the right-hand side's cost within the
 machine's noise — under [Measured results](#measured-results), "Excision:
 the variant (step X2b)".
+
+**One design after `main`'s rewrite (amended in step X4).** Step X4 merged
+`main`'s spill-free kernel (above, "Implemented 2026-10-05") into the
+excision round. The provider is now the argument of `main`'s two functions:
+`gh_rhs_head(S, …)` asks it for the thirty `d1` of `h`, the advection of
+`h` (`adv`) and the dissipation of `h` (`ko`), and `gh_rhs_pi(S, …)` for one
+Π component's `d1` of `h` and `Π`, `d2`, the three `dmix`, the advection of
+`Π` and its `ko`. `gh_rhs_store!(du, o, sd, S, …)` (the head, then a run-time
+loop over the components, each stored as it is finished) and
+`gh_rhs_at_point(S, …)` (the same, unrolled, as two vectors) are built on
+them, and `main`'s signatures with `st` and `Val(q)` build `Centered` and call
+the provider form. So:
+- **`d1` of `h` is asked twice** per component and axis, by the head and by
+  the Π component (`main` re-forms it rather than keep thirty values live
+  across the source); a provider must answer both alike, which one whose
+  methods are functions of `(work, base, d)` does.
+- **`Centered{T,q}` holds the strides and nothing else** **(proposed in step
+  X4)**: its methods form `derivative_weights` and `dissipation_weights` —
+  `@generated` constants — inside, so that inlined they *are* `main`'s
+  `axis_stencil` and `mixed_stencil` calls. X2a's `Centered` carried the three
+  weight vectors as fields, 160 bytes a point that a device which does not
+  inline passes through the stack.
+- **The main kernel's branches**: `:none` is `main`'s
+  `gh_rhs_store!(du, o, sd, T, …, Val(q), …)`; `:excised` calls the same
+  function with the same arguments at a centered point, writes zeros by a
+  run-time loop at an excised one, and nothing at a zone point; inside the
+  lopsided blend's shell it calls the store with `Lopsided`. The layer
+  variants are `main`'s, through `gh_rhs_at_point`. No branch forms a closure.
+- **The zone kernel** stores through `gh_rhs_store!(…, ClosureProvider, …)`;
+  the closure provider's own contractions stay generic loops over the table,
+  since the zone is a shell.
+- **Where the blend's weight is zero the main kernel takes the `:none` call,
+  not `Lopsided` at `λ = 0`** **(proposed in step X4)**. The arithmetic of the
+  two is the same — `adv` returns its argument through a branch — but
+  `metric_quantities` forms `g^{ab}` with StaticArrays' products, which are
+  `muladd`s, and LLVM fuses them into FMAs by the code around them: the head
+  compiled around a provider with a branch in `adv` differed from the
+  blend-free one in the last place at 496 of the fixture's 25 165 points
+  beyond the blend's shell. The same is why **the closure provider's `F` at a
+  point with no excised tap is no longer bit for bit `Centered`'s** (it was
+  on Apple silicon through X3): every contraction still is, `β` differs by
+  2.8 eps and `A^{ij}` by 6.8, and in a stationary background, where `F` is
+  the small difference of `O(1)` terms, that is up to 103 eps of each
+  variable's largest `|du|` on the fixture (1682 of 4508 points; the test
+  holds it to 512, as the suite's other comparisons of two specialisations).
+  No production path evaluates the closure provider at such a point.
+
+**Measured (step X4)**, against `main` (`cbe3662`) and the integration branch
+before the merge (`b80f4ed`), the same manifest (TreeAMR 0.1.7, Julia
+1.13.1):
+- **Every other run is `main`'s.** `test/thread_workload.jl` at four threads
+  prints `main`'s six lines character for character (its seventh, the excised
+  right-hand side, has X2b's counts and classes); the one-chunk octant runs
+  (`case=ks L=8 N=16 roots=2 radii=4,2 t_end=1/2 chunk=1/2 cfl=1/2`), `:damped`
+  with the default noise and `:fitted` without, give `main`'s `octant.csv` in
+  every cell but the wall clock and `main`'s `records.csv` in every column
+  `main` has.
+- **On the H200 the `:damped` kernel is `main`'s**, PTX and all: 255 registers,
+  a 6576-byte frame, 5700/8480 bytes of spill stores/loads, 50 `ld.local`, 119
+  `st.local` and 47 call sites in 8015 lines of PTX, in both; its right-hand
+  side on `bench/stepping.jl`'s hole (512 blocks of `16³`) 17.71 and 17.72 ms
+  against `main`'s 17.66 and 17.66 and the integration branch's 30.35, and on
+  X3's scan octant (`N = 64`, 7.6 M points) 5.28 ns a point against `main`'s
+  5.29 and 11.40. **X2a's `+5 %` is gone** with the rest of the integration
+  branch's kernel: the provider costs nothing `ptxas` or the clock can see.
+- **The excised kernels are `main`'s kind now.** The `:excised` main kernel: a
+  1544-byte frame (8800 before), 2692/3700 bytes of spills (192/192), 5 call
+  sites (131); 1.50 ns a point on the scan octant (9.73) and the right-hand
+  side 2.88 (11.14). The zone kernel: 1512 bytes (9984), 2140/3740 (172/172), 6
+  call sites (112); 238 ns a zone point on the octant (382) and 70.7 on the
+  bench's 512 small blocks (140). The blend costs `+2.7 %` of a right-hand
+  side on the octant (it cost `+20 %`) and `+10.5 %` on the bench (`+10.8 %`).
+  Under [Measured results](#measured-results), "The merge with `main` and the
+  rotating octant (step X4)".
 
 ### The time step
 
@@ -2695,7 +2770,9 @@ it on the octant.**)** **(Amended in step X3:** measured on the octant on
 Symmetry's H200s — feasible for the static Kerr-Schild `a = 0` hole, as
 accurate outside the horizon as the `:damped` layer at `r_E = M/2`, and with
 no gauge drift to `50 M`; the recommendation is under "What step X3
-measured" at the end of this section.**)** Moving holes — points that leave
+measured" at the end of this section.**)** **(Amended in step X4:** on
+`main`'s spill-free right-hand side, 3.9× faster on the H200, and on the
+rotating octant too — "What step X4 changed", before X3's.**)** Moving holes — points that leave
 the excised set on the trailing side and need values — are a later round.
 
 **The variant, `:excised`.** Points beyond the **excision surface** are
@@ -3114,6 +3191,57 @@ variant through the package**).** The design above, with these choices:
 - `test/octant_runs.jl` takes `interior=excised` with `geometry=sphere|
   tracked`, `r_E=` or `margin=`, `r_0=`, `upwind=<start>,<width>` and
   `closure=`; `bench/stepping.jl` takes `BENCH_CASE=excised`.
+
+**What step X4 changed (amended in step X4).** Step X4 merged `main`'s
+spill-free right-hand side and the rotating octant into the integration
+branch; the excision's operator is X2b's, its arithmetic `main`'s.
+- **The kernels** are those of [One right-hand-side
+  evaluation](#one-right-hand-side-evaluation), "One design after `main`'s
+  rewrite": the closure provider plugs into `gh_rhs_head(S, …)` and
+  `gh_rhs_pi(S, …)` through `gh_rhs_store!(du, o, sd, S, …)`, and the main
+  kernel's `:excised` branch is the `:none` call at a centered point — also
+  inside the blend's start, where the weight is zero. Every excision claim of
+  X2b holds as it did, but one: the closure provider at a point with no
+  excised tap is `Centered`'s to roundoff, not bit for bit (`main`'s head is
+  compiled around it with other FMA fusions). The planted degenerate metric
+  still changes no non-excised `du`, and the centered points' `du` is the
+  `:none` kernel's at all 55 505 points of the fixture.
+- **The rotating octant** ([The rotating
+  octant](#the-rotating-octant-a-quarter-turn-about-z-added-2026-10-04)).
+  The classes' bit is exchanged as a scalar — even parity, the identity
+  rotation — so a ghost across the seam holds the class of the owned point
+  it is the image of, and the two owned seam planes have one class at each
+  point (`test/excision_tests.jl` says both). `hole_case(; octant =
+  :rotating, interior = :excised)` and `test/octant_runs.jl octant=rotating
+  a=… interior=excised …` build; at `a = 3/5` the build refuses the case by
+  the physics, as X2b's refusal says — on the smoke's octant (`h = 1/16`,
+  `r_E = 1`) 72 (zone point, closure axis) pairs with the shift into the
+  excised set, the least `b/a = −0.499`.
+- **The nested mixed derivative is not symmetric under `x ↔ y` (measured in
+  step X4).** At a zone point `dmix(S, …, i, j)` takes the outer sum along `i`
+  with the point's `i`-closure and the inner sum along `j` with each outer
+  node's `j`-closure, always `i < j`. Near the surface the closures of the two
+  axes differ, so `D_x(D_y f) ≠ D_y(D_x f)` at the truncation level, and the
+  discrete operator is not equivariant under the diagonal reflection — nor,
+  since a quarter turn is that reflection composed with a mirror, under the
+  rotating seam's quarter turn. Measured on the smoke's octant (`a = 0`,
+  `r_E = 1`, `h = 1/16`, `q = 4`) at `t = 1`: the evolved state violates the
+  diagonal reflection by `3.0·10⁻³` at zone points and `1.9·10⁻⁴` elsewhere,
+  on the mirror and on the rotating octant alike, where `:damped`'s does by
+  `5·10⁻¹⁴`. The mirror octant is the full box's solution (the operator is
+  mirror-equivariant); the rotating octant imposes a symmetry the operator
+  lacks, so the two differ at that level: the record's `L∞` norms inside the
+  horizon by `1.4·10⁻³` relative, the shells outside it by `9.5·10⁻⁵`, the
+  `L2` norms by `10⁻⁷`; the classes, the census and the first row are the
+  same. Not an instability, and not a seam defect: the two owned seam planes
+  stay one state to `1.6·10⁻¹³`. **Proposed in step X4, for X6: the zone
+  points' mixed derivative as the mean of both nestings, `½(D_i D_j + D_j
+  D_i)`**, which on a scratch copy took the diagonal violation to `5·10⁻¹⁴`
+  at zone points and made the two octants' records agree to the CSV's ten
+  printed digits (`records.csv` to `10⁻¹²`). It costs a second nested sum at
+  zone points only (the zone kernel is 1.5 % of a right-hand side on the
+  octant), keeps the exactness of the closures, and changes X3's operator at
+  zone points, which is why X4 records it rather than building it.
 
 **What step X3 measured, and the recommendation (amended in step X3).** The
 static Kerr-Schild `a = 0` hole on the octant, on Symmetry's H200s at
@@ -8124,6 +8252,94 @@ of `gh_rhs!` at `32³` and 53 % at `16³`.
 - `ncu` counters: occupancy and HBM traffic above are inferred from registers,
   local memory and SASS counts.
 - `Float32`, more than one GPU, and the monitor kernels.
+
+### The merge with `main` and the rotating octant (step X4)
+
+Step X4 merged `main` (`cbe3662`, the spill-free right-hand side of the
+previous section) and the rotating octant (`0a96f27`) into the excision
+round's integration branch, and unified the kernel: the stencil provider is
+the argument of `main`'s `gh_rhs_head` and `gh_rhs_pi` ([One right-hand-side
+evaluation](#one-right-hand-side-evaluation), "One design after `main`'s
+rewrite"; [Excision](#excision-added-2026-10-05), "What step X4 changed").
+Compared against `main` and against the integration branch before the merge
+(`b80f4ed`), with one manifest (TreeAMR 0.1.7, KernelAbstractions 0.9.43,
+Julia 1.13.1; on the H200 CUDA.jl 6.4.2, driver 595.45, X3's).
+
+**On the CPU** (development machine, Apple silicon, four threads):
+- `test/thread_workload.jl` prints `main`'s six lines character for
+  character; the seventh, the excised right-hand side, has the base's zone
+  (2192), excised (3743) and zone-block (32) counts, its classes' digest, its
+  outflow rows and its gauge constraint to every printed digit, and another
+  `du` digest (`main`'s source is summed in another order).
+- The one-chunk octant runs (`case=ks L=8 N=16 roots=2 radii=4,2 t_end=1/2
+  chunk=1/2 cfl=1/2`) — `:damped` with the default noise, `:fitted` without
+  — give `main`'s `octant.csv` in every cell but the wall clock, and
+  `main`'s `records.csv` in every column `main` has.
+- The excised fixture: the centered points' `du` is the `:none` kernel's at
+  55 505 of 55 505 points; with the lopsided blend, the 25 165 points beyond
+  its start are the blend-free run's bit for bit (496 were not before the
+  main kernel took the `:none` call there); the closure provider at the 4508
+  centered points next to the band is `Centered`'s at 2826, and within 103
+  eps of each variable's largest `|du|` at the rest.
+
+**On one H200** (Symmetry `cn111`, jobs 570646 and 570647, `h200q`, eight CPU
+threads; `excision-x4/{main,base,x4}`, each a copy with `CUDA` added). The
+octant is X3's scan mesh (`L = 64`, `N = 64`, 29 blocks, 7.6 M points,
+`r_E = 1`); the bench is `bench/stepping.jl`'s 512 blocks of `16³`, minimum
+of ten, interleaved base–main–X4–X4–main–base and base–X4–X4–base:
+
+| kernel, `q = 4`, `Float64` | registers | stack frame | spill stores / loads | `ld.local` / `st.local` | call sites (PTX) |
+|---|---|---|---|---|---|
+| `:damped`, `main` | 255 | 6576 B | 5700 / 8480 B | 50 / 119 | 47 |
+| `:damped`, step X4 | 255 | 6576 B | 5700 / 8480 B | 50 / 119 | 47 |
+| `:damped`, before the merge | 255 | 10 640 B | 296 / 320 B | 361 / 582 | 143 |
+| `:excised`, step X4 | 255 | 1544 B | 2692 / 3700 B | 1 / 10 | 5 |
+| `:excised`, before | 255 | 8800 B | 192 / 192 B | 311 / 495 | 131 |
+| `:excised` with the blend, step X4 | 255 | 2104 B | 5672 / 8212 B | 2 / 20 | 11 |
+| `:excised` with the blend, before | 255 | 9112 B | 316 / 316 B | 311 / 519 | 135 |
+| zone kernel, step X4 | 255 | 1512 B | 2140 / 3740 B | 1 / 10 | 6 |
+| zone kernel, before | 255 | 9984 B | 172 / 172 B | 311 / 607 | 112 |
+| zone kernel with the blend, step X4 | 255 | 1688 B | 2780 / 6128 B | 1 / 10 | 10 |
+
+| right-hand side | `main` | before the merge | step X4 |
+|---|---|---|---|
+| `:damped`, octant, ns a point (kernel alone) | 5.29 (3.96) | 11.40 (10.07) | 5.28 (3.96) |
+| `:excised`, octant (kernel; zone kernel) | — | 11.14 (9.73; 0.53 ms, 382 ns a zone point) | **2.88** (1.50; 0.33 ms, 238 ns, 1.5 %) |
+| `:excised` with the blend, octant | — | 13.39 (`+20.2 %`) | 2.95 (`+2.7 %`) |
+| hole, bench, ms | 17.66, 17.66 | 30.35, 30.35 | 17.71, 17.72 |
+| excised, bench, ms (zone kernel) | — | 31.91, 31.89 (2.0; 140 ns a zone point) | **14.80**, 14.81 (1.0; 70.7 ns) |
+| excised with the blend, bench, ms | — | 35.37, 35.35 (`+10.8 %`) | 16.43, 16.28 (`+10.5 %`) |
+| excised, bench, RK4 step, ms | — | 129.0 | 60.4 |
+
+- **The `:damped` kernel is `main`'s**: the same `ptxas` report and PTX
+  statistics, the same time to 0.3 %. **X2a's `+5 %` is gone**: `main`'s head
+  and Π components compiled through the slim `Centered` are `main`'s code.
+  (`main`'s `:damped` branch still collects `F` as two vectors and spills
+  5.7 kB a thread; that is `main`'s, recorded and not changed here.)
+- **The excised right-hand side is 3.9× faster on the octant** and 2.2× on the
+  bench — the main kernel stores through `main`'s spill-free path, the zone
+  kernel through the same head and Π components — and the blend's cost fell
+  from a fifth of a right-hand side to `2.7 %` on the octant.
+- **The device agrees with the CPU** as before: the largest difference of
+  `du` is `1.49·10⁻¹²` against a scale of `0.31` (`:damped` `1.50·10⁻¹²` of
+  `0.28`, the same as `main`'s), the classes are the CPU's exactly.
+
+**The excised hole on the rotating octant** (`test/octant_runs.jl
+case=ks interior=excised L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2
+cfl=1/2 amplitude=0`, `octant=reflecting` against `octant=rotating`, `a = 0`,
+`r_E = 1`, `m = 16`; the finder every chunk): the classes and the census are
+the mirror octant's at every stored point, the first row is identical, and
+at `t = 1` the record agrees to `10⁻⁷` in every `L2` norm, to `9.5·10⁻⁵` in
+the `L∞` norms of the shells outside the horizon and to `1.4·10⁻³` in those
+inside it — the nested mixed derivative's `x ↔ y` asymmetry, `3.0·10⁻³` at
+zone points on both octants, which the rotating seam turns into a difference
+between them ([Excision](#excision-added-2026-10-05), "What step X4
+changed"). With the mixed derivative averaged over both nestings (a scratch
+copy, proposed for X6) the two records agree to the CSV's ten digits. The two
+seam planes stay one state to `1.6·10⁻¹³` (`3.6·10⁻¹⁴` at zone points) as
+built. At `a = 3/5` the build refuses the case by name: 72 (zone point,
+closure axis) pairs with the shift into the excised set, the least `b/a =
+−0.499` (SimWatch's status `failed`, with the message).
 
 ### Excision: the analysis (step X1)
 

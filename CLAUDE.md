@@ -127,7 +127,12 @@ Kerr-Schild `a = 0` hole is stable at every depth of X1's window; excised at
 1/16 … 1/32` (to three digits at `1/32`), beats `:fitted`, and holds the
 gauge to `50 M` as the layer does; the next round is Erik's call (proposed:
 the static spinning hole — `CODE.md`, "Excision", "What step X3
-measured").
+measured"). Erik chose it (2026-10-06, `a = 3/5`, steps X4–X7). **X4 is done
+(2026-10-06)**: `main`'s spill-free right-hand side and the rotating octant
+are merged in, the provider is the argument of `main`'s head and Π
+functions, the `:damped` kernel is `main`'s on the H200 to the `ptxas`
+report and the excised right-hand side 3.9× faster there, and the excision's
+classes are exchanged across the rotating seam as a scalar.
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -509,6 +514,23 @@ while the blend at `r_E = M` leaks through the first shell at fine `h` and
 costs 16–24 % on the H200; there is no gauge drift to `50 M`. No source
 changed in this step;
 `test/octant_study.jl` prints the drift of `h_tt` and the outflow rows.
+
+From step X4 (2026-10-06) the integration branch carries `main` (the
+spill-free right-hand side) and the rotating octant, and they are **one
+design** (`CODE.md`, "One right-hand-side evaluation", "One design after
+`main`'s rewrite", and "Excision", "What step X4 changed"): the provider is
+the argument of `gh_rhs_head(S, …)` and `gh_rhs_pi(S, …)`, and
+`gh_rhs_store!(du, o, sd, S, …)` and `gh_rhs_at_point(S, …)` are built on
+them; `main`'s signatures (`st`, `Val(q)`) build `Centered{T,q}`, which holds
+the strides only. The main kernel's `:excised` branch is the `:none` call at a
+centered point — also where the lopsided blend's weight is zero — and the
+zone kernel stores through `gh_rhs_store!` with `ClosureProvider`; no branch
+of either forms a closure. `build_excision`'s bit field set has the identity
+rotation (a scalar), so `hole_case(; octant = :rotating, interior =
+:excised)` builds, and `test/octant_runs.jl` takes `octant=rotating a=…`
+beside `interior=excised …` (margins against `r₊`, the core rule's default
+radius outside the ring). `excision_tests.jl` has the seam's claim. A
+spinning hole is still refused at the build, by the frame-dragged faces.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -981,14 +1003,26 @@ On Symmetry they ran one H200 each from a copy with `CUDA` added to its
 `margin=` (cells below `r = 2`), `r_0=` (the core rule's radius, default
 `r_E/2`), `upwind=<start>,<width>` (the lopsided blend, off by default; X1's
 profile is `1,4`) and `closure=msn|reduced|onesided`, and writes the
-excision rows into the CSV, `records.csv` and SimWatch's `extra.excision`:
+excision rows into the CSV, `records.csv` and SimWatch's `extra.excision`.
+From step X4 it takes `octant=rotating a=…` with it too (`margin=` then counts
+cells below `r₊`, and `r_0` defaults to `max(r_E/2, (r_E + a)/2)`, outside the
+ring); a spin is refused at the build until step X6:
 
 ```bash
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=fitted L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/smoke
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=excised L=8 N=16 roots=2 radii=4,2 t_end=1 out=out/smoke-excised
 julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
 julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=1/2 L=8 N=16 roots=1 radii=4,2,1 r_0=3/4 r_1=5/4 t_end=1/2 chunk=1/4 out=out/spin
+julia --project=. --threads=4 test/octant_runs.jl case=ks interior=excised octant=rotating L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/rot-excised
 ```
+
+Step X4's H200 rows ran from `excision-x4/{main,base,x4}` on Symmetry, three
+copies with `CUDA` added (`main`, the integration branch before the merge,
+the step's head), through `out/x4dev.sbatch` (the device script
+`out/x4_device.jl` — registers and spills, the right-hand side against the
+CPU, its time — on the smoke's and on X3's scan octant) and
+`out/x4bench.sbatch` (`bench/stepping.jl`'s hole and excised cases,
+interleaved).
 
 Step X3's rows (added in step X3) ran from `excision-x3` on Symmetry, a
 copy with `CUDA` added, through a job script there (`out/x3/rows.sbatch`)
@@ -1659,6 +1693,26 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   frozen line the closure is unstable there. Do not run `:excised` on a
   spinning hole without that answered. And the closures need `ε_KO > 0`:
   without it the extrapolation family grows at `+1–4/M` on the surface.
+- **A provider changes the code around the head, and with it the FMAs**
+  (step X4). `metric_quantities` forms `g^{ab}` with StaticArrays' products,
+  which are `muladd`s, and LLVM fuses them by context: `main`'s head compiled
+  around the closure provider gives `β` 2.8 eps off `Centered`'s at the same
+  point, and around `Lopsided` at `λ = 0` (whose `adv` branches) differed in
+  the last place at 496 of the fixture's 25 165 points beyond the blend.
+  So the exterior goes through the `:none` call itself — the main kernel
+  branches on `λ = 0` before choosing a provider — and a claim that a
+  provider "is" `Centered` is a claim about its contractions (`isequal`) and
+  about `F` to roundoff, not bit for bit. A per-face rule added to the zone
+  kernel must leave every point that is not a zone point on the `:none` call.
+- **The zone kernel's mixed derivative is nested in one order** (measured in
+  step X4): outer `i`, inner `j`, `i < j`, so near the surface `D_x D_y ≠
+  D_y D_x` and the excised operator is not symmetric under `x ↔ y`, nor under
+  the rotating seam's quarter turn. On the rotating octant the excised hole
+  is then not the mirror octant's (`1.4·10⁻³` in the `L∞` norms inside the
+  horizon at `t = 1` on the smoke's octant, `10⁻⁷` in `L2`), although the
+  classes are, and the seam planes stay one state. Averaging both nestings at
+  zone points removes it (proposed for X6, `CODE.md`, "Excision", "What step
+  X4 changed"). Do not read such a difference as a seam bug.
 - **An excised problem reads the state when it is built** (step X2b):
   `build_excision`'s refusal of a shift pointing into the excised set reads
   `U.work`'s owned points, so `U` must hold the state when the `GHProblem`
