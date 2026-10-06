@@ -374,6 +374,11 @@ finished run can be continued.
 - `restart_file` — continue from this checkpoint rather than from the
   initial data, with no `forest`.
 
+`simd_width` is the right-hand-side kernel's (added 2026-10-05): `nothing` lets
+[`GHProblem`](@ref) choose the host's ([`default_simd_width`](@ref)), and `1` asks
+for the scalar kernel. It is not part of a restart's recipe: the lanes compute the
+scalar kernel's numbers to roundoff.
+
 A restart must be called with the same case and the same keywords, **except
 `t_end` and the regridding criterion** — the case's `Refinement`, `regrid`
 and `buffer` — which may change; anything else that decides a number is
@@ -417,7 +422,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  checkpoint_interval_seconds=nothing, max_walltime_seconds=nothing,
                  num_checkpoints_keep=2, checkpoint_hdf5_filters=(),
                  checkpoint_sync_to_disk::Bool=true,
-                 restart_file=nothing) where {T}
+                 restart_file=nothing, simd_width=nothing) where {T}
     # The job's wall clock starts here: whatever ran before the call —
     # startup, compilation, the queue — is the caller's margin to leave
     # (TreeHydro's rule for `max_walltime_seconds`).
@@ -774,7 +779,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         p0 = GHProblem(U, schedule, case; q=q, t=zero(T),
                        interior=kgeom(geom, zero(T)), accounting=acc,
                        target=target0, fits=fits, target_rate=rate_on,
-                       trail=trail_on, target_exact=exact_on)
+                       trail=trail_on, target_exact=exact_on,
+                       simd_width=simd_width)
         # The geometry the gauge source was sampled with (step 8d): the sample
         # applies the core rule, so a tracked core that moves far from it asks
         # for a fresh sample — see the chunk loop.
@@ -821,7 +827,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                        interior=fitted ? kgeom(geom_sampled, sample_t) : geom,
                        accounting=acc, target=fitmode ? target_cache(U) : nothing,
                        fits=fits, t_target=t_saved, target_rate=rate_on,
-                       trail=trail_on, target_exact=exact_on)
+                       trail=trail_on, target_exact=exact_on, simd_width=simd_width)
         p0 = with_interior(p0, int_chunk)
     end
     # **The record is `Float64` whatever the run computes in.** That is
@@ -1139,7 +1145,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                       interior=fitted ? kgeom(g, stop) : g, accounting=acc,
                       target=fitmode ? target_cache(U) : nothing, fits=fits,
                       t_target=stop, target_rate=rate_on, trail=trail_on,
-                      target_exact=exact_on)
+                      target_exact=exact_on, simd_width=simd_width)
         u = statevector(U)
         gather!(u, U)
         # The transferred state has not been through a step, so neither
@@ -1204,7 +1210,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                               interior=kgeom(geom, tstart), accounting=acc,
                               target=p.target, fits=p.fits,
                               t_target=p.t_target, target_rate=rate_on,
-                              trail=trail_on, target_exact=exact_on)
+                              trail=trail_on, target_exact=exact_on,
+                              simd_width=simd_width)
                 geom_sampled = geom
                 sample_t, sample_track = tstart, tr
                 nresamples += 1

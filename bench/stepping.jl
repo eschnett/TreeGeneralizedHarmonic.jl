@@ -13,6 +13,9 @@
 #                                         512 blocks either way)
 #   BENCH_REPS     timed repetitions      (default 5)
 #   BENCH_TAG      label printed on every row
+#   BENCH_SIMD     the kernel's SIMD width (`simd_width`; 1 is the scalar kernel;
+#                  unset: the host's default, and nothing is passed — so the script
+#                  still runs on a version of the package without the keyword)
 #
 # step: one right-hand side; IMEXRungeKutta's RK4 by owner and by broadcast,
 # each integrator built once and stepped; `gh_solve` over four steps (`init`
@@ -43,6 +46,7 @@ const N = parse(Int, get(ENV, "BENCH_N", "16"))
 roots_for(c) = parse(Int, get(ENV, "BENCH_ROOTS_" * uppercase(c), c == "wave" ? "8" : "2"))
 TAG = ""
 const REPS = parse(Int, get(ENV, "BENCH_REPS", "5"))
+const SIMDKW = haskey(ENV, "BENCH_SIMD") ? (; simd_width=parse(Int, ENV["BENCH_SIMD"])) : (;)
 const q = 4
 
 if BK == "cuda"
@@ -103,7 +107,8 @@ function step_mode(CASE)
     interior = case.interior
     fill_exact!(U, case, zero(T); interior=interior)
     u = statevector(U); gather!(u, U)
-    p = GHProblem(U, GhostSchedule(U, ops), case; q=q, t=zero(T), interior=interior)
+    p = GHProblem(U, GhostSchedule(U, ops), case; q=q, t=zero(T), interior=interior,
+                  SIMDKW...)
     dt = gh_dt(p, u; cfl=T(1 // 4))
     if interior !== nothing
         p = with_interior(p, TreeGeneralizedHarmonic.chunk_interior(
@@ -161,10 +166,10 @@ function driver_mode(CASE)
     header(forest, U0)
     # One chunk to compile, then three timed.
     evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops, t_end=chunk, chunk=chunk,
-            backend=backend)
+            backend=backend, SIMDKW...)
     t0 = time()
     out = evolve!(T, case; forest=forest, q=q, ops=ops, t_end=3chunk, chunk=chunk,
-                  backend=backend, observer=obs)
+                  backend=backend, observer=obs, SIMDKW...)
     total = time() - t0
     per_chunk = diff(stamps)
     @printf("%s\tevolve_total\t%.3f\t\ts  (%d steps, %d chunks)\n", TAG, total,
@@ -198,7 +203,7 @@ function scan_mode(CASE)
             fill_exact!(U, case, zero(T); interior=interior)
             u = statevector(U); gather!(u, U)
             p = GHProblem(U, GhostSchedule(U, ops), case; q=q, t=zero(T),
-                          interior=interior)
+                          interior=interior, SIMDKW...)
             dt = gh_dt(p, u; cfl=T(1 // 4))
             if interior !== nothing
                 p = with_interior(p, TreeGeneralizedHarmonic.chunk_interior(

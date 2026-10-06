@@ -277,16 +277,21 @@ and where it is clamped the root's derivative is taken as zero.
 @inline function algebraic_gauge_source(src::KerrSchildSource, h::SVector{NC,T},
                                         ∂ₜh::SVector{NC,T},
                                         ∂h::NTuple{3,SVector{NC,T}}) where {T}
+    # Converted entry by entry with `T(x)` and scaled by `_scale`, and the two
+    # clamps chosen by `_select` rather than branched on (amended 2026-10-05): the
+    # kernel evaluates this on SIMD lanes too (`lanes.jl`), where a condition has a
+    # value per lane. The chosen values are the branches' own; the root of the
+    # clamped side is taken of `max(rad, 0)`, so that it is never a `DomainError`.
     M = T(src.M)
-    u = SVector{4,T}(src.u)
-    S = SVector{4,T}(src.S)
+    u = SVector{4,T}(T(src.u[1]), T(src.u[2]), T(src.u[3]), T(src.u[4]))
+    S = SVector{4,T}(T(src.S[1]), T(src.S[2]), T(src.S[3]), T(src.S[4]))
     w = _sym4(h) * u
     K = sum(u .* w)
     sw = sum(S .* w)
     rad = M * M - sw * sw
-    root = rad > 0 ? sqrt(rad) : zero(T)
+    root = _select(rad > 0, sqrt(max(rad, zero(T))), zero(T))
     D = M + root
-    Hl = (-K / D) * w
+    Hl = _scale(-K / D, w)
     dw = (_sym4(∂ₜh) * u, _sym4(∂h[1]) * u, _sym4(∂h[2]) * u, _sym4(∂h[3]) * u)
     # Unrolled by `@ntuple` rather than an `ntuple` do-block: no closure for a
     # device to compile as a call (amended 2026-10-05).
@@ -300,7 +305,7 @@ end
     c = (n - 1) % 4 + 1
     a = (n - 1) ÷ 4 + 1
     dK = sum(u .* dw[c])
-    dD = root > 0 ? -sw * sum(S .* dw[c]) / root : zero(root)
+    dD = _select(root > 0, -sw * sum(S .* dw[c]) / root, zero(root))
     return -(dK * w[a] + K * dw[c][a]) / D + K * w[a] * dD / (D * D)
 end
 
