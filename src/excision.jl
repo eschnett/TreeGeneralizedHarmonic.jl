@@ -770,9 +770,11 @@ in step X2b), in three passes over the mesh:
 1. the excised bit at every owned point, `!is_evolved(interior_mask(int, t),
    x)` — the masks' own predicate, so that the classes, the norms, the speed
    and the horizon guard exclude the same set;
-2. one `fill_ghosts!` of a one-variable field set with even parity, so that
-   every ghost is its owner's bit and an octant's walls mirror it (the outer
-   faces' ghosts take the predicate at their own positions);
+2. one `fill_ghosts!` of a one-variable field set with even parity and the
+   identity rotation — the bit is a scalar, which a mirror and a quarter turn
+   leave as it is — so that every ghost is its owner's bit, an octant's walls
+   mirror it and a rotating octant's seam turns it (the outer faces' ghosts
+   take the predicate at their own positions);
 3. a pass over every stored point writing the class — excised, zone (an
    owned point some stencil of the right-hand side would read an excised
    point through: the dissipation's `±G` along an axis, the mixed
@@ -805,9 +807,13 @@ function build_excision(U::FieldSet{T,3}, schedule, case::GHCase{T}, int;
     spacings = to_backend(backend, block_spacings(forest, T))
     mask = interior_mask(int, T(t))
 
-    # (1) and (2): the bit, exchanged.
+    # (1) and (2): the bit, exchanged. A scalar: even under a mirror, and
+    # turned into itself by the rotating seam's quarter turn (step X4), so
+    # that a ghost across the seam holds the bit of the owned point it is the
+    # image of.
     bits = FieldSet{T}(forest, 1; G=U.G, centering=U.centering,
-                       parity=even_parity(forest, 1), backend=backend)
+                       parity=even_parity(forest, 1),
+                       rotation=identity_rotation(forest, 1), backend=backend)
     fill!(bits.work, zero(T))
     map_blocks!(_excised_bit_kernel!, bits, bits.work, origins, spacings, mask,
                 Val(U.G))
@@ -827,7 +833,8 @@ function build_excision(U::FieldSet{T,3}, schedule, case::GHCase{T}, int;
 
     # The census.
     monitor = FieldSet{T}(forest, NEXM; G=0, centering=U.centering,
-                          parity=even_parity(forest, NEXM), backend=backend)
+                          parity=even_parity(forest, NEXM),
+                          rotation=identity_rotation(forest, NEXM), backend=backend)
     map_blocks!(_census_kernel!, U, monitor.work, classes, U.work, origins,
                 spacings, case.ε_KO, T(t), Val(U.G))
     total(v) = round(Int, tofloat64(mesh_mapreduce(identity, +, zero(T), monitor;
