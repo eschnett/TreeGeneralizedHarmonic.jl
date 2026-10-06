@@ -836,3 +836,71 @@ end
     @test_throws ArgumentError lopsided_weights(4, 0, 0, 3)
     @test !closure_admissible(4, 2, 2) && closure_admissible(4, 0, 3)
 end
+
+# ---------------------------------------------------------------------------
+# The frame-dragged faces' extrapolation (added in step X5)
+# ---------------------------------------------------------------------------
+#
+# `CODE.md`, "Excision", "The frame-dragged faces (step X5)": where a closure
+# axis has the shift pointing into the excised set, the advective derivative
+# is the centered stencil with each excised tap extrapolated along the
+# lattice direction nearest the surface's normal, from the consecutive
+# non-excised points `k₀ … k₀ + n − 1` beyond it inside the point's `G`-box.
+# The claims are exact, in `Rational`, as above; step X6's zone kernel is what
+# will use the table.
+
+using TreeGeneralizedHarmonic: extrapolation_table, extrapolation_weights
+
+@testset "An extrapolation is exact to degree n − 1 and not n: k₀=$k0" for k0 in 1:5
+    # Guards the order the frame-dragged faces' advection is built on: the
+    # filled tap is the Lagrange extrapolation, so it reproduces every
+    # polynomial of degree below `n` along its direction and *not* degree
+    # `n` — which catches a node list off by one (an extrapolation from the
+    # wrong side of the gap reproduces nothing) and a weight vector built for
+    # `n − 1` nodes. Its weights sum to one: a constant state is filled with
+    # itself, so a static hole's frozen-in data stay a fixed point.
+    for n in 1:4
+        nodes, w = extrapolation_weights(k0, n)
+        @test nodes == k0:(k0 + n - 1) && length(w) == n && sum(w) == 1
+        x0, h = RQ(3//7), RQ(2//5)
+        fill_at(f) = sum(w[i] * f(x0 + k * h) for (i, k) in enumerate(nodes))
+        @test all(fill_at(monomial(d)) == monomial(d)(x0) for d in 0:(n - 1))
+        @test fill_at(monomial(n)) != monomial(n)(x0)
+    end
+    # The quadratic from the first three points beyond the gap, written out:
+    # `3u₁ − 3u₂ + u₃`, the textbook one.
+    @test extrapolation_weights(1, 3)[2] == RQ[3, -3, 1]
+end
+
+@testset "The extrapolation table rounds once and stays in the G-box: q=$q" for q in
+                                                                              STENCIL_ORDERS
+    # Guards what the zone kernel will carry: every entry the exact rational
+    # rounded once into `T` (`===` at `Float64` and `Float32`), zero beyond
+    # its `n` nodes, and nothing past the point's `G`-box, `k₀ + n − 1 ≤ G` —
+    # a source further out is outside the halo the mesh has.
+    G = ghost(q)
+    once(T, w) = T(Int(numerator(w))) / T(Int(denominator(w)))
+    for T in (Float64, Float32), degree in (1, 2)
+        tab = extrapolation_table(T, Val(q); degree=degree)
+        @test isbits(tab) && size(tab) == (degree + 1, G, degree + 1)
+        for k0 in 1:G, n in 1:(degree + 1)
+            if k0 + n - 1 <= G
+                _, w = extrapolation_weights(k0, n)
+                @test all(tab[i, k0, n] === once(T, w[i]) for i in 1:n) &&
+                      all(iszero(tab[i, k0, n]) for i in (n + 1):(degree + 1))
+            else
+                @test all(iszero, tab[:, k0, n])
+            end
+        end
+    end
+end
+
+@testset "An extrapolation that does not exist is refused, with the reason" begin
+    # `ArgumentError`s say why (`CLAUDE.md`, "Conventions"): node 0 is the
+    # excised point itself, and an extrapolation from it is a read of an
+    # excised value.
+    @test_throws ArgumentError extrapolation_weights(0, 3)
+    @test occursin("excised point itself", errmsg(() -> extrapolation_weights(0, 3)))
+    @test_throws ArgumentError extrapolation_weights(1, 0)
+    @test_throws ArgumentError extrapolation_table(Float64, Val(4); degree=-1)
+end

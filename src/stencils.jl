@@ -763,3 +763,77 @@ function closure_table(::Type{T}, ::Val{q};
     return ClosureTable{T,q,typeof(t[1]),typeof(t[4]),typeof(t[5]),
                         typeof(t[9]),typeof(t[11])}(t...)
 end
+
+# ---------------------------------------------------------------------------
+# The frame-dragged faces: extrapolation along a lattice direction (step X5)
+# ---------------------------------------------------------------------------
+#
+# `CODE.md`, "Excision", "The frame-dragged faces (step X5)": on a spinning
+# hole's lego surface some closure axes have the shift pointing *into* the
+# excised set, and there the per-axis closure of the advection is a downwind
+# one-sided difference, unstable on X1's frozen line and on X5's plane where
+# both characteristics enter (`b/a < −1`). The rule X5 chose keeps the
+# per-axis closures everywhere else and, on such an axis, forms the advective
+# derivative from the centered stencil with each excised tap `Q` replaced by
+# its extrapolation along the lattice direction `e` nearest the surface's
+# normal at `Q`, from the first consecutive non-excised points `Q + k e`,
+# `k = k₀ … k₀ + n − 1`, inside the point's `G`-box — the upwind data the axis
+# itself cannot reach. The weights depend on `(k₀, n)` alone. No kernel uses
+# them yet (step X6's zone kernel will).
+
+"""
+    extrapolation_weights(k₀, n) -> (nodes::UnitRange{Int},
+                                     weights::Vector{Rational{BigInt}})
+
+The Lagrange extrapolation to offset `0` from the `n` consecutive nodes
+`k₀ … k₀ + n − 1` (`k₀ ≥ 1`, `n ≥ 1`) along a lattice direction: `Σ w_i
+u(Q + k_i e) = u(Q)` for every polynomial of degree below `n` in the
+distance along `e`, and not for degree `n` (`test/stencils_tests.jl`
+asserts both in `Rational`). It is how an excised tap `Q` of a frame-dragged
+face's advective stencil is filled (added in step X5; `CODE.md`, "Excision",
+"The frame-dragged faces (step X5)"). Node `0` is the excised point itself
+and is refused.
+"""
+function extrapolation_weights(k0::Integer, n::Integer)
+    k0 >= 1 || throw(ArgumentError(
+        "an extrapolation fills an excised point from the non-excised ones " *
+        "beyond it along its direction, at offsets k₀ ≥ 1; offset 0 is the " *
+        "excised point itself, but k₀=$k0"))
+    n >= 1 || throw(ArgumentError(
+        "an extrapolation needs at least one source, but n=$n"))
+    nodes = k0:(k0 + n - 1)
+    return nodes,
+           lagrange_derivative_weights([StencilRational(k) for k in nodes], 0)
+end
+
+"""
+    extrapolation_table(T, ::Val{q}; degree = 2)
+        -> SArray{Tuple{degree + 1, G, degree + 1}, T}
+
+Every [`extrapolation_weights`](@ref)`(k₀, n)` the frame-dragged faces' rule
+of the order-`q` scheme can ask for, rounded **once** into `T` as
+`T(num)/T(den)`, as [`closure_table`](@ref) rounds: `w[i, k₀, n]` is the
+weight of node `k₀ + i − 1`, for `k₀ = 1 … G` and `n = 1 … degree + 1`, zero
+for `i > n` and where the nodes would leave the `G`-box (`k₀ + n − 1 > G`).
+The rule takes the first `degree + 1` consecutive non-excised sources inside
+the point's `G`-box — fewer where the box or the excised set stops it — and
+the quadratic (`degree = 2`) is the one step X5's plane measured (added in
+step X5; `CODE.md`, "Excision", "The frame-dragged faces (step X5)").
+"""
+function extrapolation_table(::Type{T}, ::Val{q}; degree::Integer=2) where {T,q}
+    degree >= 0 || throw(ArgumentError(
+        "an extrapolation's degree is a polynomial degree and cannot be " *
+        "negative, but degree=$degree"))
+    G = _reach(q)
+    nmax = degree + 1
+    conv(w) = T(Int(numerator(w))) / T(Int(denominator(w)))
+    w = zeros(T, nmax, G, nmax)
+    for k0 in 1:G, n in 1:nmax
+        k0 + n - 1 <= G || continue
+        _, ws = extrapolation_weights(k0, n)
+        for i in 1:n
+            w[i, k0, n] = conv(ws[i])
+        end
+    end
+    return SArray{Tuple{nmax,G,nmax}}(w)
+end
