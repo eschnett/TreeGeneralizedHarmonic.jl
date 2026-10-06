@@ -605,7 +605,18 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-After step X3 the suite is **6579 assertions in 17m07** at one thread and
+After step X4 the suite is **6727 assertions in 21m10** at one thread and
+**6735 in 16m29** at four (2026-10-06, the two at once, at a load of 7–17
+shared with step X5's models): X3's 6579/6587, `main`'s 112 (the lean
+source's spellings), the rotating octant's 29 (`rotation_tests.jl`, `15.7 s`
+/ `9.8 s`) and the seam's 7 in `excision_tests.jl` (`1.5 s` / `1.4 s`; the
+file is now `56.0 s` / `46.5 s`). Two claims changed with `main`'s head,
+each stated in its test: the probe sees `d1` of `h` asked twice (270
+requests, not 240), and the closure provider's `F` at a point with no
+excised tap is `Centered`'s to 512 eps of each variable's largest `|du|`
+(measured 103) instead of bit for bit — its every contraction still is. The
+merge of `main` alone measured 6699 in 19m30 at four threads.
+After step X3 the suite was **6579 assertions in 17m07** at one thread and
 **6587 in 12m41** at four (2026-10-05/06, load 2–6): X2b's counts, since no
 source changed — the step ran on Symmetry's H200s and recorded what it
 measured.

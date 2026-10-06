@@ -8341,6 +8341,15 @@ built. At `a = 3/5` the build refuses the case by name: 72 (zone point,
 closure axis) pairs with the shift into the excised set, the least `b/a =
 −0.499` (SimWatch's status `failed`, with the message).
 
+**The suite**: **6727 assertions in 21m10** at one thread and **6735 in
+16m29** at four (the two at once, the machine loaded 7–17 by step X5's
+models), all green — X3's counts, `main`'s 112, the rotating octant's 29 and
+the seam's 7. Two claims changed with `main`'s head, each saying so in its
+test: `evolution_tests.jl`'s probe sees `d1` of `h` asked twice per component
+and axis (270 requests, not 240), and `excision_tests.jl`'s closure provider
+at a point with no excised tap is `Centered`'s to 512 eps of each variable's
+largest `|du|` (measured 103), its every contraction still `isequal`.
+
 ### Excision: the analysis (step X1)
 
 Host-side, no kernel change: the closure weights in `src/stencils.jl` (under
