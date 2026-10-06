@@ -126,12 +126,14 @@ research project; the inherited documents live in `notes/`.
   instead — no target, no fit. Whether it is stable on a Cartesian lego
   surface, and whether it holds the gauge as well as the layer does, is
   what `PLAN.md`'s steps X1–X3 measure; the design is under
-  [Excision](#excision-added-2026-10-05). The rest of this bullet is the
-  layer's, as it stood. Where a
-  run has a black hole, the right-hand side inside the horizon is
-  modified point by point: driven toward the analytic solution in a
-  layer well inside the horizon, switched off around the singularity
-  (see [The interior](#the-interior-a-pointwise-damping-layer)). This
+  [Excision](#excision-added-2026-10-05). **(Measured in step X3:** stable,
+  and as accurate outside the horizon as the layer, on the static
+  Kerr-Schild `a = 0` hole, with no gauge drift to `50 M`.**)** The rest of
+  this bullet is the layer's, as it stood. Where a run has a black hole,
+  the right-hand side inside the horizon is modified point by point:
+  driven toward the analytic solution in a layer well inside the horizon,
+  switched off around the singularity (see [The
+  interior](#the-interior-a-pointwise-damping-layer)). This
   restricts black-hole runs to spacetimes with a known analytic
   solution — which is the proof-of-concept target, and exactly what an
   excision milestone would be measured against. **(Amended 2026-09-23,
@@ -901,7 +903,14 @@ integration branch's `5dcddab` in a second checkout with the same manifest
   were, the same 160 bytes — and a ±3 % that changes sign with the
   specialisation is what code layout does **(proposed in step X2a**, not
   measured further; X3's H200 measurement of the `:damped` `q = 4` kernel's
-  registers and spills is the check on a device**)**.
+  registers and spills is the check on a device**)**. **(Measured in step
+  X3:** on the H200 the values are identical before and after the refactor,
+  but the kernel's stack frame grew from 10 528 to 10 640 bytes and its
+  spills by 16 bytes each way, at 255 registers both, and its right-hand
+  side is `+5.2 %` slower — 28.8 against 30.3 ms on `bench/stepping.jl`'s
+  hole, reproducibly; recorded, not fixed (proposed in step X3), under
+  [Measured results](#measured-results), "Excision on the static hole (step
+  X3)".**)**
 
 **Two more providers, and a second launch (amended in step X2b).** The
 `:excised` variant ([Excision](#excision-added-2026-10-05), "What step X2b
@@ -2530,8 +2539,12 @@ kernel uses either yet.**)** **(Amended in step X2b:** the variant is built,
 on both geometries — what and how is under "What step X2b built" at the end
 of this section, and its numbers under [Measured
 results](#measured-results), "Excision: the variant (step X2b)"; X3 measures
-it on the octant.**)** Moving holes — points that leave the excised set on the trailing side
-and need values — are a later round.
+it on the octant.**)** **(Amended in step X3:** measured on the octant on
+Symmetry's H200s — feasible for the static Kerr-Schild `a = 0` hole, as
+accurate outside the horizon as the `:damped` layer at `r_E = M/2`, and with
+no gauge drift to `50 M`; the recommendation is under "What step X3
+measured" at the end of this section.**)** Moving holes — points that leave
+the excised set on the trailing side and need values — are a later round.
 
 **The variant, `:excised`.** Points beyond the **excision surface** are
 not evolved: `du = 0`, `F` never evaluated, their data finite and never
@@ -2839,8 +2852,12 @@ details).** These are the pieces:
   drift at `8·10⁻⁵/M` because it holds the gauge inside. Excision gives that
   up **(predicted: the drift returns)**. Step X3's drift rows to `50 M`
   measure it, and the damped harmonic gauge driver is the fix [Possible
-  extensions](#possible-extensions) names;
+  extensions](#possible-extensions) names. **(Measured in step X3: it did
+  not return** — the drift of `h_tt` at the horizon peaks near `40 M` and
+  turns down as the layer's does, at `1.0–1.4×` it, to `50 M`.**)**;
 - **closures without SBP**, whose stability rests on dissipation.
+  **(Measured in step X3:** at `ε_KO = 1/2` nothing grows at any depth of the
+  window to `24 M`.**)**
 
 GHSO2's recipe applies unchanged: `ε_KO ≈ 0.5` and `γ0 ≳ 1/M`.
 
@@ -2945,6 +2962,89 @@ variant through the package**).** The design above, with these choices:
 - `test/octant_runs.jl` takes `interior=excised` with `geometry=sphere|
   tracked`, `r_E=` or `margin=`, `r_0=`, `upwind=<start>,<width>` and
   `closure=`; `bench/stepping.jl` takes `BENCH_CASE=excised`.
+
+**What step X3 measured, and the recommendation (amended in step X3).** The
+static Kerr-Schild `a = 0` hole on the octant, on Symmetry's H200s at
+`Float64`, against the exterior study's `:damped` and `:fitted` rows; the
+numbers are under [Measured results](#measured-results), "Excision on the
+static hole (step X3)".
+- **Excision is feasible here.** The variant ran on CUDA as built, its
+  right-hand side within `5·10⁻¹²` of the CPU's. There is **no stability
+  boundary** in X1's window: every depth from `r_E = M/2` to `13M/8` (24 to
+  6 cells at `h = 1/16`), with and without the blend, runs to `24 M` and is
+  stationary near the hole from `3–10 M` on — the 3D lego sphere, whose
+  per-axis closures are up to 81 % inflow-like, behaves as X1's circle did.
+- **The depth is set by accuracy: excise at a fixed radius well inside, `r_E
+  = M/2`, without the blend (proposed in step X3).** What limits a shallow
+  surface is leakage, not stability: without the blend the error just
+  outside the horizon grows by a factor `e` every 3–5 cells the surface
+  moves up, and it is 3–19× the `:damped` layer's at the same radius. At
+  `r_E = M/2` — 24, 36 and 48 cells at `h = 1/16, 1/24, 1/32` — the
+  closures' leakage falls faster than the truncation error and the exterior
+  *is* `:damped`'s: at `h = 1/32` the two agree to three digits in every
+  shell from `r = 2` out, in `M_irr`'s drift and in the drift of `h_tt`, and
+  the orders are four. A surface at a fixed number of cells is not enough:
+  at `r_E = M`, 24 cells at `h = 1/24` give `1.5×` `:damped`'s ℋ just
+  outside, where 24 cells at `1/16` gave `0.34×`.
+- **The lopsided blend is the lever for a shallow surface, not the
+  default.** It makes the exterior independent of the depth from `M/2` to
+  `5M/4` at `h = 1/16`, but its own lopsided stencils one cell below the
+  horizon leak too: at `r_E = M` with X1's profile (`upwind=1,4`) ℋ just
+  outside is `1.6×` `:damped`'s at `h = 1/24` and `2.2×` at `1/32`
+  (`1.2×` at `1/24` when it starts four cells down, `upwind=4,4`), and on the
+  H200 it costs 10–20 % of every right-hand side. Keep it off by default, as
+  X2b built it.
+- **The exterior matches `:damped`'s and beats `:fitted`'s.** At `r_E =
+  M/2` ℋ in `[2, 2.25)` is `0.34×`, `0.92×` and `1.00×` the layer's at
+  `h = 1/16, 1/24, 1/32`, the error there `0.87×`, `1.03×` and `1.00×`,
+  every shell from `r = 2.25` out the same to two or three digits, and the
+  mass drift `dM_irr/dt` the same to 2 %; against the best `:fitted`
+  setups of the exterior study it is `9×`, `1.7×` and `2.6×` lower in ℋ
+  just outside the horizon. Inside the horizon the band carries the
+  closures' lower order (`7·10⁻³` at `h = 1/16`, converging at order 2),
+  which nothing outside sees.
+- **The gauge drift did not return.** GHSO2's excised hole drifted at
+  `0.14/M` and failed near `45 M`; here, to `50 M`, the drift of `h_tt` at
+  the horizon peaks near `40 M` and turns down exactly as the layer's does,
+  at `1.4×` the layer's at `h = 1/16` and `1.0×` at `1/24` and `1/32`;
+  `M_irr` is flat to `10⁻⁸`, and ℋ near the hole changes by less than 0.4 % between
+  `24` and `50 M`. The static gauge source holds the gauge without a layer
+  inside; the damped harmonic gauge driver is not needed for this.
+- **Cost**: an excised run at `r_E = M/2` costs what a `:damped` one costs
+  on the H200 (`0–8 %` more per `M`), the zone kernel `0.6 %` of a
+  right-hand side on the octant's 29 blocks; the blend `+16–24 %`.
+- **What the moving round needs.** The frozen geometry and its refusals
+  (`regrid`, `adapt`) were this round's simplification: a moving hole needs
+  (1) values at the points its trailing side uncovers — an extrapolation
+  fill along the motion, or a thin `:damped`-like layer behind the surface
+  that hands them over — and the classes rebuilt when the surface moves; (2)
+  the one-level constraint carried by a refinement floor that travels with
+  the surface; (3) the depth measured here: the uncovered points start
+  their life at the surface, `r_h − r_E` below the horizon, and the `3M/2`
+  that `r_E = M/2` leaves is what keeps their transient inside. A boosted
+  Kerr-Schild hole is possible (`KerrSchildSource` takes a velocity); G5's
+  harmonic `a = 7/10` chart has only `0.3 M` between the horizon and its
+  disk (X1), 7 cells at `h = 1/24`, which this round's leakage numbers say
+  is far too shallow.
+- **What the spinning holes need.** X1's frozen line found the per-axis
+  closures unstable where frame dragging turns the shift into the excised
+  set (`b/a < 0`, 2–18 % of the faces), and X2b refuses such a build by the
+  physics. A closure for those faces — the normal-direction fill of
+  [Possible extensions](#possible-extensions), or an extrapolation along
+  `β` — has to be found stable on X1's models first. And the window ends at
+  the inner horizon (`0.63 M` below the outer one at the equator at
+  `a = 9/10`, `1.26 M` at `a = 3/5`): the depth that kept the leakage below
+  the truncation error here, about `3M/2` and at least 24 cells, does not
+  fit at `a = 9/10`, where 24 cells in `0.63 M` need `h ≈ 1/40` and the
+  surface sits right above the inner horizon.
+- **The next round (proposed in step X3): the static spinning hole**, on
+  the rotating octant (on `claude/octant-mode-spinning-bh-75bd22`, not yet
+  on this branch) against its `:damped` and `:fitted` rows at `a = 3/5` and
+  `9/10` — a host-side step for the `b/a < 0` faces first, then the
+  runs. It is the smaller step (no trailing side, the classes frozen), it is
+  where the layer is weakest (the `:fitted` target failed at `a = 9/10`), and
+  spin is the one thing the proof of concept needs that excision cannot do
+  yet. Moving holes after it.
 
 ## Initial data and backgrounds
 
@@ -4018,7 +4118,15 @@ break it:
   picoseconds per point against the roofline in the format of
   `notes/ghaccel-bench.jl`, whose numbers (25.8 % of the H200 roofline,
   49.6 % on an A40, for 10 fields) are the reference this kernel is
-  compared to.
+  compared to. **(Measured in step X3**, `ptxas`'s report on the H200 at
+  `Float64`, `q = 4`**:** every right-hand-side kernel — `:damped`, `:excised`
+  with and without the blend, the excision's zone kernel — uses all 255
+  registers with a stack frame of 8.8–10.6 kB and 170–320 bytes of spills
+  proper; the frame is the 112–143 device calls that are not inlined,
+  whose `SVector` arguments pass through local memory. The `:damped` hole's
+  right-hand side is `11.4 ns` a point on the octant's `N = 64` mesh.
+  Under [Measured results](#measured-results), "Excision on the static
+  hole (step X3)".**)**
 
 ## I/O and viewers
 
@@ -7774,6 +7882,285 @@ restarted run being most of it; the
 variant, which until this step was asserted of `:excised`. The first
 four-thread run found that one: 6585 passed and it failed.
 
+### Excision on the static hole (step X3)
+
+The `:excised` variant ([Excision](#excision-added-2026-10-05)) on Symmetry's
+H200s, one GPU and eight CPU threads a row (`h200q`; CUDA.jl 6.4.2,
+KernelAbstractions 0.9.43, TreeAMR 0.1.7, IMEXRungeKutta 1.3.0, Julia 1.13.1,
+driver 595.45), from the study's own copy `excision-x3` with `CUDA` added to
+its `Project.toml`. Every row is `test/octant_runs.jl` with `PLAN.md`'s
+command: Kerr-Schild `a = 0` on the exterior study's octant `[0, 64]³` (root
+brick `2³`, cubes `32, 16, 8`, `h = 4/N` in `[0, 8]³`), the algebraic source,
+`q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, the Gaussian `γ0`, `:msn`, the finder
+every chunk with the spin, uniform noise of `10⁻⁸` outside the excised set;
+the excised ball `r < r_E` about the origin, the core rule's `r_0 = r_E/2`,
+the margin `m = ⌊(2 − r_E)/h⌋` cells. The comparison is the exterior study's
+`:damped` and `:fitted` rows under [Robust stability on the
+octant](#robust-stability-on-the-octant-measured-2026-10-02), which had no
+noise. Each row's `octant.csv`, `records.csv` and `simwatch.toml` are in
+`excision-x3/out/x3/{scan,prod}/<row>` on Symmetry, with the job scripts and
+their logs; `test/octant_study.jl` reads them (amended in this step to print
+the drift of `h_tt` and the outflow rows).
+
+**On the H200 at `Float64` (measured in step X3**, jobs 570330 and 570336**)**:
+- **The variant compiles and runs as built.** Nothing in the package needed a
+  change: the `UInt8` classes, the closure table as a `NamedTuple` of
+  `CuArray`s, the zone kernel, the lopsided blend and the outflow monitor.
+- **One right-hand side against the CPU's**, on the smoke's octant (`L = 8,
+  N = 16`, 22 blocks) and on the scan's (`L = 64, N = 64`, 29 blocks, 7.6 M
+  points) at `r_E = 1`: the largest difference of `du` is `1.48·10⁻¹²`
+  against a scale of `0.31` (`1.49·10⁻¹²` with the blend; `:damped`'s own
+  `1.52·10⁻¹²` of `0.28`), every value finite; the classes are the CPU's
+  exactly — 2443 excised, 1387 zone, the rest centered; the outflow rows are
+  the CPU's (the normal margin `0.7031881453195168` against `…177`).
+- **The smoke run** (`L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2`, 56
+  steps) and its CPU twin on the same node: every cell of `octant.csv` but
+  the wall clock within `1.7·10⁻⁹` relative (218 of 255 identical in ten
+  digits), `records.csv` the same to fifteen digits, `M_irr − 1 = 3.999·10⁻⁶`
+  at `t = 1` in both. 146 s on the H200 against 152 s for eight CPU threads,
+  compilation (about two minutes) being most of both.
+- **Registers and spills**, from `ptxas`'s own report (`JULIA_DEBUG=CUDACore`
+  prints it for every kernel compiled):
+
+  | kernel | registers | stack frame | spill stores / loads | `ld.local` / `st.local` in the PTX | call sites in the PTX |
+  |---|---|---|---|---|---|
+  | `gh_rhs_kernel!`, `:damped`, `q = 4`, algebraic source | 255 | 10 640 B | 296 / 320 B | 361 / 582 | 143 |
+  | the same before step X2a (`5dcddab`) | 255 | 10 528 B | 280 / 304 B | | |
+  | `gh_rhs_kernel!`, `:excised` | 255 | 8 800 B | 192 / 192 B | 311 / 495 | 131 |
+  | `gh_rhs_kernel!`, `:excised`, blend | 255 | 9 112 B | 316 / 316 B | 311 / 519 | 135 |
+  | `gh_zone_kernel!` | 255 | 9 984 B | 172 / 172 B | 311 / 607 | 112 |
+  | `gh_zone_kernel!`, blend | 255 | 10 072 B | 260 / 260 B | 311 / 607 | 116 |
+
+  Every right-hand-side kernel is at the 255-register ceiling with a stack
+  frame of 9–11 kB. The frame is not the spills — those are 170–320 bytes —
+  but, as far as the PTX shows, the device calls that are not inlined (about
+  110–140 call sites: the `ntuple` closures, `mixed_stencil`,
+  `gh_node_source`, the providers' methods), whose `SVector` arguments pass
+  through local memory. So excision adds no register pressure of its own:
+  its main kernel's frame is *smaller* than `:damped`'s (no `u_exact` in a
+  layer), and the zone kernel's is about `:damped`'s.
+- **X2a's check on the device.** Before step X2a (`5dcddab`), after it
+  (`8fa6658`) and after X2b (this branch), on one H200 (job 570337): the
+  `:damped` octant run's `octant.csv` (but the wall clock) and `records.csv`
+  are identical in all three, so the provider is invisible in the values on
+  the device too; but it added 112 B to the frame and 16 B to each spill
+  direction, and **it costs 5 %**: `bench/stepping.jl`'s hole (`BENCH_CASE=
+  hole`, 512 blocks of `16³`, minimum of ten) `rhs` 28.84 and 28.79 ms before
+  it against 30.28, 30.29 (`8fa6658`) and 30.32, 30.30 ms (this branch),
+  interleaved base–X2a–head–head–X2a–base; the RK4 step 116.7 and 116.4
+  against 122.4–122.6 ms. On the CPU X2a measured `±3 %` with changing sign
+  and read it as code layout; on the H200 it is `+5.2 %`, reproducible, and
+  X2b changed nothing further **(proposed in step X3:** recorded, not
+  fixed — the kernel's device efficiency is the research project
+  [Precision, threads, devices](#precision-threads-devices) defers, and
+  forcing the calls inline would remove the provider's frame with the
+  rest**)**.
+- **What the zone kernel and the blend cost on the H200.** One right-hand side
+  on the scan's octant (`N = 64`, 7.6 M points, minimum of ten): `:damped`
+  86.8 ms (`11.4 ns` a point), `:excised` 84.8 ms (`11.2 ns`), of which the
+  zone kernel is **0.54 ms, `0.63 %`** (1387 zone points, `387 ns` each);
+  with the blend 102.0 ms (`13.4 ns`), **`+20 %`**, the zone kernel 0.60 ms.
+  On `bench/stepping.jl`'s excised case (512 blocks of `16³`, 14 162 zone
+  points in 32 blocks) the zone kernel is 2.00 ms of a 32.04 ms right-hand
+  side, **`6.3 %`** (`141 ns` a zone point), against the `:damped` hole's
+  30.38 ms, and the blend adds `10.5 %` (35.41 ms). So on the device the
+  zone kernel's share is what its launch over every block makes it — a few
+  zone points in large blocks cost nothing, many small blocks cost their
+  number — and **the blend is not the `0.3 %` it is on the CPU** but 10–20 %
+  of every right-hand side: its specialisation of the main kernel is
+  dearer at every point, not only in its shell (the shell is 0.2 % of the
+  points here).
+
+**The depth scan (measured in step X3**, jobs 570332–570335 to `10 M` and
+570347–570348 on to `24 M` from their `t = 8` checkpoints**)**: `h = 1/16`,
+`N = 64`, X1's window `r_E = M/2 … 13M/8` with and without the blend
+(`upwind=1,4`), twelve rows. At `24 M`; the band is `[r_E, r_E + 3h)`,
+*faces* X1's per-axis closure faces, *inflow-like* those with `b/a < 1`
+(`r_E/(2M)` predicted: 0.25, 0.38, 0.50, 0.63, 0.75, 0.81); *band ℋ* the
+evolved shell `[r_E + 3h, 2)` inside the horizon (the CSV's `in`); the drift
+is `h_tt`'s L∞ over `[2, 2 + r_E/2]`:
+
+| `r_E` | `m` | band points | faces, inflow-like | normal margin | ℋ `[2, 2.25)` | with the blend | error `[2, 2.25)` | with the blend | band ℋ | with the blend | drift of `h_tt` | with the blend |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `1/2` | 24 | 427 | 168, 39 (0.23) | `1.997` | `8.3·10⁻⁶` | `9.1·10⁻⁶` | `9.4·10⁻⁶` | `1.1·10⁻⁵` | `7.1·10⁻³` | `3.1·10⁻³` | `4.7·10⁻⁶` | `4.9·10⁻⁶` |
+| `3/4` | 20 | 839 | 363, 114 (0.31) | `1.177` | `1.4·10⁻⁵` | `9.1·10⁻⁶` | `7.3·10⁻⁶` | `1.1·10⁻⁵` | `2.6·10⁻³` | `9.8·10⁻⁴` | `3.7·10⁻⁶` | `4.9·10⁻⁶` |
+| `1` | 16 | 1387 | 642, 291 (0.45) | `0.703` | `3.4·10⁻⁵` | `9.1·10⁻⁶` | `1.7·10⁻⁵` | `1.1·10⁻⁵` | `1.6·10⁻³` | `5.8·10⁻⁴` | `6.5·10⁻⁶` | `4.9·10⁻⁶` |
+| `5/4` | 12 | 2065 | 993, 594 (0.60) | `0.402` | `1.4·10⁻⁴` | `8.0·10⁻⁶` | `3.4·10⁻⁵` | `1.0·10⁻⁵` | `1.5·10⁻³` | `4.3·10⁻⁴` | `5.3·10⁻⁶` | `4.8·10⁻⁶` |
+| `3/2` | 8 | 2885 | 1413, 1050 (0.74) | `0.192` | `4.5·10⁻⁴` | `5.7·10⁻⁵` | `1.2·10⁻⁴` | `1.1·10⁻⁵` | `2.0·10⁻³` | `4.4·10⁻⁴` | `1.4·10⁻⁵` | `2.5·10⁻⁶` |
+| `13/8` | 6 | 3352 | 1659, 1341 (0.81) | `0.108` | `7.2·10⁻⁴` | `3.0·10⁻⁴` | `2.3·10⁻⁴` | `1.0·10⁻⁴` | `2.3·10⁻³` | `8.3·10⁻⁴` | `3.9·10⁻⁵` | `2.1·10⁻⁵` |
+
+against `:damped` at its own depths (`r_1 = 1, 5/4, 3/2, 7/4`, ramps of
+12 cells, the exterior study's rows): ℋ `[2, 2.25)` `1.2·10⁻⁵`, `1.1·10⁻⁵`,
+`2.4·10⁻⁵`, `5.5·10⁻⁵`, the error there `1.1–1.2·10⁻⁵` (`2.8·10⁻⁵` at
+`7/4`), the drift `3.4–8.0·10⁻⁶`.
+
+- **There is no stability boundary in the window.** All twelve rows run to
+  `24 M` with nothing non-finite in the band, no closure axis whose shift
+  points into the excised set, and outflow rows constant to four digits.
+  Everything near the hole saturates by `3–10 M` and is stationary after:
+  over `12–24 M` the band's ℋ and error change at `|σ| ≤ 3·10⁻⁴/M`, ℋ just
+  outside the horizon at `≤ 10⁻³/M`, and the drift at `0.005–0.015/M`,
+  decelerating (`:damped`'s, `0.018–0.023/M` over `8–24 M`, peaks near
+  `40 M`). The marginal inflow-like faces of X1's frozen line — up to 81 %
+  of the closures at `13M/8` — are harmless in 3D too.
+- **The boundary is accuracy, set by leakage, and the blend removes it.**
+  Without the blend ℋ just outside the horizon grows as the surface nears
+  it, `8.3·10⁻⁶` at 24 cells deep to `7.2·10⁻⁴` at 6 — about a factor `e`
+  per 3–5 cells in the middle of the window, the grid-scale content of the
+  closure surface penetrating the horizon as step 8a's analysis and X1's
+  radial line predicted ([The margin](#the-margin)) — and it is 3–19× the
+  `:damped` layer's at the same surface radius (`r = 1`, `5/4`, `3/2`). With the blend the
+  exterior is **independent of the depth** from `M/2` to `5M/4`: `9.1·10⁻⁶`
+  at `M/2`, `3M/4` and `M` to three digits (the lopsided advection carries
+  nothing up from below its full region), `8.0·10⁻⁶` at `5M/4`, and it
+  degrades only where the surface reaches into the blend's ramp (`3M/2`,
+  three cells below its full region: `5.7·10⁻⁵`; `13M/8`: `3.0·10⁻⁴`).
+  From 20 cells down (`r_E ≤ 3M/4`) the surface without the blend is
+  already below `:damped`'s `2.4·10⁻⁵`, and at 24 cells the blend does not
+  help.
+- The band inside the horizon carries the closures' lower order and the
+  steeper data near `r_E`: `4·10⁻⁴` to `7·10⁻³`, against the `:damped`
+  layer's evolved `[r_1, 2)` `2·10⁻⁴` at `r_1 = 3/2` — largest at the
+  deepest surface, and 2–4.5× smaller with the blend.
+- The mass and the drift: `M_irr − 1 = 1.36–1.49·10⁻⁶` at `24 M` and
+  `dM_irr/dt = 2.07–2.14·10⁻⁸/M` over `8–24 M` wherever ℋ just outside is
+  below `4·10⁻⁵` (`:damped`: `1.45·10⁻⁶`, `2.09·10⁻⁸`); the shallow rows
+  without the blend drift by their leakage (`3/2`: `5.7·10⁻⁸/M`; `13/8`:
+  `M_irr − 1 = 5.4·10⁻⁶`).
+
+**The production rows (measured in step X3**, jobs 570341–570346, 570359,
+570363–570366 and 570368–570369**)**: `h = 1/16, 1/24, 1/32` (`N = 64, 96,
+128`) to `24 M`, two surfaces:
+- **A**, `r_E = M` with the blend (`upwind=1,4`; 16, 24, 32 cells), the
+  middle of the window, where the scan's exterior was the same with the
+  blend at every depth;
+- **B**, `r_E = M/2` without it (24, 36, 48 cells), the deepest.
+
+Each ran with the hand-over's noise and, at `h = 1/24` and `1/32`, again
+without (`amplitude=0`) **(proposed in step X3**: the noise's constraint
+content falls only as a power of `t`, to `ℋ ≈ 8·10⁻⁸` at `24 M` in every
+shell — above the truncation error from `r = 3` out at `h = 1/24`, and
+comparable to it from `r = 2.25` at `1/32` — while the reference rows have
+none; at `h = 1/16` A without
+noise agrees with A to three digits inside `r = 3`**)**. Two diagnostics at
+`h = 1/24` without noise: **C**, `r_E = M` without the blend, and **D**,
+`r_E = M` with the blend from four cells below the horizon
+(`upwind=4,4`). And A's surface as a tracked geometry (`geometry=tracked
+margin=16`, the seed's offset surface, frozen) at `h = 1/16` is A to four
+digits, with the found horizon `16.00` cells outside it at every row. At
+`24 M` (without noise, but B at `h = 1/16`, whose noise is invisible inside
+`r = 3`); *band ℋ* is the evolved shell inside the horizon — for excision
+`[r_E + 3h, 2)`, for the layers `[r_1, 2)` or the offset surface's — and
+the last column the H200's seconds per `M` of evolution, the analysis every
+chunk included:
+
+| `h` | interior | ℋ `[2, 2.25)` | ℋ `[2.25, 3)` | error `[2, 2.25)` | error `[2.25, 3)` | band ℋ | `M_irr − 1` | `dM_irr/dt` | drift of `h_tt` | s per `M` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `1/16` | `:damped` | `2.42·10⁻⁵` | `2.33·10⁻⁶` | `1.08·10⁻⁵` | `3.28·10⁻⁶` | `2.16·10⁻⁴` | `1.45·10⁻⁶` | `2.09·10⁻⁸` | `3.38·10⁻⁶` | 29 |
+| `1/16` | `:fitted`, m/n_L = 8/12 | `8.50·10⁻⁴` | `3.51·10⁻⁵` | `1.69·10⁻⁴` | `8.84·10⁻⁶` | `6.78·10⁻³` | `−7.61·10⁻⁷` | `6.99·10⁻⁸` | `1.72·10⁻⁵` | 30 |
+| `1/16` | `:fitted`, best (12/14) | `7.29·10⁻⁵` | `2.55·10⁻⁶` | `1.94·10⁻⁵` | `3.72·10⁻⁶` | `1.78·10⁻³` | `1.60·10⁻⁶` | `1.63·10⁻⁸` | `4.65·10⁻⁶` | 30 |
+| `1/16` | A: r_E = M, blend | `9.07·10⁻⁶` | `2.08·10⁻⁶` | `1.07·10⁻⁵` | `3.14·10⁻⁶` | `5.75·10⁻⁴` | `1.46·10⁻⁶` | `2.08·10⁻⁸` | `4.91·10⁻⁶` | 35 |
+| `1/16` | B: r_E = M/2 | `8.30·10⁻⁶` | `2.13·10⁻⁶` | `9.44·10⁻⁶` | `3.11·10⁻⁶` | `7.05·10⁻³` | `1.41·10⁻⁶` | `2.13·10⁻⁸` | `4.73·10⁻⁶` | 31 |
+| `1/24` | `:damped` | `1.46·10⁻⁶` | `4.16·10⁻⁷` | `1.65·10⁻⁶` | `6.06·10⁻⁷` | `8.66·10⁻⁶` | `2.89·10⁻⁷` | `4.05·10⁻⁹` | `8.57·10⁻⁷` | 140 |
+| `1/24` | `:fitted`, 12/18 | `3.50·10⁻⁵` | `7.45·10⁻⁷` | `6.19·10⁻⁶` | `5.98·10⁻⁷` | `9.50·10⁻⁴` | `2.42·10⁻⁷` | `5.54·10⁻⁹` | `5.51·10⁻⁷` | 144 |
+| `1/24` | `:fitted`, best (16/20, cont 2) | `2.32·10⁻⁶` | `4.08·10⁻⁷` | `1.79·10⁻⁶` | `6.11·10⁻⁷` | `1.12·10⁻⁴` | `2.94·10⁻⁷` | `3.95·10⁻⁹` | `8.77·10⁻⁷` | 145 |
+| `1/24` | A | `2.29·10⁻⁶` | `4.09·10⁻⁷` | `2.13·10⁻⁶` | `6.07·10⁻⁷` | `2.44·10⁻⁴` | `2.97·10⁻⁷` | `4.01·10⁻⁹` | `9.76·10⁻⁷` | 162 |
+| `1/24` | B | `1.35·10⁻⁶` | `4.14·10⁻⁷` | `1.70·10⁻⁶` | `6.06·10⁻⁷` | `2.93·10⁻³` | `2.90·10⁻⁷` | `4.06·10⁻⁹` | `8.74·10⁻⁷` | 139 |
+| `1/24` | C: r_E = M, no blend | `2.16·10⁻⁶` | `4.20·10⁻⁷` | `1.73·10⁻⁶` | `5.98·10⁻⁷` | `6.93·10⁻⁴` | `2.90·10⁻⁷` | `4.15·10⁻⁹` | `9.08·10⁻⁷` | 143 |
+| `1/24` | D: r_E = M, blend from 4 cells | `1.72·10⁻⁶` | `4.17·10⁻⁷` | `1.61·10⁻⁶` | `6.10·10⁻⁷` | `2.44·10⁻⁴` | `2.89·10⁻⁷` | `4.06·10⁻⁹` | `8.52·10⁻⁷` | 166 |
+| `1/32` | `:damped` | `4.30·10⁻⁷` | `1.31·10⁻⁷` | `5.24·10⁻⁷` | `1.89·10⁻⁷` | `1.77·10⁻⁶` | `8.68·10⁻⁸` | `1.27·10⁻⁹` | `2.72·10⁻⁷` | 351 |
+| `1/32` | `:fitted`, 16/24 | `5.84·10⁻⁶` | `1.58·10⁻⁷` | `6.63·10⁻⁷` | `1.81·10⁻⁷` | `2.55·10⁻⁴` | `7.89·10⁻⁸` | `1.44·10⁻⁹` | `2.35·10⁻⁷` | 373 |
+| `1/32` | `:fitted`, best (20/24) | `1.11·10⁻⁶` | `1.34·10⁻⁷` | `4.82·10⁻⁷` | `1.89·10⁻⁷` | `1.65·10⁻⁴` | `8.49·10⁻⁸` | `1.26·10⁻⁹` | `2.49·10⁻⁷` | 375 |
+| `1/32` | A | `9.27·10⁻⁷` | `1.29·10⁻⁷` | `6.91·10⁻⁷` | `1.90·10⁻⁷` | `1.49·10⁻⁴` | `8.89·10⁻⁸` | `1.25·10⁻⁹` | `3.10·10⁻⁷` | 434 |
+| `1/32` | B | `4.29·10⁻⁷` | `1.31·10⁻⁷` | `5.25·10⁻⁷` | `1.89·10⁻⁷` | `1.72·10⁻³` | `8.68·10⁻⁸` | `1.27·10⁻⁹` | `2.72·10⁻⁷` | 374 |
+
+- **B is `:damped` outside the horizon.** ℋ in `[2, 2.25)` is `0.34×`,
+  `0.92×` and `1.00×` the layer's, the error there `0.87×`, `1.03×` and
+  `1.00×`, every shell from `2.25` out equal to two or three digits,
+  `dM_irr/dt` within 2 %, and the drift of `h_tt` `1.40×`, `1.02×` and
+  `1.00×`. At `h = 1/32` the two runs agree to three or four digits in every
+  shell from `r = 2`, and at `1/16` excision is the better: its surface is
+  so far below the horizon that what it leaks is under the layer's own
+  leakage at `r_1 = 3/2`. Its orders over the three resolutions
+  (`test/octant_study.jl … series=xB64,xB96q,xB128q:16,24,32`): ℋ in
+  `[2, 2.25)` `4.48/3.98`, in `[2.25, 3)` `4.04/4.00`, the error there
+  `4.24/4.08` and `4.03/4.05`, `dM_irr/dt` `4.09/4.05` — `:damped`'s are
+  `6.93/4.25`, `4.24/4.01`, `4.63/3.99`, `4.17/4.05` and `4.05/4.04` (the
+  layer's first shell carries a term that falls faster); from `r = 5` out
+  the first orders read the noise of the `h = 1/16` row, the second are
+  `4.0`.
+- **A, C and D: at `r_E = M` the closures, or the blend, leak through the
+  first shell at fine `h`.** At `h = 1/16` A is `0.37×` `:damped` in
+  ℋ just outside; at `1/24` A is `1.57×`, C (no blend, 24 cells) `1.48×` and
+  D (the blend from four cells) `1.18×`; at `1/32` A is `2.16×`, its ℋ
+  just outside converging at order `3.39/3.15` against B's `4.48/3.98`
+  (the error there `3.97/3.92`) — while every shell from `2.25` out, the
+  mass drift and the drift of `h_tt` stay within 15 % of `:damped`'s.
+  Twenty-four cells were enough at `1/16` and are not at `1/24`: the
+  leakage falls with the depth in cells, the truncation error with `h⁴`, so
+  the depth has to grow with the resolution — a fixed radius does that.
+- **`:fitted` loses to both.** Against its best setups B is `8.8×`,
+  `1.7×` and `2.6×` lower in ℋ just outside the horizon. Inside the horizon
+  both are far from the layer: every `:fitted` row's band is `8–140×` the
+  layer's, B's `33×` (`1/16`) to `970×` (`1/32`) — the closures' second
+  order at the surface, which nothing outside sees.
+- **The band** converges at order 2: B `7.05·10⁻³`, `2.93·10⁻³`,
+  `1.72·10⁻³` (orders `2.17/1.85`), A `5.75·10⁻⁴`, `2.44·10⁻⁴`,
+  `1.49·10⁻⁴` (`2.11/1.71`) — the closures' `∂²` is second order at the
+  first evolved point.
+
+**The gauge drift did not return (measured in step X3**, job 570346: `h =
+1/16` to `50 M`, A and B**)**. GHSO2's excised hole drifted off the
+stationary background at `≈ 0.14/M` — a factor `38` between `24` and `50 M`
+— and failed near `45 M` (`notes/sonic-surface.md`). Here, between `24` and
+`50 M`:
+- the drift of `h_tt` at the horizon rises by 2 % (A: `4.91 → 5.01·10⁻⁶`)
+  and 3 % (B: `4.73 → 4.86·10⁻⁶`), peaking at `37` and `41 M` and falling
+  after — the shape of the `:damped` layer's own, which on its `128 M` run
+  (the `L = 128` octant, the same `h = 1/16` at the hole) rises from
+  `3.38·10⁻⁶` at `24 M` to its peak `3.49·10⁻⁶` at `40 M` and is
+  `3.46·10⁻⁶` at `50 M`;
+- `M_irr` peaks at `26 M` (`1 + 1.46·10⁻⁶`, B `1 + 1.42·10⁻⁶`) and falls at
+  `−5.0·10⁻⁹/M` (B `−3.7·10⁻⁹/M`) to `50 M`, the horizon found at every row
+  with `J ≤ 1.5·10⁻⁹`;
+- ℋ just outside the horizon, the gauge constraint, and the band's ℋ and
+  error inside it change by less than 0.4 %, the error in `[2, 2.25)` by
+  `−1.3 %` and in `[2.25, 3)` by `+2–3 %`; only the error in `[3, 5)` grows
+  (`×1.39`), the settling front of the slightly different stationary hole
+  moving outward, as on the `:damped` run's outer levels.
+
+So **the excised hole holds the gauge as the layer does, at the truncation
+error**: the drift at the horizon is `1.4×` the layer's at `h = 1/16`,
+`1.0–1.1×` at `1/24` and `1.00×` at `1/32` (B), and converges with it.
+Whatever drove GHSO2's — its Dirichlet boundary at `R = 5 M`, its
+resolution, its elements — is not in this scheme: the static gauge source
+holds the gauge without a layer inside.
+
+**The outflow rows** (every row, every chunk): constant to four digits for
+the whole run, no non-finite value in the band, no closure axis whose shift
+points into the excised set. The normal margin `b_n/a_n − 1` at the band is
+`2M/r − 1` at its outermost points (`β` is radial) — A `0.703`, `0.788`,
+`0.835` and B `1.997`, `2.266`, `2.406` at `h = 1/16, 1/24, 1/32` — and the
+inflow-like fraction of
+X1's per-axis faces is A `291/642 = 0.45`, `0.49`, `0.49` and B
+`39/168 = 0.23`, `0.21`, `0.24`, against `r_E/(2M) = 0.5` and `0.25`; the
+least `b/a` falls with `h` to `0.072` (A at `1/32`) — some face is always
+nearly tangent — and is never negative.
+
+**What it costs on the H200.** Per `M` of evolution, the analysis included:
+B `31, 139, 374 s` at `h = 1/16, 1/24, 1/32` against `:damped`'s `29, 140,
+351 s` (`+0–8 %`); A with the blend `35, 162, 434 s` (`+16–24 %`), D the
+same; `:fitted` `30, 144–145, 373–375 s`. The `50 M` rows took `30 min`
+(A) and `27 min` (B) on one H200, the `1/32` rows `2 h 34` (B) and
+`2 h 57` (A) — `:damped`'s `2 h 24`. The eight GPUs of a node share its
+CPUs and its host memory with the other jobs there, which moves these by a
+few per cent.
+
+**The suite.** No source changed in this step (`test/octant_study.jl`, which
+is not in it, prints the drift of `h_tt` and the outflow rows): **6579
+assertions in 17m07** at one thread (load 4–5.5) and **6587 in 12m41** at
+four (load 2.4–4), X2b's counts, run after every row above had finished.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -8231,7 +8618,12 @@ answer it in order:
 - **X2b**, the `:excised` variant.
 - **X3**, the static Kerr-Schild hole on the octant at `h = 1/16 … 1/32`
   against the `:damped` and `:fitted` rows of "Robust stability on the
-  octant", the gauge drift to `50 M` included.
+  octant", the gauge drift to `50 M` included. **(Answered in step X3:
+  feasible.** No stability boundary between `r_E = M/2` and `13M/8`; at
+  `r_E = M/2` without the blend the exterior is `:damped`'s at every `h`
+  and better than `:fitted`'s; no gauge drift to `50 M`. The proposed next
+  round is the static spinning hole. See
+  [Excision](#excision-added-2026-10-05), "What step X3 measured".**)**
 
 Spinning holes wait for the rotating octant on `main`; moving holes wait
 for the static answer.

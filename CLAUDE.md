@@ -112,7 +112,13 @@ models, the go/no-go), X2a (the stencil provider), X2b (the variant) and X3
 integration branch `claude/excision-singularity-handling-30feec`. The design
 is `CODE.md`'s "Excision (added 2026-10-05)". X1, X2a and X2b are done: the
 variant runs on both geometries, with the exterior's operator bit for bit
-today's; X3 measures it on Symmetry's H200.
+today's. X3 is done (2026-10-05): on Symmetry's H200 the excised static
+Kerr-Schild `a = 0` hole is stable at every depth of X1's window; excised at
+`r_E = M/2` without the blend it is `:damped` outside the horizon at `h =
+1/16 … 1/32` (to three digits at `1/32`), beats `:fitted`, and holds the
+gauge to `50 M` as the layer does; the next round is Erik's call (proposed:
+the static spinning hole — `CODE.md`, "Excision", "What step X3
+measured").
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -448,6 +454,20 @@ the geometry, refuses `regrid`, `adapt`, the rates, `handover` and
 `test/octant_runs.jl interior=excised` and `bench/stepping.jl
 BENCH_CASE=excised` are its runs.
 
+From step X3 (2026-10-05) the excised static hole has been **measured on
+Symmetry's H200s** (`CODE.md`, "Excision", "What step X3 measured", and
+Measured results, "Excision on the static hole (step X3)"): the variant ran
+at `Float64` on CUDA as built, its right-hand side within `5·10⁻¹²` of the
+CPU's; the depth scan at `h = 1/16` found no stability boundary in X1's
+window `r_E = M/2 … 13M/8`, only an accuracy one — the exterior degrades as
+the surface nears the horizon unless the lopsided blend is on; excised at
+`r_E = M/2` without the blend the production rows are `:damped`'s outside
+the horizon (to three digits at `h = 1/32`) and better than `:fitted`'s,
+while the blend at `r_E = M` leaks through the first shell at fine `h` and
+costs 16–24 % on the H200; there is no gauge drift to `50 M`. No source
+changed in this step;
+`test/octant_study.jl` prints the drift of `h_tt` and the outflow rows.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -521,7 +541,11 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-After step X2b the suite is **6579 assertions in 21m11** at one thread and
+After step X3 the suite is **6579 assertions in 17m07** at one thread and
+**6587 in 12m41** at four (2026-10-05/06, load 2–6): X2b's counts, since no
+source changed — the step ran on Symmetry's H200s and recorded what it
+measured.
+After step X2b the suite was **6579 assertions in 21m11** at one thread and
 **6587 in 17m39** at four (2026-10-05, the two at once, at a load of 7–25
 from other sessions): its 91 new claims are `excision_tests.jl`'s 84 —
 `44.6 s` / `32.8 s`, most of it the compilation of the excised kernels and
@@ -888,6 +912,20 @@ excision rows into the CSV, `records.csv` and SimWatch's `extra.excision`:
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=fitted L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/smoke
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=excised L=8 N=16 roots=2 radii=4,2 t_end=1 out=out/smoke-excised
 julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
+```
+
+Step X3's rows (added in step X3) ran from `excision-x3` on Symmetry, a
+copy with `CUDA` added, through a job script there (`out/x3/rows.sbatch`)
+that runs a file of rows — `<label> <options…>` a line — one after the other
+on one H200, each into `out/x3/<study>/<label>` with its own checkpoints,
+skipping a row whose log says it finished and resubmitting itself on exit
+3; its scratch scripts (`x3_device.jl`, the device check against the CPU)
+are beside it. A kernel's registers and spills are `ptxas`'s own report,
+which `JULIA_DEBUG=CUDACore` prints for every kernel a run compiles:
+
+```bash
+JULIA_DEBUG=CUDACore julia --project=. test/octant_runs.jl backend=cuda case=ks L=8 N=16 roots=2 radii=4,2 t_end=1/2 chunk=1/2 cfl=1/2 2>&1 | grep -A3 "entry function '_Z[0-9]*gpu_gh_rhs_kernel"
+julia test/octant_study.jl out/x3/prod t_from=8 series=xB64,xB96q,xB128q:16,24,32
 ```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
@@ -1550,6 +1588,24 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   with no energy estimate, and the `:damped` control itself grew at
   `+0.04/M` under them; `test/excision_model.jl` takes the divergences over
   the plane. Check a model's control before reading its experiment.
+- **The octant runs' default noise outlives the truncation error at fine
+  `h`** (step X3). `amplitude = 10⁻⁸` leaves a constraint content that
+  decays only as a power of `t` — `ℋ ≈ 8·10⁻⁸` in every shell at `24 M` —
+  which is above the exterior's truncation error from `r = 3` out at
+  `h = 1/24` and comparable to it from `r = 2.25` at `1/32`. The exterior
+  study's reference rows have none; a convergence order needs `amplitude=0`
+  rows.
+- **On the H200 the right-hand side's options cost what they do not cost on
+  the CPU** (step X3): the lopsided blend `+10–20 %` of every right-hand
+  side (the CPU's `+0.3 %`), the zone kernel `6 %` on a mesh of many small
+  blocks (`0.6 %` on the octant's 29), and step X2a's provider `+5 %` on
+  the `:damped` kernel. Every right-hand-side kernel sits at 255 registers
+  with a 9–11 kB stack frame from its non-inlined calls.
+- **An octant row checkpoints every eighth chunk by default**
+  (`checkpoint_every=8`): a ten-chunk row's newest file is at `t = 8`, so
+  extending it reruns two chunks and appends them to its CSV. Truncate a
+  copied CSV to the checkpoint's time first; the rerun rows are the
+  original's bit for bit, on the H200 too.
 
 ## Conventions
 
