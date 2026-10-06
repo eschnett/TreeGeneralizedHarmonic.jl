@@ -1,30 +1,39 @@
-# The host-side analysis of step X1: whether a static hole can be excised on
-# this mesh — one-sided closures per stencil at a lego surface inside the
-# horizon — before a kernel is written. Run by hand, with its numbers
-# recorded in `CODE.md` under "Excision" and "Excision: the analysis (step
-# X1)" in "Measured results".
+# The host-side analysis of steps X1 and X5: whether a static hole can be
+# excised on this mesh — one-sided closures per stencil at a lego surface
+# inside the horizon — before a kernel is written (X1, Kerr-Schild `a = 0`),
+# and which closure holds the spinning hole's frame-dragged faces, where the
+# shift points into the excised set (X5, Kerr-Schild `a = 3/5`). Run by hand,
+# with its numbers recorded in `CODE.md` under "Excision" and, in "Measured
+# results", "Excision: the analysis (step X1)" and "Excision: the
+# frame-dragged faces (step X5)".
 #
 # It is a **script and not a test**, in the manner of `test/dispersion.jl`,
 # whose model it builds on: it prints Markdown tables, loads no `Test`, and
 # its checks on itself — the frozen coefficients against Kerr-Schild's closed
 # form, the radial line's layer against `dispersion.jl`'s recorded numbers to
-# their printed digits, the parity sectors against the full operator — throw
-# when they fail. The exact claims about the closures (where they read, what
-# they are exact on, the dissipation's sign, the table's rounding) are
+# their printed digits, the parity sectors (X5: the turns' sectors) against
+# the full operator, X5's turned coefficients against the metric and its
+# general operator against X1's at `a = 0` — throw when they fail. The exact
+# claims about the closures and the extrapolation (where they read, what they
+# are exact on, the dissipation's sign, the tables' rounding) are
 # `test/stencils_tests.jl`'s. It builds no mesh: every model is a sparse
-# matrix assembled on the host from the package's own closure weights
-# (`src/stencils.jl`) and the background's coefficients, read through
-# `background_state`, `metric_quantities` and `metric_derivatives` as the
-# kernel reads them.
+# matrix assembled on the host from the package's own closure and
+# extrapolation weights (`src/stencils.jl`) and the background's
+# coefficients, read through `background_state`, `metric_quantities` and
+# `metric_derivatives` as the kernel reads them.
 #
 # Sections, selected by name (all three when none is named); `section=part,
 # part` selects parts of one, and `key=value` overrides a part's defaults
 # (`q=2,4`, `n=24,32`, `eps=1/2,1`, `rE=…`, `ratios=…`, `h=…`, `m=…`,
-# `t_end=…`, `n_fine=…`, `fam=axis,axislop,extrap,extraplop`). Each table in
-# `CODE.md` is one of these commands, with the time it took on the
-# development machine (Apple silicon, 12 threads) at a load of 10–40:
+# `t_end=…`, `n_fine=…`, `fam=axis,axislop,extrap,extraplop`, and for X5's
+# parts `a=3/5` and `fam=…,hybrid,hybridlop,hybridadv,hybridadvlop`). Each
+# table in `CODE.md` is one of these commands, with the time it took on the
+# development machine (Apple silicon, 12 threads) at a load of 10–40, or on
+# one of Symmetry's 64-core EPYC nodes (`amdq`) where it says so — there a
+# command was one process per `(q, ε, r_E)` or per family, each a few
+# threads, all at once:
 #
-#     julia --project=. --threads=4 test/excision_model.jl margins               # 20 s
+#     julia --project=. --threads=4 test/excision_model.jl margins=margins       # 20 s
 #     julia --project=. --threads=4 test/excision_model.jl model1d=frozen        # 20 s
 #     julia --project=. --threads=4 test/excision_model.jl model1d=reflect       # 30 s
 #     julia --project=. --threads=4 test/excision_model.jl model1d=radial        # 20 s
@@ -33,14 +42,32 @@
 #     julia --project=. --threads=4 test/excision_model.jl model2d=noise         # 4 min
 #     julia --project=. --threads=4 test/excision_model.jl model2d=fine          # 36 min
 #
-#   * `margins` — the outflow condition on the seed's offset surfaces of
-#     Kerr-Schild `a = 0, 3/5, 9/10` and harmonic Kerr `a = 7/10, 9/10`, at
-#     depths of `m` cells for the octant runs' spacings `h = 1/16 … 1/48`: the
-#     margin along the true normal and its least value, the per-axis ratios
-#     `b/a` over the lego surface's closure faces (their distribution, the
-#     inflow-like fraction, predicted `r_E/(2M)` for Kerr-Schild `a = 0`, and
-#     the fraction whose shift points into the excised set), the clearance of
-#     the chart's singular set, and the answer per chart.
+#     julia --project=. --threads=4 test/excision_model.jl margins=window        # 20 s
+#     julia --project=. --threads=2 test/excision_model.jl model2d=spinfaces     # 10 s
+#     julia --project=. --threads=4 test/excision_model.jl model2d=spineig n=24  # 22 min
+#     julia --project=. --threads=2 test/excision_model.jl model2d=spineig n=32 q=… eps=… rE=…
+#                                                       # Symmetry, 28 processes: 8 min
+#     julia --project=. --threads=3 test/excision_model.jl model2d=spineig n=48 q=4 eps=1/2 rE=… fam=…
+#                                                       # Symmetry, 21 processes: SPINEIG48
+#     julia --project=. --threads=4 test/excision_model.jl model2d=spincontrols q=… n=… rE=…
+#                                                       # Symmetry, 8 processes: 5 min
+#     julia --project=. --threads=64 test/excision_model.jl model2d=spinnoise    # Symmetry: 5 min
+#     julia --project=. --threads=64 test/excision_model.jl model2d=spinfine     # Symmetry: SPINFINE
+#
+#   * `margins` — `margins`: the outflow condition on the seed's offset
+#     surfaces of Kerr-Schild `a = 0, 3/5, 9/10` and harmonic Kerr `a = 7/10,
+#     9/10`, at depths of `m` cells for the octant runs' spacings `h = 1/16 …
+#     1/48`: the margin along the true normal and its least value, the
+#     per-axis ratios `b/a` over the lego surface's closure faces (their
+#     distribution, the inflow-like fraction, predicted `r_E/(2M)` for
+#     Kerr-Schild `a = 0`, and the fraction whose shift points into the
+#     excised set), the clearance of the chart's singular set, and the answer
+#     per chart. `window` (step X5): Kerr-Schild `a = 3/5`'s window for the
+#     sphere and the tracked offset surface at `h = 1/24, 1/32, 1/48` — the
+#     normal outflow, the depth in cells at the poles and on the equator, the
+#     room for the core rule's sphere outside the ring, X1's faces and X2b's
+#     closure axes with the fractions whose shift points into the excised set,
+#     and whether X5's rule finds its extrapolation's sources in 3D.
 #   * `model1d` — `frozen`: the constant-coefficient system of
 #     `dispersion.jl` on a half-line closed at its left end, for `b/a` from
 #     `−5/4` (both characteristics entering) through `0 … 1` (one, inflow
@@ -63,12 +90,20 @@
 #     parity sector. `controls`: the same for the variations the go/no-go is
 #     read against (no dissipation, the other dissipation closures, other
 #     extrapolation degrees, a bare frozen core). `noise`: noise evolutions to
-#     `100 M` at `129²`; `fine`: the same at `257²`.
+#     `100 M` at `129²`; `fine`: the same at `257²`. Step X5's parts are the
+#     same on Kerr-Schild `a = 3/5`'s plane, where frame dragging puts faces
+#     with the shift pointing into the excised set on the lego circle, with
+#     two more families — the hybrids, per-axis where the shift points out
+#     and the extrapolation where it points in, for every operator along that
+#     axis or for the advection alone — over `r_E = 0.65 … 1.7`: `spinfaces`
+#     (the faces at every resolution), `spineig` (`n = 24, 32`, and `48` for
+#     three families), `spincontrols`, `spinnoise` (`129²`) and `spinfine`
+#     (`257²`).
 #
 # What the models leave out is what `dispersion.jl`'s leave out — the source
 # terms, the coupling between components, a third dimension — and what they
-# keep is the question X1 asks: whether the closures, including the lego
-# staircase's inflow-like ones, are stable.
+# keep is the question X1 and X5 ask: whether the closures, including the
+# lego staircase's inflow-like and frame-dragged ones, are stable.
 
 import Printf
 using LinearAlgebra: BLAS, Diagonal, eigen, eigvals, mul!, norm, svdvals
@@ -79,7 +114,7 @@ import SpacetimeMetrics as SM
 using TreeGeneralizedHarmonic
 using TreeGeneralizedHarmonic: _sym4, closure_derivative_weights,
                                closure_dissipation_weights, lopsided_weights,
-                               lagrange_derivative_weights
+                               lagrange_derivative_weights, extrapolation_weights
 
 # Dense eigenvalues use BLAS; the noise runs use the Julia threads instead.
 BLAS.set_num_threads(max(1, Threads.nthreads()))
@@ -340,6 +375,195 @@ if runs("margins", "margins")
     println("| chart | h | shallowest normal outflow | deepest normal outflow clearing the disk |")
     println("|---|---|---|---|")
     foreach(println, answers)
+end
+
+# --- margins, window: the spinning hole's window (step X5) ---------------------
+#
+# Kerr-Schild at spin `a` (`a=…`, default `3/5`), the two geometries step X2b
+# built — the sphere `r < r_E` about the center and the tracked offset surface
+# `r < r_h(n̂) − m h` — at the spinning round's spacings `h = 1/24, 1/32, 1/48`
+# (`PLAN.md`, step X7): the window (normal outflow along the surface's own
+# normal, which ends near Kerr-Schild's inner horizon — `√(r₋² + a²)` on the
+# equator, `0.632` at `a = 3/5` — and the room for the core rule's surface
+# `r_0` between the ring `ρ = a` and `r_E`), the depth in cells below the
+# horizon at the poles (`r₊`) and on the equator (`√(r₊² + a²)`), and the lego
+# census at `q = 4`: X1's faces (an immediate excised neighbour along an
+# axis) and X2b's closure axes (`k_s < G` on side `s`), with the per-axis
+# ratio `b/a`, `b = −s β^d`, `a = α√γ^{dd}`, the fraction whose shift points
+# into the excised set (`b/a < 0`, what X2b refuses) and the fraction that
+# has both characteristics entering from it (`b/a < −1`).
+
+const WINDOW_H = (1 / 24, 1 / 32, 1 / 48)
+const WINDOW_RE = (0.65, 0.70, 0.75, 0.80, 0.90, 1.00, 1.10, 1.133, 1.20, 1.30,
+                   1.40, 1.50, 1.60, 1.70)
+const WINDOW_M = (4, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56)
+
+# The lattice directions of 3D, and the one nearest a unit vector (the first
+# in this order on a tie, which an integer point on a sphere never makes).
+const DIRS26 = [(a, b, c) for a in -1:1 for b in -1:1 for c in -1:1
+                if (a, b, c) != (0, 0, 0)]
+function nearest_direction26(n̂)
+    best = DIRS26[1]
+    bd = -Inf
+    for e in DIRS26
+        d = (e[1] * n̂[1] + e[2] * n̂[2] + e[3] * n̂[3]) / sqrt(e[1]^2 + e[2]^2 + e[3]^2)
+        d > bd && (bd = d; best = e)
+    end
+    return best
+end
+
+# The census of a lego surface: every lattice point `h (i, j, k)` not excised
+# within `G + 1` cells of the radial shell `[r_lo, r_hi]` the surface lies
+# in, and at it every axis and side whose run of non-excised points `k_s` is
+# shorter than `G` — a closure axis — with its ratio `b/a`; `k_s = 0` is a
+# face. With `normal` (the surface's outward normal at a point), the
+# frame-dragged faces' rule is tried on every closure axis whose shift points
+# into the excised set: each excised tap `Q` of the advective stencil
+# (`k_s < j ≤ q/2`) is filled along the lattice direction (of 26) nearest the
+# normal at `Q`, from the first consecutive non-excised points `Q + k e`
+# inside the point's `G`-box, at most three; `fills[n + 1]` counts the taps
+# with `n` sources and `k0max` is the farthest first source. Returns the two
+# sorted lists of ratios and the fill census.
+function lego_census(bg, h, excised, rlo, rhi; q=4, normal=nothing)
+    G = q ÷ 2 + 1
+    w = (G + 1) * h
+    K = ceil(Int, (rhi + w) / h)
+    faces = Float64[]
+    axes = Float64[]
+    fills = zeros(Int, 4)
+    k0max = 0
+    for i in (-K):K, j in (-K):K
+        (i^2 + j^2) * h^2 > (rhi + w)^2 && continue
+        for k in (-K):K
+            r = h * sqrt(i^2 + j^2 + k^2)
+            (rlo - w ≤ r ≤ rhi + w) || continue
+            excised(i, j, k) && continue
+            c = nothing
+            for d in 1:3, s in (-1, 1)
+                e = ntuple(l -> l == d ? s : 0, 3)
+                ks = 0
+                while ks < G && !excised(i + (ks + 1) * e[1], j + (ks + 1) * e[2],
+                                         k + (ks + 1) * e[3])
+                    ks += 1
+                end
+                ks < G || continue
+                c === nothing && (c = coefficients(bg, h * SVector(i, j, k)))
+                c === nothing && error("a closure axis at $(h .* (i, j, k)) is " *
+                                       "on the chart's singular set")
+                ratio = -s * c.β[d] / (c.α * sqrt(c.γu[d, d]))
+                push!(axes, ratio)
+                ks == 0 && push!(faces, ratio)
+                (normal === nothing || ratio >= 0) && continue
+                for jt in (ks + 1):(q ÷ 2)
+                    Q = (i + jt * e[1], j + jt * e[2], k + jt * e[3])
+                    en = nearest_direction26(normal(h * SVector(Q...)))
+                    n = 0
+                    k0 = 0
+                    for kk in 1:(4G)
+                        S = Q .+ kk .* en
+                        maximum(abs.(S .- (i, j, k))) ≤ G || break
+                        if excised(S...)
+                            n == 0 || break
+                            continue
+                        end
+                        n == 0 && (k0 = kk)
+                        n += 1
+                        n == 3 && break
+                    end
+                    fills[n + 1] += 1
+                    k0max = max(k0max, k0)
+                end
+            end
+        end
+    end
+    return sort!(faces), sort!(axes), (fills=fills, k0max=k0max)
+end
+
+# The least normal margin `b_n/a_n − 1` of a surface `r = R(n̂)` along its own
+# normal, over `θ` (Kerr-Schild is axisymmetric about the spin axis).
+function normal_margin(bg, R, normal)
+    nmin = Inf
+    for it in 1:721
+        θ = π * (it - 1) / 720
+        n̂ = SVector(sin(θ), 0.0, cos(θ))
+        x = R(n̂) * n̂
+        c = coefficients(bg, x)
+        c === nothing && return -Inf
+        b, a = speeds(c, normal(x))
+        nmin = min(nmin, b / a - 1)
+    end
+    return nmin
+end
+
+frac(v, p) = isempty(v) ? 0.0 : count(p, v) / length(v)
+
+function census_cells(faces, axes, fl)
+    return fmt("%d | %.3f | %.3f | %.3f | %.3f | %.3f | %d | %d | %.3f | %.3f | " *
+               "%d | %d, %d, %d, %d | %d",
+               length(faces), faces[1], quantile_sorted(faces, 0.01),
+               frac(faces, <(1)), frac(faces, <(0)), frac(faces, <(-1)),
+               length(axes), count(<(0), axes), frac(axes, <(0)), axes[1],
+               sum(fl.fills), reverse(fl.fills)..., fl.k0max)
+end
+
+if runs("margins", "window")
+    a_spin = opt(Float64, "a", 0.6)
+    bg = SM.KerrSchild(1.0, a_spin)
+    rp = horizon_min_radius(bg)
+    req = horizon_max_radius(bg)
+    rm = 1 - sqrt(1 - a_spin^2)
+    inner_eq = sqrt(rm^2 + a_spin^2)
+    hs = parse_list(Float64, "h", WINDOW_H)
+    println("\n=== margins, window: Kerr-Schild a = $a_spin — horizon r₊ = " *
+            "$(round(rp; digits=4)) at the poles, $(round(req; digits=4)) on the " *
+            "equator; the ring at ρ = $a_spin; the inner horizon r₋ = " *
+            "$(round(rm; digits=4)) at the poles, $(round(inner_eq; digits=4)) on " *
+            "the equator ===")
+    println("normal: least b_n/a_n − 1 along the surface's own normal (> 0 is " *
+            "outflow); poles, equator: the depth below the horizon in cells; r_0 " *
+            "room: (r_E − ρ_ring)/h, the cells between the ring and the surface for " *
+            "the core rule's sphere; faces (X1): the lego surface's immediate " *
+            "closure faces, b/a min and 1 %, the inflow-like (b/a < 1), into " *
+            "(b/a < 0) and both-entering (b/a < −1) fractions; closure axes (X2b's " *
+            "census, q = 4): the (point, axis, side) with k_s < G, how many have " *
+            "b/a < 0 (X2b's refusal), their fraction, and the least b/a; filled " *
+            "taps: the excised taps of those axes' advective stencils (k_s < j ≤ " *
+            "q/2) that X5's rule fills along the lattice direction (of 26) " *
+            "nearest the normal, by the number of sources it finds in the G-box " *
+            "(0 would be a refusal), and the farthest first source k₀")
+    hdr = "| faces | b/a min | 1 % | inflow | b/a < 0 | b/a < −1 | closure axes " *
+          "| b/a < 0 | fraction | least | filled taps | 3, 2, 1, 0 sources | k₀ max |"
+    for h in hs
+        println("\n-- the sphere r < r_E, h = 1/$(round(Int, 1/h)) --")
+        println("| r_E | normal | poles | equator | r_0 room " * hdr)
+        println("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        for r_E in parse_list(Float64, "rE", WINDOW_RE)
+            r_E ≤ a_spin && continue
+            nm = normal_margin(bg, _ -> r_E, x -> x / norm(x))
+            excised(i, j, k) = h^2 * (i^2 + j^2 + k^2) < r_E^2
+            faces, axes, fl = lego_census(bg, h, excised, r_E, r_E;
+                                          normal=x -> x / norm(x))
+            say("| %.3f | %+.3f | %.1f | %.1f | %.1f | %s |", r_E, nm, (rp - r_E) / h,
+                (req - r_E) / h, (r_E - a_spin) / h, census_cells(faces, axes, fl))
+        end
+        println("\n-- the tracked offset surface r < r_h(n̂) − m h, " *
+                "h = 1/$(round(Int, 1/h)) (the depth is m cells along every ray) --")
+        println("| m | r_E range | normal | r_0 room at the equator " * hdr)
+        println("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        for m in parse_list(Int, "m", WINDOW_M)
+            off = m * h
+            r1, r2 = rp - off, req - off
+            r2 ≤ a_spin && continue
+            nm = normal_margin(bg, n̂ -> surface_radius(bg, n̂, off),
+                               x -> surface_normal(bg, x, off))
+            excised(i, j, k) = (x = h * SVector(i, j, k); r = norm(x);
+                                r < surface_radius(bg, x / r, off))
+            faces, axes, fl = lego_census(bg, h, excised, r1, r2;
+                                          normal=x -> surface_normal(bg, x, off))
+            say("| %d | %.3f–%.3f | %+.3f | %.1f | %s |", m, r1, r2, nm,
+                (r2 - a_spin) / h, census_cells(faces, axes, fl))
+        end
+    end
 end
 
 # ==============================================================================
@@ -1041,7 +1265,11 @@ function extrapolation(pl::Plane, P, Q, p)
         length(ks) == p + 1 && break
     end
     isempty(ks) && error("no extrapolation source for $Q in the G-box of $P")
-    c = Float64.(lagrange_derivative_weights([Rational{BigInt}(k) for k in ks], 0))
+    # The sources are consecutive, `k₀ … k₀ + n − 1`: the package's weights
+    # (`extrapolation_weights`, added in step X5; until then the same
+    # rationals from `lagrange_derivative_weights` here).
+    ks == first(ks):last(ks) || error("the extrapolation's sources $ks are not consecutive")
+    c = Float64.(extrapolation_weights(first(ks), length(ks))[2])
     return [((Q[1] + k * e[1], Q[2] + k * e[2]), ck) for (k, ck) in zip(ks, c)]
 end
 
@@ -1448,6 +1676,546 @@ if runs("model2d", "fine")
         for (i, r_E) in enumerate(rEs)
             cells = [fmt_noise(res[1 + length(names) * (i - 1) + k], t_end)
                      for k in 1:length(names)]
+            say("| %.2f | %s |", r_E, join(cells, " | "))
+        end
+    end
+end
+
+# ==============================================================================
+# model2d, spin — the frame-dragged faces (step X5)
+# ==============================================================================
+#
+# The same plane on Kerr-Schild at spin `a` (`a=…`, default `3/5`), whose
+# equatorial plane is where frame dragging lies in the plane: `β` has an
+# azimuthal part, so that along an axis nearly tangent to the lego circle the
+# shift can point *into* the excised set (`b/a < 0`), the faces X1's frozen
+# line found unstable under the per-axis closure. The model is X1's, in its
+# conservation form; what changes:
+#
+#   * the coefficients are no longer mirror-symmetric (the spin picks a sense
+#     of rotation), so they are computed on the orbit representatives
+#     `i > 0, j ≥ 0` of the quarter turn `(i, j) → (−j, i)` and turned with
+#     their exact tensor rules — `β` and `∂_aA^{ab}` as vectors, `A^{ab}` as a
+#     tensor — and the spectrum splits into the turn's four sectors (the
+#     eigenvalues `1, i, −1, −i`; the last is the second's conjugate);
+#   * the horizon the lopsided blend is measured from is the sphere
+#     geometry's, `r₊` (`horizon_min_radius`), as X2b's `ExcisionBlend` reads
+#     it for the sphere — on the equator that starts the blend about one
+#     cell of `5/64` deeper than the plane's own horizon;
+#   * the families: `:axis` and `:extrap` are X1's; **`:hybrid`** uses, at a
+#     point and an axis, the per-axis closure unless that axis is a closure
+#     axis (`k_s < G` on side `s`) whose shift points into the excised set,
+#     `−s β^d < 0`, and there every operator along the axis — `D₁`, `D₂`, the
+#     dissipation, the lopsided advection and the mixed derivative's sum
+#     along it — is centered with each excised tap extrapolated as `:extrap`
+#     does; **`:hybridadv`** does that for the advection's derivative only,
+#     the one the provider's `adv` method forms, and keeps the closures for
+#     everything else. The nested mixed derivative takes, at each outer node,
+#     that node's own rule along the inner axis; an outer node that is
+#     excised (only under an extrapolated outer sum) has its inner sum
+#     extrapolated tap by tap.
+
+const SPIN_RE = (0.65, 0.75, 0.90, 1.10, 1.30, 1.50, 1.70)
+const SPIN_FAMS = ((:axis, nothing), (:axis, LOP), (:extrap, nothing), (:extrap, LOP),
+                   (:hybrid, nothing), (:hybrid, LOP), (:hybridadv, nothing),
+                   (:hybridadv, LOP))
+const SPIN_FAMNAMES = Dict(:axis => "axis", :extrap => "extrap", :hybrid => "hybrid",
+                           :hybridadv => "hybrid-adv", :normal => "normal",
+                           :hybridnormal => "hybrid-normal")
+famname(fam, lop) = SPIN_FAMNAMES[fam] * (lop === nothing ? "" : ", lop")
+
+# A quarter turn of a lattice point, and the turn that carries the orbit
+# representative (`i > 0, j ≥ 0`) to a point: `P = R^k(P₀)`.
+qturn(P) = (-P[2], P[1])
+function orbit_rep(P)
+    Q = P
+    for k in 0:3
+        Q[1] > 0 && Q[2] >= 0 && return Q, k
+        Q = qturn(qturn(qturn(Q)))         # R⁻¹
+    end
+    error("the center has no orbit representative")
+end
+
+"""
+The plane's coefficients on Kerr-Schild `bg`, exactly covariant under the
+quarter turn: computed at the orbit representatives and turned `k` times —
+`(vx, vy) → (−vy, vx)` for `β` and `∂_aA^{ab}`, `(A^{xx}, A^{yy}, A^{xy}) →
+(A^{yy}, A^{xx}, −A^{xy})`, and the axis light speeds `a_x = α√γ^{xx}`,
+`a_y` exchanged. Checked against the metric at the turned points.
+"""
+function plane_coefficients_turn(pl::Plane, bg)
+    cache = Dict{NTuple{2,Int},Any}()
+    function rep_coef(P0)
+        get!(cache, P0) do
+            c = coefficients(bg, SVector(pl.h * P0[1], pl.h * P0[2], 0.0))
+            c === nothing && error("the plane's evolved point $P0 is on the " *
+                                   "singular set")
+            (βx=c.β[1], βy=c.β[2], cu=c.cu, Axx=c.A[1, 1], Ayy=c.A[2, 2],
+             Axy=c.A[1, 2], divβ=c.divβ2, divAx=c.divA2[1], divAy=c.divA2[2],
+             speed=c.speed, ax=c.α * sqrt(c.γu[1, 1]), ay=c.α * sqrt(c.γu[2, 2]))
+        end
+    end
+    turn(c) = (βx=-c.βy, βy=c.βx, cu=c.cu, Axx=c.Ayy, Ayy=c.Axx, Axy=-c.Axy,
+               divβ=c.divβ, divAx=-c.divAy, divAy=c.divAx, speed=c.speed,
+               ax=c.ay, ay=c.ax)
+    coef = map(pl.pts) do P
+        P0, k = orbit_rep(P)
+        c = rep_coef(P0)
+        for _ in 1:k
+            c = turn(c)
+        end
+        c
+    end
+    # The turn rules against the metric, at a few points of every quadrant.
+    for (k, P) in enumerate(pl.pts)
+        k % 97 == 0 || continue
+        c = coefficients(bg, SVector(pl.h * P[1], pl.h * P[2], 0.0))
+        t = coef[k]
+        err = maximum(abs, (t.βx - c.β[1], t.βy - c.β[2], t.Axx - c.A[1, 1],
+                            t.Ayy - c.A[2, 2], t.Axy - c.A[1, 2],
+                            t.divAx - c.divA2[1], t.divAy - c.divA2[2]))
+        err ≤ 1e-11 * (1 + abs(c.A[1, 1])) ||
+            error("the turned coefficients at $P are off the metric's by $err")
+    end
+    return coef
+end
+
+"""
+The plane's operator for every family (`fam ∈ (:axis, :extrap, :hybrid,
+:hybridadv, :centered, :dirichlet)`), with the coefficients of
+`plane_coefficients_turn`: X1's `plane_operator` with the rule chosen per
+point, axis and operator rather than per family. At `a = 0`, `:axis`,
+`:extrap`, `:centered` and `:dirichlet` are X1's operators (checked below to
+roundoff; the summation order of the assembly differs).
+"""
+function spin_operator(pl::Plane, coef, rh; fam=:axis, ε=0.5, lop=nothing,
+                       diss=:msn, p=2, thresh=0.0)
+    q, h = pl.q, pl.h
+    N = length(pl.pts)
+    G = G_OF(q)
+    c = Coo()
+    big = 1000
+    kc(P, d, s) = kcount(pl, P, d == 1 ? s : 0, d == 2 ? s : 0, G)
+    # A closure axis whose shift points into the excised set, `b/a < 0` — or,
+    # for the controls, `b/a < thresh`.
+    function into(P, d)
+        k = (abs(P[1]) > pl.n || abs(P[2]) > pl.n) ? 0 : pindex(pl, P...)
+        k == 0 && return false
+        β, a = d == 1 ? (coef[k].βx, coef[k].ax) : (coef[k].βy, coef[k].ay)
+        return any(s -> kc(P, d, s) < G && -s * β / a < thresh, (-1, 1))
+    end
+    # The rule at `P` along `d` for an operator `kind`.
+    function mode(P, d, kind)
+        fam === :axis && return :closure
+        fam === :extrap && return :extrap
+        fam in (:centered, :dirichlet) && return :open
+        fam === :hybrid && return into(P, d) ? :extrap : :closure
+        fam === :hybridadv &&
+            return (kind in (:adv, :lop) && into(P, d)) ? :extrap : :closure
+        error("unknown family $fam")
+    end
+    function weights(kind, P, d, md; up=1)
+        km, kp = md === :closure ? (kc(P, d, -1), kc(P, d, 1)) : (big, big)
+        kind in (:adv, :d1, :mix) && return wd(q, 1, km, kp, G)
+        kind === :d2 && return wd(q, 2, km, kp, G)
+        kind === :ko && return md === :closure ? wk(q, diss, km, kp) : wkc(q)
+        return md === :closure ? wl(q, up, km, kp) : wlc(q, up)
+    end
+    function emit!(row, P, Q, wt, f, md)
+        s = pstate(pl, Q...)
+        if s == UNK
+            put!(c, row, f * N + pindex(pl, Q...), wt)
+        elseif s == EXC && fam !== :dirichlet
+            md === :extrap || error("$fam ($md) read the excised point $Q from $P")
+            for (S, ck) in extrapolation(pl, P, Q, p)
+                emit!(row, P, S, wt * ck, f, md)
+            end
+        end
+        return nothing
+    end
+    for (k, P) in enumerate(pl.pts)
+        w, ρ = pl.prof[k]
+        cf = coef[k]
+        ru, rv = k, N + k
+        r = h * hypot(P...)
+        λ = lop === nothing ? 0.0 : blend_below(r, h, rh; start=lop[1], width=lop[2])
+        for (d, β, divA, Add) in ((1, cf.βx, cf.divAx, cf.Axx),
+                                  (2, cf.βy, cf.divAy, cf.Ayy))
+            e = d == 1 ? (1, 0) : (0, 1)
+            at(j) = (P[1] + j * e[1], P[2] + j * e[2])
+            ma = mode(P, d, :adv)
+            for (j, wj) in zip(weights(:adv, P, d, ma)...)
+                for (row, f) in ((ru, 0), (rv, 1))
+                    emit!(row, P, at(j), w * β * (1 - λ) * wj / h, f, ma)
+                end
+            end
+            md = mode(P, d, :d1)
+            for (j, wj) in zip(weights(:d1, P, d, md)...)
+                emit!(rv, P, at(j), w * divA * wj / h, 0, md)
+            end
+            if λ > 0
+                ml = mode(P, d, :lop)
+                for (j, wj) in zip(weights(:lop, P, d, ml; up=β >= 0 ? 1 : -1)...)
+                    for (row, f) in ((ru, 0), (rv, 1))
+                        emit!(row, P, at(j), w * β * λ * wj / h, f, ml)
+                    end
+                end
+            end
+            m2 = mode(P, d, :d2)
+            for (j, wj) in zip(weights(:d2, P, d, m2)...)
+                emit!(rv, P, at(j), w * Add * wj / h^2, 0, m2)
+            end
+            mk = mode(P, d, :ko)
+            for (j, wj) in zip(weights(:ko, P, d, mk)...)
+                for (row, f) in ((ru, 0), (rv, 1))
+                    emit!(row, P, at(j), w * ε * wj / h, f, mk)
+                end
+            end
+        end
+        # The mixed derivative, nested: outer along x by `P`'s rule, inner
+        # along y by the outer node's own.
+        mx = mode(P, 1, :mix)
+        for (a, wa) in zip(weights(:mix, P, 1, mx)...)
+            Pa = (P[1] + a, P[2])
+            if pstate(pl, Pa...) == EXC
+                (mx === :extrap || fam === :dirichlet) ||
+                    error("the mixed derivative's outer sum read an excised point")
+                my = mx
+                inner = wc(q, 1)
+            else
+                my = mode(Pa, 2, :mix)
+                inner = weights(:mix, Pa, 2, my)
+            end
+            for (b, wb) in zip(inner...)
+                emit!(rv, P, (Pa[1], Pa[2] + b), w * 2 * cf.Axy * wa * wb / h^2, 0,
+                      my)
+            end
+        end
+        put!(c, ru, rv, w * cf.cu)
+        put!(c, rv, rv, w * cf.divβ)
+        put!(c, ru, ru, -ρ)
+        put!(c, rv, rv, -ρ)
+    end
+    return tomatrix(c, 2N)
+end
+
+# The lopsided blend `C²` in the depth below `rh`: zero at and above `start`
+# cells below it, one from `start + width` on.
+blend_below(x, h, rh; start, width) =
+    width ≤ 0 ? 0.0 : smoothstep(((rh - x) / h - start) / width)
+
+# The sectors of the turns: the operator restricted to the span of
+# `Σ_k μ^{−k} δ_{R^k P₀}` over the orbit representatives `P₀` of the turn
+# `R` by `2π/order`, `μ = e^{2πi m/order}`, checked against `A P = P A_m`.
+# `order = 4` is the quarter turn, whose sector 3 is sector 1's conjugate and
+# is not computed; it commutes with the operator only where the mixed
+# derivative is symmetric in its two axes — the centered stencil, and
+# `:extrap`'s tap by tap — since the nested closures take the outer sum along
+# `x` at every point (as the kernel's `dmix` does). `order = 2`, the half
+# turn `P → −P`, keeps that order and commutes with every family.
+function turn_sectors(pl::Plane, A; order=4)
+    N = length(pl.pts)
+    rep(P) = order == 4 ? (P[1] > 0 && P[2] >= 0) : (P[1] > 0 || (P[1] == 0 && P[2] > 0))
+    step(P) = order == 4 ? qturn(P) : (-P[1], -P[2])
+    reps = [k for (k, P) in enumerate(pl.pts) if rep(P)]
+    nr = length(reps)
+    order * nr == N || error("the plane's evolved points are not whole orbits of " *
+                             "the turn ($N points, $nr representatives)")
+    out = []
+    for m in (order == 4 ? (0, 1, 2) : (0, 1))
+        μ = cispi(2m / order)
+        I = Int[]
+        J = Int[]
+        V = ComplexF64[]
+        for (cidx, k) in enumerate(reps)
+            P = pl.pts[k]
+            for kk in 0:(order - 1)
+                gi = pindex(pl, P...)
+                gi > 0 || error("the plane is not invariant under the turn at $P")
+                cf = conj(μ)^kk
+                append!(I, (gi, N + gi))
+                append!(J, (cidx, nr + cidx))
+                append!(V, (cf, cf))
+                P = step(P)
+            end
+        end
+        real_sector = order == 2 || m != 1
+        Pm = real_sector ? sparse(I, J, real.(V), 2N, 2nr) : sparse(I, J, V, 2N, 2nr)
+        AP = A * Pm
+        As = (Pm' * AP) ./ order
+        res = norm(AP - Pm * As) / norm(AP)
+        res ≤ 1e-12 || error("the operator does not commute with the turn of order " *
+                             "$order (sector $m): residual $res")
+        push!(out, (m=m, P=Pm, As=As, conjugate=(order == 4 && m == 1)))
+    end
+    return out
+end
+
+# The turn a family's operator commutes with.
+turn_order(fam) = fam in (:centered, :extrap, :dirichlet) ? 4 : 2
+
+"""
+The spinning plane's spectrum by sector, as `plane_spectrum`: the rightmost
+`Re λ` (in `1/M`), the share of its mode within three cells of the surface
+and of the outer face, the RK4 `cfl` the spectrum allows, and its
+eigenvalue's imaginary part.
+"""
+function spin_spectrum(pl::Plane, A, coef, r_surf; order=2)
+    secs = turn_sectors(pl, A; order=order)
+    N = length(pl.pts)
+    best = (re=-Inf, sec=0, k=0)
+    all_λ = ComplexF64[]
+    vals = Vector{Vector{ComplexF64}}()
+    for (si, s) in enumerate(secs)
+        λs = ComplexF64.(eigvals(Matrix(s.As)))
+        push!(vals, λs)
+        append!(all_λ, λs)
+        s.conjugate && append!(all_λ, conj.(λs))
+        k = argmax(real.(λs))
+        real(λs[k]) > best.re && (best = (re=real(λs[k]), sec=si, k=k))
+    end
+    near = outer = NaN
+    if best.re > -1e-2
+        s = secs[best.sec]
+        F = eigen(Matrix(s.As))
+        k = argmin(abs.(F.values .- vals[best.sec][best.k]))
+        v = s.P * F.vectors[:, k]
+        wts = [abs2(v[i]) + abs2(v[N + i]) for i in 1:N]
+        tot = sum(wts)
+        near = sum(wts[i] for i in 1:N
+                   if pl.h * hypot(pl.pts[i]...) < r_surf + 3pl.h; init=0.0) / tot
+        outer = sum(wts[i] for i in 1:N
+                    if max(abs.(pl.pts[i])...) > pl.n - 3; init=0.0) / tot
+    end
+    λmax = maximum(c.speed for c in coef)
+    ν = rk4_step_limit(all_λ)
+    return (maxre=best.re, im=imag(vals[best.sec][best.k]), near=near, outer=outer,
+            cfl=ν * λmax / pl.h)
+end
+
+# The lego circle's faces and closure axes on the spinning plane: X1's face
+# ratios, and the closure axes (`k_s < G`) whose shift points into the excised
+# set — the axes `:hybrid` extrapolates.
+function spin_faces(pl::Plane, coef)
+    G = G_OF(pl.q)
+    faces = Float64[]
+    nin = 0
+    for (k, P) in enumerate(pl.pts), d in 1:2, s in (-1, 1)
+        β, a = d == 1 ? (coef[k].βx, coef[k].ax) : (coef[k].βy, coef[k].ay)
+        ratio = -s * β / a
+        kcount(pl, P, d == 1 ? s : 0, d == 2 ? s : 0, G) < G && ratio < 0 &&
+            (nin += 1)
+        e = d == 1 ? (s, 0) : (0, s)
+        pstate(pl, P[1] + e[1], P[2] + e[2]) == EXC && push!(faces, ratio)
+    end
+    return sort!(faces), nin
+end
+
+spin_background() = SM.KerrSchild(1.0, opt(Float64, "a", 0.6))
+
+# The self-check of the general operator: at `a = 0` its `:axis`, `:extrap`
+# and `:centered` operators are X1's, to roundoff.
+if any(p -> runs("model2d", p), ("spineig", "spincontrols", "spinnoise", "spinfine"))
+    for (fam, lop, interior) in ((:axis, LOP, (:excise, 1.0)),
+                                 (:extrap, LOP, (:excise, 1.0)),
+                                 (:centered, nothing, LAYER))
+        pl = make_plane(4, 16, interior)
+        A0 = plane_operator(pl, plane_coefficients(pl); fam=fam, lop=lop)
+        A1 = spin_operator(pl, plane_coefficients_turn(pl, KS0), R_H; fam=fam,
+                           lop=lop)
+        err = norm(A0 - A1) / norm(A0)
+        err ≤ 1e-13 || error("spin_operator($fam) at a = 0 is off X1's " *
+                             "plane_operator by $err")
+    end
+end
+
+fmt_spin(s) = s.maxre ≤ 1e-9 ? fmt("%+.3f", s.maxre) :
+              fmt("**%+.2e**%s", s.maxre,
+                  s.near > 0.5 ? " (s)" : s.outer > 0.5 ? " (o)" : "")
+
+if runs("model2d", "spineig")
+    bg = spin_background()
+    rh = horizon_min_radius(bg)
+    fams = haskey(OPTS, "fam") ?
+           [f for f in SPIN_FAMS if replace(famname(f...), ", " => "", "-" => "") in
+                                    split(OPTS["fam"], ',')] : collect(SPIN_FAMS)
+    println("\n=== model2d, spineig: the dense spectrum on Kerr-Schild a = " *
+            "$(bg.spin)'s equatorial plane, [−5/2, 5/2]², by the sectors of the half " *
+            "turn (the quarter turn where the family allows it) ===")
+    println("each entry: the largest Re λ in 1/M (bold above 1e-9; '(s)' when " *
+            "its mode has more than half its norm within three cells of the " *
+            "surface, '(o)' near the outer face) / the RK4 cfl = dt λ_max/h. " *
+            "faces: the lego circle's immediate closure faces, their least b/a, " *
+            "and the fractions with b/a < 1 and b/a < 0; into: the closure axes " *
+            "(k_s < G) whose shift points into the excised set. lop: the advection " *
+            "lopsided from 1 cell below r₊ = $rh over 4")
+    for q in parse_list(Int, "q", (4, 2)), n in parse_list(Int, "n", (24, 32))
+        h = L_SQ / n
+        println("\n-- q = $q, n = $n (h = $(round(h; digits=4)) = 5/$(round(Int, 5/h))) --")
+        for ε in parse_list(Float64, "eps", (0.5, 1.0))
+            pl = make_plane(q, n, LAYER)
+            coef = plane_coefficients_turn(pl, bg)
+            sref = spin_spectrum(pl, spin_operator(pl, coef, rh; fam=:centered, ε=ε),
+                                 coef, LAYER[3]; order=4)
+            say("\nε_KO = %.2f; the :damped layer (r_0 = 3/4, r_1 = 3/2, 4/M): %s / %.2f",
+                ε, fmt_spin(sref), sref.cfl)
+            println("| r_E/M | r_E/h | faces | b/a min | inflow | b/a < 0 | into | " *
+                    join([famname(f...) for f in fams], " | ") * " |")
+            println("|---|---|---|---|---|---|---|" * repeat("---|", length(fams)))
+            for r_E in parse_list(Float64, "rE", SPIN_RE)
+                pl = make_plane(q, n, (:excise, r_E))
+                coef = plane_coefficients_turn(pl, bg)
+                fr, nin = spin_faces(pl, coef)
+                cells = String[]
+                for (fam, lop) in fams
+                    A = spin_operator(pl, coef, rh; fam=fam, ε=ε, lop=lop)
+                    s = spin_spectrum(pl, A, coef, r_E; order=turn_order(fam))
+                    push!(cells, fmt("%s / %.2f", fmt_spin(s), s.cfl))
+                end
+                say("| %.2f | %.1f | %d | %.2f | %.3f | %.3f | %d | %s |", r_E, r_E / h,
+                    length(fr), fr[1], count(<(1), fr) / length(fr),
+                    count(<(0), fr) / length(fr), nin, join(cells, " | "))
+            end
+        end
+    end
+end
+
+# --- model2d, spinfaces: the lego circle's faces at every resolution ---------
+#
+# What the spinning plane's tables are read against: at each `n` of the
+# spectra and the noise runs, the lego circle's faces, the least `b/a`, how
+# many have the shift pointing into the excised set (`b/a < 0`) and how many
+# have both characteristics entering from it (`b/a < −1`), and the closure
+# axes `:hybrid` extrapolates.
+
+if runs("model2d", "spinfaces")
+    bg = spin_background()
+    println("\n=== model2d, spinfaces: the lego circle's faces on Kerr-Schild a = " *
+            "$(bg.spin)'s plane, q = 4 (into: closure axes with b/a < 0) ===")
+    ns = parse_list(Int, "n", (24, 32, 48, 64, 128))
+    println("| r_E/M | " * join(["n = $n: faces, b/a min, < 0, < −1, into" for n in ns],
+                                 " | ") * " |")
+    println("|---|" * repeat("---|", length(ns)))
+    for r_E in parse_list(Float64, "rE", SPIN_RE)
+        cells = String[]
+        for n in ns
+            pl = make_plane(parse_list(Int, "q", (4,))[1], n, (:excise, r_E))
+            fr, nin = spin_faces(pl, plane_coefficients_turn(pl, bg))
+            push!(cells, fmt("%d, %.2f, %d, %d, %d", length(fr), fr[1], count(<(0), fr),
+                             count(<(-1), fr), nin))
+        end
+        say("| %.2f | %s |", r_E, join(cells, " | "))
+    end
+end
+
+# --- model2d, spincontrols: what the spinning plane is read against ----------
+#
+# X1's controls on the spinning plane: no dissipation, the other dissipation
+# closures, the extrapolation's degree, the bare frozen core.
+
+if runs("model2d", "spincontrols")
+    bg = spin_background()
+    rh = horizon_min_radius(bg)
+    println("\n=== model2d, spincontrols: the spinning plane's spectrum (largest Re λ " *
+            "in 1/M / RK4 cfl) for the variations the go/no-go is read against, " *
+            "Kerr-Schild a = $(bg.spin) ===")
+    rows = (("the :damped layer, ε = 0 (independent of r_E)", (; fam=:layer, ε=0.0)),
+            ("axis, ε = 0", (; fam=:axis, ε=0.0)),
+            ("extrap, ε = 0", (; fam=:extrap, ε=0.0)),
+            ("hybrid, ε = 0", (; fam=:hybrid, ε=0.0)),
+            ("hybrid-adv, ε = 0", (; fam=:hybridadv, ε=0.0)),
+            ("axis, reduced rank", (; fam=:axis, diss=:reduced)),
+            ("axis, one-sided", (; fam=:axis, diss=:onesided)),
+            ("hybrid, reduced rank", (; fam=:hybrid, diss=:reduced)),
+            ("hybrid-adv, one-sided", (; fam=:hybridadv, diss=:onesided)),
+            ("hybrid-adv, extrapolation degree 1", (; fam=:hybridadv, p=1)),
+            ("hybrid-adv, extrapolation degree ≤ q", (; fam=:hybridadv, p=8)),
+            ("hybrid-adv where b/a < 1/2", (; fam=:hybridadv, thresh=0.5)),
+            ("hybrid-adv at every closure axis", (; fam=:hybridadv, thresh=Inf)),
+            ("extrap, degree 1", (; fam=:extrap, p=1)),
+            ("Dirichlet core", (; fam=:dirichlet)),
+            ("Dirichlet core, ε = 0", (; fam=:dirichlet, ε=0.0)))
+    for q in parse_list(Int, "q", (4, 2)), n in parse_list(Int, "n", (24,))
+        h = L_SQ / n
+        println("\n-- q = $q, n = $n (h = 5/$(round(Int, 5/h))), ε_KO = 1/2 unless " *
+                "stated --")
+        rEs = parse_list(Float64, "rE", (0.75, 1.1))
+        println("| variation | " * join(["r_E = $r" for r in rEs], " | ") * " |")
+        println("|---|" * repeat("---|", length(rEs)))
+        for (label, kw) in rows
+            cells = String[]
+            for r_E in rEs
+                if kw.fam === :layer
+                    pl = make_plane(q, n, LAYER)
+                    coef = plane_coefficients_turn(pl, bg)
+                    A = spin_operator(pl, coef, rh; fam=:centered, ε=kw.ε)
+                    s = spin_spectrum(pl, A, coef, LAYER[3]; order=4)
+                else
+                    pl = make_plane(q, n, (:excise, r_E))
+                    coef = plane_coefficients_turn(pl, bg)
+                    A = spin_operator(pl, coef, rh; kw...)
+                    s = spin_spectrum(pl, A, coef, r_E; order=turn_order(kw.fam))
+                end
+                push!(cells, fmt("%s / %.2f", fmt_spin(s), s.cfl))
+            end
+            say("| %s | %s |", label, join(cells, " | "))
+        end
+    end
+end
+
+# --- model2d, spinnoise and spinfine: long evolutions on the spinning plane ----
+#
+# X1's noise runs, `plane_noise` unchanged, on the spinning plane: uniform
+# noise on every unknown, RK4 at `cfl = 1/2`, to `t_end` (`100 M`), each
+# configuration on a thread of its own. `spinnoise` at `n = 64` (`h = 5/128`),
+# `spinfine` at `n_fine = 128` (`5/256`).
+
+function spin_noise_table(bg, q, n, rEs, famlops; ε=0.5, t_end=100.0)
+    rh = horizon_min_radius(bg)
+    jobs = Any[(:layer, nothing, nothing)]
+    for r_E in rEs, (fam, lop) in famlops
+        push!(jobs, (r_E, fam, lop))
+    end
+    res = Vector{Any}(undef, length(jobs))
+    Threads.@threads :dynamic for k in eachindex(jobs)
+        r_E, fam, lop = jobs[k]
+        if r_E === :layer
+            pl = make_plane(q, n, LAYER)
+            coef = plane_coefficients_turn(pl, bg)
+            A = spin_operator(pl, coef, rh; fam=:centered, ε=ε)
+        else
+            pl = make_plane(q, n, (:excise, r_E))
+            coef = plane_coefficients_turn(pl, bg)
+            A = spin_operator(pl, coef, rh; fam=fam, ε=ε, lop=lop)
+        end
+        res[k] = plane_noise(pl, A, coef; t_end=t_end)
+    end
+    return jobs, res
+end
+
+for (part, nkey, ndefault) in (("spinnoise", "n", 64), ("spinfine", "n_fine", 128))
+    runs("model2d", part) || continue
+    local bg = spin_background()
+    local t_end = opt(Float64, "t_end", 100.0)
+    local n = opt(Int, nkey, ndefault)
+    local fams = haskey(OPTS, "fam") ?
+           [f for f in SPIN_FAMS if replace(famname(f...), ", " => "", "-" => "") in
+                                    split(OPTS["fam"], ',')] : collect(SPIN_FAMS)
+    println("\n=== model2d, $part: noise on Kerr-Schild a = $(bg.spin)'s plane, " *
+            "RK4 at cfl = 1/2; ‖u‖/‖u₀‖ at 10 M, half-way and the end, and the " *
+            "late rate (bold above 1e-4/M) ===")
+    for q in parse_list(Int, "q", (4, 2)), ε in parse_list(Float64, "eps", (0.5,))
+        rEs = parse_list(Float64, "rE", SPIN_RE)
+        jobs, res = spin_noise_table(bg, q, n, rEs, fams; ε=ε, t_end=t_end)
+        h = L_SQ / n
+        println("\n-- q = $q, n = $n (h = 5/$(round(Int, 5/h))), ε_KO = $ε, to " *
+                "$(t_end) M --")
+        say("the :damped layer: %s", fmt_noise(res[1], t_end))
+        println("| r_E/M | " * join([famname(f...) for f in fams], " | ") * " |")
+        println("|---|" * repeat("---|", length(fams)))
+        for (i, r_E) in enumerate(rEs)
+            cells = [fmt_noise(res[1 + length(fams) * (i - 1) + k], t_end)
+                     for k in 1:length(fams)]
             say("| %.2f | %s |", r_E, join(cells, " | "))
         end
     end
