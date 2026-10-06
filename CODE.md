@@ -2543,7 +2543,15 @@ it on the octant.**)** **(Amended in step X3:** measured on the octant on
 Symmetry's H200s — feasible for the static Kerr-Schild `a = 0` hole, as
 accurate outside the horizon as the `:damped` layer at `r_E = M/2`, and with
 no gauge drift to `50 M`; the recommendation is under "What step X3
-measured" at the end of this section.**)** Moving holes — points that leave
+measured" at the end of this section.**)** **(Amended in step X5:** the spinning
+hole's frame-dragged faces — closure axes whose shift points into the
+excised set — have a rule: the per-axis closures everywhere else, and on
+such an axis the advective derivative formed from the centered stencil
+with its excised taps extrapolated along the lattice direction nearest the
+surface's normal; on Kerr-Schild `a = 3/5`'s equatorial plane it is stable
+at every depth of the window, where the per-axis closures are not. The
+rule, the window and what X6 and X7 need are under "The frame-dragged faces
+(step X5)" at the end of this section.**)** Moving holes — points that leave
 the excised set on the trailing side and need values — are a later round.
 
 **The variant, `:excised`.** Points beyond the **excision surface** are
@@ -2739,7 +2747,11 @@ analysis (step X1)":
   lopsided or not. And Kerr-Schild's normal outflow ends at the inner
   horizon — `0.63 M` below the outer one at the equator at `a = 9/10`, not
   the ring — and the harmonic chart's at its disk, `0.3 M` and `0.1 M`
-  below at `a = 7/10` and `9/10`.
+  below at `a = 7/10` and `9/10`. **(Answered for Kerr-Schild `a = 3/5` in
+  step X5:** on the equatorial plane the per-axis closures fail where faces
+  reach `b/a ≈ −1.3` and below, near the inner horizon, and a rule that
+  extrapolates the advection on those axes holds every depth — "The
+  frame-dragged faces (step X5)", below.**)**
 
 **What X2a and X2b take from X1 (proposed in step X1).**
 1. **The closure family is the per-axis one, as built** (the starting
@@ -3048,6 +3060,146 @@ static hole (step X3)".
   where the layer is weakest (the `:fitted` target failed at `a = 9/10`), and
   spin is the one thing the proof of concept needs that excision cannot do
   yet. Moving holes after it.
+
+**The frame-dragged faces (step X5): a rule, the window, and go for
+Kerr-Schild `a = 3/5` (measured in step X5).** Host-side, no kernel change:
+`test/excision_model.jl`'s `margins=window` and `model2d=spin…` parts, and
+the extrapolation's weights in `src/stencils.jl` (`extrapolation_weights`,
+`extrapolation_table`). The tables are under [Measured
+results](#measured-results), "Excision: the frame-dragged faces (step X5)".
+
+- **What the spinning hole adds.** Frame dragging gives `β` an azimuthal
+  part, so along an axis nearly tangent to the lego surface the shift can
+  point *into* the excised set: `b/a = −s β^d/(α√γ^{dd}) < 0` at a closure
+  axis (`k_s < G` on the excised side `s`), the faces X2b refuses. On the
+  sphere at `a = 3/5` they are about `1450`, `2800` and `6800` closure axes
+  at `h = 1/24, 1/32, 1/48`, at every depth — 2 % of the closure axes near
+  the horizon, 12 % near the inner horizon — only along `x` and `y` (a
+  `z`-face's shift is radial), with the least `b/a` falling from `−0.25`
+  near the horizon to `−2.6 … −3.9` at `r_E = 0.65`; both characteristics
+  enter (`b/a < −1`) on 0.3–2 % of the faces below `r_E ≈ 0.9`.
+- **The per-axis closures fail there, near the inner horizon.** On the
+  equatorial plane, where frame dragging is in the plane, the per-axis
+  family has a surface mode growing at `+1.2` to `+4.8/M` at `r_E = 0.65`
+  (`b/a` down to `−2.2 … −2.6`) at `h = 5/48`, `5/64` and `5/96`, at `q = 4`
+  and 2 and `ε_KO = 1/2` and `1` (all but `q = 2`, `ε_KO = 1`, `5/64`), and at
+  `r_E = 0.75` on the coarser plane (`b/a = −1.31`, `+0.02` to `+1.75/M` at
+  three of the four `(q, ε_KO)`); noise blows up at `5 M` (`q = 4`) and
+  `26 M` (`q = 2`) at `r_E = 0.65`, `h = 5/128`, and at `5–6 M` (`q = 4`) at
+  `5/256`. Where `−1 < b/a < 0` the plane is stable — the frozen
+  line's weak growth there (`10⁻⁴` to `5·10⁻²/h` for `b/a` from `−0.02` to
+  `−0.5` at `q = 4`, `ε_KO = 1/2`) does not survive the
+  neighbouring faces — but whether a face with `b/a ≲ −1` breaks it depends
+  on the staircase (`r_E = 0.75` holds at `5/64` and `5/96` with the same
+  `−1.31` that breaks `5/48`): the per-axis family is not a rule for the
+  deep part of the window.
+- **The extrapolation everywhere is not either**: X1's `extrap` grows at
+  `+2.0` to `+3.2/M` on the surface at `r_E = 0.65`, `h = 5/48`, unless the
+  lopsided blend is on, and ten to twenty-five times the layer's rate
+  without dissipation, as at `a = 0`. And extrapolating the advection at *every*
+  closure axis — the faces where the shift points out included — is
+  unstable at every `r_E`, `+2.6` to `+18/M`: the extrapolation belongs only
+  where the axis cannot reach its upwind side.
+- **The hybrid holds every face.** Per-axis closures where the shift points
+  out of the excised set and, where it points in, the centered stencil with
+  its excised taps extrapolated along the lattice direction nearest the
+  normal — for every operator along that axis (`hybrid`) or for the
+  advection alone (`hybrid-adv`) — has its rightmost eigenvalue within
+  `0.002/M` of the `:damped` layer's on the same plane, or below it, at every
+  `r_E` from `0.65` to `1.7`,
+  at `q = 4` and 2, `ε_KO = 1/2` and `1`, `h = 5/48`, `5/64` and (`q = 4`,
+  `ε_KO = 1/2`) `5/96`, with and without the lopsided blend: `−0.075` to
+  `−0.19/M` against the layer's `−0.077` to `−0.11/M`, the box's own slowest
+  decay (equal to it at `r_E = 0.65`, below it where the hole is larger).
+  RK4's step is the layer's (`cfl = 1.86–1.89` at `q = 4`, `2.06–2.08`
+  at `q = 2`, `ε_KO = 1/2`). Noise falls at the layer's rate to `100 M`
+  (`−0.083` to `−0.099/M` against `−0.088`, `−0.091/M`) at `h = 5/128` and
+  `−0.073` to `−0.088/M` against `−0.074`, `−0.086/M` at `5/256`, where the
+  per-axis closures blow up at `r_E = 0.65` in `5–6 M` (`q = 4`). The two
+  hybrids agree to three digits everywhere, so
+  **extrapolating the advection alone is enough**. The rule is robust: a
+  threshold of `b/a < 1/2` instead of `0`, the extrapolation's degree (1,
+  2, `≤ q`) and the dissipation closure change nothing at `ε_KO = 1/2`.
+  Without dissipation it grows as the layer does (`+0.12` to `+0.23/M`
+  against `+0.11` to `+0.14`): **`ε_KO > 0` stays required.**
+- **In 3D the rule always finds its sources.** On the lego sphere and the
+  tracked offset surface at `h = 1/24, 1/32, 1/48` and every depth, every
+  excised tap of a frame-dragged axis's advective stencil has at least two
+  non-excised points beyond it along the nearest of the 26 lattice
+  directions inside the point's `G`-box — three for all but 8–124 of them
+  (at most 1.7 %, all at `r_E ≤ 0.8`) — the first at most two steps out and
+  the last at most `G = 3`.
+
+**The rule X6 builds (proposed in step X5): the frame-dragged faces' rule,
+in the advection only.** At a zone point and an axis `d`, if a side `s`
+with `k_s < G` has the shift pointing into the excised set, `−s β^d < 0`
+in the state the problem is built on — X2b's census condition, its refusal
+turned into a rule — then the provider's `adv` for that axis (the
+derivative beside `β^d` in `β^k ∂_k h` and `β^k ∂_k Π`, and nowhere else)
+returns the centered `D₁` with every excised tap `Q = x + j e_d` replaced by
+`Σ_i w_i u(Q + (k₀ + i − 1) e)`: `e` the lattice direction (of 26) nearest
+the excision surface's outward normal at `Q`, `k₀` the first step out of
+the excised set, at most three consecutive non-excised sources inside the
+point's `G`-box, `w = extrapolation_table(T, Val(q))[:, k₀, n]`. Every other
+stencil at the point — `d1` for the other terms, `d2`, `dmix`, `ko` — stays
+the per-axis closure. With the lopsided blend on, the lopsided row at such
+an axis is the open one with its excised taps filled the same way (what the
+plane measured; it is not needed). Kerr-Schild `a = 0` has no such axis, so
+its runs are X2b's bit for bit. The criterion is `b/a < 0` and not the
+`b/a ≲ −1` where the plane fails: it is the frozen line's, it is the
+census X2b already computes, and the plane is as stable with it as with
+`b/a < 1/2`.
+
+**What X6 needs from the classes** (proposed in step X5):
+- **A rule bit per zone point and axis** (three bits), set at build from
+  the state's shift where X2b's census now counts `excision_into`. The class
+  is a `UInt8` with three values, so the bits fit beside it; or a second
+  `UInt8` array of the same layout.
+- **The extrapolation's direction per excised point** within `q/2` of a
+  zone point along an axis: a code `0…25` for the nearest lattice direction
+  to the surface's normal there — `x − c` for the sphere, `excision_normal`
+  for the tracked shape — built in the classes' pass from the frozen
+  geometry, so that the zone kernel reads a code and not the geometry (the
+  direction is not "is it excised"; the classes stay the only answer to
+  that). The sources' classes are read from the class array, as the codes
+  `k±` are.
+- **The weights**: `extrapolation_table(T, Val(q); degree = 2)`, an `isbits`
+  `3 × G × 3` array (216 bytes at `q = 4`, `Float64`), rounded once; small
+  enough for a kernel argument beside `closure_arrays`. It holds the
+  sources up to `G` steps out, `k₀ + n − 1 ≤ G`, which is as far as any
+  frame-dragged tap's sources go on the sphere and the tracked surface.
+- **The refusals and the record**: an excised tap with no source in the
+  `G`-box is refused at build by name (none occurs on the sphere or the
+  tracked surface at `a = 3/5`); `excision_into` keeps counting, every
+  chunk, the axes whose shift points in, and a second count — those whose
+  sign disagrees with the rule bit — must stay zero. The faces per rule go
+  into the outflow rows.
+
+**The window and the resolutions for X7 (proposed in step X5).** The sphere
+geometry, as X3 ran:
+- **Normal outflow** holds on the sphere from `r_E = 0.641` (`+0.052` at
+  `0.65`, the inner horizon being `0.632` on the equator) to the horizon,
+  largest at `r_E ≈ 0.9–1.0` (`+0.43`); the tracked offset surface has it
+  from `m = 1` (X1) down to the inner horizon.
+- **The core rule's sphere must lie between the ring and the surface**,
+  `0.6 < r_0 < r_E`: `check_interior_radii` refuses `r_0 ≤ 0.6` by name, so
+  `test/octant_runs.jl`'s default `r_0 = r_E/2` is refused below
+  `r_E = 1.2` and X7 passes `r_0=` itself — midway, `(0.6 + r_E)/2`.
+- **At least 16 cells at the poles at `h = 1/24`** (Erik's floor) is
+  `r_E ≤ 1.133`. X3's lesson is that the depth in `M`, not in cells, sets
+  the leakage, so the deepest healthy surface is the target: **the depth
+  scan at `h = 1/24` over `r_E = 0.70, 0.80, 0.90, 1.00, 1.133`** — 26.4,
+  24, 21.6, 19.2 and 16 cells at the poles, 28.7 … 18.3 on the equator —
+  without the blend; **production at `r_E = 0.80`, `r_0 = 0.70`** until the
+  scan says otherwise: normal margin `+0.38`, `1.0 M` below the poles'
+  horizon (24, 32 and 48 cells at `h = 1/24, 1/32, 1/48`), `1.1 M` below the
+  equator's, the frame-dragged faces at `b/a ≥ −1.4`, and `4.8` cells of
+  `1/24` between the ring and the surface.
+- **The lopsided blend is not needed**: no family's stability depends on it
+  except X1's `extrap`, which the rule does not use; it costs RK4's step on
+  the plane (`1.88 → 1.53–1.58` at `q = 4`) and the H200 10–20 % (X3). Off,
+  as X3 recommended.
+- **`ε_KO = 1/2`**, as X3 ran: `1` is as stable and shortens the step.
 
 ## Initial data and backgrounds
 
@@ -8163,6 +8315,200 @@ few per cent.
 is not in it, prints the drift of `h_tt` and the outflow rows): **6579
 assertions in 17m07** at one thread (load 4–5.5) and **6587 in 12m41** at
 four (load 2.4–4), X2b's counts, run after every row above had finished.
+
+### Excision: the frame-dragged faces (step X5)
+
+Host-side, no kernel change: `test/excision_model.jl`'s `margins=window` and
+the `model2d=spin…` parts, and the extrapolation's weights in
+`src/stencils.jl` (under [Excision](#excision-added-2026-10-05), "The
+frame-dragged faces (step X5)"). Every model is X1's — the same sparse
+assembly from the package's closure and extrapolation weights and the
+metric's coefficients as the kernel reads them — on Kerr-Schild `a = 3/5`:
+`r₊ = 1.8` at the poles, `1.897` on the equator, the ring at `ρ = 0.6`, the
+inner horizon at `0.632` on the equator. Its self-checks throw: the turned
+coefficients against the metric, the operator against the turns it commutes
+with, and the general operator against X1's at `a = 0` (to `10⁻¹³`). The
+local parts ran on the development machine (Apple silicon, 12 threads) at a
+load of 10–30, beside step X4's suites; the spectra at `5/64`, `5/96`, the
+controls and the noise on Symmetry's EPYC nodes (`amdq`), one process per
+`(q, ε_KO, r_E)` or family.
+
+**The window** (`margins=window`, 20 s). The sphere `r < r_E` at the
+spinning round's spacings; *normal* the least `b_n/a_n − 1` along its
+radial normal; the depth below the horizon in cells; *ring room* the cells
+between the ring and the surface, where the core rule's sphere must go; the
+*frame-dragged* closure axes (`k_s < G`, `q = 4`, the shift pointing into
+the excised set: X2b's refusal, X5's rule) and their fraction of the closure
+axes; their least `b/a`; the fraction of X1's faces with both
+characteristics entering (`b/a < −1`):
+
+| `r_E` | normal | poles: cells at `1/24, 1/32, 1/48` | equator | ring room at `1/24` | frame-dragged axes at `1/24, 1/32, 1/48` (fraction) | least `b/a` | `b/a < −1` at `1/48` |
+|---|---|---|---|---|---|---|---|
+| 0.65 | `+0.052` | 27.6, 36.8, 55.2 | 29.9, 39.9, 59.9 | 1.2 | 1472, 2844, 6824 (0.107–0.124) | `−2.57, −2.92, −3.94` | 0.021 |
+| 0.70 | `+0.224` | 26.4, 35.2, 52.8 | 28.7, 38.3, 57.5 | 2.4 | 1504, 2888, 6812 (0.094–0.107) | `−1.50, −2.02, −2.13` | 0.012 |
+| 0.75 | `+0.322` | 25.2, 33.6, 50.4 | 27.5, 36.7, 55.1 | 3.6 | 1452, 2752, 6712 (0.080–0.092) | `−1.21, −1.32, −1.43` | 0.006 |
+| 0.80 | `+0.381` | 24.0, 32.0, 48.0 | 26.3, 35.1, 52.7 | 4.8 | 1488, 2836, 6828 (0.072–0.082) | `−1.38, −1.17, −1.39` | 0.004 |
+| 0.90 | `+0.429` | 21.6, 28.8, 43.2 | 23.9, 31.9, 47.9 | 7.2 | 1564, 2840, 6888 (0.059–0.065) | `−0.96, −0.82, −1.09` | 0.001 |
+| 1.00 | `+0.422` | 19.2, 25.6, 38.4 | 21.5, 28.7, 43.1 | 9.6 | 1424, 2828, 6752 (0.044–0.052) | `−0.57, −0.65, −0.73` | 0 |
+| 1.133 | `+0.368` | 16.0, 21.3, 32.0 | 18.3, 24.5, 36.7 | 12.8 | 1452, 2956, 6800 (0.035–0.041) | `−0.58, −0.61, −0.61` | 0 |
+| 1.30 | `+0.268` | 12.0, 16.0, 24.0 | 14.3, 19.1, 28.7 | 16.8 | 1488, 2840, 6972 (0.027–0.032) | `−0.44, −0.48, −0.49` | 0 |
+| 1.50 | `+0.149` | 7.2, 9.6, 14.4 | 9.5, 12.7, 19.1 | 21.6 | 1408, 2748, 6592 (0.019–0.023) | `−0.29, −0.30, −0.31` | 0 |
+| 1.70 | `+0.046` | 2.4, 3.2, 4.8 | 4.7, 6.3, 9.5 | 26.4 | 1464, 2792, 6908 (0.016–0.018) | `−0.28, −0.26, −0.28` | 0 |
+
+- **Normal outflow** holds on the sphere from `r_E = 0.641` (`−0.0007` at
+  `0.64`, `−0.051` at `0.632`) up to the horizon, largest near `r_E = 0.9`;
+  on the tracked offset surface at every `m` scanned, from `4` down to the
+  inner horizon (`+0.04` to `+0.46`; the deepest rows, `m = 28, 40, 56` at
+  `h = 1/24, 1/32, 1/48` with the equator at `0.731, 0.647, 0.731`, have
+  `+0.32, +0.05, +0.32`).
+- **The frame-dragged axes are a fixed number at each `h`, not a fraction**:
+  about `1450`, `2800` and `6800` at every depth on both geometries, so
+  their share of the closure axes grows inward, from 2 % near the horizon to
+  12 % at `r_E = 0.65`. They are along `x` and `y` only — equal numbers of
+  each and none along `z`, whose faces see the radial part of `β` (counted
+  at four `(h, r_E)`). The tracked offset surface has the same counts, and
+  least ratios close to those of the sphere through its equator (`m = 24`
+  at `1/24`, the equator at `0.897`: `−0.94` against the sphere's `−0.96`
+  at `0.9`).
+- **X5's rule always finds its sources in 3D**: every excised tap of a
+  frame-dragged axis's advective stencil (`1612–1732`, `2928–3228` and
+  `6708–7360` taps) has three non-excised points beyond it along the nearest
+  of the 26 lattice directions inside the point's `G`-box, except 8–124 that
+  have two (all at `r_E ≤ 0.8`, at most 1.7 %); none has fewer, the first
+  is at most two steps out and the last at most three (`k₀ + n − 1 ≤ G`, what
+  `extrapolation_table` holds).
+
+**The plane's faces** (`model2d=spinfaces`, 10 s): the lego circle on the
+equatorial plane — faces, their least `b/a`, how many have `b/a < 0` and
+`b/a < −1`, and the closure axes the rule extrapolates:
+
+| `r_E` | `n = 24` (`h = 5/48`) | 32 (`5/64`) | 48 (`5/96`) | 64 (`5/128`) | 128 (`5/256`) |
+|---|---|---|---|---|---|
+| 0.65 | 52, `−2.57`, 12, 8, 24 | 68, `−2.19`, 16, 8, 36 | 100, `−2.57`, 28, 12, 64 | 132, `−2.78`, 36, 16, 92 | 268, `−3.76`, 76, 36, 208 |
+| 0.75 | 60, `−1.31`, 8, 4, 20 | 76, `−0.92`, 12, 0, 24 | 116, `−1.31`, 20, 4, 48 | 156, `−1.69`, 32, 8, 76 | 308, `−1.69`, 60, 12, 160 |
+| 0.90 | 68, `−0.34`, 4, 0, 8 | 92, `−0.55`, 8, 0, 20 | 140, `−0.76`, 16, 0, 40 | 188, `−1.04`, 24, 4, 60 | 372, `−1.09`, 48, 4, 132 |
+| 1.10 | 84, `−0.22`, 4, 0, 8 | 116, `−0.54`, 8, 0, 20 | 172, `−0.54`, 12, 0, 32 | 228, `−0.60`, 20, 0, 52 | 452, `−0.60`, 36, 0, 100 |
+| 1.30 | 100, `−0.16`, 4, 0, 8 | 132, `−0.18`, 4, 0, 12 | 196, `−0.21`, 8, 0, 20 | 268, `−0.35`, 16, 0, 40 | 532, `−0.37`, 28, 0, 80 |
+| 1.50 | 116, `−0.12`, 4, 0, 8 | 156, `−0.24`, 8, 0, 16 | 228, `−0.15`, 8, 0, 16 | 308, `−0.24`, 12, 0, 32 | 612, `−0.24`, 24, 0, 64 |
+| 1.70 | 132, `−0.09`, 4, 0, 8 | 172, `−0.07`, 4, 0, 8 | 260, `−0.12`, 8, 0, 16 | 348, `−0.17`, 12, 0, 28 | 700, `−0.28`, 24, 0, 64 |
+
+The plane's frame-dragged faces are 3–30 % of its faces, more than the
+sphere's (the equator is where frame dragging lies along the surface), and
+reach the sphere's least ratios from `n = 64` on.
+
+**The go/no-go: the spinning plane's spectrum** (`model2d=spineig`). X1's
+model with the coefficients of `a = 3/5`, whose operator commutes with the
+half turn `P → −P` only — the spin breaks the mirrors, and the nested
+mixed derivative the quarter turn — so its spectrum is computed in two
+sectors (the quarter turn's four where a family allows it). Entries: the
+rightmost `Re λ` in `1/M` over the seven `r_E = 0.65, 0.75, 0.90, 1.10,
+1.30, 1.50, 1.70` (bold above `10⁻⁹`, with the unstable `r_E`; every bold
+mode has more than half its norm within three cells of the surface) / the
+least RK4 `cfl = dt λ_max/h` over them; *lop* the advection lopsided from
+one cell below `r₊ = 1.8` over four:
+
+| `q`, `ε_KO`, `h` | `:damped` layer | axis | axis, lop | extrap | extrap, lop | hybrid | hybrid, lop | hybrid-adv | hybrid-adv, lop |
+|---|---|---|---|---|---|---|---|---|---|
+| 4, 1/2, 5/48 | `−0.079` / 1.89 | **`+4.81`** (0.65, 0.75) / 1.88 | **`+4.98`** (0.65, 0.75) / 1.56 | **`+2.87`** (0.65) / 1.89 | `−0.087` / 1.58 | `−0.078` / 1.88 | `−0.087` / 1.58 | `−0.078` / 1.88 | `−0.087` / 1.57 |
+| 4, 1/2, 5/64 | `−0.082` / 1.88 | **`+3.28`** (0.65) / 1.87 | **`+3.48`** (0.65) / 1.52 | `−0.082` / 1.87 | `−0.086` / 1.52 | `−0.082` / 1.87 | `−0.086` / 1.53 | `−0.082` / 1.87 | `−0.086` / 1.53 |
+| 4, 1/2, 5/96 | `−0.084` / 1.86 | **`+3.64`** (0.65) / 1.86 | | | | `−0.083` / 1.86 | | `−0.083` / 1.86 | |
+| 4, 1, 5/48 | `−0.103` / 1.54 | **`+4.31`** (0.65, 0.75) / 1.54 | **`+4.50`** (0.65, 0.75) / 1.22 | **`+3.20`** (0.65) / 1.54 | `−0.108` / 1.22 | `−0.103` / 1.54 | `−0.108` / 1.22 | `−0.103` / 1.54 | `−0.108` / 1.22 |
+| 4, 1, 5/64 | `−0.106` / 1.52 | **`+2.45`** (0.65) / 1.52 | **`+2.75`** (0.65) / 1.18 | `−0.106` / 1.52 | `−0.108` / 1.16 | `−0.106` / 1.52 | `−0.108` / 1.18 | `−0.106` / 1.52 | `−0.108` / 1.19 |
+| 2, 1/2, 5/48 | `−0.077` / 2.08 | **`+2.69`** (0.65, 0.75) / 2.08 | **`+2.17`** (0.65) / 1.21 | **`+2.26`** (0.65) / 2.08 | `−0.099` / 1.21 | `−0.075` / 2.08 | `−0.099` / 1.21 | `−0.075` / 2.08 | `−0.099` / 1.21 |
+| 2, 1/2, 5/64 | `−0.081` / 2.06 | **`+1.20`** (0.65) / 2.06 | **`+0.26`** (0.65) / 1.17 | `−0.081` / 2.06 | `−0.096` / 1.16 | `−0.081` / 2.06 | `−0.096` / 1.17 | `−0.081` / 2.06 | `−0.096` / 1.17 |
+| 2, 1, 5/48 | `−0.108` / 1.68 | **`+1.87`** (0.65) / 1.68 | **`+1.63`** (0.65) / 0.95 | **`+1.97`** (0.65) / 1.68 | `−0.128` / 0.94 | `−0.107` / 1.68 | `−0.128` / 0.95 | `−0.107` / 1.68 | `−0.128` / 0.95 |
+| 2, 1, 5/64 | `−0.112` / 1.66 | `−0.114` / 1.66 | `−0.091` / 0.92 | `−0.114` / 1.66 | `−0.126` / 0.91 | `−0.114` / 1.66 | `−0.126` / 0.92 | `−0.114` / 1.66 | `−0.126` / 0.92 |
+
+- **The per-axis closures fail at `r_E = 0.65` at every resolution (but for
+  `q = 2`, `ε_KO = 1` at `5/64`), and at `0.75` on the coarsest plane**,
+  with a surface mode of `+0.02` to `+5/M`; the lopsided blend does not
+  save them (it falls back to
+  the closure where the upwind side is excised). Elsewhere — every `r_E ≥
+  0.9`, and `0.75` at `5/64` and `5/96` — they are stable, though every row
+  has frame-dragged faces: on the plane the failure needs faces well below
+  `b/a = −1` (`−1.31` breaks `5/48` and not `5/96`; `−2.2` to `−2.6` breaks
+  every resolution), where the frozen line found every `b/a < 0` unstable
+  (`+1.1·10⁻⁴/h` at `−0.02` to `+5.0·10⁻²/h` at `−0.5`, `q = 4`, `ε_KO =
+  1/2`, `model1d=frozen ratios=…`).
+- **X1's extrapolation fails at `r_E = 0.65` on the coarsest plane** at every
+  `(q, ε_KO)` (`+2.0` to `+3.2/M`) and is stable everywhere else and with
+  the blend.
+- **At X7's proposed depth, `r_E = 0.80`** (`spineig rE=0.8`, the same
+  configurations, 6 min on one node), every family is stable at `5/48` and
+  `5/64` and the three computed at `5/96`, with faces down to `b/a = −0.46`,
+  `−0.96` and `−1.06`; the hybrids are within `0.002/M` of the layer. So
+  the per-axis closures happen to hold there on the plane — but the 3D
+  sphere at `0.80` has faces at `−1.17` to `−1.39`, where the plane has
+  already broken them once (`−1.31` at `5/48`), and the rule costs nothing
+  where it is not needed.
+- **Both hybrids are stable in every configuration**, their rightmost
+  eigenvalue within `0.002/M` of the layer's at `r_E = 0.65` and below it
+  where the hole is larger, and RK4's step the layer's to `0.01`. They agree
+  with each other to the three digits printed in every cell of the
+  per-`r_E` tables — extrapolating the advection alone is the whole fix.
+  The blend costs the step (`1.88 → 1.53–1.58` at `q = 4`, `ε_KO = 1/2`,
+  at the worst `r_E`) and buys nothing here.
+
+*The controls* (`model2d=spincontrols`), the rightmost `Re λ` at `r_E =
+0.75` and `1.10`, `ε_KO = 1/2` unless stated:
+
+| variation | `q = 4`, `5/48` | `q = 4`, `5/64` | `q = 2`, `5/48` | `q = 2`, `5/64` |
+|---|---|---|---|---|
+| the `:damped` layer, `ε_KO = 0` | **`+0.13`** | **`+0.14`** | **`+0.11`** | **`+0.12`** |
+| axis, `ε_KO = 0` | **`+2.88` (s)**, **`+0.12`** | **`+0.60` (s)**, **`+0.36` (s)** | **`+1.45` (s)**, **`+0.13`** | **`+0.60` (s)**, **`+0.13`** |
+| extrap, `ε_KO = 0` | **`+3.10` (s)**, **`+2.21` (s)** | **`+3.22` (s)**, **`+2.18` (s)** | **`+1.49` (s)**, **`+1.12` (s)** | **`+1.61` (s)**, **`+1.25` (s)** |
+| hybrid, `ε_KO = 0` | **`+0.22` (s)**, **`+0.12`** | **`+0.20`**, **`+0.13`** | **`+0.22`**, **`+0.13`** | **`+0.22`**, **`+0.14`** |
+| hybrid-adv, `ε_KO = 0` | **`+0.23` (s)**, **`+0.12`** | **`+0.20`**, **`+0.13`** | **`+0.22`**, **`+0.13`** | **`+0.22`**, **`+0.13`** |
+| axis, reduced rank; one-sided | `−0.023`, `−0.080`; `−0.078`, `−0.081` | `−0.082` | `−0.075`, `−0.080` | `−0.081` |
+| hybrid, reduced rank; hybrid-adv, one-sided | `−0.078`, `−0.081` | `−0.082` | `−0.075`, `−0.081` | `−0.081` |
+| hybrid-adv, extrapolation of degree 1; `≤ q` | `−0.078`, `−0.081` | `−0.082` | `−0.075`, `−0.082` | `−0.081`, `−0.082` |
+| hybrid-adv where `b/a < 1/2` | `−0.078`, `−0.081` | `−0.082` | `−0.075`, `−0.082` | `−0.081`, `−0.082` |
+| hybrid-adv **at every closure axis** | **`+7.07` (s)**, **`+13.6` (s)** | **`+13.5` (s)**, **`+18.2` (s)** | **`+2.64` (s)**, **`+5.02` (s)** | **`+6.43` (s)**, **`+6.55` (s)** |
+| extrap, degree 1 | `−0.078`, `−0.079` | `−0.082` | `−0.075`, `−0.079` | `−0.081` |
+| bare frozen core (Dirichlet) | `−0.078`, `−0.077` | `−0.082` | `−0.075`, `−0.067` | `−0.081`, `−0.055` |
+| bare frozen core, `ε_KO = 0` | **`+0.34`**, **`+0.23`** | **`+0.34`**, **`+0.24`** | **`+0.29`**, **`+0.20`** | **`+0.37`**, **`+0.22`** |
+
+Without dissipation the hybrids grow as the layer does (the interior's own
+grid-scale growth, `notes/sonic-surface.md`), the per-axis closures up to
+twenty times faster at `r_E = 0.75` and the extrapolation ten to twenty-five
+times: `ε_KO > 0` stays required. The rule's details — its threshold (`0` or
+`1/2`), the extrapolation's degree, the dissipation's closure — change
+nothing at `ε_KO = 1/2`; extrapolating the advection where the shift
+points *out* of the excised set too is violently unstable on every plane.
+The bare frozen core is stable here at `ε_KO = 1/2`, but it over-specifies
+an outflow surface (X1's reflection), and it is not a candidate.
+
+*Noise* (`model2d=spinnoise`, `129²`, `h = 5/128`; `model2d=spinfine`,
+`257²`, `h = 5/256`): uniform noise on every unknown, RK4 at `cfl = 1/2`,
+`ε_KO = 1/2`, to `100 M`; the late rate (`60–100 M`) as a range over `r_E =
+0.65 … 1.7`:
+
+| `q`, grid | `:damped` layer | axis | axis, lop | extrap | extrap, lop | hybrid | hybrid, lop | hybrid-adv | hybrid-adv, lop |
+|---|---|---|---|---|---|---|---|---|---|
+| 4, `129²` | `−0.088` | **blows up at `5 M`** (0.65); `−0.083 … −0.090` | **blows up at `5 M`** (0.65); `−0.083 … −0.089` | `−0.083 … −0.090` | `−0.083 … −0.089` | `−0.084 … −0.090` | `−0.084 … −0.089` | `−0.083 … −0.090` | `−0.084 … −0.089` |
+| 2, `129²` | `−0.091` | **blows up at `26 M`** (0.65); `−0.089 … −0.099` | `−0.090 … −0.094` | `−0.090 … −0.099` | `−0.090 … −0.094` | `−0.089 … −0.099` | `−0.090 … −0.094` | `−0.089 … −0.099` | `−0.090 … −0.094` |
+| 4, `257²` | `−0.074` | **blows up at `5 M`** (0.65); `−0.074 … −0.075` | **blows up at `6 M`** (0.65); `−0.073 … −0.075` | `−0.074 … −0.075` | `−0.073 … −0.075` | `−0.074 … −0.075` | `−0.073 … −0.075` | `−0.074 … −0.075` | `−0.073 … −0.075` |
+| 2, `257²` | `−0.086` | `−0.084 … −0.088` | `−0.083 … −0.088` | `−0.084 … −0.088` | `−0.083 … −0.087` | `−0.084 … −0.088` | `−0.083 … −0.087` | `−0.084 … −0.088` | `−0.083 … −0.087` |
+
+Every hybrid run falls to `10⁻⁴`–`10⁻⁵` of its start by `100 M` (`6·10⁻⁴`
+at `257²`, `q = 4`) at the layer's rate, which is itself slower on the finer
+plane (`−0.074/M`); the per-axis run at `r_E = 0.75`, `q = 4`, `129²` first
+grows to twice its start by `10 M` (the faces at `b/a = −1.69`) and then
+decays, and at `q = 2` the per-axis closures survive `r_E = 0.65` at `257²`
+after blowing up at `129²` — the staircase again.
+
+**What it cost.** `margins=window` 20 s and `spinfaces` 10 s locally;
+`spineig` at `n = 24` 22 min locally at four threads (the four `(q,
+ε_KO)` one after the other); on Symmetry, `n = 32` 8 min for its 28
+processes at two threads, `n = 48` (three families, `q = 4`, `ε_KO = 1/2`)
+14 min for 21 processes at three, the controls 10 min for 8 processes at
+four, `spinnoise` 5 min and `spinfine` 23 min at 64 threads, `r_E = 0.80`
+6 min. **The suite**: before the step **6579 assertions in 24m30** at one
+thread (load 8–30; X3 recorded the same sources at four threads, 6587 in
+12m41, and that run was not repeated); after it **6804 in 24m14** at one
+thread and **6812 in 18m31** at four, the two at once beside step X4's
+suites (load 8–32). The 225 new claims are `stencils_tests.jl`'s
+extrapolation, `1.3 s` of it.
 
 ## Possible extensions
 

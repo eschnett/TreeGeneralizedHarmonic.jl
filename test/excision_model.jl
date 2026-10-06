@@ -48,11 +48,11 @@
 #     julia --project=. --threads=2 test/excision_model.jl model2d=spineig n=32 q=… eps=… rE=…
 #                                                       # Symmetry, 28 processes: 8 min
 #     julia --project=. --threads=3 test/excision_model.jl model2d=spineig n=48 q=4 eps=1/2 rE=… fam=…
-#                                                       # Symmetry, 21 processes: SPINEIG48
+#                                                       # Symmetry, 21 processes: 14 min
 #     julia --project=. --threads=4 test/excision_model.jl model2d=spincontrols q=… n=… rE=…
-#                                                       # Symmetry, 8 processes: 5 min
+#                                                       # Symmetry, 8 processes: 10 min
 #     julia --project=. --threads=64 test/excision_model.jl model2d=spinnoise    # Symmetry: 5 min
-#     julia --project=. --threads=64 test/excision_model.jl model2d=spinfine     # Symmetry: SPINFINE
+#     julia --project=. --threads=64 test/excision_model.jl model2d=spinfine     # Symmetry: 23 min
 #
 #   * `margins` — `margins`: the outflow condition on the seed's offset
 #     surfaces of Kerr-Schild `a = 0, 3/5, 9/10` and harmonic Kerr `a = 7/10,
@@ -422,8 +422,9 @@ end
 # (`k_s < j ≤ q/2`) is filled along the lattice direction (of 26) nearest the
 # normal at `Q`, from the first consecutive non-excised points `Q + k e`
 # inside the point's `G`-box, at most three; `fills[n + 1]` counts the taps
-# with `n` sources and `k0max` is the farthest first source. Returns the two
-# sorted lists of ratios and the fill census.
+# with `n` sources, `k0max` is the farthest first source and `kmax` the
+# farthest source (`extrapolation_table` holds `k₀ + n − 1 ≤ G`). Returns the
+# two sorted lists of ratios and the fill census.
 function lego_census(bg, h, excised, rlo, rhi; q=4, normal=nothing)
     G = q ÷ 2 + 1
     w = (G + 1) * h
@@ -432,6 +433,7 @@ function lego_census(bg, h, excised, rlo, rhi; q=4, normal=nothing)
     axes = Float64[]
     fills = zeros(Int, 4)
     k0max = 0
+    kmax = 0
     for i in (-K):K, j in (-K):K
         (i^2 + j^2) * h^2 > (rhi + w)^2 && continue
         for k in (-K):K
@@ -472,11 +474,12 @@ function lego_census(bg, h, excised, rlo, rhi; q=4, normal=nothing)
                     end
                     fills[n + 1] += 1
                     k0max = max(k0max, k0)
+                    n > 0 && (kmax = max(kmax, k0 + n - 1))
                 end
             end
         end
     end
-    return sort!(faces), sort!(axes), (fills=fills, k0max=k0max)
+    return sort!(faces), sort!(axes), (fills=fills, k0max=k0max, kmax=kmax)
 end
 
 # The least normal margin `b_n/a_n − 1` of a surface `r = R(n̂)` along its own
@@ -499,11 +502,11 @@ frac(v, p) = isempty(v) ? 0.0 : count(p, v) / length(v)
 
 function census_cells(faces, axes, fl)
     return fmt("%d | %.3f | %.3f | %.3f | %.3f | %.3f | %d | %d | %.3f | %.3f | " *
-               "%d | %d, %d, %d, %d | %d",
+               "%d | %d, %d, %d, %d | %d, %d",
                length(faces), faces[1], quantile_sorted(faces, 0.01),
                frac(faces, <(1)), frac(faces, <(0)), frac(faces, <(-1)),
                length(axes), count(<(0), axes), frac(axes, <(0)), axes[1],
-               sum(fl.fills), reverse(fl.fills)..., fl.k0max)
+               sum(fl.fills), reverse(fl.fills)..., fl.k0max, fl.kmax)
 end
 
 if runs("margins", "window")
@@ -530,9 +533,10 @@ if runs("margins", "window")
             "taps: the excised taps of those axes' advective stencils (k_s < j ≤ " *
             "q/2) that X5's rule fills along the lattice direction (of 26) " *
             "nearest the normal, by the number of sources it finds in the G-box " *
-            "(0 would be a refusal), and the farthest first source k₀")
+            "(0 would be a refusal), the farthest first source k₀ and the " *
+            "farthest source k₀ + n − 1")
     hdr = "| faces | b/a min | 1 % | inflow | b/a < 0 | b/a < −1 | closure axes " *
-          "| b/a < 0 | fraction | least | filled taps | 3, 2, 1, 0 sources | k₀ max |"
+          "| b/a < 0 | fraction | least | filled taps | 3, 2, 1, 0 sources | k₀, k₀ + n − 1 max |"
     for h in hs
         println("\n-- the sphere r < r_E, h = 1/$(round(Int, 1/h)) --")
         println("| r_E | normal | poles | equator | r_0 room " * hdr)
