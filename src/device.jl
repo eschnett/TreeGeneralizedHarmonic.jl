@@ -79,7 +79,7 @@ function hostcopy(fs::FieldSet{T}) where {T}
     # which is what turns the first of those mistakes into an error message
     # instead of a wrong answer.
     host = FieldSet{T}(fs.forest, fs.nvars; G=fs.G, centering=fs.centering,
-                       parity=fs.parity)
+                       parity=fs.parity, rotation=fs.rotation)
     return hostcopy!(host, fs)
 end
 

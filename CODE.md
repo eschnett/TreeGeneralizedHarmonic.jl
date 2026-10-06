@@ -73,6 +73,7 @@ research project; the inherited documents live in `notes/`.
   - [Periodic](#periodic)
   - [Outer boundary: Dirichlet from the background, at the current time](#outer-boundary-dirichlet-from-the-background-at-the-current-time)
   - [Reflecting faces: symmetry planes (added 2026-10-02)](#reflecting-faces-symmetry-planes-added-2026-10-02)
+  - [The rotating octant: a quarter turn about `z` (added 2026-10-04)](#the-rotating-octant-a-quarter-turn-about-z-added-2026-10-04)
   - [The interior: a pointwise damping layer](#the-interior-a-pointwise-damping-layer)
     - [The design, as steps 8a–8f leave it (rewritten in step 8f)](#the-design-as-steps-8a8f-leave-it-rewritten-in-step-8f)
     - [Step 5's layer: the analytic control](#step-5s-layer-the-analytic-control)
@@ -1274,6 +1275,57 @@ printed digit at every row; the octant costs `75 s` against `491 s`. The
 frozen core, the layer, the sampled gauge source and the `γ0` profile need
 nothing of their own at the walls. The suite's version is the `q = 2`
 fixture to `1/5 M` (`3.6·10⁻¹⁴`).
+
+### The rotating octant: a quarter turn about `z` (added 2026-10-04)
+
+A spinning hole has no mirror in `x` or `y`, so the octant above refuses it.
+It does have every rotation about its axis, and TreeAMR 0.1.7's M12 makes
+one of them a seam: `rotating = (d1, d2)` evolves only the quadrant of the
+`(d1, d2)` plane, glues the low face of `d1` to the low face of `d2`, and
+fills the ghosts across it from the data a quarter turn away, `u(Rp) = Q
+u(p)`, with `R` taking `e_{d1}` to `e_{d2}` and `e_{d2}` to `−e_{d1}`.
+Together with the mirror at `z = 0` (equatorial symmetry, which a spin
+along `z` keeps) it is an octant again, a quarter of the bitant proposed
+under "Robust stability on the octant". A case's `rotating` is that pair,
+`(0, 0)` for none so that the case stays `isbits`; it is refused on a
+periodic or reflecting dimension and between unequal widths, and `GHProblem`
+refuses a forest whose seam is not the case's. `hole_case(; octant =
+:rotating)` builds the seam `(1, 2)` with the mirror at `z = 0`, and needs
+the axisymmetric hole — at the origin, at rest, any spin along `z` — and
+refuses any other; `octant = true` is `:reflecting` and still refuses a
+spin, naming `:rotating`.
+
+**The map is the tensor's.** A quarter turn sends every Cartesian
+component to plus or minus one other: with `(d1, d2) = (1, 2)`, index `x`
+of the turned tensor is `−y` of the original and `y` is `+x`, so `h_tx →
+−h_ty`, `h_ty → h_tx`, `h_xx ↔ h_yy`, `h_xy → −h_xy`, `h_xz → −h_yz`, `h_yz
+→ h_xz`, and `h_tt`, `h_tz`, `h_zz` stay (`state_rotation`; the same for
+`Π`). The `G = 0` field sets are declared with the identity
+(`identity_rotation`), as they are declared even. Over a forest without a
+seam both are `nothing`, and a checkpoint's recipe carries `rotating` only
+where there is a seam, so older checkpoints still restart.
+
+**The two seam planes are the same points.** Vertex centering owns the low
+plane of `x` and of `y` (TreeAMR's decision), both evolved, from ghosts
+that are each other's images. `add_noise!` leaves both unperturbed, as it
+projects odd components to zero on a mirror's wall: independent draws there
+would be a solution that disagrees with itself. The refinement ceiling
+skips the seam's faces as it skips reflecting ones.
+
+**(Measured 2026-10-04**, `test/rotation_tests.jl`**.)** Kerr-Schild at
+`a = 3/10` (the ring inside `r_0 = 7/20`, `r_1 = 11/10` eight cells inside
+`r₊ = 1.954`), `q = 2`, uniform at `h = 5/48`: the analytic state is its own
+image under the map to `2·10⁻¹⁶`; after one ghost fill every stored point
+— owned, mirrored, turned or the hook's — holds the exact state to
+`1.3·10⁻¹⁴` relative (the worst next to the ring, where the solution is
+`350`), and `1.3` with every variable declared to turn into itself; after
+two chunks (`t = 1/5`) the rotating octant `[0, 5/2]³` is the box `[−5/2,
+5/2]³` to `2.6 eps` relative at every point outside the core, the layer
+residual agreeing to `10⁻¹⁴`. The horizon finder needs nothing of its own:
+TreeAMR's `interpolate` turns the finder's sphere into the quadrant, and
+`M_irr` and `J` on the octant are the box's to `10⁻¹⁰` (`J = 0.29994`,
+Kerr's `0.3`). A restart chain on the rotating octant is the uninterrupted
+run bit for bit (checked by hand, not in the suite).
 
 ### The interior: a pointwise damping layer
 
@@ -4546,7 +4598,7 @@ the rest without a launch, and is a wish, not a prerequisite.**)**
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
 | `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the **five** `Val`s and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. Step 5 split the streaming body out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and added `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c) |
-| `src/boundaries.jl` | the time-dependent Dirichlet hook |
+| `src/boundaries.jl` | the time-dependent Dirichlet hook, and the declarations TreeAMR's symmetries ask of every field set: the parities of the reflecting faces (`state_parity`, `even_parity`, added 2026-10-02) and the signed maps of the rotating seam (`state_rotation`, `identity_rotation`, added 2026-10-04) |
 | `src/bounds.jl` | the range projection (added in step 8b): `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
 | `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii and the hole's mass (`hole_mass`, added in step 8c′), and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes. **Step 8d adds the tracked geometry's kernel side**: the real harmonics (`real_harmonic_index`, `real_from_complex`/`complex_from_real`, the recurrence `shape_series`, `shape_bounds`), the analytic horizon of the seed (`analytic_horizon_radius`), `FittedSpec` — what a case holds — and `FittedInterior` — the kernel argument — with `interior_point`, `fitted_geometry`, `core_position`, `ShapeMask`, `ShapeBand`, `geometry_spacing` and its `check_interior_radii`; and the protocol both geometries speak (`in_layer(int, t, x)`, `interior_point`, `is_outside`, `geometry_radii`, `layer_radii`, `layer_mask`, `shell_mask`) |
 | `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4), or `hole_forest`'s nested shells around a hole (added in step 5, **here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
@@ -7593,7 +7645,11 @@ is `:damped`'s to two digits.
   outside the horizon `2.6×`.
 
 **Proposed next (2026-10-04): a spinning hole on a bitant.** Written for the
-session that picks this up; nothing of it is built.
+session that picks this up; nothing of it is built. **(Amended 2026-10-04:
+the static spinning hole runs on the *rotating octant* instead —
+`hole_case(; octant = :rotating)`, TreeAMR 0.1.7's quarter-turn seam with
+the mirror at `z = 0`, a quarter of the bitant; see "The rotating octant".
+The bitant remains the domain of a hole that moves in the plane.)**
 
 - **A bitant, not an octant.** A spin along `z` keeps only the `z → −z`
   mirror, and so does a boost in the `x`–`y` plane: the domain is
@@ -7624,6 +7680,102 @@ session that picks this up; nothing of it is built.
   over once they take the bitant. TreeAMR `main`'s second-derivative
   interpolation can replace the state sampler's differenced gradient when it
   is released; nothing here needs it sooner.
+
+**A spinning hole on the rotating octant, `a = 3/5` (measured 2026-10-04**,
+jobs 569778 and 569779, `spin-a06`**)**. Erik's first spinning reference: not
+`a = 9/10` at `h ≈ 1/48`, but `a = 3/5` at `h = 1/32`, `:damped` and
+`:fitted` side by side, everything else the `a = 0` rows `dA128` and `fR32`
+— the octant `[0, 64]³`, cubes `32, 16, 8`, `N = 128` (60.8 M points),
+`q = 4`, `cfl = 1/2`, the algebraic source, `24 M`, the finder with the spin
+every chunk — on the rotating octant (`test/octant_runs.jl octant=rotating
+a=3/5`). Kerr-Schild `a = 3/5` has `r₊ = 1.8` at the poles, `√(2 r₊) = 1.897`
+on the equator, and its ring at `0.6`. Two settings follow from the ring:
+
+- `:damped` keeps `r_0 = 3/4`, `r_1 = 3/2` — the ring inside `r_0`, `r_1`
+  9.6 cells inside the horizon at the poles.
+- `:fitted` keeps `m = 20` but takes `n_L = 18`, not `fR32`'s 24: the
+  analytic initial data fill the layer down to the core surface, and
+  `m + n_L = 44` cells below the equator's `1.897` is `0.52`, inside the
+  ring; at 38 cells the core surface is `0.71` there. `lmax_fit = 12` (the
+  spinning hole's, above), `fit_cont = 1`.
+
+Both run to `24 M` in `2 h 35` on one H200 each. At `24 M`, point-weighted
+L2 in the shells of `test/octant_runs.jl` (the first from the equatorial
+radius; the band `in` is the evolved region inside it):
+
+| | `ℋ` in | `ℋ [1.90, 2.25)` | `ℋ [2.25, 3)` | error in | error `[1.90, 2.25)` | error `[2.25, 3)` |
+|---|---|---|---|---|---|---|
+| `:damped` | `3.95·10⁻⁶` | `6.41·10⁻⁷` | `1.55·10⁻⁷` | `5.0·10⁻⁶` | `1.35·10⁻⁶` | `4.75·10⁻⁷` |
+| `:fitted` | `1.43·10⁻³` | `2.04·10⁻⁶` | `1.39·10⁻⁷` | `2.7·10⁻⁴` | `1.41·10⁻⁶` | `4.41·10⁻⁷` |
+| `dA128` (`a = 0`) | `1.77·10⁻⁶` | `4.30·10⁻⁷` | `1.31·10⁻⁷` | `2.2·10⁻⁶` | `5.24·10⁻⁷` | `1.89·10⁻⁷` |
+| `fR32` (`a = 0`) | `1.65·10⁻⁴` | `1.11·10⁻⁶` | `1.34·10⁻⁷` | `1.7·10⁻⁵` | `4.82·10⁻⁷` | `1.89·10⁻⁷` |
+
+- **The spin changes nothing qualitative outside the horizon.** Both runs'
+  constraints are stationary from `t ≈ 6–8 M` to `64 M` (both rows were
+  continued from their `24 M` checkpoints, jobs 569811 and 569812): `ℋ` just
+  outside the horizon `6.41 → 6.47·10⁻⁷` (`:damped`) and `2.04·10⁻⁶`
+  throughout (`:fitted`, `3.2×` — `a = 0`: `2.6×`), and from `2.25` out the
+  two agree to two digits. Every find succeeds (65 of 65), every fit is
+  valid, the projection never fires, and `:fitted`'s band inside the horizon
+  and its fit residual (`6.9·10⁻³`) are constant from `t = 2 M`. The spinning
+  hole's own error is `2–2.6×` the `a = 0` hole's from `2.25` to `8`, and
+  `ℋ` just outside the horizon `1.5×`.
+- **The spin drifts, linearly, as truncation error at order four.**
+  `:damped`'s `J` rises from `a + 8·10⁻⁹` at a constant rate to `64 M` —
+  `5.42`, `5.11`, `5.16·10⁻⁸/M` over `8–24`, `24–40`, `40–64 M`
+  (`+3.6·10⁻⁶` at `64 M`) — and `M_irr` falls with it, about `−0.2 δJ` at
+  constant mass (`−2.7·10⁻⁷` at `64 M`). The convergence rows `h = 1/16` and
+  `1/24` (`N = 64, 96`, the same radii in `M`, `margin = 4` for the check;
+  jobs 569813 and 569814) give the same constant rates, `1.1–1.4·10⁻⁶` and
+  `1.6–1.75·10⁻⁷`, and orders `3.99–4.07` from `1/24` to `1/32` in every
+  interval, `4.16` for `J − a` at `24 M` and `4.02` for `dM_irr/dt`; every
+  shell's `ℋ` and error from `2.25` out converge at `3.98–4.17`. `1/16` is not
+  in the asymptotic regime (orders `4.6–8.7` from it, and `145×` the `1/32`
+  `ℋ` just outside the horizon by `8 M`): `r_1 = 3/2` is only 4.8 of its cells
+  inside the horizon at the poles. The drift is the scheme's, as `a = 0`'s
+  mass drift is (`1.3·10⁻⁹/M`); it is four orders below G5's moving hole's.
+  `:fitted`'s `J` wanders by `±2·10⁻⁷` to `15 M` and then drifts at
+  `4.1·10⁻⁸/M`, `0.8×` `:damped`'s.
+- **The error grows with the drift, so the variants' error ratio is the ratio
+  of their drifts.** The error outside the horizon grows linearly in every
+  run, the slightly different hole spreading outward, at order four: in the
+  first shell `:fitted`/`:damped` goes `1.65×` (`8 M`), `1.04×` (`24 M`),
+  `0.88×` (`40 M`), `0.81×` (`64 M`), toward the drifts' `0.80`. So a
+  comparison of the two by their error must name its time; by `ℋ` it need not.
+- **`:fitted` is worse inside than at `a = 0`.** The evolved band inside
+  the horizon is `9×` `fR32`'s `ℋ`, and the fit's residual `9×` `fR32`'s
+  `7.5·10⁻⁴` — the shorter ramp, the band reaching deeper (from `1.27`
+  rather than `1.375`) and an oblate hole in the `cont = 1` ansatz, not
+  separated here.
+- **The far field settles by `64 M`**: the start-up pulse passes `r ≥ 8` at
+  about `24 M` for `:fitted` (`ℋ 1.2·10⁻¹⁰`, then `1.0·10⁻¹⁰`) and both rows
+  end at `1.0–1.3·10⁻¹⁰` there, three orders below the first shell.
+
+**`a = 9/10` at `h = 1/48` (measured 2026-10-04**, jobs 569826, 569855,
+569856, `spin-a06`**)**. Kerr-Schild `a = 9/10` has `r₊ = 1.436` at the poles,
+`1.695` on the equator and its ring at `0.9`, which leaves `0.79` below the
+equator for a `:fitted` margin and ramp — 25 cells at `h = 1/32` — so the rows
+run at `h = 1/48` on one more cube (`32, 16, 8, 4`, the finest level
+`[0, 4]³`, `N = 96`, 31.9 M points, `2 h` for `24 M` on an H200).
+
+- **`:fitted` at `m = 16`, `n_L = 18` (the core surface at `0.986` on the
+  equator, 4 cells outside the ring), `lmax_fit = 12` is unstable, at either
+  `fit_cont`.** With `fit_cont = 2` the band inside the horizon grows `2–4×`
+  per `M` from `t = 0` (`ℋ` `3.9·10⁻³` at `1 M`, `0.65` at `7 M`), the fit's
+  residual with it (`0.034 → 0.46`), and it crosses the horizon — the first
+  shell outside `1600×` in `6 M` — and ends in a `DomainError` in the kernel
+  at `7.5 M`; every fit stays valid, every find succeeds and the projection
+  never fires. `fit_cont = 1` grows the same way (`ℋ 0.14`, L∞ `178` at `8 M`;
+  cancelled). So the curvature fit is not the cause.
+- **`:damped` runs** (`r_0 = 19/20`, the ring inside the core; `r_1 = 5/4`,
+  8.9 cells inside the poles' horizon, a 14-cell ramp), stationary from `8 M`
+  to `24 M` — but at a high level: `ℋ` `3.7·10⁻³` in the band inside the
+  horizon and `2.4·10⁻⁵` just outside it (`37×` the `a = 3/5` hole's at
+  `h = 1/32`), the error there `5.4·10⁻⁶` (`4×`), the layer's residual against
+  the truth `5.2` (`a = 3/5`: `0.15`). `J` starts `7·10⁻⁶` above `a` (the
+  finder at this resolution) and drifts at `7.8·10⁻⁸/M`; all 25 finds succeed.
+  The layer next to the ring is under-resolved at `1/48`: on the equator it
+  spans `0.95–1.25`, where Kerr-Schild's `H` falls from `3.3` to `1.3`.
 
 ### The right-hand side on an H200 (measured 2026-10-05)
 

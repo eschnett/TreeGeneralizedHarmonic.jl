@@ -126,3 +126,66 @@ a field set has no ghosts to mirror and is never transferred.
 """
 even_parity(forest, nvars::Integer) =
     _reflects(forest) ? fill(ntuple(_ -> EvenParity, Val(3)), Int(nvars)) : nothing
+
+# --- the rotating seam (added 2026-10-04) --------------------------------------
+#
+# TreeAMR's M12 fills the ghosts across a rotating seam from the real data a
+# quarter turn away and turns the variables with a signed map, which it
+# requires on every field set over a forest with a seam, for the reason it
+# requires a parity: how a variable turns is physics. The quarter turn `R`
+# takes `e_{d1}` to `e_{d2}` and `e_{d2}` to `−e_{d1}`, and a covariant tensor
+# turns index by index, `T′_ab(Rp) = R_a^c R_b^d T_cd(p)`: the index `d1` of
+# the turned tensor is minus the index `d2` of the original, `d2` is plus
+# `d1`, and `t` and the third dimension stay. So component `ab` of `h` or `Π`
+# is plus or minus one other component, and the four turns compose to the
+# identity. The other field sets are declared with the identity, as they are
+# declared even under a mirror: they have `G = 0` and are neither filled nor
+# transferred.
+#
+# Over a forest without a seam both helpers return `nothing`, so every field
+# set of a run without one — its checkpoints included — is what it was.
+
+# The packed component and the sign that component `c` (`_pack10`'s order)
+# reads a quarter turn away, about the seam `(d1, d2)`: the spacetime index of
+# `x^d` is `d + 1`.
+function _component_rotation(c::Integer, d1::Integer, d2::Integer)
+    turn(a) = a == d1 + 1 ? (d2 + 1, -1) : a == d2 + 1 ? (d1 + 1, 1) : (a, 1)
+    for a in 1:4, b in 1:a
+        _pairindex(a, b) == c || continue
+        (a′, sa), (b′, sb) = turn(a), turn(b)
+        return sa * sb * _pairindex(a′, b′)
+    end
+    throw(ArgumentError("there is no packed component $c of a symmetric 4×4"))
+end
+
+"""
+    state_rotation(forest; copies = 2) -> Vector{Int} or nothing
+
+How the state's variables turn under the quarter turn of TreeAMR's rotating
+seam (M12), the `rotation` keyword of a `FieldSet` over `forest`: variable
+`v` at `Rp` is `sign(r[v])` times variable `abs(r[v])` at `p`. `h_ab` and
+`Π_ab` are covariant tensors, and with the seam `(d1, d2) = (1, 2)` — `R`
+takes `x` to `y` and `y` to `−x` — `h_tx` turns into `−h_ty`, `h_ty` into
+`h_tx`, `h_xx` and `h_yy` into each other, `h_xy` into `−h_xy`, `h_xz` into
+`−h_yz`, and `h_tt`, `h_tz` and `h_zz` into themselves. `copies` repeats the
+`NC`-component pattern, offset by `NC` each time, as
+[`state_parity`](@ref)'s does. `nothing` over a forest without a seam
+(added 2026-10-04).
+"""
+function state_rotation(forest; copies::Integer=2)
+    seam = seam_dims(forest)
+    seam === nothing && return nothing
+    one = [_component_rotation(c, seam...) for c in 1:NC]
+    return reduce(vcat, [sign.(one) .* (abs.(one) .+ k * NC) for k in 0:(copies - 1)])
+end
+
+"""
+    identity_rotation(forest, nvars) -> Vector{Int} or nothing
+
+`1:nvars`, every variable turning into itself, or `nothing` over a forest
+without a rotating seam: the declaration of a `G = 0` field set, which TreeAMR
+requires over a rotating forest and which nothing reads, as
+[`even_parity`](@ref) is under a mirror (added 2026-10-04).
+"""
+identity_rotation(forest, nvars::Integer) =
+    seam_dims(forest) === nothing ? nothing : collect(1:Int(nvars))

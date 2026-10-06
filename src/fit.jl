@@ -1064,7 +1064,8 @@ variables (the target and its slope), `G = 0`, `U`'s centering.
 """
 target_cache(U::FieldSet{T,3}) where {T} =
     FieldSet{T}(U.forest, 4NC; G=0, centering=U.centering,
-                parity=even_parity(U.forest, 4NC), backend=get_backend(U.work))
+                parity=even_parity(U.forest, 4NC),
+                rotation=identity_rotation(U.forest, 4NC), backend=get_backend(U.work))
 
 """
     fill_target!(target, origins, spacings, interior, fits, t) -> target

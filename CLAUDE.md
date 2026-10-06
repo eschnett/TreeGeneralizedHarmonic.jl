@@ -399,6 +399,20 @@ Measured results from "Robust stability on the octant" on hold the numbers —
 among them the `:fitted` setup to use: `h = 1/24` at the hole, `m = 16`,
 `n_L = 20`, `fit_cont = 2`.
 
+From 2026-10-04 a **spinning** hole has an octant too, on **TreeAMR 0.1.7**'s
+rotating seam (M12): `GHCase(; rotating = (d1, d2))` (stored as `(0, 0)` for
+none, so the case stays `isbits`), `gh_forest` passing it, `state_rotation`
+for the state and `identity_rotation` for every `G = 0` set at every
+`FieldSet` site (beside the parities; `hostcopy` keeps it), `GHProblem`
+refusing a forest whose seam is not the case's, the ceiling skipping the
+seam's faces, `add_noise!` leaving both seam planes alone, and
+`hole_case(; octant = :rotating)` — the seam `(1, 2)` with the mirror at
+`z = 0`, for a hole at the origin, at rest, any spin along `z`
+(`octant = true` is `:reflecting`). The horizon finder works through the
+seam unchanged. `test/rotation_tests.jl` is its file (29 claims, `9.4 s` at
+four threads inside the suite, which then measured **4824 assertions in
+13m21**); `CODE.md`, "The rotating octant", has the numbers.
+
 From 2026-10-05 the right-hand side is **fast on a device**. `CODE.md`, "The
 right-hand side on an H200", found the kernel uninlined and spilling at 8.5 ns a
 point on an H200, and it now runs at 1.1, and 1.7× faster on the CPU. What changed:
@@ -705,7 +719,8 @@ julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])'
 The clean-checkout check, which is what the `[sources]` pins exist for: a
 tree with no `Manifest.toml` resolves the four pinned packages from
 GitHub and TreeAMR from the General registry (from 2026-09-26, at `0.1.3`,
-and from 2026-10-01 at `0.1.4`; also between 2026-09-21 and 2026-09-23),
+from 2026-10-01 at `0.1.4` and from 2026-10-04 at `0.1.7`; also between
+2026-09-21 and 2026-09-23),
 and HDF5 with its binary library from General too (2026-10-01), and passes. From 2026-09-21 it is a real check —
 every source is public, so it works anonymously, which is what CI does:
 
@@ -955,7 +970,8 @@ skill has the rest of the cluster's mechanics.
 
 The octant runs (added 2026-10-02) are `test/octant_runs.jl`, one run per
 call, `key=value` options listed in its header — the case (`case=minkowski`
-or `ks`, `interior=damped|fitted`, margins, `fit_cont`), the mesh (`L`, `N`,
+or `ks`, `interior=damped|fitted`, margins, `fit_cont`; from 2026-10-04
+`octant=reflecting|rotating` and the spin `a=`, which needs `rotating`), the mesh (`L`, `N`,
 `roots`, `radii`), the run (`t_end`, `cfl`, `chunk`), noise, `backend=cuda`,
 `out=<dir>` (CSV, `records.csv`, `simwatch.toml`) and `checkpoint=<dir>`.
 On Symmetry they ran one H200 each from a copy with `CUDA` added to its
@@ -971,6 +987,7 @@ excision rows into the CSV, `records.csv` and SimWatch's `extra.excision`:
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=fitted L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/smoke
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=excised L=8 N=16 roots=2 radii=4,2 t_end=1 out=out/smoke-excised
 julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
+julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=1/2 L=8 N=16 roots=1 radii=4,2,1 r_0=3/4 r_1=5/4 t_end=1/2 chunk=1/4 out=out/spin
 ```
 
 Step X3's rows (added in step X3) ran from `excision-x3` on Symmetry, a
@@ -1006,8 +1023,9 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   0.1.3 for its M11 interpolation; from 2026-09-23 to then TreeAMR was
   pinned too). `SpacetimeMetrics`, `ApparentHorizonFinder`,
   `KorzynskiSpin` and `IMEXRungeKutta` are what `Project.toml`'s `[sources]` entries resolve, and TreeAMR is
-  General's release under `[compat]` `0.1.4` (from 2026-10-01, for M9a's
-  checkpoints; `0.1.3` before) — so `~/src/jl/…` is *not*
+  General's release under `[compat]` `0.1.7` (from 2026-10-04, for M12's
+  rotating seam; `0.1.4` from 2026-10-01, for M9a's checkpoints; `0.1.3`
+  before) — so `~/src/jl/…` is *not*
   what the tests see; an unpushed change there is invisible here, a pushed
   change to TreeAMR's `main` is invisible too until it is *released*, and
   the local SpacetimeMetrics checkout has been behind `main` before. Read

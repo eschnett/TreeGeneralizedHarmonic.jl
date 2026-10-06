@@ -560,7 +560,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     G = q ÷ 2 + 1
     U = if ck === nothing
         FieldSet{T}(forest, 2NC; G=G, centering=vertexcentered(3),
-                    parity=state_parity(forest), backend=backend)
+                    parity=state_parity(forest), rotation=state_rotation(forest),
+                    backend=backend)
     else
         # The loaded field set's layout is the file's; it is checked against
         # the run's, since every kernel and the schedule assume this one.
