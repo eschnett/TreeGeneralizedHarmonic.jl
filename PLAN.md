@@ -38,6 +38,8 @@ first — steps X4–X7 below. X5 is done and merged (2026-10-06): go for
 `a = 3/5` with the hybrid rule (`hybrid-adv`). X4 is done and merged
 (2026-10-06): the branch is on `main`'s spill-free kernel and the rotating
 octant, and the merged suite passes (6952 at one thread, 6960 at four). X6
+is done and merged (2026-10-06): the frame-dragged rule and the symmetric
+zone mixed derivative; the `a = 3/5` smoke runs on the CPU and an H200. X7
 is next.**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
@@ -2036,6 +2038,82 @@ Starts from the integration branch with X4 and X5 merged. `CODE.md`:
 - the suite green at one and four threads;
 - a local smoke run at `a = 3/5` that writes `simwatch.toml`;
 - `CODE.md` amended **(amended in step X6)**.
+
+**What step X6 hands over** (its report's section 6, 2026-10-06; the
+numbers are `CODE.md`'s "Excision", "What step X6 built", and Measured
+results, step X6).
+
+The frame-dragged rule is built: `DraggedProvider`, launched by
+`gh_dragged_kernel!` after the zone kernel. The zone points' mixed
+derivative is symmetric by default (`Excision(T; mixed = :symmetric)`;
+`:nested` is the X3-era operator, for comparisons only).
+- **The `a = 3/5` smoke** (`h = 1/16`, `r_E = 1`, `r_0 = 0.8`) runs end to
+  end on the CPU and on an H200, the CSV within `3.2·10⁻⁹`: 72
+  frame-dragged axes, all along `y`, and `excision_flips = 0` at every row.
+- **The rotating and mirror octants agree to `8.5·10⁻¹⁰`** at `a = 0`.
+- **The symmetric derivative** moves X2b's fixture error outside `r = 23/20`
+  by `7·10⁻⁸` relative, and X3's shells by at most `3.5·10⁻⁵`.
+- **Cost:** the rule is about `0.5 ms` a right-hand side on the H200,
+  latency-bound, predicted `0.6 %` of a right-hand side at `h = 1/24` and
+  `0.3 %` at `1/32`. The new kernel has 255 registers and a 1872-byte frame.
+
+- **Every row** is Kerr-Schild `a = 3/5` on the rotating octant with the
+  sphere geometry, the algebraic source, `q = 4`, `ε_KO = 1/2`, `cfl = 1/2`,
+  no blend, on an H200 from a copy with `CUDA` added, one row a job. The
+  scan has the default noise; production has `amplitude=0`. **Check the
+  reference rows' own noise and options** in `CODE.md`'s `a = 3/5` record
+  and match them, or run both.
+- **The depth scan at `h = 1/24`, `10 M` a row, five rows:**
+
+  ```
+  julia --project=. --threads=8 test/octant_runs.jl backend=cuda case=ks octant=rotating a=3/5 interior=excised geometry=sphere L=64 N=96 roots=2 radii=32,16,8 r_E=<rE> r_0=<r0> t_end=10 chunk=1 cfl=1/2 out=<dir>/scan/rE<rE> checkpoint=<dir>/scan/ck-rE<rE> walltime=<s>
+  ```
+
+  | `r_E` | `r_0` | cells below the poles | below the equator |
+  |---|---|---|---|
+  | 7/10 | 13/20 | 26 | 28.7 |
+  | 4/5 | 7/10 | 24 | 26.3 |
+  | 9/10 | 3/4 | 21 | 23.9 |
+  | 1 | 4/5 | 19 | 21.5 |
+  | 17/15 | 13/15 | 16 | 18.3 |
+
+  `r_0 = (0.6 + r_E)/2` in every row: the script's default with a spin,
+  passed anyway so it is on record.
+- **Production at `r_E = 4/5`, `r_0 = 7/10`** (unless the scan prefers
+  another), `amplitude=0 t_end=24`, and the `1/32` row also to `t_end=64`:
+
+  | `h` | mesh options | blocks | points | cells below the poles |
+  |---|---|---|---|---|
+  | 1/24 | `L=64 N=96 roots=2 radii=32,16,8` | 29 | 25.7 M | 24 |
+  | 1/32 | `L=64 N=128 roots=2 radii=32,16,8` | 29 | 60.8 M | 32 |
+  | 1/48 | `L=64 N=96 roots=2 radii=32,16,8,4` | 36 | 31.9 M | 48 |
+
+  - `1/32` is the reference rows' mesh.
+  - At `1/48` only `[0, 4]³` is at `1/48`, while `r = 4 … 8` stays at
+    `1/24`. Only the shells inside `r < 4` form a clean
+    `1/24 – 1/32 – 1/48` series, and the `[3, 5)` shell straddles the
+    boundary. If an order is wanted there, use radii that keep the shells
+    on one level, or report only the shells inside `r = 4`.
+  - The excision's one-level check passed for all fifteen
+    `(h, r_E)` combinations: the surface's `9h` neighbourhood lies inside
+    the finest cube.
+- **Predicted cost** (X3's H200 rates, plus about 3 % for `a = 3/5`):
+
+  | `h` | per `M` | a `10 M` scan row | `24 M` | `64 M` |
+  |---|---|---|---|---|
+  | 1/24 | ~140 s | ~25 min | ~1 h | — |
+  | 1/32 | ~380 s | — | ~2.5 h | ~7 h |
+  | 1/48 | ~350 s | — | ~2.3 h | — |
+- **Expected frame-dragged axes on the octant:** about 190, 355 and 850 at
+  `1/24`, `1/32` and `1/48`.
+- **Read `excision_flips` at every row before trusting a checkpoint
+  chain.** A restart rebuilds the rule bits from its own state, so a chain
+  is the uninterrupted run only while flips are 0.
+- **Report the faces per rule** as `excision_faces_dragged` against
+  `excision_faces`.
+- **Symmetry leftovers:** X6's `excision-x6` directory holds a CUDA copy
+  and logs. X7 uses a directory of its own, and deletes its checkpoints once
+  the data are copied back.
 
 ## Step X7 — The static `a = 3/5` hole on the rotating octant, on the H200s
 
