@@ -1112,8 +1112,8 @@ function check_excision_case(case::GHCase{T}, int, q::Integer) where {T}
         "this case has ε_KO = $(case.ε_KO): without it the per-axis closures " *
         "grow as the interior itself does (+0.08 to +0.14/M on step X1's " *
         "plane) and the extrapolation family at +1 to +4/M on the surface " *
-        "(CODE.md, \"Excision: the analysis (step X1)\"). Use GHSO2's recipe, " *
-        "ε_KO ≈ 1/2."))
+        "(SINGULARITY_HANDLING.md, \"Excision: the analysis (step X1)\"). Use " *
+        "GHSO2's recipe, ε_KO ≈ 1/2."))
     iszero(case.center.v) || throw(ArgumentError(
         "an :excised hole is static in this round (CODE.md, \"Excision\"): its " *
         "geometry is frozen for the run, and a hole that moves leaves points " *
@@ -1261,8 +1261,8 @@ function build_excision(U::FieldSet{T,3}, schedule, case::GHCase{T}, int;
         "the Kreiss–Oliger amplitude vanishes at a zone point of this :excised " *
         "interior (its least value there is $εmin): the closures need " *
         "dissipation at the surface, without which they grow as the interior " *
-        "itself does (CODE.md, \"Excision: the analysis (step X1)\"). Give the " *
-        "case a profile that is positive at the surface."))
+        "itself does (SINGULARITY_HANDLING.md, \"Excision: the analysis (step " *
+        "X1)\"). Give the case a profile that is positive at the surface."))
     nosource == 0 || throw(ArgumentError(
         "at $nosource excised taps of the advective stencils of this :excised " *
         "interior's frame-dragged axes — the $ninto (zone point, closure axis) " *

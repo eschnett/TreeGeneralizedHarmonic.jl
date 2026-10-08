@@ -82,11 +82,9 @@ function setup(N, roots)
     return case, forest, U, u, p
 end
 
-ka_args(p, du) = (statearray(du, p.U), p.U.work, TGH.gauge_work(p.Hsrc), p.origins,
-                  p.spacings, p.case.background, p.case.γ0, p.case.γ2, p.case.ε_KO,
-                  p.interior, zero(T), TGH.target_work(p.target), p.t_target,
-                  p.target_rate, p.trail, TGH._exact_fit(p), p.valG, p.valq, p.valH,
-                  p.valdiss, p.valint)
+# The package's own argument list (amended 2026-10-05, when the kernel gained its
+# SIMD width, which is 1 on a device).
+ka_args(p, du) = TGH.gh_rhs_kernel_args(p, du, zero(T))
 
 function timeit(f; n=parse(Int, opt("reps", "8")))
     f()

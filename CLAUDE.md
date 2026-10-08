@@ -1,7 +1,12 @@
 # Working notes for Claude in TreeGeneralizedHarmonic.jl
 
 Read `CODE.md` first — it is the design document and states *why* things
-are the way they are. This file is only about mechanics.
+are the way they are. The runs behind the black hole's interior — step 5's
+layer, steps 8a–8′, the single holes on the octant, and the excision round's
+steps X1–X7 — are in `SINGULARITY_HANDLING.md` (moved out of `CODE.md` on
+2026-10-08), and the
+settings they recommend for a single hole are `CODE.md`'s "Single black
+holes: recommended settings". This file is only about mechanics.
 
 **Contents**
 
@@ -94,7 +99,8 @@ step 8g (excision) is not needed; the analytic layer stays the default where
 a chart admits it and `:fitted` is for G5's chart. **G5 runs at `a = 7/10`
 (decided 2026-09-23)**, which runs at `h = 5/256` (2472 blocks, `10 M` in
 1¾ node-hours) and not at `5/128`; harmonic `a = 9/10` waits with its price
-written down in `CODE.md`'s "Open questions" (`h ≲ 5/1024` on the equator,
+written down in `SINGULARITY_HANDLING.md`'s "The interior's questions"
+(`h ≲ 5/1024` on the equator,
 23 000 blocks, `38 h` a `50 M` run, and a fit that holds 45° first). Step 8,
 the moving hole, has run (2026-09-24) and G5 is **not** done: the mesh
 follows the hole (the `:fitted` cycle on the case's own data, the floor from
@@ -104,14 +110,16 @@ at the hole with 6–9× fewer points, the horizon is found along the
 trajectory with Kerr's numbers and the boost's contraction, `:frozen` fails
 — but on G5's chart the moving layer's error is `3.3×` the static hole's
 at `7 M` and growing, carried out through the layer's trailing side
-(`CODE.md`, G5 and "The moving hole (step 8)"). Step 8′ (2026-09-25) found
+(`CODE.md`'s G5 and `SINGULARITY_HANDLING.md`'s "The moving hole (step 8)").
+Step 8′ (2026-09-25) found
 the lever for the trailing side — `evolve!(…; trail_ramp = 9/10)`, `ρ`'s ramp
 narrowed where grid points leave the layer — which takes the crossing's
 excess over the resting hole from `5.0×` to `2.05×` at `13 M` and makes the
 two sides of the layer equal; G5 is still open on the uniform growth that is
 left and on a drift of the horizon's `J` (`0.846` at `13 M`) that the moving
-spinning hole shows with and without it (`CODE.md`, "The trailing side (step
-8′)" and "Open questions").**
+spinning hole shows with and without it (`SINGULARITY_HANDLING.md`, "The
+trailing side
+(step 8′)" and "The interior's questions").**
 **Excision is reopened (2026-10-05, Erik's decision) as an interior variant
 under study, `:excised`, for static holes first**: one-sided closures per
 stencil at a lego surface inside the horizon, in a zone kernel beside the
@@ -419,10 +427,12 @@ SimWatch status files (`SimWatchWriter`; https://github.com/eschnett/simwatch).
 second-derivative interpolation; TreeAMR's `main` has it, unreleased).
 `test/reflection_tests.jl`, `gauge_source_tests.jl` and `simwatch_tests.jl`
 are its files; `test/octant_runs.jl` is the run script (`octant_rates.jl`,
-`octant_study.jl`, `octant_diff.jl` analyse its output), and `CODE.md`'s
-Measured results from "Robust stability on the octant" on hold the numbers —
-among them the `:fitted` setup to use: `h = 1/24` at the hole, `m = 16`,
-`n_L = 20`, `fit_cont = 2`.
+`octant_study.jl`, `octant_diff.jl` analyse its output), and
+`SINGULARITY_HANDLING.md`'s
+"Single holes on the octant" holds the numbers — among them the `:fitted`
+setup at `a = 0`: `h = 1/24` at the hole, `m = 16`, `n_L = 20`,
+`fit_cont = 2`; `CODE.md`'s "Single black holes: recommended settings" has
+the table for every spin to `9/10`.
 
 From 2026-10-04 a **spinning** hole has an octant too, on **TreeAMR 0.1.7**'s
 rotating seam (M12): `GHCase(; rotating = (d1, d2))` (stored as `(0, 0)` for
@@ -457,6 +467,26 @@ point on an H200, and it now runs at 1.1, and 1.7× faster on the CPU. What chan
 - **The investigation's prototypes** are `bench/rhs_lab.jl` and its companions
   (see "Commands").
 
+From 2026-10-05 the right-hand side runs on **SIMD lanes on the CPU** (`CODE.md`,
+"The right-hand side on a CPU"): the kernel evaluates `W` neighbouring points along
+the first axis at once as SIMD.jl's `Vec{W,T}` (SIMD.jl is a dependency), through the
+package's own algebra, on every branch — no hole, a hole's evolved region (a group
+with a point in the layer or the core falls back to the scalar code point by point),
+the sampled and the algebraic gauge sources. `W` is the sixth kernel `Val`, chosen by
+`GHProblem` (`default_simd_width`: 4 `Float64` on AVX2 and aarch64, 8 with AVX-512,
+1 on a device or for a software type; `simd_width = 1` asks for the scalar kernel,
+also through `evolve!`). A row that `W` does not divide ends in an **overlapping**
+group. `src/lanes.jl` has the width, `Lanes` (an array read `W` elements at a time)
+and the leader rule; the kernel's body is `gh_rhs_point!` (one point) and
+`gh_rhs_lanes!` (a group). `pointwise.jl`'s algebra and the algebraic source asked
+three things of their number type that a `Vec` lacks, now spelled `_scale`,
+`_anynonzero` and `_select`. `test/simd_tests.jl` is its file, and
+`bench/rhs_cpu_lab.jl` the lab that measured it. Measured: the kernel 2.2–2.4× on
+Zen 3 (four lanes) and 2.2–2.8× on Skylake-AVX512 (eight), the gauge wave's RK4 step
+1.42× at 64 threads; the hole fixture's step only 1.08×, because on a refined mesh
+TreeAMR's prolongation is 145 of a 200 ms `gh_rhs!` — that, not the kernel, is a
+hole's next lever. Devices run the `W = 1` kernel at PR #4's speed.
+
 From step X1 (2026-10-05, the first of the excision round, `PLAN.md`'s
 X1–X3 on the integration branch `claude/excision-singularity-handling-30feec`)
 there are **closures** and their **analysis**, and no kernel uses either yet.
@@ -472,8 +502,8 @@ the `isbits` `ClosureTable` step X2b's zone kernel will carry (4.6 kB at
 surfaces), `model1d` (the closure on a frozen line, its reflection, and
 `dispersion.jl`'s radial line excised) and `model2d` (the go/no-go: a lego
 circle on Kerr-Schild's equatorial plane, dense spectra by parity sector and
-noise evolutions). Its answer is in `CODE.md`, "Excision" and "Excision: the
-analysis (step X1)": **go for the static Kerr-Schild `a = 0` hole with
+noise evolutions). Its answer is in `CODE.md`, "Excision", and
+`SINGULARITY_HANDLING.md`, "Excision: the analysis (step X1)": **go for the static Kerr-Schild `a = 0` hole with
 per-axis closures and `:msn` dissipation, at every `r_E` from `M/2` to
 `7M/4`; `ε_KO > 0` is required; the lopsided advection is not needed for
 stability and is the lever on leakage; and spinning holes are not covered —
@@ -523,7 +553,7 @@ BENCH_CASE=excised` are its runs.
 
 From step X3 (2026-10-05) the excised static hole has been **measured on
 Symmetry's H200s** (`CODE.md`, "Excision", "What step X3 measured", and
-Measured results, "Excision on the static hole (step X3)"): the variant ran
+`SINGULARITY_HANDLING.md`, "Excision on the static hole (step X3)"): the variant ran
 at `Float64` on CUDA as built, its right-hand side within `5·10⁻¹²` of the
 CPU's; the depth scan at `h = 1/16` found no stability boundary in X1's
 window `r_E = M/2 … 13M/8`, only an accuracy one — the exterior degrades as
@@ -554,7 +584,7 @@ spinning hole is still refused at the build, by the frame-dragged faces.
 
 From step X5 (2026-10-06) there is the **frame-dragged faces' analysis**, and
 no kernel change (`CODE.md`, "Excision", "The frame-dragged faces (step X5)",
-and Measured results, "Excision: the frame-dragged faces (step X5)").
+and `SINGULARITY_HANDLING.md`, "Excision: the frame-dragged faces (step X5)").
 `src/stencils.jl` has `extrapolation_weights(k₀, n)` — the Lagrange
 extrapolation to an excised point from the `n` consecutive nodes `k₀ … k₀ + n
 − 1` along a lattice direction — and `extrapolation_table(T, Val(q); degree =
@@ -578,7 +608,7 @@ lopsided blend is not needed. X7's window is `r_E = 0.70 … 17/15` at
 
 From step X6 (2026-10-06) the **frame-dragged faces have their rule in the
 zone kernel**, and the zone points' mixed derivative is symmetric (`CODE.md`,
-"Excision", "What step X6 built", and Measured results, "Excision: the
+"Excision", "What step X6 built", and `SINGULARITY_HANDLING.md`, "Excision: the
 frame-dragged faces in the zone kernel (step X6)"):
 - `ExcisionData` carries `codes`, a `UInt8` array of the classes' layout: at
   a zone point the **rule bits** (bit `d − 1` for axis `d`), set by the
@@ -621,7 +651,7 @@ frame-dragged faces in the zone kernel (step X6)"):
 
 From step X7 (2026-10-06) the excised spinning hole has been **measured on
 Symmetry's H200s** (`CODE.md`, "Excision", "What step X7 measured", and
-Measured results, "Excision of the static spinning hole (step X7)"): the
+`SINGULARITY_HANDLING.md`, "Excision of the static spinning hole (step X7)"): the
 depth scan at `h = 1/24` (`r_E = 0.70 … 17/15`, `10 M`, with and without
 noise) and production at `r_E = 4/5`, `r_0 = 7/10`, `h = 1/24, 1/32, 1/48` to
 `24 M` and `1/32` to `64 M`, against the rotating octant's `a = 3/5`
@@ -633,6 +663,28 @@ failure it found — `r_E = 17/15` (and `21/20`) at `h = 1/24` growing at
 `≈ 2/M` from `2 M` at the rim of the excised ball's topmost lattice layer at
 the pole — reproduces bit for bit on the CPU on a small rotating octant
 (`L = 8`, `N = 24`, cubes `4, 2`), which is where to work on it.
+
+From 2026-10-08 the integration branch is on **`main` `9ab2178`** — the
+CPU's SIMD lanes (PR #5) and `SINGULARITY_HANDLING.md` — merged after X7
+(`CODE.md`, "One right-hand-side evaluation", "Excision runs scalar on the
+CPU"). On Erik's guidance the singularity handling does not take the lanes
+yet: `gh_rhs_kernel!` gives an `:excised` problem `main`'s scalar path, `W ==
+1 || INT === :excised` → `gh_rhs_point!`, the body where the `:excised` branch
+now lives, every item its own point as on a device; the zone and
+frame-dragged kernels were always scalar launches. `:none` and the layer
+variants are `main`'s lanes bit for bit, and `gh_rhs_lanes!` and
+`src/lanes.jl` are `main`'s. SIMD lanes for excision are future work
+(`CODE.md`, "Possible extensions", with its price). The merge also put an
+`:inline` meta into the generated weight methods (`_weight_expr`,
+`src/stencils.jl`): through X4's `Centered` provider, which forms its weights
+inside each method, a `Vec` weight vector was a call per stencil, and the
+merged kernel on lanes was as slow as the scalar one until then.
+`gh_rhs_kernel!` takes `cls, blend` before the `Val`s and `Val(W)` last, and
+`gh_rhs_kernel_args` builds them all; `GHProblem`'s `W` is its seventh type
+parameter and the excision's `Z` its last. The excision round's measured
+results moved to `SINGULARITY_HANDLING.md`, "Excision, steps X1–X7", as the
+interior's had; `CODE.md` keeps "Excision", and its "Single black holes:
+recommended settings" has two `:excised` rows.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -707,7 +759,12 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-After step X7 the suite is **7001 assertions in 17m42** at one thread and
+After `main` was merged (2026-10-08) the suite is **7138 assertions in 22m36**
+at one thread and **7146 in 17m56** at four (the two at once, at a load of 6–10
+from other sessions): X7's 7001/7009, `main`'s 130 (`simd_tests.jl` and the lean
+algebra's lane spellings) and 7 in `excision_tests.jl` for the scalar route of
+an `:excised` problem; `excision_tests.jl` is `1m42` / `1m24`.
+After step X7 the suite was **7001 assertions in 17m42** at one thread and
 **7009 in 13m41** at four (2026-10-06, the two at once, at a load of 4–7):
 X6's counts, since no source changed — the step ran on Symmetry's H200s, and
 its one script change, `test/octant_study.jl`, is not in the suite.
@@ -891,7 +948,9 @@ The black-hole runs that are too long for the suite — the default margin
 `m = 8` at `q = 4`, the `t = 50 M` run of all three interior variants,
 the two harmonic charts, and from step 6 the indicator's calibration and
 its adaptive run — are a **script**, run by hand, with its numbers
-recorded in `CODE.md` under "Measured results" (added in step 5). It takes
+recorded under "Measured results" (added in step 5) — the indicator's and
+the horizon's in `CODE.md`, the interior's in `SINGULARITY_HANDLING.md` (moved there
+2026-10-08). It takes
 an optional list of sections (`order`, `long`, `charts`, `indicator`,
 `horizon`, `bounds`; and `leakage`, `calibration` and `tracked`, which are
 not in the default list). An option `key=value` whose key is a section's name selects
@@ -1120,6 +1179,18 @@ julia --project=. bench/rhs_lab.jl mode=round9 N=32 roots=8
 
 ```bash
 julia --project=. bench/rhs_lab_cpu.jl
+```
+
+The CPU right-hand-side lab (added 2026-10-05) is `bench/rhs_cpu_lab.jl`, the
+measurements of `CODE.md`'s "The right-hand side on a CPU": where `gh_rhs!` goes,
+the kernel at each SIMD width (`simd_width`), checked against the scalar one, the
+stencils without their zero weights (`LAB_ZW=1`), the native code, the head's pieces
+and a profile of the ghost fill — modes and variables in its header; `LAB_CASE=hole`
+for the hole fixture. It runs in the package's own environment, pinned on Symmetry as
+`bench/stepping.jl` is; `BENCH_SIMD=1` gives `bench/stepping.jl` the scalar kernel:
+
+```bash
+LAB_MODE=breakdown,simd julia --project=. -t 4 bench/rhs_cpu_lab.jl
 ```
 
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
@@ -1592,7 +1663,9 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `r_0 > |a|`; the placement bound needs `r_0 < r_h,min`, and harmonic
   Kerr's `r_h,min = √(M²−a²) = 0.436` is smaller than `0.9`. A ball fits
   only where `a < M/√2`. `check_interior_radii` refuses it by name
-  (`singular_radius`); `CODE.md`'s "Open questions" has the two ways out.
+  (`singular_radius`); `SINGULARITY_HANDLING.md`'s "The interior's questions"
+  has the two
+  ways out.
   Kerr-Schild at `a = 0.9` runs, because `r₊ = 1.436 > 0.9`.
 - **The three interior radii are asserted at every regrid**: `r_1`
   inside the horizon by `m` spacings of the blocks containing it
@@ -1758,9 +1831,10 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   platform's, not the physics'. `interior_tests.jl` asks for
   `g_tt = −1 + 2γ²M/δ` at a transverse offset `δ` instead.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
-  dissipation" and — from step 5 — the interior *variant* (`:none`,
+  dissipation", — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in
-  one parameter) are `Val` parameters built in `GHProblem`'s constructor.
+  one parameter) and — from 2026-10-05 — the SIMD width `W` are `Val`
+  parameters built in `GHProblem`'s constructor.
   Building them per evaluation recompiles or dispatches dynamically on
   every RK stage. The price is paid at compile time instead: a test row
   at a new `q` is a new kernel, which is most of what
@@ -1770,6 +1844,23 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   against it — and `with_interior` shares the field sets and the sampled
   gauge source rather than rebuilding the problem, which would re-sample
   `H_a`.
+- **On the CPU the kernel's algebra runs on SIMD lanes, so it must stay generic
+  in its number type** (added 2026-10-05). Everything `gh_rhs_head` and
+  `gh_rhs_pi` reach — `metric_quantities`, the lean source, `metric_divergences`,
+  the gauge sources, the damping and dissipation profiles' *results* — is evaluated
+  with `T = Vec{W,T}`, which is not a `Number`. So: **no branch on a computed value**
+  (`if x > 0`, `?:` — a lane condition has a value per lane; use `_select`, and
+  `_anynonzero` for "is it zero"); **no scalar times a static array** (`a * M`;
+  use `_scale`, which is also closure-free for a device); **no literal converted to
+  `T`** (`SMatrix{4,4,T}(-1, 0, …)`; use `one(T)`, `zero(T)`, `T(x)`). A violation
+  is a `MethodError` or a `TypeError` at the first CPU evaluation, which
+  `test/simd_tests.jl` makes on every branch. Two consequences to know: a lane's
+  `sqrt` is the instruction, so a degenerate metric in the evolved region gives a
+  `NaN` (read by the record's `finite` and the next chunk's speed check) where the
+  scalar code throws a `DomainError` — `simd_width = 1` restores the throw; and the
+  lanes are the scalar kernel to **roundoff, not bits** (StaticArrays' `muladd`s are
+  fused into FMAs by context): bitwise on the gauge wave, 1.0–2.0 eps of the terms
+  on a hole. Bit-identity across thread counts is unaffected — a block is one thread's.
 - **KernelAbstractions refuses a `return` statement anywhere in a kernel
   body**, closures included. That is why the streaming right-hand side
   lives in `gh_rhs_at_point`, a plain `@inline` function: the frozen
@@ -1847,7 +1938,9 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `wrap` / `ceilint` / `floorint` / `tofloat64` from `precision.jl`.
 - **Measured numbers go into `CODE.md`**, beside the prediction they
   confirm or correct, so a regression shows up as a changed number and
-  not as a test that merely still passes.
+  not as a test that merely still passes — those of the black hole's
+  interior, excision included, into `SINGULARITY_HANDLING.md`, and a
+  recommendation that changes into `CODE.md`'s table (2026-10-08).
 - **A refined octant is not the refined full box** (found 2026-10-02):
   vertex centering puts a refinement cube's plane `x = −R` on the fine level
   and `x = +R` on the coarse one, so the box's discretization is not
@@ -1903,6 +1996,22 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   provider "is" `Centered` is a claim about its contractions (`isequal`) and
   about `F` to roundoff, not bit for bit. A per-face rule added to the zone
   kernel must leave every point that is not a zone point on the `:none` call.
+- **Excision runs scalar on the CPU, and a lane must not load what its point
+  may not read** (proposed in the main merge, 2026-10-08). `main`'s kernel
+  evaluates `W` neighbouring points at once, and a group next to an excision
+  surface would hold zone or excised points beside centered ones. SIMD
+  arithmetic is lane by lane, so a discarded lane that read an excised `NaN`
+  would change no other lane's bits — and *no test of the results can see
+  it*: the planted-degenerate-metric claim passes either way. Today the
+  kernel's `W == 1 || INT === :excised` keeps every `:excised` point on the
+  scalar path; whoever gives excision lanes (future work, priced in
+  `CODE.md`) must mask the lanes that are not centered points rather than
+  evaluate a straddling group and fix it up afterwards — `SIMD.jl`'s masked
+  `vload`/`vstore` touch no memory in a masked lane, and a scratch prototype
+  of the merge (`MaskedLanes`) gave every centered point the `:none` lanes'
+  bits. A generated method a lane path calls needs an `:inline` meta: at
+  `Vec{W,T}` inference cannot fold its arithmetic, and a call per stencil
+  cost the lanes their whole gain until the weights got one.
 - **The zone kernel's mixed derivative is nested in one order** (measured in
   step X4): outer `i`, inner `j`, `i < j`, so near the surface `D_x D_y ≠
   D_y D_x` and the excised operator is not symmetric under `x ↔ y`, nor under
@@ -1999,8 +2108,8 @@ Match TreeAMR's, since the four packages are read together:
   step lands on `main` only after review.
 - `TODO.md`, when it appears, is Erik's personal to-do list. **Do not
   modify it.** It is gitignored.
-- `CODE.md`, `PLAN.md`, `README.md`, `notes/`, `src/`, `test/`,
-  `.github/` and this file are committed. `Manifest.toml` files,
+- `CODE.md`, `SINGULARITY_HANDLING.md`, `PLAN.md`, `README.md`, `notes/`, `src/`,
+  `test/`, `.github/` and this file are committed. `Manifest.toml` files,
   `bin/output/` and `docs/build/` are gitignored — no `Manifest.toml` is
   tracked, which is what makes the clean-checkout check above mean
   something.

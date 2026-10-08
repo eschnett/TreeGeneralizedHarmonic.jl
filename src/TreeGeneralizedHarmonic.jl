@@ -69,6 +69,9 @@ import IMEXRungeKutta as IRK
 using SpacetimeMetrics: AbstractMetric, GaugeWave, Harmonic, KerrSchild,
                         Minkowski, ShiftedMinkowski, dmetric, gauge_source_grad
 using StaticArrays: SArray, SMatrix, SVector
+# SIMD lanes for the right-hand-side kernel on the CPU (added 2026-10-05): `W`
+# neighbouring points along the first axis evaluated as one `Vec{W,T}`.
+using SIMD: Vec, vifelse, vload, vstore
 using Base.Cartesian: @nexprs, @ntuple
 
 # Devices
@@ -146,6 +149,7 @@ export dirichlet, has_outer_face, state_parity, even_parity, state_rotation,
 
 # Evolution
 export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate
+export default_simd_width
 export gh_step_limiter!, paste_interior!
 
 # Excision (step X2b): the classes, the closures, the zone kernel, the monitors
@@ -201,6 +205,9 @@ include("bounds.jl")
 include("gauge.jl")
 include("initialdata.jl")
 include("boundaries.jl")
+# Before `evolution.jl`, whose kernel evaluates `W` points at a time through it
+# (added 2026-10-05).
+include("lanes.jl")
 include("evolution.jl")
 # After `evolution.jl` (its providers extend `d1`, `d2`, `dmix`, `ko` and
 # `adv`, and its zone kernel calls `gh_rhs_at_point`), before the monitors

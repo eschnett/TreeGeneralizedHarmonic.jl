@@ -30,6 +30,10 @@ using TreeGeneralizedHarmonic
     # against broadcast, and the swap `evolve!` refills a moving hole's
     # target through, which no run in the suite reaches.
     include("stepping_tests.jl")
+    # The kernel on SIMD lanes (added 2026-10-05): after the runs' helpers, whose
+    # hole fixture it evaluates, and after `evolution_tests.jl`, whose `rhs_scale`
+    # it measures against.
+    include("simd_tests.jl")
     # Step 4's four. They come after `evolution_cases.jl` because all of
     # them are runs; `threading_tests.jl` is last because it starts a
     # subprocess, and a failure anywhere above is cheaper to read than a

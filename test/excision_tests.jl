@@ -35,11 +35,12 @@ const TGHx = TreeGeneralizedHarmonic
     # rebinds it — every `setup` until step X6 replaced the fixture's
     # problem with the one it built, or with a half-built field set where it
     # refused (no testset read them afterwards until X6's).
-    function setup(c; interior=c.interior, perturb=nothing)
+    function setup(c; interior=c.interior, perturb=nothing, simd_width=nothing)
         local U = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3))
         fill_exact!(U, c, zero(T); interior=interior)
         perturb === nothing || perturb(U)
-        local p = GHProblem(U, GhostSchedule(U, ops), c; q=q, interior=interior)
+        local p = GHProblem(U, GhostSchedule(U, ops), c; q=q, interior=interior,
+                            simd_width=simd_width)
         local u = statevector(U)
         gather!(u, U)
         return p, u
@@ -343,6 +344,48 @@ const TGHx = TreeGeneralizedHarmonic
               "by at least $zmin"
         @test worst ≤ 512 * eps(T) * scale
         @test zmin > 1e6 * 512 * eps(T) * scale
+    end
+
+    @testset "the excised right-hand side runs scalar on the CPU, whatever the problem's SIMD width" begin
+        # Guards the routing of the merge with `main`'s SIMD lanes (proposed
+        # in the main merge, 2026-10-08): an `:excised` problem keeps the
+        # host's lane width like any other, and the kernel must still give
+        # every point of it the scalar path, `W = 1`'s. Sent down the lanes,
+        # a group that straddles the surface would load excised values into
+        # its lanes and the `:none` branch's operator onto zone points, and
+        # every centered group would differ from the scalar code in the last
+        # bits (StaticArrays' `muladd`s fuse differently on lanes,
+        # `test/simd_tests.jl`: 1–207 eps of each variable's largest `|du|`
+        # here). So the claim is the `W = 1` problem's `du` — bit for bit on
+        # the development machine, and held to 64 eps of each variable's
+        # largest `|du|` where two specialisations of one body round apart
+        # (`CLAUDE.md`, "Two spellings of one expression").
+        @test p.valsimd === Val(default_simd_width(T, TGHx.CPU(), N))
+        @test p.valsimd !== Val(1)
+        p1, u1 = setup(case; simd_width=1)
+        @test p1.valsimd === Val(1) && isequal(u1, u)
+        @test p1.excision.classes == ex.classes
+        du1 = fill!(similar(u), T(NaN))
+        gh_rhs!(du1, u, p1, zero(T))
+        A1 = statearray(du1, p1.U)
+        vscale = [maximum(abs, A[:, :, :, v, :]) for v in 1:20]
+        worst = 0.0
+        zero_ = 0
+        for b in 1:nblocks(U), I in owned
+            if cls(ex, I, b) == TGHx.CLASS_EXCISED
+                zero_ += all(v -> A[I, v, b] === zero(T) && A1[I, v, b] === zero(T), 1:20)
+            else
+                worst = max(worst, maximum(v -> abs(A[I, v, b] - A1[I, v, b]) / vscale[v],
+                                           1:20))
+            end
+        end
+        bitwise = isequal(du1, du)
+        @info "the excised kernel at W = $(typeof(p.valsimd).parameters[1]) against " *
+              "W = 1: " * (bitwise ? "bit for bit" :
+                           "within $(worst / eps(T)) eps of each variable's largest |du|")
+        @test !any(isnan, du1)
+        @test zero_ == ex.nexcised
+        @test bitwise || worst ≤ 64 * eps(T)
     end
 
     @testset "an excised sphere and a FittedInterior holding it are one operator" begin

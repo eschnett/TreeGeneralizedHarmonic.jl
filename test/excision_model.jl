@@ -3,8 +3,9 @@
 # inside the horizon — before a kernel is written (X1, Kerr-Schild `a = 0`),
 # and which closure holds the spinning hole's frame-dragged faces, where the
 # shift points into the excised set (X5, Kerr-Schild `a = 3/5`). Run by hand,
-# with its numbers recorded in `CODE.md` under "Excision" and, in "Measured
-# results", "Excision: the analysis (step X1)" and "Excision: the
+# with its numbers recorded in `CODE.md` under "Excision" and, in
+# `SINGULARITY_HANDLING.md` (in `CODE.md`'s "Measured results" until
+# 2026-10-08), "Excision: the analysis (step X1)" and "Excision: the
 # frame-dragged faces (step X5)".
 #
 # It is a **script and not a test**, in the manner of `test/dispersion.jl`,

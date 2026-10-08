@@ -52,8 +52,31 @@
 "Number of independent components of a symmetric 4×4 tensor."
 const NC = 10
 
-@inline _η4(::Type{T}) where {T} =
-    SMatrix{4,4,T}(-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+# Spelled with `one(T)` and `zero(T)` rather than integer literals converted to `T`
+# (amended 2026-10-05): the right-hand-side kernel evaluates this algebra on SIMD
+# lanes as well (`lanes.jl`), and a `Vec` converts from a scalar only by its
+# constructor.
+@inline function _η4(::Type{T}) where {T}
+    o, z = one(T), zero(T)
+    return SMatrix{4,4,T}(-o, z, z, z, z, o, z, z, z, z, o, z, z, z, z, o)
+end
+
+# The three things the kernel's algebra asks of its number type beyond arithmetic
+# (added 2026-10-05, for the SIMD lanes of `lanes.jl`, which give each its `Vec`
+# method): a scalar times a static array, entry by entry; whether a value is
+# nonzero, which for lanes is "in any lane"; and a branch-free choice between two
+# values. A lane type is not a `Number`, so StaticArrays' `a * M` does not take it,
+# and a lane condition cannot steer an `if`.
+#
+# `_scale` is generated so that the products are written out: an `ntuple` closure
+# is a call on a device (`CODE.md`, "The right-hand side on an H200"). It forms the
+# same products as `a * M`.
+@generated function _scale(a, M::SArray{S,T,N,L}) where {S,T,N,L}
+    ex = Expr(:tuple, (:(a * M[$k]) for k in 1:L)...)
+    return Expr(:block, Expr(:meta, :inline), :(@inbounds SArray{S}($ex)))
+end
+@inline _anynonzero(x::Number) = !iszero(x)
+@inline _select(c::Bool, x, y) = ifelse(c, x, y)
 
 # Symmetric 4×4 from the 10 packed components in pack_g order
 # (column-major lower-triangular: tt, tx, ty, tz, xx, xy, xz, yy, yz, zz).
@@ -603,15 +626,16 @@ algebra, tested against the second as the second is against the port.
         _slot(Gp, (n - 1) % 4 + 1, (n - 1) ÷ 4 + 1) *
         _slot(Γ[c], (n - 1) % 4 + 1, (n - 1) ÷ 4 + 1)))
     S = S + SVector{NC,T}(@ntuple 10 n -> _lean_gamma_terms(Γ, Γup, D, Hl, dHl, Val(n)))
-    # (3) the damping, with t_a = −α δ_a^t.
-    if γ0 != 0
+    # (3) the damping, with t_a = −α δ_a^t. On SIMD lanes the question is whether any
+    #     lane damps; a lane whose rate is zero then adds `0 · Z`, which is `±0`.
+    if _anynonzero(γ0)
         GH = SVector{4,T}(@ntuple 4 c -> _fold4(@ntuple 4 x -> _slot(Gp, c, x) * Hl[x]))
         Cup = Γup + GH
         Cl = SVector{4,T}(@ntuple 4 c -> _fold4(@ntuple 4 x -> _slot(gp, c, x) * Cup[x]))
         tC = -α * _fold4(@ntuple 4 x -> _slot(Gp, 1, x) * Cl[x])
         S = S + SVector{NC,T}(@ntuple 10 n -> _lean_damping(Cl, tC, α, gp, γ0, γ2, Val(n)))
     end
-    return -(α * sqrtγ) * S
+    return _scale(-(α * sqrtγ), S)
 end
 
 # The `a`-th row and column of `C2 + C2ᵀ`, with `C2[a, b] = Σ_μν Cuu_μν ∂_μ g_νb` and

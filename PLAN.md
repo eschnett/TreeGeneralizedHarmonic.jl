@@ -5,7 +5,16 @@ time. The **design** lives in `CODE.md` — read it first, in full; it is
 authoritative, and this file is only the work breakdown: what each step
 changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
-last milestone is marked *(Done.)* in `CODE.md`.
+last milestone is marked *(Done.)* in `CODE.md`. **(Amended 2026-10-08:**
+the measured results of the interior — step 5's layer, steps 8a–8′, and the
+open questions they answered — moved from `CODE.md` to
+`SINGULARITY_HANDLING.md`; where
+a brief below says "`CODE.md`, Measured results" or "Open questions" for
+those, read `SINGULARITY_HANDLING.md`.**)** **(Amended 2026-10-08**, when
+`main` was merged into the excision round: so did the excision round's own
+entries, steps X1–X7 — `SINGULARITY_HANDLING.md`, "Excision, steps X1–X7";
+`CODE.md` keeps "Excision", the design, with each step's "What step X…
+built" and "… measured".**)**
 
 **Steps 0–7, 8a–8f and 8c′ are done; the generic interior is *(Done.)*
 and step 8g is not needed (`:fitted` reaches `50 M` on 8f's first row).
@@ -47,6 +56,9 @@ shallow surface (`r_E = 17/15`) fails at a lego corner at the pole — cure
 found on a scratch copy, not built. The spinning round is complete; the next
 (proposed in step X7: the polar corner, then `a = 9/10` on the tracked
 surface, then moving holes) is Erik's decision.**
+**`main` (`9ab2178`: the CPU's SIMD lanes, `SINGULARITY_HANDLING.md`) is
+merged into the integration branch (2026-10-08): `:excised` runs scalar on the
+CPU, and the suite passes (7138 at one thread, 7146 at four).**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each

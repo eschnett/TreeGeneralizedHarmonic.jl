@@ -167,10 +167,21 @@ end
 # of something far below anything this package measures. Doing it the other
 # way, converting in the generator, is what the header comment records as
 # failing at `Float32x2`.
+#
+# The body carries an explicit `:inline` meta (amended 2026-10-08, in the merge
+# of `main` into the excision round). For an IEEE `T` inference folds the call
+# to a constant anyway; for SIMD.jl's `Vec{W,T}`, whose division it cannot fold,
+# the method was a call returning the vector through memory — once per `gh_rhs_head`
+# and `gh_rhs_pi` in `main`'s kernel, but once per stencil through the stencil
+# provider's `Centered`, which forms its weights inside each method: the merged
+# kernel on lanes measured 1.47 s where `main`'s took 1.03 (the hole of
+# `bench/stepping.jl`, one thread), as slow as the scalar kernel. Inlined, the
+# splats and their division are constants for LLVM, at every call site.
 function _weight_expr(ws::Vector{StencilRational})
     entries = [:(T($(Int(numerator(w)))) / T($(Int(denominator(w)))))
                for w in ws]
-    return :(SVector{$(length(ws)),T}($(entries...)))
+    return Expr(:block, Expr(:meta, :inline),
+                :(SVector{$(length(ws)),T}($(entries...))))
 end
 
 """
@@ -709,7 +720,7 @@ plain function converts in the caller's world at every type.
 
 `:msn` is the default because it is the closure that keeps the damping
 sign in the `l²` norm on any excised pattern (`CODE.md`, "Excision", and
-"Excision: the analysis (step X1)" under "Measured results").
+`SINGULARITY_HANDLING.md`, "Excision: the analysis (step X1)").
 """
 function closure_table(::Type{T}, ::Val{q};
                        dissipation::Symbol=:msn) where {T,q}
