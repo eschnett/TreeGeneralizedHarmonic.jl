@@ -7014,6 +7014,57 @@ switches**)**. Each row is run A's mesh at `h = 1/96`, changed in one thing:
   `:damped` layer at `m = 12` (G2) has none of this. So at `a = 9/10`
   `:fitted` has no margin that works so far: `24` cells is unstable on the
   axis, `12` leaks; whether one in between does is the next screen.
+  (It does — `16` to `20`, below; amended 2026-10-08.)
+
+**The margin screen, `m = 16–20` (measured 2026-10-06/07**, jobs 570817–570822
+and 570861/2, `spin-sync/` with its experimental switches off — the committed
+`e1bb8eb`'s code**)**. A's mesh at `h = 1/96`, `n_L = 36`, `lmax_fit = 12`,
+`fit_cont = 1`; each margin once as `:fitted` to `32 M` (`8 h` on an H200) and
+once as the same tracked geometry with the exact target (`variant = :damped`,
+as G2 and A6) to `6 M`, `18` and `20` continued to `12 M`. "Outside" is the
+first shell, `1.69 ≤ r < 2.25`, at the run's last time; `J` is read against B's
+`0.9000069` (the finder at this resolution). `octant_runs.jl`'s band inside the
+horizon starts at the equatorial radius less `m h` and so misses the evolved
+points near the poles, where A's mode lives: the global L∞ and the location
+script (`locate.jl` in `spin-a06-cpu/out/study`, which bins the finest level by
+depth and polar angle) are what see it.
+
+| `m` | the geometry, exact target | `:fitted`: `ℋ` outside | its error | `J − J_B` | `dJ/dt` from `16 M` |
+|---|---|---|---|---|---|
+| 12 (G2, A7) | clean | `1.85·10⁻⁴` | `4.7·10⁻⁵` | `−2.8·10⁻⁵` | `−1.6·10⁻⁷/M` |
+| 16 | clean, `ℋ∞` `4.7·10⁻⁶` | `8.8·10⁻⁵` | `9.9·10⁻⁶` | `+3.3·10⁻⁶` | `−6·10⁻⁹/M` |
+| 18 | clean, `4.4·10⁻⁶` to `12 M` | `4.9·10⁻⁵` | `7.8·10⁻⁶` | `−3.9·10⁻⁶` | `−2·10⁻⁹/M` |
+| 20 | a bounded ring at the pole, `6.4·10⁻⁵` | `2.5·10⁻⁵` | `5.0·10⁻⁶` | `+2.5·10⁻⁶` | `+9·10⁻⁹/M` |
+| 24 (A6, A) | grows `10×` per `M` from `1 M` | `8.3·10⁻⁶`, the axis from `18 M` | `1.3·10⁻⁶` | `+2·10⁻⁷` | — |
+| B (sphere) | — | `4.2·10⁻⁸` | `1.1·10⁻⁷` | `0` | `2.4·10⁻⁹/M` |
+
+- **All three `:fitted` rows are stable to `32 M`**, stationary in every norm
+  from `12–16 M`: through A's onset at `18 M` the gauge constraint's L∞ stays
+  at `4.4–4.7·10⁻⁴` (A's rose from `3.65·10⁻⁴` at `16 M`), every find
+  succeeds, and `M_irr` is B's to `10⁻⁷`. Located from the `12` and `32 M`
+  checkpoints, their largest violation is on the equator at the offset
+  surface — the target's mismatch, `|C_a| ≈ 6·10⁻⁴`, as in A7 — and near the
+  pole (`|cos θ| ≥ 0.9`) at that depth it is a quarter of that (`|C_a|`
+  `1.6`, `1.4`, `1.2·10⁻⁴` for `m = 16, 18, 20`), every bin the same at `12`
+  and `32 M` to two digits; A's precursor, a ring just off the axis, never
+  appears.
+- **The geometry's polar mode switches on between `18` and `20` cells.** With
+  the exact target `m = 16` and `18` are G2's clean layer (near the pole at the
+  offset surface `ℋ` `1.4–1.6·10⁻⁷`, `|C_a|` `0.7–1.1·10⁻⁸`, the largest
+  violation the ordinary one on the equator), while `m = 20` grows a ring
+  `0.11` off the axis at the offset surface (`z = 1.22`, `|cos θ| = 0.995`) —
+  A's precursor at `22 M` — to `ℋ` `6.3·10⁻⁵` by `6 M`, `400×` its
+  neighbours', and then holds it there to `12 M`; A6 at `24` grows without
+  bound. In the `:fitted` row at `m = 20` that ring is far below the target's
+  own mismatch in the same bin (`ℋ` `5.7·10⁻³`), and nothing grows to `32 M`.
+- **The leak falls `1.8–2×` for every two cells of margin from `16` to `20`**
+  (`2.1×` from `12` to `16`, `3×` from `20` to `24`), and `J` stops
+  drifting: after an offset of `±3·10⁻⁶` set in the first `8 M` (not
+  monotonic in `m`), it is flat to `|dJ/dt| ≤ 9·10⁻⁹/M` from `16 M`, where
+  A7's still drifts at `−1.6·10⁻⁷/M`. So at `a = 9/10`, `h = 1/96`, `:fitted`
+  works at `m = 16–20` — `18` is the deepest margin whose geometry is clean —
+  at a price outside the horizon that no margin here removes: `ℋ` `600–2100×`
+  B's and the error `50–90×`.
 
 ## Possible extensions
 
