@@ -55,7 +55,8 @@ four digits at `1/48`), its `J` drifts as the layer's does (`1.03×`), and a
 shallow surface (`r_E = 17/15`) fails at a lego corner at the pole — cure
 found on a scratch copy, not built. The spinning round is complete; the next
 (proposed in step X7: the polar corner, then `a = 9/10` on the tracked
-surface, then moving holes) is Erik's decision.**
+surface, then moving holes) — Erik's decision of 2026-10-08: **the polar
+corner, step X8 below, is next.**
 **`main` (`9ab2178`: the CPU's SIMD lanes, `SINGULARITY_HANDLING.md`) is
 merged into the integration branch (2026-10-08): `:excised` runs scalar on the
 CPU, and the suite passes (7138 at one thread, 7146 at four).**
@@ -2170,6 +2171,117 @@ back (Erik's instruction of 2026-10-06 for X3's).
 
 **Accept**: every row run or its failure diagnosed; the tables in `CODE.md`;
 the suite green at one and four threads.
+
+## Step X8 — The polar corner: shave the lego corners (added 2026-10-08)
+
+Erik's decision of 2026-10-08, after X7: **continue with the corner cure.**
+`CODE.md`: "Excision", above all X7's "What step X7 measured, and the
+recommendation", with its diagnosis of the polar corner; and
+`SINGULARITY_HANDLING.md`, "Excision, steps X1–X7", the entry "Excision of the
+static spinning hole (step X7)" with its table of variants. (From the merge
+with `main` on 2026-10-08, new measured results for excision go into
+`SINGULARITY_HANDLING.md`, design amendments into `CODE.md`'s "Excision", and
+a changed recommendation into `CODE.md`'s "Single black holes: recommended
+settings". Everything excised runs scalar on the CPU (`W = 1`, Erik's
+guidance), so a change to the classes needs nothing from `src/lanes.jl`.)
+
+**The failure** (diagnosed in step X7):
+- Kerr-Schild `a = 3/5` on the rotating octant at `h = 1/24`, excised at
+  `r_E = 17/15` (16 cells below the poles) or `21/20`, grows at about
+  `2/M` from `2 M` and ends near `4.5–5 M`.
+- The growing points are zone points on the rim of the excised ball's
+  topmost lattice layer at the pole, `(3h, 2h, 27h)` and its image, whose
+  inward neighbours along all three axes are excised (`k⁻ = 0` on every
+  axis). Frame dragging nearly cancels the shift along the nearly tangent
+  axis there (`b/a = +0.011`).
+- It is not the frame-dragged rule (no rule bit), nor noise, the nested
+  mixed derivative or the blend. `ε_KO = 1` halves the rate; widening the
+  rule makes it worse.
+- It is the staircase's lottery: absent at `a = 0`, at `h = 1/32`, and at
+  `r_E = 1.10, 1.15`.
+
+**The cure, on a scratch copy:** excise every point whose inward
+neighbours along all three axes are excised. That was about 200 points of
+the octant's band at `1/24`. It made `17/15` and `21/20` stationary to `8 M`
+and left `r_E = 4/5` unchanged. The scratch patch is
+`.claude/worktrees/step-x7/bin/output/x7/local/pkg-shave.diff`, with the
+diagnostic script `diag_surface.jl` and the logs beside it. It changed only
+the classes' excised bit, and its "inward" was the sign of each coordinate,
+correct only for a hole at the origin.
+
+**Changes:**
+1. **The shave as a property of the excised set**, decided once at the
+   build, on both geometries (the sphere and the frozen tracked surface).
+   - A point is excised if the geometry excises it, **or** if its three
+     neighbours one step toward the excision center along each axis are
+     all excised.
+   - "Toward the center" is per axis from `x − c`. A coordinate on the
+     center's plane has no inward neighbour along that axis and is not
+     shaved by it.
+   - Decide whether one pass suffices or the rule is iterated to a fixed
+     point, and say which.
+   - The classes stay the single source of truth, and **everything that
+     asks "is it excised" agrees with them**:
+     - the zone kernel's classes and counts;
+     - the census and the frame-dragged rule bits and direction codes;
+     - `monitor_mask` and `interior_mask` (the error, the speed, the
+       non-finite count, the validity rows);
+     - the horizon finder's footprint guard;
+     - the core rule;
+     - `octant_runs.jl`'s noise exclusion.
+
+     If a mask is position-based, build it from the shaved set: for
+     example, the masks consult the classes, or the shave is expressed as
+     a geometric predicate every mask can evaluate. Say which, and why.
+   - The rotating octant's seam and the mirror: the shave must give
+     classes consistent across the seam (X4's test) and through the
+     reflecting faces.
+2. **A switch** in `Excision(T; …)` (e.g. `shave = true`, on by default), so
+   the X3/X7 behaviour can still be compared, with a legacy `repr` so that
+   older checkpoints restart (X2b's and X6's pattern).
+3. **The record** reports the shaved points' count.
+
+**Tests** (claims, priced):
+- with no shaved point, everything is bit for bit as before: the exterior,
+  the classes, `du`. For example, `a = 0` at `r_E = 4/5` if it has none;
+  otherwise say what it has;
+- the shaved set is exactly the rule's enumeration on the host;
+- the masks and the classes agree point by point;
+- a planted degenerate metric in the (shaved) excised set leaves every
+  non-excised `du` `isequal`;
+- the classes agree across the rotating seam;
+- a short run is finite.
+
+**The lottery, measured:**
+- every `r_E` of X5's window (`0.65 … 1.70`, finely enough to meet both cap
+  configurations X7 found) at `h = 1/24, 1/32, 1/48`, built and run to
+  `10 M` on the small rotating octant (`L = 8`, the same spacing at the
+  hole), which X7 found reproduces the H200 rows bit for bit at minutes a
+  row on the CPU — with and without the shave;
+- one H200 row at `r_E = 17/15`, `h = 1/24`, to `24 M`, with the shave;
+- `r_E = 4/5` at `1/32` against X7's production row, to show what the
+  shave changes there.
+
+If the shave does not hold at some lattice, a frozen-coefficient spectrum
+of a patch around the cap (X1's and X5's model machinery, in 3D, small) is
+the analysis that says why; record it and stop for Erik.
+
+**Mechanics:**
+- SimWatch status for every simulation;
+- Symmetry in a directory of its own, at most 8 CPUs on the H200 debug
+  QOS, Erik's jobs untouched;
+- delete the checkpoints once the data are copied back (Erik's standing
+  instruction).
+
+**Accept:**
+- the above;
+- the suite green at one and four threads;
+- `CODE.md` amended **(amended in step X8)**;
+- a measured-results entry, "The polar corner (step X8)", in
+  `SINGULARITY_HANDLING.md`;
+- a recommendation for what follows: `a = 9/10` on the tracked offset
+  surface (X7's plan: an `m` scan at `h = 1/48`, about 7 H200-hours with
+  production), then moving holes.
 
 ## Step 9 — Infrastructure and the H200 (G6)
 
