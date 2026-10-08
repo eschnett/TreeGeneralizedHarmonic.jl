@@ -7,6 +7,15 @@ layer, steps 8a–8′, the single holes on the octant — are in
 settings they recommend for a single hole are `CODE.md`'s "Single black
 holes: recommended settings". This file is only about mechanics.
 
+**Contents**
+
+- [What this package is](#what-this-package-is)
+- [Current state](#current-state)
+- [Commands](#commands)
+- [Things that will bite](#things-that-will-bite)
+- [Conventions](#conventions)
+- [Repository facts](#repository-facts)
+
 ## What this package is
 
 The third downstream application of
@@ -385,6 +394,45 @@ seam unchanged. `test/rotation_tests.jl` is its file (29 claims, `9.4 s` at
 four threads inside the suite, which then measured **4824 assertions in
 13m21**); `CODE.md`, "The rotating octant", has the numbers.
 
+From 2026-10-05 the right-hand side is **fast on a device**. `CODE.md`, "The
+right-hand side on an H200", found the kernel uninlined and spilling at 8.5 ns a
+point on an H200, and it now runs at 1.1, and 1.7× faster on the CPU. What changed:
+
+- **`pointwise.jl`** has `gh_node_source_lean`: the source held by unique
+  components, phase-ordered and unrolled by `@ntuple`, a third spelling tested
+  against `gh_node_source`. Beside it, `metric_divergences` forms the two
+  contractions of `metric_derivatives` the kernel reads.
+- **`evolution.jl`** splits the body:
+  - `gh_rhs_head` — the state, `∂h`, the coefficients, `∂ₜh`, the source and the
+    divergences;
+  - `gh_rhs_pi` — one Π component.
+
+  The kernel without an interior stores as it goes (`gh_rhs_store!`); the
+  interior variants collect through `gh_rhs_at_point`. `axis_stencil` and
+  `mixed_stencil` are `@generated`.
+- **The investigation's prototypes** are `bench/rhs_lab.jl` and its companions
+  (see "Commands").
+
+From 2026-10-05 the right-hand side runs on **SIMD lanes on the CPU** (`CODE.md`,
+"The right-hand side on a CPU"): the kernel evaluates `W` neighbouring points along
+the first axis at once as SIMD.jl's `Vec{W,T}` (SIMD.jl is a dependency), through the
+package's own algebra, on every branch — no hole, a hole's evolved region (a group
+with a point in the layer or the core falls back to the scalar code point by point),
+the sampled and the algebraic gauge sources. `W` is the sixth kernel `Val`, chosen by
+`GHProblem` (`default_simd_width`: 4 `Float64` on AVX2 and aarch64, 8 with AVX-512,
+1 on a device or for a software type; `simd_width = 1` asks for the scalar kernel,
+also through `evolve!`). A row that `W` does not divide ends in an **overlapping**
+group. `src/lanes.jl` has the width, `Lanes` (an array read `W` elements at a time)
+and the leader rule; the kernel's body is `gh_rhs_point!` (one point) and
+`gh_rhs_lanes!` (a group). `pointwise.jl`'s algebra and the algebraic source asked
+three things of their number type that a `Vec` lacks, now spelled `_scale`,
+`_anynonzero` and `_select`. `test/simd_tests.jl` is its file, and
+`bench/rhs_cpu_lab.jl` the lab that measured it. Measured: the kernel 2.2–2.4× on
+Zen 3 (four lanes) and 2.2–2.8× on Skylake-AVX512 (eight), the gauge wave's RK4 step
+1.42× at 64 threads; the hole fixture's step only 1.08×, because on a refined mesh
+TreeAMR's prolongation is 145 of a 200 ms `gh_rhs!` — that, not the kernel, is a
+hole's next lever. Devices run the `W = 1` kernel at PR #4's speed.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -458,7 +506,22 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4690 assertions in 18m43** at one thread and **4698 in
+The suite is **4907 assertions in 15m32** at four threads after the lean
+right-hand side (2026-10-05, development machine loaded 9–12; the one-thread
+suite was not rerun). It also passes on an EPYC node, x86-64, where the
+contraction differences live (Symmetry cn079, 26m21 at four threads). Its 112 new claims are the two kernel spellings:
+
+- their identity with the port on every background
+  (`pointwise_identity_tests.jl`);
+- their allocation and their kernel launch (`pointwise_tests.jl`);
+- their types, `Float32x2` included (`type_tests.jl`).
+
+One claim was relaxed: `evolution_tests.jl`'s dissipation switch, from `1e−290`
+everywhere to roundoff of each component. Its two specialisations now round a
+product of two roundoff-sized numbers differently (`1.9e−68` on components that
+are zero).
+
+The suite was **4690 assertions in 18m43** at one thread and **4698 in
 12m59** at four after TreeAMR 0.1.4's two features (2026-10-01, on a machine
 loaded 6–10 by other work — read the times against that): `mesh_mapreduce`
 changed no count, and `checkpoint_tests.jl` is 78 new claims in `2m02` /
@@ -755,6 +818,34 @@ placements) in a scratch copy with `OrdinaryDiffEqLowOrderRK` and
 
 ```bash
 BENCH_MODE=step BENCH_CASE=wave,hole julia --project=. -t 4 bench/stepping.jl
+```
+
+The GPU right-hand-side prototypes (added 2026-10-05) are `bench/rhs_lab.jl`:
+`key=value` options, one mode per round of `CODE.md`'s "The right-hand side on an
+H200", listed in its header. Like `bench/stepping.jl` on a device, it runs from a
+copy with `CUDA` added — on Symmetry `rhs-gpu-lab`, one H200 a job in `h200debugq`.
+`bench/rhs_lab_source.jl` is the lean source it measures. `bench/rhs_lab_cpu.jl`
+checks and times that source on the CPU in the package's own environment, and
+`bench/sass_stats.jl` counts the instructions of a SASS dump it writes:
+
+```bash
+julia --project=. bench/rhs_lab.jl mode=round9 N=32 roots=8
+```
+
+```bash
+julia --project=. bench/rhs_lab_cpu.jl
+```
+
+The CPU right-hand-side lab (added 2026-10-05) is `bench/rhs_cpu_lab.jl`, the
+measurements of `CODE.md`'s "The right-hand side on a CPU": where `gh_rhs!` goes,
+the kernel at each SIMD width (`simd_width`), checked against the scalar one, the
+stencils without their zero weights (`LAB_ZW=1`), the native code, the head's pieces
+and a profile of the ghost fill — modes and variables in its header; `LAB_CASE=hole`
+for the hole fixture. It runs in the package's own environment, pinned on Symmetry as
+`bench/stepping.jl` is; `BENCH_SIMD=1` gives `bench/stepping.jl` the scalar kernel:
+
+```bash
+LAB_MODE=breakdown,simd julia --project=. -t 4 bench/rhs_cpu_lab.jl
 ```
 
 **On Symmetry** (added in step 6, and step 9 writes the batch job for
@@ -1275,14 +1366,34 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `Float64`'s expense. The type-generic discipline stays anyway: a
   decimal literal in a `T` expression is a leak — `T(1//2)`, not `0.5`;
   `oftype(x, 2)` inside closures.
-- **The RHS kernel is written in streaming order, and stays that way.**
-  Coefficients and `∂_i h` once per point; then per component, stencils
-  formed and consumed immediately; then the source. Never build an
-  `SVector` of all derivatives — that is about 140 `Float64` values,
-  over a GPU thread's 255 registers, and it spills. GHAccel's ten-field
-  kernel fit only as fully scalarised generated code; spills show as
-  `ld.local` in the PTX. GPU kernel *efficiency* beyond this order is a
-  research project, not a milestone; G6 measures, it does not tune.
+- **The RHS kernel is written in streaming order, and stays that way**
+  (amended 2026-10-05).
+  - **The head, once per point:** the state, `∂_i h`, the coefficient set,
+    `∂ₜh` (stored at once), the source and the two divergences.
+  - **Then a run-time loop over the ten Π components,** each formed from its own
+    stencils, combined and stored. Nothing of `F` stays live longer than it
+    takes to store it.
+  - **The source comes before the Π components.** Computed last, as until
+    2026-10-05, it was live with the ten accumulators and spilled.
+
+  Never build an `SVector` of all derivatives: that is about 140 `Float64`
+  values, over a GPU thread's 255 registers, and it spills. GHAccel's ten-field
+  kernel fit only as fully scalarised generated code. Spills show as `STL`/`LDL`
+  in the SASS (`bench/sass_stats.jl`).
+- **On a device a closure is a call** (found 2026-10-05).
+  - **Why:** KernelAbstractions' default `CUDABackend()` does not force inlining,
+    and TreeAMR launches with it whatever backend a field set was built with.
+  - **What becomes a call** in a kernel's path: an `ntuple(Val(n)) do … end`, a
+    StaticArrays generator `SVector(f(i) for i in 1:3)`, or a `@generated`
+    method whose body lacks an `:inline` meta. Its `SVector` arguments then
+    travel through the stack: 8 KB of local memory a thread, and most of the
+    right-hand side's 8.5 ns a point before 2026-10-05.
+  - **How to write kernel-path code instead:** `Base.Cartesian.@ntuple`/`@nexprs`
+    with literal counts, small tuples spelled out, and a generated body returning
+    `Expr(:block, Expr(:meta, :inline), …)`.
+  - **The symptom** is a `CALL` to `julia_…` in the SASS
+    (`bench/rhs_lab.jl mode=baseline` writes it, `bench/sass_stats.jl` counts it).
+    On the CPU the same closures cost 7× (`bench/rhs_lab_cpu.jl`).
 - **Hooks depend on time.** `dirichlet(case, t)` is built at each call.
   It goes to `fill_ghosts!` inside the RHS, to `regrid!`, and to
   `adapt_to_initial_data!`, each with that call's `t`. Forgetting the
@@ -1305,9 +1416,10 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   platform's, not the physics'. `interior_tests.jl` asks for
   `g_tt = −1 + 2γ²M/δ` at a transverse offset `δ` instead.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
-  dissipation" and — from step 5 — the interior *variant* (`:none`,
+  dissipation", — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in
-  one parameter) are `Val` parameters built in `GHProblem`'s constructor.
+  one parameter) and — from 2026-10-05 — the SIMD width `W` are `Val`
+  parameters built in `GHProblem`'s constructor.
   Building them per evaluation recompiles or dispatches dynamically on
   every RK stage. The price is paid at compile time instead: a test row
   at a new `q` is a new kernel, which is most of what
@@ -1317,6 +1429,23 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   against it — and `with_interior` shares the field sets and the sampled
   gauge source rather than rebuilding the problem, which would re-sample
   `H_a`.
+- **On the CPU the kernel's algebra runs on SIMD lanes, so it must stay generic
+  in its number type** (added 2026-10-05). Everything `gh_rhs_head` and
+  `gh_rhs_pi` reach — `metric_quantities`, the lean source, `metric_divergences`,
+  the gauge sources, the damping and dissipation profiles' *results* — is evaluated
+  with `T = Vec{W,T}`, which is not a `Number`. So: **no branch on a computed value**
+  (`if x > 0`, `?:` — a lane condition has a value per lane; use `_select`, and
+  `_anynonzero` for "is it zero"); **no scalar times a static array** (`a * M`;
+  use `_scale`, which is also closure-free for a device); **no literal converted to
+  `T`** (`SMatrix{4,4,T}(-1, 0, …)`; use `one(T)`, `zero(T)`, `T(x)`). A violation
+  is a `MethodError` or a `TypeError` at the first CPU evaluation, which
+  `test/simd_tests.jl` makes on every branch. Two consequences to know: a lane's
+  `sqrt` is the instruction, so a degenerate metric in the evolved region gives a
+  `NaN` (read by the record's `finite` and the next chunk's speed check) where the
+  scalar code throws a `DomainError` — `simd_width = 1` restores the throw; and the
+  lanes are the scalar kernel to **roundoff, not bits** (StaticArrays' `muladd`s are
+  fused into FMAs by context): bitwise on the gauge wave, 1.0–2.0 eps of the terms
+  on a hole. Bit-identity across thread counts is unaffected — a block is one thread's.
 - **KernelAbstractions refuses a `return` statement anywhere in a kernel
   body**, closures included. That is why the streaming right-hand side
   lives in `gh_rhs_at_point`, a plain `@inline` function: the frozen
@@ -1431,6 +1560,10 @@ Match TreeAMR's, since the four packages are read together:
 - Spec-first: when the implementation shows `CODE.md` was wrong or
   incomplete, amend it and say so in it — "(amended in step N)",
   "(measured in step N)" — rather than diverging silently.
+- `CLAUDE.md` and `CODE.md` open with a **table of contents** (added
+  2026-10-05) of every heading below the title. A heading added or renamed
+  goes into it, linked by GitHub's anchor: lowercase, backticks and
+  punctuation dropped (an en dash too), spaces to hyphens.
 
 ## Repository facts
 

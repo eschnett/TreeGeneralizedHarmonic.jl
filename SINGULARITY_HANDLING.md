@@ -2187,52 +2187,6 @@ asks for (measured in step 8e). Two findings for 8e-ii and G5: a moving
 hole's shift needs its constant term (`shift_constant = true`), and the
 evaluator costs `2.2 µs` a point at `L = 8`, twenty-three `u_exact`s.
 
-Still proposed, to be confirmed or amended by the milestones that
-first touch them:
-
-1. **The damping layer `(INTERIOR)` as the default interior**, against
-   the hard paste and the pure mask (G4, G5). The argument for it is
-   under [The interior](CODE.md#the-interior-a-pointwise-damping-layer); the
-   numbers are not yet.
-2. **The Löhner indicator on `h` with a global floor**, with the mask,
-   the level floor around the horizon and the ceiling at the boundary
-   (G4): whether calibrated thresholds carry from the static to the
-   moving hole, and whether the floor ever binds.
-3. **The streaming-order fused kernel** against the stencil/algebra
-   split, decided by measured spills and time (G2 on the CPU, G6 on the
-   H200); anything beyond the black-box attempts is research, not a
-   milestone. *G2's half is in*: the fused kernel runs at 1244 ns per
-   owned point at `q = 4` on one CPU thread, of which the pointwise
-   algebra is 505 ns and the stencils the rest, and the mesh pattern
-   around it adds another 616. A host CPU says nothing about spills, so
-   the question stays open for the H200; what G2 adds to it is that the
-   split it would be measured against is 3:1 and not 1:1.
-4. **In-kernel evaluation of `SpacetimeMetrics`** on the H200 (G6); the
-   structure does not depend on it, the cost does.
-5. **The defaults** — `q = 4`, `N = 32`, `cfl = 1/4`, `ε_KO = 0.5`,
-   `γ0 = 1/M` near the hole, `m = 8`, a layer of `2(G + 1)` spacings,
-   `ρ_max = 4/M` (`ρ_max · dt = 1` until 2026-09-23), the indicator's
-   thresholds — are starting values for G4–G6 to confirm or move. Three
-   of them survived G2 on flat space and on a gauge wave: `cfl = 1/4` (no
-   run needed less), `ε_KO = 0.5` (the noise test, and no order lost) and
-   `q = 4` as the development order (`q = 2, 6, 8` all run, at 0.5×, 1.3×
-   and 1.9× the cost of `q = 4`). None of that is yet a statement about a hole. Step 8a split
-   `m` into a stencil margin and a leakage margin, measured that `m = 8`
-   attenuates grid-scale content from `r_1` by `e^{−2.9}` to `e^{−4.6}` on
-   the fixture, and left the default where it is until step 8c says what
-   amplitude it has to hold back **(proposed in step 8a**; see [The
-   interior](CODE.md#the-interior-a-pointwise-damping-layer)**)**. Step 8c kept
-   `m = 8` — a smooth layer's wrong target leaves the exterior what the exact
-   one leaves — and replaced `ρ_max · dt = 1` by `ρ_max = 4/M` with a ramp of
-   `4G` cells, measured for an inexact target and **(proposed in step 8c)**
-   for the analytic one, where it cuts the `50 M` error sixfold. **Erik took
-   it on 2026-09-23** for every variant, the analytic `:damped` layer
-   included, and step 8c′ made `4/M` the code's default; the grid rate is
-   the option `ρ_max_factor` **(decided 2026-09-23)**. The ramp is not part
-   of that decision: it is the case's `r_0`, `r_1` and `ρ_ramp`, and the
-   suite's fixture keeps step 5's layer, a ramp of `4.8` cells, on which
-   step 8c measured the exact target at `4/M` to `50 M`.
-
 **The moving layer's trailing side (opened in step 8, answered in step
 8′).** On G5's chart the `:fitted` layer moving at `0.3` exported error
 through the side it leaves. Step 8′ tried the three levers step 8 named,

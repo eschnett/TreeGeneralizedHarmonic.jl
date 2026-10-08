@@ -69,6 +69,10 @@ import IMEXRungeKutta as IRK
 using SpacetimeMetrics: AbstractMetric, GaugeWave, Harmonic, KerrSchild,
                         Minkowski, ShiftedMinkowski, dmetric, gauge_source_grad
 using StaticArrays: SArray, SMatrix, SVector
+# SIMD lanes for the right-hand-side kernel on the CPU (added 2026-10-05): `W`
+# neighbouring points along the first axis evaluated as one `Vec{W,T}`.
+using SIMD: Vec, vifelse, vload, vstore
+using Base.Cartesian: @nexprs, @ntuple
 
 # Devices
 export hostcopy
@@ -78,6 +82,7 @@ export pack_g, pack_sym
 export metric_quantities, metric_derivatives, metric_derivatives_along
 export adm_from_metric, adm_vars_from_state, gauge_constraint_at_node
 export gh_node_rhs, gh_node_source, gh_node_rhs_expanded
+export gh_node_source_lean, metric_divergences
 
 # Stencils
 export derivative_weights, dissipation_weights, dissipation_rank
@@ -141,6 +146,7 @@ export dirichlet, has_outer_face, state_parity, even_parity, state_rotation,
 
 # Evolution
 export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate
+export default_simd_width
 export gh_step_limiter!, paste_interior!
 
 # The time integrator (IMEXRungeKutta's RK4 by block owner, 2026-09-26)
@@ -189,6 +195,9 @@ include("bounds.jl")
 include("gauge.jl")
 include("initialdata.jl")
 include("boundaries.jl")
+# Before `evolution.jl`, whose kernel evaluates `W` points at a time through it
+# (added 2026-10-05).
+include("lanes.jl")
 include("evolution.jl")
 # After `evolution.jl` and `bounds.jl`: the integrator couples `gh_rhs!` to
 # the two limiters (added 2026-09-26, replacing OrdinaryDiffEq's RK4).
