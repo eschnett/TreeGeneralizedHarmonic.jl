@@ -40,7 +40,13 @@ first — steps X4–X7 below. X5 is done and merged (2026-10-06): go for
 octant, and the merged suite passes (6952 at one thread, 6960 at four). X6
 is done and merged (2026-10-06): the frame-dragged rule and the symmetric
 zone mixed derivative; the `a = 3/5` smoke runs on the CPU and an H200. X7
-is next.**
+is done and merged (2026-10-08): the excised static `a = 3/5` hole at
+`r_E = 4/5` is the `:damped` layer outside the horizon from `h = 1/32` on (to
+four digits at `1/48`), its `J` drifts as the layer's does (`1.03×`), and a
+shallow surface (`r_E = 17/15`) fails at a lego corner at the pole — cure
+found on a scratch copy, not built. The spinning round is complete; the next
+(proposed in step X7: the polar corner, then `a = 9/10` on the tracked
+surface, then moving holes) is Erik's decision.**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
