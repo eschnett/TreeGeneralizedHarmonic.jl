@@ -268,7 +268,7 @@ using KernelAbstractions: CPU
     # and at `1/10 M` it has not — `:frozen`'s residual is then only 1.2
     # times `:damped`'s, the sticky wall and the sink not yet told apart. By
     # `1/2 M` `:damped` has saturated and `:frozen` is still growing
-    # linearly (`CODE.md`, "Measured results", step 8c′). The shell is not read there as well because `:pasted`'s
+    # linearly (`SINGULARITY_HANDLING.md`, "The default rate (step 8c′)"). The shell is not read there as well because `:pasted`'s
     # kink has by then grown it past the other two at *either* rate — the
     # surface failure step 5 measured at `17 M`, starting — which is a claim
     # about the paste and not the one this testset makes. `:pasted`'s

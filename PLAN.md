@@ -5,7 +5,12 @@ time. The **design** lives in `CODE.md` — read it first, in full; it is
 authoritative, and this file is only the work breakdown: what each step
 changes, what it must not change, and what it must measure and record.
 `CLAUDE.md` has the mechanics and the traps. Delete this file when the
-last milestone is marked *(Done.)* in `CODE.md`.
+last milestone is marked *(Done.)* in `CODE.md`. **(Amended 2026-10-08:**
+the measured results of the interior — step 5's layer, steps 8a–8′, and the
+open questions they answered — moved from `CODE.md` to
+`SINGULARITY_HANDLING.md`; where
+a brief below says "`CODE.md`, Measured results" or "Open questions" for
+those, read `SINGULARITY_HANDLING.md`.**)**
 
 **Steps 0–7, 8a–8f and 8c′ are done; the generic interior is *(Done.)*
 and step 8g is not needed (`:fitted` reaches `50 M` on 8f's first row).

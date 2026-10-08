@@ -1236,7 +1236,8 @@ the hole; the geometry is a function of the run.
   fit), `2` also curvatures, from the interpolant's Hessian (added
   2026-10-03). For `l = 0` the ansatz below the surface is then a quartic in
   `r` rather than a quadratic — the representation the spherical hole's
-  study pointed at (`CODE.md`, Measured results). The initial data's fit is
+  study pointed at (`SINGULARITY_HANDLING.md`, "Single holes on the
+  octant"). The initial data's fit is
   `evolve!`'s `fit_initial_cont`.
 
 `isbits`: the numbers that have a "use the rule" value spell it `0`, since a

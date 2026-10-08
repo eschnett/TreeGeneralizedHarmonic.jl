@@ -955,6 +955,13 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         "the mesh reflects at $(U.forest.reflecting) and the case at " *
         "$(case.reflecting): build the forest from the case (gh_forest, " *
         "hole_forest), which passes the case's faces."))
+    # And so is the seam (added 2026-10-04): a seam the case does not know of
+    # turns a solution with no such symmetry, and a seam the mesh lacks would
+    # hand the hook two faces the case has no data for.
+    seam_dims(U.forest) == seam_dims(case) || throw(ArgumentError(
+        "the mesh has the rotating seam $(something(seam_dims(U.forest), "none")) " *
+        "and the case $(something(seam_dims(case), "none")): build the forest " *
+        "from the case (gh_forest, hole_forest), which passes the case's seam."))
 
     # The gauge source's kind: none on a harmonic background, the closed form
     # where the case carries one (added 2026-10-02) — it is then the kernel
@@ -965,14 +972,16 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         case.gauge
     elseif HASH
         fs = FieldSet{T}(U.forest, 2NC; G=0, centering=U.centering,
-                         parity=even_parity(U.forest, 2NC), backend=backend)
+                         parity=even_parity(U.forest, 2NC),
+                         rotation=identity_rotation(U.forest, 2NC), backend=backend)
         sample_gauge_source!(fs, case.background, t; interior=interior)
         fs
     else
         nothing
     end
     diag = FieldSet{T}(U.forest, NDIAG; G=0, centering=U.centering,
-                       parity=even_parity(U.forest, NDIAG), backend=backend)
+                       parity=even_parity(U.forest, NDIAG),
+                       rotation=identity_rotation(U.forest, NDIAG), backend=backend)
 
     origins = to_backend(backend, block_origins(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))

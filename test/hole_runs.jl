@@ -17,8 +17,9 @@
 # It is a **script and not a test**: it prints a table, and where a row
 # ends in a state that is no longer a metric it prints *that* and the time
 # it reached rather than throwing, because a table wants the failure as a
-# row. It loads no `Test`. The claims it supports are in `CODE.md` under
-# "Measured results", beside the predictions they confirm or correct, and
+# row. It loads no `Test`. The claims it supports are under "Measured
+# results" — the indicator's and the horizon's in `CODE.md`, the interior's in
+# `SINGULARITY_HANDLING.md` — beside the predictions they confirm or correct, and
 # the suite's own hole runs (`test/driver_tests.jl`) are the regression.
 #
 # Each row names its own configuration, because the resolution a hole
@@ -42,7 +43,8 @@
 # suite's tracked hole — the step-5 fixture's mesh, `m = 10`, the finder every
 # chunk — against step 5's sphere with the same layer, to `5 M` by default
 # (`hole_runs.jl tracked`, or `tracked=<t_end>`), four minutes at four
-# threads. Its table is in `CODE.md`, "The tracked geometry (step 8d)".
+# threads. Its table is in `SINGULARITY_HANDLING.md`, "The tracked geometry
+# (step 8d)".
 #
 # Step 8e adds the `fitted` section, which is not in the default list either:
 # the `:fitted` variant's three trials, selected as `fitted=<row>,…` —
@@ -2199,8 +2201,9 @@ end
 # chart allows one, and the controls that say what the fit is worth — the
 # snapshot target (the state at the chunk's start, no fit), a Kerr target
 # built from the finder's own `M_ch`, `J` and origin, a hand-over from
-# `:damped` to `:fitted`, and a track that coasts. Its table is in `CODE.md`,
-# "The generic interior: the measurement matrix (step 8f)".
+# `:damped` to `:fitted`, and a track that coasts. Its table is in
+# `SINGULARITY_HANDLING.md`, "The generic interior: the measurement matrix
+# (step 8f)".
 #
 # **How it runs.** A run is a label (`ks0-fitted`, `boost-coast`, …) and a
 # group of runs is a batch job: `generic=<group or label>,…` (or `+`), with

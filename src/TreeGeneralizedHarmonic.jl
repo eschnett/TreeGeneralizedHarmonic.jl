@@ -141,7 +141,8 @@ export BoundsAccounting, take_chunk!, apply_bounds!, gh_stage_limiter!
 export validity_rows, evolved_nonfinite
 
 # Boundaries: the Dirichlet hook, and the parities of the reflecting faces
-export dirichlet, has_outer_face, state_parity, even_parity
+export dirichlet, has_outer_face, state_parity, even_parity, state_rotation,
+       identity_rotation
 
 # Evolution
 export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate
