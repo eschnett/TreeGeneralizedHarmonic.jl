@@ -19,6 +19,7 @@ here; links have been pointed at the right file.
 - [Steps 8b–8′: the generic interior and the moving hole](#steps-8b8-the-generic-interior-and-the-moving-hole)
 - [Single holes on the octant, `a = 0` to `9/10` (2026-10-02 to 2026-10-07)](#single-holes-on-the-octant-a--0-to-910-2026-10-02-to-2026-10-07)
 - [Excision, steps X1–X7 (2026-10-05 to 2026-10-08)](#excision-steps-x1x7-2026-10-05-to-2026-10-08)
+- [The polar corner (step X8)](#the-polar-corner-step-x8)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -3366,6 +3367,227 @@ is not in it, was extended): **7001 assertions in 17m42** at one thread and
 **7009 in 13m41** at four (the two at once, at a load of 4–7, after every row
 had finished), X6's counts; the same counts in 17m43 and 13m46 at the step's
 start.
+
+## The polar corner (step X8)
+
+Step X7's cure built (under [Excision](CODE.md#excision-added-2026-10-05),
+"What step X8 built"): a lattice point the geometry leaves outside is excised
+too when its three neighbours one step toward the center are inside it, one
+pass, `Excision(T; shave = true)` by default, decided once with the classes
+from a predicate every mask evaluates (`ShavedMask`). Kerr-Schild `a = 3/5`
+on the rotating octant, the excised ball `r < r_E`, `r_0 = (0.6 + r_E)/2`,
+`q = 4`, `ε_KO = 1/2`, `cfl = 1/2`, the algebraic source, the default noise
+`10⁻⁸`, no horizon finder, to `10 M` in chunks of `M`: the lottery scan's rows
+(`bin/output/x8/genrows.py`). **The tunnel to Symmetry went down at about
+17:10 on 2026-10-08**, with the scan's jobs, the H200 rows and the `1/48` scan
+running there; everything below is what was read back before that and what
+ran on the development machine after it (at a load of 12 to 42 from the
+step's own work, so no time here is a benchmark). What is still on Symmetry,
+and how to collect it, is at the end. The local rows' CSVs, records,
+SimWatch files and logs are in the worktree's ignored `bin/output/x8/local`,
+with the patch spectra's logs (`patch/`), X7's diagnostic's (`diag/`) and the
+host-side enumerations (`tools/`).
+
+**The shave itself** (host enumeration on the integer lattice, the open
+octant `k ≥ 1`):
+
+- *One pass, not a fixed point.* Iterated, the rule grows along the layers'
+  rims toward square cross-sections:
+
+  | `r_E`, `h` | shaved by one pass | passes to the fixed point | points the fixed point excises | farthest outside the sphere |
+  |---|---|---|---|---|
+  | `3/4`, `1/16` (the suite's fixture) | 34 | 5 | 80 | 1.9 cells |
+  | `4/5`, `1/24` | 108 | 12 | 419 | 3.9 |
+  | `1`, `1/24` | 169 | 11 | 783 | 4.3 |
+  | `21/20`, `1/24` | 198 | 13 | 957 | 4.8 |
+  | `17/15`, `1/24` | 217 | 15 | 1186 | 5.7 |
+  | `4/5`, `1/32` | 202 | 16 | 1063 | 5.6 |
+  | `17/15`, `1/32` | 421 | 22 | 3110 | 7.6 |
+  | `17/15`, `1/48` | 924 | 30 | 9700 | 11.4 |
+  | `1.7`, `1/48` | 2154 | 51 | 34141 | 17.7 |
+
+  One pass reaches `0.573 h` at most outside the sphere over every radius from
+  1 to 90 cells (the bound is `h/√3`), and no lattice sphere of `3.6` cells or
+  more is without a corner (every radius from 1 to 40 cells in steps of
+  `0.01`).
+- *A shaved set still has triple corners* — points whose three inward
+  neighbours are excised, one of them now shaved: one pass changes which
+  points they are and removes a tenth of them, not all. At `h = 1/24` (*at the
+  caps*: within `20°` of a coordinate axis, where two axes are nearly tangent
+  to the surface):
+
+  | `r_E` | `R` (cells) | triple corners without, with the shave | at the caps |
+  |---|---|---|---|
+  | `0.65` | 15.6 | 66, 54 | 6, 6 |
+  | `0.70` | 16.8 | 82, 63 | 9, 0 |
+  | `4/5` | 19.2 | 108, 84 | 3, 0 |
+  | `0.90` | 21.6 | 147, 121 | 9, 6 |
+  | `1` | 24.0 | 169, 141 | 9, 6 |
+  | `21/20` | 25.2 | 198, 166 | 18, 12 |
+  | `1.10` | 26.4 | 210, 177 | 21, 9 |
+  | `17/15` | 27.2 | 217, 192 | 15, 9 |
+  | `1.15` | 27.6 | 232, 201 | 12, 6 |
+  | `1.25` | 30.0 | 273, 237 | 12, 9 |
+  | `1.35` | 32.4 | 322, 285 | 24, 18 |
+  | `1.45` | 34.8 | 375, 333 | 33, 21 |
+  | `3/2` | 36.0 | 397, 354 | 33, 12 |
+  | `1.55` | 37.2 | 429, 382 | 27, 12 |
+  | `1.60` | 38.4 | 462, 420 | 27, 21 |
+
+  A set with no triple corner is closed under the rule — a fixed point — so a
+  sphere-like excised set always has some.
+- *The implementation reproduces X7.* Without the shave the small rotating
+  octant at `r_E = 17/15`, `h = 1/24` gives X7's diagnostic's largest error to
+  its printed digits (`0.1150`, `0.1220`, `0.1289`, `0.1356` at `1/4 … 1 M`);
+  with it, the scratch copy's band (3709 points), its 217 shaved points and its
+  largest error (`0.1117`, `0.1149` at `1/2`, `1 M`). The small octant and the
+  H200's `L = 64` octant agree on the shaved row's largest error to four digits
+  (`0.11493`, `0.11668`, `0.11714`, `0.11772` at `1 … 4 M` on the H200), and the
+  development machine and Symmetry's EPYC nodes on the same rows to all ten
+  printed.
+
+**The lottery at `h = 1/24`** (the small rotating octant `L = 8`, `N = 24`,
+cubes `4, 2`, 22 blocks, 304 128 points; *L∞* is the largest error of the run
+over the evolved points; the rows to `10 M` ran on the development machine,
+the others are the Symmetry rows as read back at `2–4 M`):
+
+| `r_E` | `R` | shave | L∞ at 1, 2, 4 M | at 10 M | the run |
+|---|---|---|---|---|---|
+| `0.65` | 15.6 | on / off | `142`, `142`, `142` (at 3) / `143`, `143`, `143` | | stationary to `3 M` |
+| `0.70` | 16.8 | on / off | `14.5` / `14.3` at 4 | | stationary |
+| `4/5` | 19.2 | on | `2.093`, `2.071`, `2.076` | `2.072` | **stationary** |
+| `4/5` | 19.2 | off | `2.087`, `2.058`, `2.065` | `2.060` | stationary |
+| `0.90` | 21.6 | on / off | `0.360` / `0.365` at 4 | | stationary |
+| `1` | 24.0 | on / off | `0.1123` / `0.1119` at 4 | | stationary |
+| `21/20` | 25.2 | on | `0.1531`, `0.1540`, `0.1543` | `0.1544` | **stationary** |
+| `21/20` | 25.2 | off | `0.1737`, `0.1743`, `0.1750` | blows up: `0.26`, `0.87`, `1.8`, `3.3`, `11.6` at `5 … 9 M` | **fails**, as X7's (`0.87` at `6 M` there too) |
+| `1.10` | 26.4 | on / off | `0.0721` / `0.0852` at 4 | | stationary |
+| `17/15` | 27.2 | on | `0.1149`, `0.1167`, `0.1177` | `0.1170` | **stationary** |
+| `17/15` | 27.2 | off | `0.1356`, `0.1411`, `4.45` | blows up at `4.5 M` | **fails**, as X7's |
+| `1.15` | 27.6 | on / off | `0.0455` / `0.0455` at 4 | | stationary |
+| `1.25` | 30.0 | on | `0.0291`, `0.0284`, `0.0282` | `0.0280` | **stationary** |
+| `1.25` | 30.0 | off | `0.0325` at 2 | | |
+| `1.35` | 32.4 | on | `0.0488`, `0.0662`, `0.0761` | `0.0772` | **stationary** (saturates by `6 M`) |
+| `1.45` | 34.8 | on | `0.0320`, `0.0409`, `0.0450` | `0.0456` | **stationary** (saturates by `6 M`) |
+| `3/2` | 36.0 | on | `0.0292`, `0.0402`, `0.139` | blows up: `0.25`, `0.44`, `0.80`, `1.8`, `9.2` at `5 … 9 M` | **fails**, at `0.64/M` from `2 M` |
+| `3/2` | 36.0 | off | `0.0504`, `0.196`, `1.71` (at 3) | blows up after `3 M` | **fails**, faster |
+| `1.55` | 37.2 | on | `0.0389`, `0.0860`, `0.161` | `0.225` (`0.213`, `0.220`, `0.223` at `7 … 9`) | saturating |
+| `1.60` | 38.4 | on | `0.257` at 1 | blows up before `2 M` (`0.97`, `3.4` at `1¼`, `1½ M`) | **fails**, at `≈ 5/M` |
+
+- **The shave cures X7's two failures**: `17/15` and `21/20` are stationary to
+  `10 M` with it and blow up without it, at `4.5 M` and `9 M` here (`4.5` and
+  `5–6 M` in X7). On the H200 (`L = 64`, `N = 96`, job 571759) the shaved
+  `17/15` row was stationary to the last row read back, `10 M` (ℋ over the mesh
+  `8.50·10⁻⁵` at `9` and `10 M`, the largest error `0.1168` at `7 M`); its `24 M`
+  is on Symmetry.
+- **It does not hold at `r_E = 3/2`** (7 cells below the polar horizon, 9.4
+  below the equator's), between `1.45` and `1.55`, which hold (`1.55`
+  saturating slowly), **nor at `1.6`** (4 cells, the least the build allows),
+  which blows up before `2 M` at the same kind of corner, `(38, 5, 4) h` and
+  `(38, 4, 5) h` on the `x` cap with the `y` axis frame-dragged, at about
+  `5/M`. There the
+  largest error grows from `2 M` at `0.64/M` with the shave (`0.040`, `0.051`,
+  `0.073`, `0.101`, `0.139` at `2 … 4 M` in half-`M` steps) and blows up at
+  `9 M`, and at about `2/M` without it. At `h = 1/32` (a local row on the
+  small octant, `N = 32`, to `5 M`) the same radius, 9 cells deep, fails with
+  the shave too, faster: `0.019`, `0.138`, `0.834`, `4.79` at `1 … 4 M`, `1.8/M`,
+  and blows up after `4 M`. X7's diagnostic, run on the
+  shaved row, puts the growth at `(35, 7, 6) h`, its image `(35, 6, 7) h` and
+  `(35, 8, 4) h` — `0.19` and `0.12` cells outside the sphere at `θ ≈ 80°`, on
+  the lattice sphere's cap along `x` — in `Π_xx`, `Π_xz` and `Π_zz`. All three
+  are **triple corners of the shaved set**, made so by shaving `(35, 7, 5) h`,
+  the unshaved set's own triple corner, where the unshaved run grows:
+  `k⁻ = 0` along all three axes, the normal axis `x` in outflow (`b/a = +1.31`
+  at `(35, 7, 6) h`), `y` frame-dragged (`b/a = −0.19`, its rule bit set) and
+  `z` nearly tangent (`b/a = +0.17`). It is X7's polar corner turned on its
+  side — two axes nearly tangent at a cap, a corner of the staircase one-sided
+  along all three — on the cap the frame dragging crosses.
+
+**The analysis: the operator's spectrum on a patch** (`test/excision_patch.jl`,
+added in step X8). The package's own right-hand side, linearized about the
+analytic state by one-sided differences of `gh_rhs!` (the coefficients frozen
+at the background), restricted to a box of lattice points about a point —
+every non-excised owned point within `half` cells, all twenty variables, the
+state outside held at the background — on the finest cube `[0, 2]³` alone,
+which is the same operator near the surface (the `L = 8` octant gave the same
+eigenvalues to the printed digits at `half = 1`). A box is a principal
+submatrix with Dirichlet data at its faces, and its faces carry modes of their
+own; the table's eigenvalue is the rightmost whose eigenvector has less than a
+tenth of its weight on the faces, and its point is where that eigenvector is
+largest (`h = 1/24` unless marked, in `1/M`):
+
+| `r_E` | shave | box | rightmost interior eigenvalue | at | the run |
+|---|---|---|---|---|---|
+| `17/15` | off | `(3, 2, 27)`, `half = 3` | `+2.00 ± 0.80i` (`half = 2`: `+1.98`) | `(3, 2, 27)`, `Π_zz` | fails, `≈ 2/M` (X7: `1.9/M`) |
+| `17/15` | on | `(3, 2, 27)`, `half = 2` | `−0.77 ± 0.83i` | `(3, 3, 27)` | stationary |
+| `21/20` | off | `(3, 2, 25)`, `half = 2` | `+0.92 ± 0.88i` | `(3, 2, 25)` | fails from `5 M` |
+| `21/20` | on | `(3, 2, 25)`, `half = 2` | `−1.69 ± 0.90i` | `(3, 3, 25)` | stationary |
+| `3/2` | off | `(35, 7, 5)`, `half = 3` | `+2.23 ± 0.25i` | `(35, 7, 5)`, `Π_zz` | fails, `≈ 2/M` |
+| `3/2` | on | `(35, 7, 6)`, `half = 3` | `+0.66 ± 0.25i` | `(35, 7, 6)`, `Π_zz` | fails at `0.64/M` |
+| `3/2`, `h = 1/32` | on | `(47, 8, 7)`, `half = 3` | `+1.79 ± 0.24i` | `(47, 8, 7)`, `Π_zz` | fails at `1.8/M` (a local row) |
+| `3/2`, `h = 1/32` | on | `(47, 9, 5)`, `half = 3` | `−0.76 ± 0.21i` | `(47, 9, 5)` | |
+| `4/5` | on | the pole, `(2, 2, 19)`, `half = 2` | `−6.8` (every mode) | | stationary |
+| `4/5` | on | the `x` cap, `(19, 2, 2)`, `half = 2` | `−9.9` (every mode) | | stationary |
+| `17/15` | off | a box of centered points, `(3, 2, 33)`, `half = 2` | `−0.75` (every mode) | | — |
+
+The spectrum is the runs': every growing row has a positive eigenvalue at its
+growing point, at its rate (`+2.0` against X7's `1.9/M`, `+0.66` against the
+shaved `3/2` row's `0.64/M`, `+1.79` against the shaved `3/2` row's `1.8/M` at
+`h = 1/32`), and every stationary one has none. The faces'
+modes reach `+3.2`, with all their weight on the faces — the truncation's; at
+`half = 2` they still touch the shaved `3/2` row's corner mode (`+0.98`, 42 %
+on the faces), at `half = 3` they separate. **So the growing lego corner is a
+local mode of the discrete operator at a triple corner on a cap, and the
+one-pass shave moves it rather than removing it: where the corners it leaves
+sit on a cap with a nearly tangent axis, the mode is there again.** At
+`r_E = 4/5`, the production depth, the shaved set has no triple corner within
+`20°` of an axis and the spectrum is far into the left half-plane (`−6.8`,
+`−9.9`): the deep surface's outflow is strong enough. And the shallow failure
+is not a coarse lattice's: at `h = 1/32` the same radius, 9 cells deep, has a
+corner of the shaved set on the `x` cap with the same axes (`(47, 8, 7) h`:
+`y` frame-dragged at `b/a = −0.22`, `z` at `+0.15`) whose mode grows at
+`+1.79/M`, faster than at `1/24` — and the local `1/32` row grows at
+`1.8/M` — beside one (`(47, 9, 5) h`, `z` at `+0.11`) that is stable.
+
+**What this asks of the next step (proposed in step X8, for Erik).** The cure
+cannot be a set: every sphere-like excised set has triple corners, and the set
+closed under the rule — the fixed point — reaches 4 to 18 cells outside the
+sphere. It has to be the operator at a triple corner on a cap, or a depth that
+keeps those corners in strong outflow. The patch spectrum tests a candidate
+operator in minutes, and it reproduced every run here. Candidates: X5's rule
+(the extrapolated advection) on a triple corner's nearly tangent axes, not
+only where the shift points in — X7 found that worse on the polar corner's own
+axis at `b/a < 0.02–0.05`, so the spectrum should decide which axes; the
+per-stencil extrapolation of every operator along the normal at a triple
+corner (X1's `extrap`, stable at `ε_KO > 0` on the plane); `ε_KO = 1` at the
+caps (it halved X7's rate).
+
+**Blocked: the tunnel to Symmetry** (`ssh symmetry`: "connection refused" from
+about 17:10). Running or queued there, each row writing its `simwatch.toml`:
+
+- the `1/24` scan (300 rows, 150 radii — every topmost layer `Z` from 15 to 38
+  with the top disk `R² − Z² = 3, 6.5, 9.5, 11.5, 14.5, 22.5`, and X7's radii —
+  with and without the shave), `excision-x8/out/x8/scan/h24-*`, jobs
+  `x8s24a`, `x8s24b` and the self-resubmitting chain `x8s24c` (`amddebugq`,
+  16 rows a node at 4 threads, about `30 min` a row);
+- the `1/32` scan (108 rows: every `Z` at `11.5`, every fourth at `6.5` and
+  `14.5`, and X7's radii), `excision-x8/out/x8/scan/h32-*`, jobs `x8s32a` and
+  the chain `x8s32b`;
+- the `1/48` scan on an H200 (56 rows: every second `Z` at `11.5`, and `17/15`,
+  `21/20`, `4/5` — coarser, as the brief allows, and on the GPU because a `1/48`
+  row is 16 times a `1/24` one, hours a row on four EPYC threads),
+  `excision-x8-gpu/out/x8/scan/h48-*`, job `x8g48a` (`h200q`, 6 h, four rows at
+  once), and the GPU's check of `17/15` at `1/24` against the CPU
+  (`h24g-R27.200-*`, job `x8g24`);
+- the H200 rows: `17/15` at `h = 1/24` to `24 M` with the shave
+  (`excision-x8-gpu/out/x8/h200/n113s`, job 571759, at `10 M` when last read),
+  and `4/5` at `1/32` to `24 M` with the shave (`p32s`, job 571760, at `3 M`
+  when last read, the largest error `1.152`), against X7's `p32`.
+
+Collecting them is `bin/output/x8/collect.sh` (the status, the copy-back
+without the checkpoints, the tables by `scantable.py`, the remote sizes, and
+the deletion of the checkpoints — Erik's standing instruction — which waits
+for the copies and is therefore not done: neither size was measured).
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 

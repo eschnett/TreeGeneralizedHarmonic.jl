@@ -2901,7 +2901,11 @@ static `a = 3/5` hole at `r_E = 4M/5` is the `:damped` layer outside the
 horizon from `h = 1/32` on, its spin drifts as the layer's does, and the
 depth scan found one failure, a lego corner at the pole of a shallow surface;
 "What step X7 measured", at the end of this section, has the numbers and the
-recommendation.**)** Moving holes —
+recommendation.**)** **(Amended in step X8:** the excised set is shaved —
+a lattice point the geometry leaves outside whose three neighbours one step
+toward the center are inside it is excised too, one pass, decided once with
+the classes from a predicate every mask evaluates; "What step X8 built" and
+"What step X8 measured", at the end of this section.**)** Moving holes —
 points that leave the excised set on the trailing side and need values — are
 a later round.
 
@@ -3867,6 +3871,158 @@ X7)".
   - **Stopping** is not recommended: nothing measured here is worse than the
     layer outside the horizon, and the two open problems — the corner and the
     oblate surface — are bounded.
+
+**What step X8 built (amended in step X8**, `src/interior.jl`'s
+`ShavedMask` and `src/excision.jl`; its numbers under
+[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#the-polar-corner-step-x8),
+"The polar corner (step X8)"**).** X7's cure, built as a property of the
+excised set:
+
+- **The rule.** A lattice point of the surface's level that the geometry
+  leaves outside is excised too when its three neighbours **one step toward
+  the excision center**, one along each axis, are inside the geometry's
+  excised set. "Toward the center" is per axis, from the sign of `x_d − c_d`,
+  so it holds for a hole anywhere (X7's scratch copy used the sign of `x_d`,
+  right only at the origin); a coordinate on the center's plane has no inward
+  neighbour along its axis, and such a point is not shaved — on the rotating
+  octant the seam planes and the mirror plane are center planes. A shaved
+  point lies within `h/√3` of the geometric surface along the ray (`0.573 h`
+  at most over every lattice sphere of 1 to 90 cells).
+- **One pass, not a fixed point (proposed in step X8).** The rule iterated
+  does not stop at the corners: a shaved rim point makes its tangent
+  neighbour a corner, and the closure of a lattice sphere under the rule
+  grows along the rims of its layers toward square cross-sections. On X7's
+  surfaces it takes 11 to 51 passes and reaches 3.9 to 17.7 cells outside the
+  sphere (`r_E = 4/5 … 17/15` at `h = 1/24`, `17/15` and `1.7` at `1/48`),
+  which would eat the margin to the horizon. One pass excises the corners
+  the geometry made — 217 on the open octant at `r_E = 17/15`, `h = 1/24`, X7's
+  scratch copy's count — and leaves the corners of the shaved set (192 there),
+  points with `k⁻ = 0` along all three axes again: the shave changes **which**
+  corners there are, not that there are some. Whether that is enough is what
+  "What step X8 measured", below, answers: not at every depth.
+- **A predicate every mask evaluates, not a lookup of the classes (proposed
+  in step X8).** `ShavedMask(base, h)` is the geometry's mask (`InteriorMask`
+  for the sphere, `ShapeMask` for the frozen tracked surface) with the rule
+  applied on the lattice of spacing `h`, the surface's (the one level
+  `check_excision_mesh` asserts there); `excised_mask(interior, t, h)` builds
+  it where `Excision(T; shave)` asks. Everything that asks "is it excised"
+  takes a position — the error's, the speed's, the non-finite count's and the
+  validity monitor's kernels, and above all the horizon finder's footprint
+  guard, which TreeAMR asks at stencil positions it computes itself and which
+  no class array can answer — so the shave is expressed where they all are:
+  `build_excision`'s first pass evaluates `ShavedMask` at every owned point,
+  as X2b's evaluated the masks' own predicate, and the masks, the guard and
+  `test/octant_runs.jl`'s noise exclusion evaluate the same function at the
+  same positions. The classes stay the single source of truth: the zone, the
+  census, the rule bits and the direction codes read them as before, and a
+  shaved point's direction code is its own position's.
+- **The problem's masks** are `evolved_mask(p, t)`: the interior's own
+  `interior_mask` for every problem but an `:excised` one whose build shaved
+  a point (`ExcisionData.nshaved > 0`), and the shaved set's mask for that one
+  — the default of `gh_error!`, `max_speed`, `evolved_nonfinite`,
+  `validity_rows`' evolved region and the horizon finder's provider. Where the
+  build shaved nothing the two masks agree everywhere and the interior's own
+  is taken, so such a problem's analysis is steps X2b–X7's arithmetic. The
+  monitors that take stencils widen their mask by `W + h` where a point was
+  shaved (`monitor_mask`), the excised set reaching `h/√3` beyond the
+  surface; the validity monitor's band `[r_E, r_E + W)` leaves the shaved
+  points out (`BothMask`). The guard's `stencil_hits` for a `ShavedMask`
+  enumerates the footprint unless its nearest point is `2h` beyond the
+  geometric set — the predicate's own fast path, so the shortcut is exact.
+- **The core rule** needs nothing: the shave adds points only outside the
+  geometric surface, where the initial data are the analytic solution at the
+  point itself as at every evolved point, and the core rule's sphere stays
+  inside the excised set.
+- **The checks.** With the shave a `Horizon` asks `m ≥ ⌈√3 G + 1/√3⌉` (still
+  6 cells at `q = 4`; 5 at `q = 2`, where it was 4) **(proposed in step
+  X8)**. `check_excision_mesh`'s `(G + q + 2) h` is not widened: a
+  prolongation needs `G + (q + 2)/2` cells, and the neighbourhood exceeds
+  that plus `h/√3` by `(q + 2)/2 − 1/√3` cells.
+- **The switch and the recipe.** `Excision(T; shave = true)` is the default;
+  `shave = false` is steps X2b–X7's excised set bit for bit (the fixture's
+  classes are X2b's 3743 excised and 2192 zone points, and the small rotating
+  octant at `r_E = 17/15` reproduces X7's diagnostic to its four printed
+  digits). Without the shave the struct prints as steps X6–X7 printed it, and
+  with `mixed = :nested` as well as steps X2b–X5 did, so that every earlier
+  checkpoint restarts under its own excised set when that is asked for by
+  name and its recipe refuses the shaved one **(proposed in step X8)**.
+- **The record** has `excision_shaved`, the owned points the shave excised —
+  a constant of the problem, counted by the census (`EXM_SHAVED`, the
+  excision's eleventh monitor slot); `test/octant_runs.jl` writes it into the
+  CSV, `records.csv` and `[extra.excision]`, takes `shave=on|off`, and keeps
+  its noise off the shaved set and its `in` shell's constraint norms one cell
+  farther out with it (the shells take the problem's masks too).
+
+**What step X8 measured, and the recommendation (amended in step X8).** The
+tables are under
+[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#the-polar-corner-step-x8),
+"The polar corner (step X8)". The tunnel to Symmetry went down two hours into
+the step, with the lottery scan at `h = 1/24`, `1/32` and `1/48` and the two
+H200 rows running there; what follows is what was read back before that and
+what ran on the development machine.
+- **The shave cures the polar corner.** On the small rotating octant at
+  `h = 1/24` (which reproduces the H200's rows to four digits and X7's
+  diagnostic to its printed digits) `r_E = 17/15` and `21/20` are stationary
+  to `10 M` with the shave and blow up without it, at `4.5` and `9 M`; the
+  H200 row at `17/15` (`L = 64`) was stationary to `10 M`, the last row read
+  back. Every other depth read back from `0.65` to `1.25` is stationary with
+  and without it, and `1.35`, `1.45` and `1.55` with it.
+- **It does not hold at every depth: `r_E = 3/2` fails with it**, at
+  `0.64/M` from `2 M` to a blow-up at `9 M` (about `2/M` without), 7 cells
+  below the polar horizon — and at `h = 1/32` too, 9 cells deep, at `1.8/M`;
+  `r_E = 1.6`, 4 cells, fails at about `5/M` at the same kind of corner. The
+  growing points are corners the shave left: one pass removes the corners the
+  geometry made and leaves the corners of the shaved set — points with `k⁻ = 0`
+  along all three axes again, a tenth fewer — and at `3/2` three of them sit
+  on the lattice sphere's cap along `x`, where the `y` axis is frame-dragged
+  and the `z` axis nearly tangent (`b/a = +0.17`): X7's polar corner on its
+  side.
+- **The analysis says why** (`test/excision_patch.jl`, proposed in step X8:
+  the package's right-hand side linearized about the analytic state and
+  restricted to a box of lattice points — a frozen-coefficient spectrum of
+  the discrete operator itself). The rightmost eigenvalue whose eigenvector
+  lives off the box's faces is positive exactly at the growing corners, at
+  the runs' rates: `+2.00/M` at `17/15` without the shave (X7 measured
+  `1.9/M`), `+0.66/M` and `+1.79/M` at `3/2` with it at `h = 1/24` and `1/32`
+  (the runs `0.64/M` and `1.8/M`), `+2.23/M` and
+  `+0.92/M` at `3/2` and `21/20` without; and negative where the runs are
+  stationary — `17/15` and `21/20` with the shave (`−0.77`, `−1.69/M`), and
+  both caps at `r_E = 4/5` (`−6.8`, `−9.9/M`). **A growing lego corner is a
+  local mode of the operator at a triple corner on a cap, and the shave moves
+  it rather than removing it.**
+- **Why not the fixed point.** A set with no triple corner is closed under the
+  rule, and the closure of a lattice sphere reaches 3.9 to 17.7 cells outside
+  it at X7's depths. So the cure for the corners that remain is in the
+  operator, not the set **(proposed in step X8)**: at a triple corner on a cap,
+  X5's extrapolated advection on its nearly tangent axes (not only where the
+  shift points in — the patch spectrum, not the sign, should choose them), or
+  X1's per-stencil extrapolation along the normal, or more dissipation at the
+  caps (`ε_KO = 1` halved X7's rate). The patch spectrum tests each in
+  minutes.
+- **The recommendation (proposed in step X8): stop here for Erik**, as the
+  brief asks where the shave does not hold. For production nothing changes:
+  `r_E = 4M/5` with the shave on — the default — is stationary at `1/24`, with
+  no triple corner on a cap and its caps' spectrum far in the left half-plane,
+  and the shave cures `17/15` and `21/20`; a surface shallower than about
+  `1.3 M` at `a = 3/5` is not safe, with the shave or without it, until the
+  corner's operator is fixed. `a = 9/10` on the tracked offset surface, which
+  X7 proposed next, would put the surface where this failure lives — shallow
+  (normal outflow ends `0.63 M` below the horizon, with a margin of at most
+  `+0.08`) and under stronger frame dragging — so it should wait for the
+  corner's operator, and its `m` scan should take the patch spectrum at each
+  surface's caps before any H200 hour. **Two checks stand in its way as built
+  (found in step X8,** building the `a = 9/10` tracked hole on a small octant
+  at `h = 1/48`**):** the driver's `excision_horizon_margin` compares the found
+  horizon's *least* radius with the surface's *largest* (`r_out − offset`),
+  exact for a sphere and `−6.2` cells at `m = 6` on the oblate `a = 9/10`
+  horizon, which ends the run at `t = 0`; and the singular-set check compares
+  the core surface's least radius, at the pole, with the ring's, in the
+  equator, which refuses `m + n_L ≳ 26` at `1/48` (the recommended settings'
+  `:fitted` note met it too). Both need the direction: the margin per
+  collocation direction of the found surface against the shape's radius
+  there, the ring against the core surface on the equator. The build itself
+  is fine — at `m = 6` it shaves 1614 corners and finds 1783 frame-dragged
+  axes, twice `a = 3/5`'s at the same `h` (870, X7).
 
 **Scalar on the CPU (proposed in the main merge, 2026-10-08).** `main`'s SIMD
 lanes evaluate `W` points at a time on the CPU; an `:excised` problem does not take
@@ -6631,7 +6787,7 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 | 0.3 | `:fitted` | `1/24` | `m = 16`, `n_L = 18`, `fit_cont = 2`, `lmax_fit = 12` | the rules (`fit_cont = 2` not yet run with spin) |
 | 0.6 | `:damped` | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 3/2` | measured: order `4.0`; `1/16` is not convergent |
 | 0.6 | `:fitted` | `1/32` (`1/32`, `1/48`) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured at `1/32`: `ℋ` outside `3.2×`, the error equal; the pair predicted |
-| 0.6 | `:excised` | `1/32` (`1/32`, `1/48`) | `r_E = 4/5`, `r_0 = 7/10`, `:msn`, no blend, X5's rule and the symmetric mixed derivative (the defaults) | measured (step X7): `ℋ` outside `2.1×`, `1.15×`, `1.00×` `:damped`'s at `1/24`, `1/32`, `1/48`; `J` drifts as the layer's |
+| 0.6 | `:excised` | `1/32` (`1/32`, `1/48`) | `r_E = 4/5`, `r_0 = 7/10`, `:msn`, no blend, X5's rule, the symmetric mixed derivative and the shave (the defaults) | measured (step X7): `ℋ` outside `2.1×`, `1.15×`, `1.00×` `:damped`'s at `1/24`, `1/32`, `1/48`; `J` drifts as the layer's; (step X8) stationary with the shave at `1/24`, no triple corner on a cap |
 | 0.7 | `:damped` | `1/32` (`1/32`, `1/48`) | `r_0 = 0.85`, `r_1 = 1.45` | the rules |
 | 0.7 | `:fitted` | `1/48` | `m = 18`, `n_L = 24`, `fit_cont = 1`, `lmax_fit = 12` | a guess: screen the depth first |
 | 0.8 | `:damped` | `1/32` (`1/32`, `1/48`) | `r_0 = 0.95`, `r_1 = 1.35` | the rules |
@@ -6666,9 +6822,13 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   the coarsest `h` and, at `a = 3/5`, clear of the ring by `0.2 M`; `ε_KO > 0`
   is required. Shallower is less accurate outside the horizon at `a = 0` (the
   blend `upwind = 1,4` recovers it) and fails at `a = 3/5`: `r_E = 17/15`,
-  16 cells at `1/24`, blows up at a lego corner at the pole. Static holes only,
-  and spins above `3/5` are not measured. An excised right-hand side costs
-  about half a `:damped` one on the H200.
+  16 cells at `1/24`, blows up at a lego corner at the pole. **(Amended in step
+  X8:** with the shave, the default from step X8, `17/15` and `21/20` are
+  stationary at `1/24`, but `r_E = 3/2`, 7 cells, grows at a corner the shave
+  leaves on the equatorial cap; keep the 24 cells and `r_E = 4/5`
+  ([`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#the-polar-corner-step-x8)).**)**
+  Static holes only, and spins above `3/5` are not measured. An excised
+  right-hand side costs about half a `:damped` one on the H200.
 - **Screen a new `:fitted` depth** before a long run: the same tracked
   geometry with the exact target (`variant = :damped`) for `6 M` at the
   run's `h`, about an hour and a half at `1/96` — a bad depth grows from
@@ -7325,7 +7485,9 @@ the frame-dragged faces
 ([X5](SINGULARITY_HANDLING.md#excision-the-frame-dragged-faces-step-x5),
 [X6](SINGULARITY_HANDLING.md#excision-the-frame-dragged-faces-in-the-zone-kernel-step-x6))
 and the static spinning hole
-([X7](SINGULARITY_HANDLING.md#excision-of-the-static-spinning-hole-step-x7)). The
+([X7](SINGULARITY_HANDLING.md#excision-of-the-static-spinning-hole-step-x7)). Step
+X8's runs went there too, under their own heading,
+[The polar corner (step X8)](SINGULARITY_HANDLING.md#the-polar-corner-step-x8). The
 design is [Excision](#excision-added-2026-10-05), and why it runs scalar on the
 CPU is under [One right-hand-side evaluation](#one-right-hand-side-evaluation),
 "Excision runs scalar on the CPU".

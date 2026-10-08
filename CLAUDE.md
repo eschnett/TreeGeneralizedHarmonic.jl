@@ -3,7 +3,7 @@
 Read `CODE.md` first — it is the design document and states *why* things
 are the way they are. The runs behind the black hole's interior — step 5's
 layer, steps 8a–8′, the single holes on the octant, and the excision round's
-steps X1–X7 — are in `SINGULARITY_HANDLING.md` (moved out of `CODE.md` on
+steps X1–X8 — are in `SINGULARITY_HANDLING.md` (moved out of `CODE.md` on
 2026-10-08), and the
 settings they recommend for a single hole are `CODE.md`'s "Single black
 holes: recommended settings". This file is only about mechanics.
@@ -160,7 +160,16 @@ error), `excision_flips = 0` everywhere, and its right-hand side costs half a
 nearly cancels a tangent closure's shift. The next round is Erik's call
 (proposed: fix the polar corner — a shave of the lego corners cured it on a
 scratch copy — then `a = 9/10` on the tracked surface; `CODE.md`,
-"Excision", "What step X7 measured").
+"Excision", "What step X7 measured"). Erik chose the corner (2026-10-08,
+step X8). **X8 is built and stopped for Erik (2026-10-08)**: the shave is the
+default (`Excision(T; shave = true)`), a property of the excised set every
+mask agrees with; it cures `r_E = 17/15` and `21/20` at `h = 1/24`, but
+`r_E = 3/2` fails with it (at `1/24` and `1/32`) at a corner the one pass
+leaves on the equatorial cap, which a frozen-coefficient spectrum of the operator on a patch
+(`test/excision_patch.jl`) finds at the run's rate — the brief's condition to
+stop. Production at `r_E = 4/5` is unchanged and stationary. The lottery scan
+on Symmetry was cut off by the tunnel (`CODE.md`, "Excision", "What step X8
+measured"; `SINGULARITY_HANDLING.md`, "The polar corner (step X8)").
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -686,6 +695,36 @@ results moved to `SINGULARITY_HANDLING.md`, "Excision, steps X1–X7", as the
 interior's had; `CODE.md` keeps "Excision", and its "Single black holes:
 recommended settings" has two `:excised` rows.
 
+From step X8 (2026-10-08, the branch `claude/step-x8-polar-corner`) the
+excised set **shaves its lego corners** (`CODE.md`, "Excision", "What step X8
+built" and "What step X8 measured"; `SINGULARITY_HANDLING.md`, "The polar
+corner (step X8)"):
+- **The rule**: a lattice point the geometry leaves outside is excised too
+  when its three neighbours one step toward the center — per axis from the
+  sign of `x − c`, none on the center's planes — are inside it. One pass, not
+  a fixed point: iterated it grows 4 to 18 cells outside the sphere.
+- **One predicate**: `ShavedMask(base, h)` in `src/interior.jl` (`is_shaved`,
+  `excised_mask(int, t, h)`; `BothMask` for a band without the shaved points),
+  evaluated by `build_excision`'s first pass, so the classes stay the single
+  source of truth; a problem's masks are `evolved_mask(p, t)` — the default of
+  `gh_error!`, `max_speed`, `evolved_nonfinite`, `validity_rows` and the
+  finder's provider — and `monitor_mask` widens by `W + h` where the build
+  shaved a point. The footprint guard has a `stencil_hits` for it. With a
+  `Horizon`, `m ≥ ⌈√3 G + 1/√3⌉` (5 at `q = 2`).
+- **The switch**: `Excision(T; shave = true)` by default, `excision_shave`;
+  `shave = false` is X2b–X7's set bit for bit and prints as X6–X7 printed
+  (and with `mixed = :nested` as X2b–X5), so earlier checkpoints restart when
+  asked for by name. `ExcisionData.nshaved` and the record's
+  `excision_shaved` (census slot `EXM_SHAVED`, the eleventh).
+- **What it did**: cured `r_E = 17/15` and `21/20` at `h = 1/24` (stationary to
+  `10 M`, and on the H200 to `10 M` at least); left `r_E = 3/2` failing, at
+  `0.64/M` at `1/24` and `1.8/M` at `1/32`, at a triple corner on the `x` cap. **`test/excision_patch.jl`** is
+  the analysis: the package's right-hand side linearized about the analytic
+  state on a box of lattice points, whose rightmost interior eigenvalue was
+  each run's growth rate, positive or negative. The step stopped there for
+  Erik; the lottery scan and the two H200 rows are on Symmetry, cut off by the
+  tunnel (`excision-x8`, `excision-x8-gpu`).
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -759,7 +798,14 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-After `main` was merged (2026-10-08) the suite is **7138 assertions in 22m36**
+After step X8 the suite is **7175 assertions in 55m54** at one thread and
+**7183 in 51m28** at four (2026-10-08, the two at once, at a load of 12–42
+from the step's own runs beside them — read those times as the machine's, not
+the suite's): `main`'s 7138/7146 and 37 new claims in `excision_tests.jl` (184
+claims, `2m10` / `2m01` under that load; its three new testsets, the shave's
+enumeration, its reach and the masks' agreement, are `31 s` of it at four
+threads, mostly the ADM monitor's first compilation moved earlier).
+After `main` was merged (2026-10-08) the suite was **7138 assertions in 22m36**
 at one thread and **7146 in 17m56** at four (the two at once, at a load of 6–10
 from other sessions): X7's 7001/7009, `main`'s 130 (`simd_tests.jl` and the lean
 algebra's lane spellings) and 7 in `excision_tests.jl` for the scalar route of
@@ -1226,6 +1272,7 @@ cells below `r₊`, and `r_0` defaults to `max(r_E/2, (r_E + a)/2)`, outside the
 ring). From step X6 a spinning excised hole builds — its frame-dragged faces
 take step X5's rule — and `mixed=symmetric|nested` chooses the zone points'
 mixed derivative (symmetric by default, nested for comparison with X2b–X5);
+from step X8 `shave=on|off` the lego corners (on by default);
 **always pass `r_0=` between the ring and the surface** at `a = 3/5` (X5:
 `(0.6 + r_E)/2`), and `cfl=1/2`:
 
@@ -1255,6 +1302,37 @@ rows' CSVs, records, SimWatch files and logs are in the worktree's
 julia test/octant_study.jl bin/output/x7/prod bin/output/x7/ref at=24 a=3/5 intervals=8,24 series=p24,p32,p48:24,32,48
 julia test/octant_study.jl bin/output/x7/prod bin/output/x7/ref at=64 a=3/5 intervals=8,24,40,64
 ```
+
+Step X8 (added 2026-10-08) added `shave=on|off` to `test/octant_runs.jl` (the
+lego corners shaved, on by default; the record's `excision_shaved`) and a
+standalone analysis script, **`test/excision_patch.jl`**: the package's own
+right-hand side linearized about the analytic state on a box of lattice points
+about one point, its eigenvalues — the rightmost whose eigenvector stays off the
+box's faces is the growth rate of a lego corner, as every run of the step
+confirmed. A `half = 2` box is 1300 unknowns, about two minutes at three threads;
+`half = 3` 3600, about five. By default it takes the finest cube `[0, 2]³`
+alone (the same operator near the surface as the small octant):
+
+```bash
+julia --project=. --threads=4 test/excision_patch.jl r_E=17/15 r_0=13/15 shave=off center=3,2,27 half=3
+julia --project=. --threads=4 test/excision_patch.jl r_E=3/2 r_0=21/20 shave=on center=35,7,6 half=3
+```
+
+Its lottery scan is `test/octant_runs.jl` on the small rotating octant
+(`L=8 N=24|32|48 roots=2 radii=4,2`, `finder=0`, `t_end=10 chunk=1 cfl=1/2`),
+rows generated by `bin/output/x8/genrows.py` (by the top disk of the polar
+cap, `R² − Z²`, at every topmost layer `Z`). On Symmetry it ran from
+`excision-x8` (CPU, `amddebugq`) and `excision-x8-gpu` (a copy with `CUDA`
+added, `h200q`) through `out/x8/scan.sbatch` and `scangpu.sbatch` — many rows a
+job, `P` at a time with `K` threads, a claim directory per row so that several
+jobs share a rows file, each row checkpointing at the job's end and the job
+resubmitting itself while rows are left — and `scansubmit.sh <rows> <dir>
+<job> <P> <K>`; X7's `rows.sbatch`/`submit.sh` for the two H200 rows; and
+`status.sh <dir>` prints a row a line. The scripts are in the worktree's
+`bin/output/x8`, and `local/runlocal.sh` runs the same rows on this machine.
+The tunnel went down while they ran: collect them as the "Blocked" paragraph of
+`SINGULARITY_HANDLING.md`'s "The polar corner (step X8)" lists, then delete
+their checkpoints (`ck-*`).
 
 Step X6's H200 check ran from `excision-x6/x6` on Symmetry, a copy with
 `CUDA` added, through `out/x6dev.sbatch` (`h200debugq`, eight CPUs): the
@@ -1978,8 +2056,29 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   a lattice lottery — `r_E = 1.10`, `1.15` and the same radius at `1/32` are
   stable — so a stable row at one `(h, r_E)` says nothing about another.
   Excising every point whose three inward axis neighbours are excised cured
-  both radii on a scratch copy; until that is built, run production at
-  `r_E = 4/5` (X7's rows).
+  both radii on a scratch copy. **(Built in step X8**, the default, as
+  `Excision(T; shave = true)`: it cures both radii, but `r_E = 3/2` fails with
+  it, at `0.64/M` at `1/24` and `1.8/M` at `1/32`, at a corner the one pass
+  leaves on the `x` cap — the entry below.**)** Run production at `r_E = 4/5` (X7's rows).
+- **The shave moves the triple corners; it does not remove them** (step X8).
+  A point whose three inward neighbours are excised (`k⁻ = 0` on every axis)
+  is where a lego corner's mode lives; one pass excises the ones the geometry
+  made and leaves the shaved set's own, a tenth fewer, and the set with none
+  at all is the rule's fixed point, 4 to 18 cells outside the sphere. On a cap
+  — within about `20°` of a coordinate axis, two axes nearly tangent, one of
+  them frame-dragged on the equatorial caps — such a corner can grow; at
+  `r_E = 4/5` there are none on the caps and the spectrum is at `−7/M`.
+  Before trusting a new depth, spin or `h`, take `test/excision_patch.jl` at
+  its caps' triple corners (a few minutes each): its rightmost interior
+  eigenvalue was every run's growth rate.
+- **An excised problem's masks are `evolved_mask(p, t)`, not
+  `interior_mask(p.interior, t)`** (step X8). The interior's own mask is the
+  geometry's and does not know the shaved points; the problem's knows them
+  (the shave needs the surface's spacing, which is the problem's, not the
+  interior's). Every default in `src/` takes the problem's; a test or a
+  script that builds its own mask for an excised hole should too, and the
+  noise of `test/octant_runs.jl` takes `excised_mask(int, t, h)`, the same
+  predicate.
 - **The rule bits are the build state's, and a restart rebuilds them from
   its own** (step X6). The checkpoint holds no bits: a chain of jobs is the
   uninterrupted run exactly while `excision_flips` is 0 at the checkpoint's
