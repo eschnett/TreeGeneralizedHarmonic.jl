@@ -142,7 +142,17 @@ the rule is in the zone kernel, as a second launch over the frame-dragged
 points, the zone points' mixed derivative is symmetric in its two axes (so
 the rotating octant evolves as the mirror octant does), and `test/octant_runs.jl
 octant=rotating a=3/5 interior=excised …` runs end to end, on the CPU and on
-an H200. X7 — the `a = 3/5` rows on Symmetry's H200s — is next.
+an H200. **X7 is done (2026-10-06)**: on Symmetry's H200s the excised static
+`a = 3/5` hole at `r_E = 4M/5` is the `:damped` layer outside the horizon
+from `h = 1/32` on (ℋ just outside it `2.1×`, `1.15×`, `1.00×` at `h = 1/24,
+1/32, 1/48`), its `J` drifts as the layer's does (the scheme's truncation
+error), `excision_flips = 0` everywhere, and its right-hand side costs half a
+`:damped` one's on the H200; the depth scan's shallowest surface, `r_E =
+17/15` at `1/24`, blows up at a lego corner at the pole where frame dragging
+nearly cancels a tangent closure's shift. The next round is Erik's call
+(proposed: fix the polar corner — a shave of the lego corners cured it on a
+scratch copy — then `a = 9/10` on the tracked surface; `CODE.md`,
+"Excision", "What step X7 measured").
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -609,6 +619,21 @@ frame-dragged faces in the zone kernel (step X6)"):
   the rule's launch; `test/thread_workload.jl` has an eighth line, the
   spinning hole's excised right-hand side.
 
+From step X7 (2026-10-06) the excised spinning hole has been **measured on
+Symmetry's H200s** (`CODE.md`, "Excision", "What step X7 measured", and
+Measured results, "Excision of the static spinning hole (step X7)"): the
+depth scan at `h = 1/24` (`r_E = 0.70 … 17/15`, `10 M`, with and without
+noise) and production at `r_E = 4/5`, `r_0 = 7/10`, `h = 1/24, 1/32, 1/48` to
+`24 M` and `1/32` to `64 M`, against the rotating octant's `a = 3/5`
+reference rows. No source changed; `test/octant_study.jl` takes several
+study directories, `at=` (every row at one time), `a=` (`M_irr` against
+Kerr's, `J − a`), `intervals=` (the slopes of `J` and `M_irr` per interval),
+rows with different shell sets, and prints the frame-dragged rows. The
+failure it found — `r_E = 17/15` (and `21/20`) at `h = 1/24` growing at
+`≈ 2/M` from `2 M` at the rim of the excised ball's topmost lattice layer at
+the pole — reproduces bit for bit on the CPU on a small rotating octant
+(`L = 8`, `N = 24`, cubes `4, 2`), which is where to work on it.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -682,7 +707,11 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-After step X6 the suite is **7001 assertions in 20m18** at one thread and
+After step X7 the suite is **7001 assertions in 17m42** at one thread and
+**7009 in 13m41** at four (2026-10-06, the two at once, at a load of 4–7):
+X6's counts, since no source changed — the step ran on Symmetry's H200s, and
+its one script change, `test/octant_study.jl`, is not in the suite.
+After step X6 the suite was **7001 assertions in 20m18** at one thread and
 **7009 in 15m42** at four (2026-10-06, the two at once, at a load of 7–10;
 its base, X4 with X5, measured 6952 in 19m31 and 6960 in 14m39 the same
 afternoon). Its 49 new claims are `excision_tests.jl`'s: the file is `1m42` /
@@ -1136,6 +1165,24 @@ julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
 julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=1/2 L=8 N=16 roots=1 radii=4,2,1 r_0=3/4 r_1=5/4 t_end=1/2 chunk=1/4 out=out/spin
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=excised octant=rotating L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/rot-excised
 julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=3/5 interior=excised L=8 N=16 roots=2 radii=4,2 r_E=1 r_0=0.8 t_end=1 chunk=1/2 cfl=1/2 out=out/smoke35
+```
+
+Step X7's rows ran from `excision-x7` on Symmetry, a copy with `CUDA`
+added, through X3's `rows.sbatch` (in `out/x7/`, resubmitting in its own
+partition on exit 3) and `out/x7/submit.sh <partition> <time> <rows file>
+<dir> <job>`, which marks every row of the file `queued` in SimWatch; the
+`10 M` scan rows, the `1/24` and `1/48` production rows and a `:damped` row
+at `1/48` (`d48`, the comparison the reference set lacks) ran in
+`h200debugq`'s hour (`walltime=2900`; the `1/48` rows as chains of two), the
+`1/32` row to `64 M` on `h200q`.
+`out/x7/x7_device.jl` (`dev.sbatch`) times the right-hand side, the zone
+kernel and the rule's launch against `:damped`'s on the production meshes. The
+rows' CSVs, records, SimWatch files and logs are in the worktree's
+`bin/output/x7`, the checkpoints deleted (Erik's instruction):
+
+```bash
+julia test/octant_study.jl bin/output/x7/prod bin/output/x7/ref at=24 a=3/5 intervals=8,24 series=p24,p32,p48:24,32,48
+julia test/octant_study.jl bin/output/x7/prod bin/output/x7/ref at=64 a=3/5 intervals=8,24,40,64
 ```
 
 Step X6's H200 check ran from `excision-x6/x6` on Symmetry, a copy with
@@ -1827,6 +1874,19 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   the extrapolation family grows at `+1–4/M` on the surface. **At `q = 2` the
   rule's extrapolation is linear** — its sources stop at `G = 2` steps — and
   quadratic at `q = 4` where three fit.
+- **A shallow excised surface can be unstable at a lego corner at the pole**
+  (found in step X7). At `a = 3/5`, `r_E = 17/15` and `21/20` at `h = 1/24`
+  blow up in `4.5–6 M`: the excised ball's topmost lattice layer is a small
+  disk (`x² + y² ≤ 10–11 h²`), and at its rim a zone point with `−x`, `−y`
+  and `−z` excised sits where frame dragging nearly cancels the shift along
+  the tangent `y` axis (`b/a = +0.011`). It has no rule bit; the nested mixed
+  derivative, the blend and noise do not change it, `ε_KO = 1` halves the
+  rate, and extending X5's rule to small positive `b/a` makes it worse. It is
+  a lattice lottery — `r_E = 1.10`, `1.15` and the same radius at `1/32` are
+  stable — so a stable row at one `(h, r_E)` says nothing about another.
+  Excising every point whose three inward axis neighbours are excised cured
+  both radii on a scratch copy; until that is built, run production at
+  `r_E = 4/5` (X7's rows).
 - **The rule bits are the build state's, and a restart rebuilds them from
   its own** (step X6). The checkpoint holds no bits: a chain of jobs is the
   uninterrupted run exactly while `excision_flips` is 0 at the checkpoint's

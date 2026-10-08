@@ -2797,7 +2797,13 @@ rule, the window and what X6 and X7 need are under "The frame-dragged faces
 is built — in the zone kernel's second launch, from rule bits and direction
 codes built once with the problem — the zone points' mixed derivative is
 symmetric in its two axes, and the static `a = 3/5` hole runs on the rotating
-octant; "What step X6 built", at the end of this section.**)** Moving holes —
+octant; "What step X6 built", at the end of this section.**)** **(Amended in
+step X7:** measured on the rotating octant on Symmetry's H200s — the excised
+static `a = 3/5` hole at `r_E = 4M/5` is the `:damped` layer outside the
+horizon from `h = 1/32` on, its spin drifts as the layer's does, and the
+depth scan found one failure, a lego corner at the pole of a shallow surface;
+"What step X7 measured", at the end of this section, has the numbers and the
+recommendation.**)** Moving holes —
 points that leave the excised set on the trailing side and need values — are
 a later round.
 
@@ -3611,6 +3617,160 @@ hole on the rotating octant end to end:
 - **`test/octant_runs.jl octant=rotating a=3/5 interior=excised …` runs**,
   with SimWatch: the build no longer refuses, and the CSV, `records.csv` and
   `[extra.excision]` carry the three rows.
+
+**What step X7 measured, and the recommendation (amended in step X7).** The
+excised static Kerr-Schild `a = 3/5` hole on the rotating octant, on
+Symmetry's H200s at `Float64`, with X5's rule as X6 built it, against the
+`:damped` and `:fitted` reference rows of [Robust stability on the
+octant](#robust-stability-on-the-octant-measured-2026-10-02) ("A spinning hole
+on the rotating octant, `a = 3/5`"); the tables are under [Measured
+results](#measured-results), "Excision of the static spinning hole (step
+X7)".
+- **The production depth runs; the shallow end of the window does not.** The
+  depth scan at `h = 1/24` (X5's window, `r_0` midway between the ring and
+  the surface) ran `r_E = 0.70, 0.80, 0.90, 1.00` to `10 M` with and without
+  noise: the band stationary from `2 M`, no non-finite value, `excision_flips
+  = 0`. `r_E = 17/15` — 16 cells below the poles, Erik's floor — **blows up**
+  at `4.5 M` (a `DomainError` in the kernel), with and without noise. The
+  production rows at `r_E = 4/5` (24, 32 and 48 cells below the poles at
+  `h = 1/24, 1/32, 1/48`) ran to `24 M`, and the `1/32` row to `64 M`.
+- **The failure is a lego corner at the pole, not the frame-dragged rule
+  (diagnosed in step X7).** It reproduces bit for bit on the CPU on a small
+  rotating octant with the same spacing at the hole (`L = 8`), where the
+  points of largest error were printed every quarter `M`. The growth, about
+  `2/M` from `2 M`, sits at the rim of the excised ball's topmost lattice
+  layer — at `r_E = 27.2 h` that layer, `z = 27 h`, is the disk `x² + y² ≤
+  10.8 h²` — at the zone point `(3h, 2h, 27h)` and its image across the
+  diagonal, `0.04` cells outside the sphere, whose `−x`, `−y` and `−z`
+  neighbours are all excised (`k⁻ = 0` on all three axes). There frame
+  dragging nearly cancels the radial shift's component along the nearly
+  tangent `y` axis: `b/a = +0.011` (`+0.078` at the same point at `a = 0`).
+  So the per-axis closure is X1's marginal inflow-like kind at almost zero
+  speed, and in that corner it is not marginal. The point has no rule bit.
+  - What does not change it: the nested mixed derivative (grows too), the
+    noise, the lopsided blend. `ε_KO = 1` halves the rate. Extending the rule
+    to `b/a < 0.02` or `0.05` makes it grow faster, and to `b/a < 1/2` the
+    whole surface blows up within `1 M` — X5's "at every closure axis"
+    control, in 3D.
+  - What removes it: the same lattice at `a = 0`; the same radius at `h =
+    1/32`; `r_E = 1.10` or `1.15` at `1/24` (other caps). `r_E = 21/20` at
+    `1/24`, whose topmost layer is the same disk, fails at `5 M`.
+  - **What cures it, on a scratch copy: shaving the lego corners.** Excising
+    every point whose three inward axis neighbours are excised — about 200
+    points of the octant's band at `1/24`, among them the two growing ones —
+    makes `r_E = 17/15` and `21/20` stationary to `8 M` (the largest error
+    `0.117` and `0.154`, the equator's) and leaves `r_E = 4/5` as it was
+    (`2.07`). Not built: the scratch copy changed only the classes' bit, so
+    its masks and monitors still saw the sphere.
+
+  It is the staircase's lottery X5 met on the plane, in three dimensions:
+  whether a run meets it depends on which lattice points the sphere leaves at
+  its poles, not on the depth alone.
+- **At `r_E = 4M/5` the exterior is the `:damped` layer's from `h = 1/32`
+  on.** At `24 M`, ℋ just outside the horizon, `[1.90, 2.25)`, is `2.09×`,
+  `1.15×` and `1.00×` the layer's at `h = 1/24, 1/32, 1/48` (at `1/48`
+  against a `:damped` row run for the comparison), converging at order
+  `7.0/4.4` where the layer's converges at `4.9/4.0`; the error there is
+  `0.87×`, `1.06×`, `1.00×`; every shell from `r = 2.25` out is within 5 % at
+  `1/32` and to `r = 5` at `1/24` (where the start-up pulse still makes the
+  far shells' ℋ `1.2–1.5×`), and the same to three digits at `1/48`. To
+  `64 M` at `1/32` it stays so: ℋ just outside the horizon `1.15×` at `24`,
+  `40` and `64 M`, the error there `1.04–1.06×` as both grow with the drift
+  of `J`. So the closures' leakage falls faster than the truncation error,
+  as at `a = 0` (X3's `r_E = M/2`), and by `1/32` it is below it. The depth
+  scan says the same at `1/24`: `r_E = 0.70` and
+  `0.80` give the same exterior, and `0.90` and `1.00` ℋ just outside the
+  horizon `1.8×` and `2.4×` theirs.
+- **The spin drifts as the layer's does: truncation error at order four.**
+  At `24 M`, `J − a` and `dJ/dt` are `0.82×` and `0.90×` `:damped`'s at
+  `h = 1/24`, `1.03×` and `1.03×` at `1/32`, and the layer's to three digits
+  at `1/48` (`dJ/dt = 1.07·10⁻⁸/M` in both); the orders of `dJ/dt` are
+  `3.6/4.1` (the layer's `4.1/4.0`). **To `64 M` at `h = 1/32`, `J` rises
+  at `5.56`, `5.25` and `5.30·10⁻⁸/M`** over `8–24`, `24–40` and `40–64 M`,
+  against the layer's `5.42`, `5.11` and `5.16·10⁻⁸/M` — `1.03×` in every
+  interval — to `J − a = 3.69·10⁻⁶` (the layer: `3.58·10⁻⁶`), and `M_irr`
+  falls with it as the layer's does (`−2.71·10⁻⁷` below Kerr's at `64 M`,
+  the layer `−2.67·10⁻⁷`). The drift of `h_tt` at the horizon is the
+  layer's to 1 %. Excision neither causes nor cures the drift of `J`: it is
+  the scheme's, outside the hole.
+- **The band inside the horizon carries the closures' low order, and it
+  stays there.** The largest error of a run, `2.1`, `1.1` and `0.60` in `L∞`
+  at `h = 1/24, 1/32, 1/48`, sits in the closure band on the equator, in
+  `Π_tt` at frame-dragged zone points next to the surface, where the data are
+  steepest (Kerr-Schild's radius `0.53` there, `H ≈ 3.8`); it is stationary
+  from `1 M`. In `L2` ℋ in `[r_E + 3h, 3/2)` is `4.5·10⁻²`, `2.8·10⁻²`,
+  `1.4·10⁻²` (order `1.7/1.6`) and the error `8.9·10⁻³`, `4.8·10⁻³`,
+  `1.8·10⁻³` (order `2.2/2.4`); in `[3/2, 1.90)`, which the layer evolves
+  too, ℋ is `4.9×` and `11×` the layer's at `1/24` and `1/32` and converges at
+  order `6.7/8.9`. A deeper surface is rougher: at `r_E = 0.70`, `0.1 M`
+  outside the ring on the equator, the band's ℋ is `4×` that at `0.80` and
+  its `L∞` error `14`, with the same exterior — which is why `4/5` and not
+  `7/10`.
+- **The outflow rows** are constant for the whole run: the normal margin
+  `+0.381`; the least per-axis `b/a` `−1.38`, `−1.17`, `−1.39` at `h = 1/24,
+  1/32, 1/48` (X5's census to its digits); the frame-dragged axes 194, 365
+  and 870 (X6 predicted about 190, 355, 850) and their faces 77, 140 and 317
+  of 924, 1623 and 3594 (`excision_faces_dragged` against
+  `excision_faces`); half the faces inflow-like; and **`excision_flips = 0` at
+  every row of every run**, so the chained rows are the uninterrupted runs.
+- **Cost.** A right-hand side of the excised hole is `2.2–2.6 ns` a point on
+  the H200, `0.47–0.48×` the `:damped` layer's on the same mesh (`main`'s
+  `:damped` branch still spills, X4). The zone kernel is 1.6–3.1 % of it and
+  the rule's launch 2.5–3.2 % — **X6 predicted 0.6 % and 0.3 %**: the launch
+  costs `1.6–3.9 ms`, growing with the frame-dragged points and the block
+  holding them, not a fixed latency. A run costs `62–67`, `148` and `112 s`
+  per `M` at `h = 1/24, 1/32, 1/48`, the analysis every chunk included — a
+  third of what X6 predicted from X3's rates, the spill-free kernel's gain —
+  and the `:damped` row at `1/48` `165 s`: an excised run is `0.68×` a
+  layer's on this kernel.
+- **The recommendation (proposed in step X7): fix the polar corner first,
+  then the static `a = 9/10` hole; moving holes after; do not stop.**
+  Excision is now what the layer is for a static spinning hole with an
+  analytic interior, at the same cost or less. It is worth carrying on where
+  the layer has no good target — `a = 9/10`, where `:fitted` is unstable and
+  `:damped` needs `h = 1/96` — and to the moving hole. What each needs:
+  - **The polar corner** (one agent step, a day): build the corner shave
+    that cured it on the scratch copy — a point whose three inward axis
+    neighbours are excised is excised — as a property of the excised set
+    itself, so that the classes, the masks of the monitors and the horizon
+    guard, and the census agree (the classes stay the one answer to "is it
+    excised"); on both geometries, decided once at the build. Its tests: the
+    exterior bit for bit where no corner is shaved, the planted degenerate
+    metric, and the lottery itself — every `r_E` of X5's window at `h =
+    1/24, 1/32, 1/48` built and run to `10 M` on the small rotating octant
+    (`L = 8`), which reproduces the H200's rows bit for bit at minutes a row
+    on the CPU — plus one H200 row at `r_E = 17/15`, `1/24`. A
+    frozen-coefficient spectrum of a patch around the cap is the analysis
+    that would say why, if the shave does not hold at another lattice.
+  - **`a = 9/10`**, after the corner, **on the tracked offset surface, not
+    the sphere.** Normal outflow ends at the inner horizon, at `ρ = 1.06` on
+    the equator, and the horizon is at `1.436` at the poles, so a sphere is at
+    most `0.37 M` below the poles — shallower than `r_E = 1` here, whose
+    exterior was `2.4×` the layer's at `1/24`. The tracked offset surface
+    (X2b, frozen) has normal outflow to `0.63 M` below the horizon, but only
+    just: X1 measured its margin peaking at `+0.079` half an `M` down, against
+    `+0.38` at this round's `r_E = 4/5`. That is the near-null inward speed
+    the `a = 9/10` study on the rotating-octant branch suspects in its oblate
+    *layer*, unstable 24 cells (`0.25 M`) below the horizon at `h = 1/96` and
+    stable at 12 (`e1bb8eb`, not on this branch). So the surface's depth is a
+    stability question again, and the scan has to bracket it, from `0.125`
+    to `0.5 M` below the horizon: `m = 6, 9, 12, 18, 24` at `h = 1/48` (36
+    blocks, 31.9 M points, `≈ 112 s/M`; five `10 M` rows, 1.6 H200-hours),
+    then production at `1/48`, `1/64` (75.5 M points,
+    `≈ 350 s/M`) and on that study's `1/96` mesh (52.8 M points, `≈ 370 s/M`)
+    to `24 M`, against its `:damped` row at `1/96` (ℋ just outside the
+    horizon `2.9·10⁻⁸`, `J` drifting at `2.5·10⁻⁹/M`): about 7 H200-hours.
+    The rule's census at `9/10` (X1: `b/a` down to `−1.2` within half an `M`
+    of the horizon) is the other thing to watch.
+  - **Moving holes**, after both: X3's list — values at the points the
+    trailing side uncovers, the classes rebuilt as the surface moves, the
+    one-level floor travelling with it — and two things this round adds: the
+    rule bits are the build state's, so a moving surface rebuilds them; and a
+    moving surface passes through every lattice configuration, so the polar
+    corner must be solved, not avoided by the choice of `r_E`.
+  - **Stopping** is not recommended: nothing measured here is worse than the
+    layer outside the horizon, and the two open problems — the corner and the
+    oblate surface — are bounded.
 
 ## Initial data and backgrounds
 
@@ -9638,6 +9798,191 @@ carries the mixed derivative's field (the nested one prints as before), and
 X2b's refusal of the shift into the excised set became a build that counts
 frame-dragged axes plus the refusal of a tap without a source.
 
+### Excision of the static spinning hole (step X7)
+
+The `:excised` variant with step X5's rule as X6 built it (under
+[Excision](#excision-added-2026-10-05), "What step X7 measured"), on
+Symmetry's H200s at `Float64`, one GPU and eight CPU threads a row (CUDA.jl
+6.4.2, KernelAbstractions 0.9.43, TreeAMR 0.1.7, IMEXRungeKutta 1.3.0, Julia
+1.13.1, driver 595.45), from the study's own copy `excision-x7` with `CUDA`
+added to its `Project.toml`, through X3's `rows.sbatch` (a file of rows, a
+chain on exit 3). Every row is `test/octant_runs.jl backend=cuda case=ks
+octant=rotating a=3/5 interior=excised geometry=sphere L=64 roots=2
+chunk=1 cfl=1/2`: Kerr-Schild `a = 3/5` (`r₊ = 1.8` at the poles, `1.897` on
+the equator, the ring at `0.6`) on the rotating octant `[0, 64]³`, root brick
+`2³`, cubes `32, 16, 8` (and `4` at `h = 1/48`), the algebraic source, `q =
+4`, `ε_KO = 1/2`, the Gaussian `γ0`, `:msn`, the symmetric mixed derivative,
+no blend, the finder every chunk with the spin; the ball `r < r_E`, the core
+rule's `r_0 = (0.6 + r_E)/2`, the margin `⌊(r₊ − r_E)/h⌋` cells. The reference
+is the rotating octant's `a = 3/5` record (`a06d16`, `a06d24`, `a06d32`,
+`a06f32`), whose job scripts say `amplitude=0`: the production rows have no
+noise, and the depth scan ran both ways **(proposed in step X7)**. Each row's
+`octant.csv`, `records.csv`, `simwatch.toml` and log are in the worktree's
+ignored `bin/output/x7/{scan,prod}`, the reference rows' in
+`bin/output/x7/ref`; `test/octant_study.jl` reads them (amended in this step:
+several directories, `at=`, `a=`, `intervals=`, the frame-dragged rows).
+
+**The depth scan** (jobs 570834, 570844–570852, `h200debugq`): `h = 1/24`
+(`N = 96`, 29 blocks, 25.7 M points), `10 M` a row, X5's window. At `10 M`
+without noise; *band ℋ* is the evolved shell `[r_E + 3h, 1.90)` inside the
+horizon (the layer's: `[3/2, 1.90)`), *L∞* the largest error of the run
+(in the closure band), *dragged* the frame-dragged axes and their faces:
+
+| `r_E` | `m` | band points | faces, inflow-like | dragged | least `b/a` | normal | ℋ `[1.90, 2.25)` | error there | ℋ `[2.25, 3)` | band ℋ | L∞ | `J − a` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `:damped`, `r_1 = 3/2` | (7) | | | | | | `2.56·10⁻⁶` | `2.69·10⁻⁶` | `4.57·10⁻⁷` | `5.90·10⁻⁵` | `1.8·10⁻⁴` | `2.65·10⁻⁶` |
+| `7/10` | 26 | 1519 | 714, 363 | 197, 77 | `−1.50` | `+0.229` | `5.42·10⁻⁶` | `2.74·10⁻⁶` | `4.58·10⁻⁷` | `1.19·10⁻¹` | `14.3` | `2.32·10⁻⁶` |
+| `4/5` | 24 | 1909 | 924, 475 | 194, 77 | `−1.38` | `+0.381` | `5.50·10⁻⁶` | `2.63·10⁻⁶` | `5.21·10⁻⁷` | `2.96·10⁻²` | `2.06` | `1.97·10⁻⁶` |
+| `9/10` | 21 | 2380 | 1170, 624 | 202, 76 | `−0.95` | `+0.419` | `9.74·10⁻⁶` | `3.64·10⁻⁶` | `5.65·10⁻⁷` | `9.97·10⁻³` | `0.37` | `0.75·10⁻⁶` |
+| `1` | 19 | 2885 | 1413, 784 | 182, 73 | `−0.57` | `+0.378` | `1.30·10⁻⁵` | `4.76·10⁻⁶` | `5.74·10⁻⁷` | `5.08·10⁻³` | `0.11` | `2.83·10⁻⁶` |
+| `17/15` | 16 | 3647 | 1824, 1111 | 187, 75 | `−0.58` | `+0.296` | **blows up at `4.5 M`**: `2.94·10⁻⁵` at `4 M` | `6.75·10⁻⁶` | `8.79·10⁻⁷` | `4.5·10⁻³` | `4.45` at `4 M` | — |
+
+- **Four depths are stable; the shallowest is not.** At `r_E ≤ 1` the band's
+  norms are constant to three digits from `2 M`, ℋ just outside the horizon
+  peaks at `3–5 M` (the start-up) and settles, no value in the band is ever
+  non-finite, and the frame-dragged axes keep their bits (`excision_flips =
+  0` at every row). `r_E = 17/15` is the same until `2 M`; then its largest
+  error grows about `1.9/M` (`0.21`, `0.52`, `1.36`, `4.45` at `2.5`, `3`,
+  `3.5`, `4 M`) and the kernel throws a `DomainError` at `4.5 M`.
+- **The exterior wants depth, the band wants room from the ring.** ℋ just
+  outside the horizon is `2.1×` the layer's at `0.70` and `0.80` and rises
+  to `3.8×` and `5.1×` at `0.90` and `1`; the error there is the layer's at
+  `0.70` and `0.80` and `1.35×`, `1.77×` at `0.90`, `1`; in `[2.25, 3)` ℋ is
+  `1.00–1.26×` and the error `0.96–1.08×` the layer's. The band
+  goes the other way: its ℋ falls `4×` from `0.70` to `0.80` and `3×` to
+  `0.90`, and its `L∞` from `14` (`0.1 M` outside the ring on the equator)
+  to `2.1`. Hence production at `4/5` (X6's proposal).
+- **The noise changes nothing near the hole**: the rows with `10⁻⁸` agree
+  with these to three or four digits inside `r = 2.25` and fail the same way
+  at `17/15`; in `[2.25, 3)` they add `6·10⁻⁸` to ℋ (`5.84·10⁻⁷` at `4/5`),
+  X3's noise floor.
+
+**The failure at `r_E = 17/15`, located (diagnosed in step X7)**, on the CPU
+with a scratch script (`diag_surface.jl`, the case of `test/octant_runs.jl` on
+the small rotating octant `L = 8`, `N = 24`, cubes `4, 2`, so `h = 1/24` at
+the hole, printing the points of largest `|u − u_exact|` with their class,
+rule bits and variable every half or quarter `M`; the script, its logs and
+the scratch copies' patches are in `bin/output/x7/local`). It reproduces the
+H200 row's largest error to four digits (`0.5238` at `3 M`). The growing points
+are `(3h, 2h, 27h)` and `(2h, 3h, 27h)`, `0.04` cells outside the sphere on
+the rim of the excised ball's topmost layer (`z = 27 h`, `x² + y² ≤ 10.8 h²`),
+with `−x`, `−y` and `−z` excised and no rule bit; the error is in `Π_xy`,
+`Π_yy`, `Π_yz`. The shift's component along `y` there is nearly cancelled by
+frame dragging, `b/a = +0.011`. Each row below changes one thing (the largest
+error of the run; *grows* means the same points):
+
+| row | change | result |
+|---|---|---|
+| as built | — | grows from `2.25 M`, `4.5` at `4 M`, `48` at `4.5 M` |
+| nested | `mixed = :nested` | grows, `7.2` at `4 M` |
+| `ε_KO = 1` | | grows from `3.5 M` at about half the rate, `0.36` at `5 M` |
+| blend | `upwind = 1,4` | grows, `7.6` at `4 M` |
+| rule to `b/a < 0.02` | the rule's threshold, a scratch copy | the corner takes a bit and grows faster, `19` at `4 M` |
+| rule to `b/a < 0.05` | | `8.1` at `3.5 M` |
+| rule to `b/a < 1/2` | | `8.2` at `1 M`, at the equator's frame-dragged points |
+| `a = 0` | the same lattice and radius (20 cells below `r₊ = 2`), symmetric or nested | `0.012`, stationary to `5 M` |
+| `h = 1/32` | the same radius | `0.048`, stationary to `5 M` |
+| `r_E = 21/20` | the same topmost disk, `x² + y² ≤ 10.0 h²` at `z = 25 h` | grows from `4.5 M`, `0.87` at `6 M` |
+| `r_E = 11/10`, `23/20` | topmost disks of radius `4.6`, `5.7` cells | `0.085`, `0.046`, stationary to `6 M` |
+| shave | a scratch copy excising every point whose three inward axis neighbours are excised (217 points of the open octant at `17/15`, 198 at `21/20`, 108 at `4/5`) | `17/15`: `0.117`, `21/20`: `0.154`, stationary to `8 M`; `4/5`: `2.07`, as built |
+
+**The production rows** (jobs 570855 (`p24`), 570863 (`p32`), 570854 and
+570879 (`p48`, two jobs of a chain)), and a `:damped` row at `h = 1/48` for
+the comparison there, which the reference set has not (`d48`, jobs 570887 and
+570898; `r_0 = 3/4`, `r_1 = 3/2`, the reference rows' options otherwise)
+**(proposed in step X7)**: `r_E = 4/5`, `r_0 = 7/10`, no noise,
+`h = 1/24, 1/32, 1/48` (`N = 96`, `128`, and `96` with the fourth cube, 36
+blocks, 31.9 M points, `[0, 4]³` at `1/48` and `[4, 8)` at `1/24`), with a
+shell edge added at `r = 3/2` (`shells=3/2,√(2r₊),9/4,3,5,8`) so that
+`[3/2, 1.90)` is the region the `:damped` layer evolves inside the horizon
+**(proposed in step X7)**. At `24 M`; the band is `[r_E + 3h, 3/2)`; `J − a`,
+`M_irr` and their slopes over `8–24 M` from the record; the last column the
+H200's seconds per `M`, the analysis every chunk included (the reference rows
+`a06d*` ran on the kernel before X4's merge, `d48` on this one):
+
+| `h` | interior | band ℋ | ℋ `[3/2, 1.90)` | ℋ `[1.90, 2.25)` | ℋ `[2.25, 3)` | error `[3/2, 1.90)` | error `[1.90, 2.25)` | error `[2.25, 3)` | `J − a` | `dJ/dt` | `M_irr − M_Kerr` | `dM_irr/dt` | drift of `h_tt` | s per `M` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `1/16` | `:damped` | | `1.26·10⁻³` | `9.13·10⁻⁵` | `4.42·10⁻⁶` | `3.38·10⁻⁴` | `5.24·10⁻⁵` | `1.25·10⁻⁵` | `2.08·10⁻⁵` | `1.14·10⁻⁶` | `+6.8·10⁻⁷` | `−5.7·10⁻⁸` | `1.79·10⁻⁵` | 29 |
+| `1/24` | `:damped` | | `5.90·10⁻⁵` | `2.65·10⁻⁶` | `4.88·10⁻⁷` | `1.98·10⁻⁵` | `4.36·10⁻⁶` | `1.50·10⁻⁶` | `5.06·10⁻⁶` | `1.75·10⁻⁷` | `+4.6·10⁻⁸` | `−8.8·10⁻⁹` | `3.00·10⁻⁶` | 138 |
+| `1/32` | `:damped` | | `3.95·10⁻⁶` | `6.41·10⁻⁷` | `1.55·10⁻⁷` | `5.02·10⁻⁶` | `1.35·10⁻⁶` | `4.75·10⁻⁷` | `1.53·10⁻⁶` | `5.42·10⁻⁸` | `+1.1·10⁻⁸` | `−2.8·10⁻⁹` | `9.29·10⁻⁷` | 354 |
+| `1/32` | `:fitted` | | | `2.04·10⁻⁶` | `1.39·10⁻⁷` | | `1.41·10⁻⁶` | `4.41·10⁻⁷` | `3.06·10⁻⁷` | `2.54·10⁻⁸` | `−8.0·10⁻⁹` | `−3.6·10⁻⁹` | `1.07·10⁻⁶` | |
+| `1/24` | excised | `4.52·10⁻²` | `2.91·10⁻⁴` | `5.56·10⁻⁶` | `4.80·10⁻⁷` | `6.21·10⁻⁵` | `3.80·10⁻⁶` | `1.44·10⁻⁶` | `4.15·10⁻⁶` | `1.57·10⁻⁷` | `+3.5·10⁻⁸` | `−9.5·10⁻⁹` | `3.01·10⁻⁶` | 67 |
+| `1/32` | excised | `2.75·10⁻²` | `4.31·10⁻⁵` | `7.37·10⁻⁷` | `1.58·10⁻⁷` | `7.47·10⁻⁶` | `1.43·10⁻⁶` | `4.84·10⁻⁷` | `1.57·10⁻⁶` | `5.56·10⁻⁸` | `+1.3·10⁻⁸` | `−2.7·10⁻⁹` | `9.25·10⁻⁷` | 148 |
+| `1/48` | `:damped` | | `5.69·10⁻⁷` | `1.26·10⁻⁷` | `3.03·10⁻⁸` | `9.76·10⁻⁷` | `2.74·10⁻⁷` | `1.00·10⁻⁷` | `3.07·10⁻⁷` | `1.07·10⁻⁸` | `+1.0·10⁻⁸` | `−1.5·10⁻¹⁰` | `1.96·10⁻⁷` | 165 |
+| `1/48` | excised | `1.43·10⁻²` | `1.18·10⁻⁶` | `1.26·10⁻⁷` | `3.03·10⁻⁸` | `9.80·10⁻⁷` | `2.73·10⁻⁷` | `1.00·10⁻⁷` | `3.06·10⁻⁷` | `1.07·10⁻⁸` | `+1.0·10⁻⁸` | `−1.5·10⁻¹⁰` | `1.96·10⁻⁷` | 112 |
+
+- **Against the layer at the same `h`**, excised over `:damped`: ℋ just
+  outside the horizon `2.09×` (`1/24`) and `1.15×` (`1/32`), `ℳ` there
+  `2.43×`, `1.89×`, the gauge constraint `1.00×`, `1.04×`, the error `0.87×`,
+  `1.06×`; from `r = 2.25` out every constraint and the error within 5 % at
+  `1/24` to `r = 5` (ℋ `1.17×` in `[5, 8)` and `1.55×` beyond, the start-up
+  pulse still passing) and within 5 % at `1/32` in every shell, most within
+  2 %. At `1/48` the excised row is `d48` to three digits in every shell
+  from `r = 1.90` out, in `J`, `M_irr` and the drift of `h_tt`; only
+  `[3/2, 1.90)`, next to the closures, is `2.07×` in ℋ (the error there
+  `1.00×`).
+- **Orders**, `1/24 → 1/32 → 1/48` (`test/octant_study.jl … series=p24,p32,
+  p48:24,32,48`): ℋ just outside the horizon `7.02/4.36` (the layer's
+  `1/24 → 1/32`: `4.94`), the error there `3.39/4.08`, in `[2.25, 3)` ℋ
+  `3.87/4.07` and the error `3.79/3.88`; `[3, 5)` straddles the `1/48`
+  mesh's `r = 4` and the shells beyond are at `1/24` on it, so their second
+  orders mean nothing (`[3, 5)`: `3.91/3.39`). Inside: `[3/2, 1.90)` ℋ
+  `6.65/8.88`, the error `7.37/5.01`; the band `1.72/1.61` (ℋ) and
+  `2.18/2.41` (error); the run's `L∞`, in the band, `2.06`, `1.10`, `0.60`.
+  `J − a` `3.37/4.03` and `dJ/dt` `3.61/4.06`, against the layer's
+  (`a06d24 → a06d32 → d48`) `4.16/3.96` and `4.07/3.99`, whose ℋ just
+  outside the horizon goes `4.94/4.01`.
+- **`M_irr` at `1/48`** is Kerr's to `1.0·10⁻⁸` and flat to `1.5·10⁻¹⁰/M`
+  in both rows: below what the finder resolves at `N_ah = 12` (the layer at
+  `1/32` has `1.1·10⁻⁸`), so its slope there is not a drift.
+
+**To `64 M` at `h = 1/32`** (job 570863, one job of `2 h 57`, 7104 steps),
+against `a06d32` continued to `64 M`; the excised row at `24`, `40` and
+`64 M`, the layer's in brackets:
+
+| `t` | ℋ `[1.90, 2.25)` | ℋ `[2.25, 3)` | error `[1.90, 2.25)` | error `[2.25, 3)` | `J − a` | `dJ/dt` since the last row | `M_irr − M_Kerr` | drift of `h_tt` |
+|---|---|---|---|---|---|---|---|---|
+| `24` | `7.37·10⁻⁷` (`6.41`) | `1.58·10⁻⁷` (`1.55`) | `1.43·10⁻⁶` (`1.35`) | `4.84·10⁻⁷` (`4.75`) | `1.57·10⁻⁶` (`1.53`) | `5.56·10⁻⁸` (`5.42`), over `8–24` | `+1.3·10⁻⁸` (`+1.1`) | `9.25·10⁻⁷` (`9.29`) |
+| `40` | `7.41·10⁻⁷` (`6.46`) | `1.61·10⁻⁷` (`1.58`) | `2.02·10⁻⁶` (`1.93`) | `8.17·10⁻⁷` (`8.00`) | `2.41·10⁻⁶` (`2.35`) | `5.25·10⁻⁸` (`5.11`) | `−8.9·10⁻⁸` (`−8.9`) | `1.19·10⁻⁶` (`1.19`) |
+| `64` | `7.43·10⁻⁷` (`6.48`) | `1.61·10⁻⁷` (`1.59`) | `2.99·10⁻⁶` (`2.88`) | `1.35·10⁻⁶` (`1.32`) | `3.69·10⁻⁶` (`3.58`) | `5.30·10⁻⁸` (`5.16`) | `−2.71·10⁻⁷` (`−2.67`) | `1.57·10⁻⁶` (`1.56`) |
+
+The hole region is stationary from `3 M` to `64 M`: the band's ℋ is
+`2.75·10⁻²` to three digits at every row, ℋ just outside the horizon rises
+by 1 % in `40 M` as the layer's does, and only the errors grow — the slightly
+different hole spreading outward with the drift of `J`, `1.03×` the layer's
+in every interval. All 65 finds succeed, and `excision_flips = 0` at all 65
+rows.
+
+**What it costs on the H200** (job 570857, `h200debugq`; `x7_device.jl`,
+X6's device script reduced to the timings, minimum of ten, the `:damped`
+layer at `r_0 = 3/4`, `r_1 = 3/2` on the same mesh):
+
+| mesh | points | zone points | frame-dragged axes | right-hand side | zone kernel | the rule's launch | `:damped` right-hand side |
+|---|---|---|---|---|---|---|---|
+| `1/24` (`N = 96`, 29 blocks) | 25.7 M | 1909 | 194 | 64.4 ms (2.51 ns a point) | 1.23 ms (1.9 %, 647 ns a zone point) | 1.62 ms (2.5 %) | 136.1 ms (5.31 ns; excised `0.47×`) |
+| `1/32` (`N = 128`, 29 blocks) | 60.8 M | 3272 | 365 | 136.3 ms (2.24 ns) | 2.16 ms (1.6 %, 661 ns) | 3.89 ms (2.9 %) | 283.6 ms (4.66 ns; `0.48×`) |
+| `1/48` (`N = 96`, 36 blocks) | 31.9 M | 6967 | 870 | 82.1 ms (2.58 ns) | 2.51 ms (3.1 %, 360 ns) | 2.63 ms (3.2 %) | 169.9 ms (5.34 ns; `0.48×`) |
+
+The excised right-hand side is X4's `2.9 ns` a point; the `:damped` one is
+X4's `5.3 ns` (`main`'s `:damped` branch still spills), so on this kernel an
+excised right-hand side costs about half a `:damped` one. The zone kernel and
+the rule's launch together are 4.4 %, 4.5 % and 6.3 % — **X6 predicted 0.6 % and 0.3 %
+for the rule** at `1/24` and `1/32` from a `0.47 ms` launch at 72 points: the
+launch is not a fixed latency but grows with the frame-dragged points and the
+`96³` or `128³` block that holds them. Per `M` of evolution, the analysis
+every chunk included: `62` (scan) and `67 s` (production, one shell more) at
+`1/24`, `148 s` at `1/32`, `112 s` at `1/48`, against X6's `~140`, `~380`,
+`~350 s`, and `165 s` for `d48`, the `:damped` layer at `1/48` on the same
+kernel: an excised run is `0.68×` a layer's. The start-up is about `125 s`,
+a checkpoint chunk `+60–130 s`. The
+whole study took 8.2 H200-hours (`sacct`), the `1/32` row 3 of them.
+
+**The suite.** No source changed in this step (`test/octant_study.jl`, which
+is not in it, was extended): **7001 assertions in 17m42** at one thread and
+**7009 in 13m41** at four (the two at once, at a load of 4–7, after every row
+had finished), X6's counts; the same counts in 17m43 and 13m46 at the step's
+start.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -10115,4 +10460,13 @@ answer it in order:
   [Excision](#excision-added-2026-10-05), "What step X3 measured".**)**
 
 Spinning holes wait for the rotating octant on `main`; moving holes wait
-for the static answer.
+for the static answer. **(Answered for Kerr-Schild `a = 3/5` in steps
+X4–X7:** the rotating octant is on the integration branch (X4), the faces
+where frame dragging turns the shift into the excised set take X5's rule
+(X6), and the excised static hole at `r_E = 4M/5` is the `:damped` layer
+outside the horizon from `h = 1/32` on, with the layer's drift of `J` (X7).
+Open: a lego corner at the pole of a shallow surface is unstable (X7's depth
+scan, `r_E = 17/15` at `h = 1/24`), which `a = 9/10` and the moving hole
+must not meet; X7's recommendation is to fix it first, then `a = 9/10` on the
+tracked surface. See [Excision](#excision-added-2026-10-05), "What step X7
+measured".**)**
