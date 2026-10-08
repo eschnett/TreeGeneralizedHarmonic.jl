@@ -1463,7 +1463,7 @@ It reads the working array, not a state vector: call it after a
 `scatter!`, which is what [`gh_dt`](@ref) does.
 """
 function max_speed(p::GHProblem{T}; t=zero(T),
-                   mask=interior_mask(p.interior, t)) where {T}
+                   mask=evolved_mask(p, t)) where {T}
     map_blocks!(gh_speed_kernel!, p.U, p.diag.work, p.U.work, p.origins,
                 p.spacings, mask, p.valG)
     # `zero(T)` as the identity rather than `typemin`: a characteristic

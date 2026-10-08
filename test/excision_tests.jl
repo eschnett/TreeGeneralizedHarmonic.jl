@@ -8,6 +8,12 @@
 # geometries are one operator; the monitors read no excised value; the
 # refusals fire, each by name; and a run goes, and restarts, as the run.
 #
+# From step X8 the fixture's excised set is shaved — the ball and its 216
+# lego corners — and the step's claims are the testsets after the first: the
+# shaved set is the rule's enumeration, the shave changes nothing beyond its
+# points' reach (and nothing at all on a sphere with no corner), and every
+# mask, the monitors and the horizon guard agree with the classes.
+#
 # The run file of the excision round, so it prices its claims: the fixture's
 # problem is built once and shared by the testsets that only evaluate on it.
 
@@ -54,7 +60,11 @@ const TGHx = TreeGeneralizedHarmonic
     owned = CartesianIndices((N, N, N))
     # The class of owned point `I` of block `b`.
     cls(ex, I, b) = ex.classes[I[1] + G, I[2] + G, I[3] + G, b]
-    mask = interior_mask(case.interior, zero(T))
+    # The excised set as the classes hold it: from step X8 the geometry's with
+    # its lego corners shaved, the problem's `evolved_mask` (the fixture's
+    # sphere `r < 3/4` has 216 corners, 27 in each octant).
+    mask = evolved_mask(p, zero(T))
+    @test mask isa ShavedMask && ex.nshaved == 216
 
     @testset "the classes are the geometry's, the ghosts their owners', the zone the enumeration's" begin
         # Guards the single source of truth. A class array that disagreed with
@@ -97,11 +107,204 @@ const TGHx = TreeGeneralizedHarmonic
         @test wrong == 0
         @test (ex.nzone, ex.nexcised) == (nzone, nexc)
         @test ex.nzone + ex.nexcised + ex.ncentered == nblocks(U) * N^3
-        # The numbers on the record: a ball of radius 3/4 at h = 5/64, and
-        # its band; the zone lives in 32 of the 64 fine blocks.
-        @test (ex.nexcised, ex.nzone, ex.nzoneblocks) == (3743, 2192, 32)
+        # The numbers on the record: a ball of radius 3/4 at h = 5/64 with
+        # its 216 corners shaved (step X8; without the shave 3743, 2192, 32,
+        # the testset below), and its band; the zone lives in 32 of the 64
+        # fine blocks.
+        @test (ex.nexcised, ex.nzone, ex.nzoneblocks) == (3959, 2312, 32)
         @test ex.W == 2 * h && ex.h == h
         @test count(Array(ex.zoneblocks)) == ex.nzoneblocks
+    end
+
+    # --- step X8: the lego corners shaved (`CODE.md`, "Excision", "What step
+    # X8 built"). A point the geometry leaves outside is excised too when its
+    # three neighbours one step toward the center are inside it; one pass,
+    # decided once with the classes from a predicate every mask evaluates. The
+    # fixture's problem above is shaved (the default); `p0` is the same
+    # fixture without the shave, steps X2b–X7's excised set.
+    p0, u0 = setup(hole_fixture(T; q=q, variant=:excised, r_1=r_E,
+                                excision=Excision(T; shave=false)))
+    ex0 = p0.excision
+    # The fixture's level-3 lattice is `x = k h`, `h = 5/64`, about the center:
+    # inside the sphere `r < 3/4` exactly when `400 |k|² < 36864`, in integers.
+    inball(k) = 400 * (k[1]^2 + k[2]^2 + k[3]^2) < 36864
+    lattice(x) = ntuple(d -> round(Int, x[d] / ex.h), 3)
+    inward(k, d) = Base.setindex(k, k[d] - sign(k[d]), d)
+    corner(E, k) = !E(k) && all(d -> k[d] != 0 && E(inward(k, d)), 1:3)
+
+    @testset "the shaved set is the rule's enumeration on the host, one pass, and without the shave the excised set is X2b's" begin
+        # Guards the shave's definition (step X8). A shaved set that were not
+        # the rule — an inward neighbour taken on the wrong side, a center
+        # plane shaved, a neighbour read on another lattice, the predicate
+        # iterated — would excise other points than the ones step X7's scratch
+        # copy cured; a build without the shave that were not steps
+        # X2b–X7's would not be the comparison the switch exists for. At every
+        # owned point, from the integer lattice alone: the shaved classes'
+        # excised set is the ball and its corners, and the unshaved one the
+        # ball. One pass: the corners of the shaved set itself — a point whose
+        # three inward neighbours are excised, one of them shaved — are left
+        # (iterated, the rule would shave them and their neighbours on).
+        nsh = 0
+        bad = 0
+        bad0 = 0
+        second = 0
+        shavedset = Set{NTuple{3,Int}}()
+        for b in 1:nblocks(U), I in owned
+            k = lattice(coordinates(U, b, Tuple(I) .+ G))
+            sh = corner(inball, k)
+            sh && push!(shavedset, k)
+            nsh += sh
+            bad += (cls(ex, I, b) == TGHx.CLASS_EXCISED) != (inball(k) || sh)
+            bad0 += (cls(ex0, I, b) == TGHx.CLASS_EXCISED) != inball(k)
+        end
+        for b in 1:nblocks(U), I in owned
+            k = lattice(coordinates(U, b, Tuple(I) .+ G))
+            second += corner(k -> inball(k) || k in shavedset, k)
+        end
+        @info "the fixture's shave: $nsh corners shaved; $second corners of the " *
+              "shaved set left by the one pass"
+        @test bad == 0 && bad0 == 0
+        @test nsh == ex.nshaved == 216 && ex0.nshaved == 0
+        @test second > 0
+        @test (ex0.nexcised, ex0.nzone, ex0.nzoneblocks) == (3743, 2192, 32)
+        @test ex.nexcised == ex0.nexcised + ex.nshaved
+        @test evolved_mask(p0, zero(T)) isa InteriorMask
+        # Every shaved point lies within `h/√3` of the sphere (step X8's bound).
+        @test all(k -> sqrt(sum(abs2, k)) * ex.h - r_E < ex.h / sqrt(3), shavedset)
+    end
+
+    @testset "the shave changes nothing beyond the shaved points' reach, and nothing at all where it shaves nothing" begin
+        # Guards "the exterior is unchanged" for the shave (step X8). Where it
+        # shaves, the classes change at the shaved points (excised for zone)
+        # and at the points whose stencils read one (zone for centered); every
+        # other point keeps its class and — its stencils' reads of the classes
+        # reaching `G` along the axes and the `G`-box in each plane — its `du`
+        # bit for bit. And a sphere with no corner: every lattice sphere of
+        # 3.6 cells or more has some (enumerated from 1 to 40 cells in steps
+        # of 0.01), so the claim is made on one of 3.5 cells, `r_E = 35/128`,
+        # where the shaved and the unshaved problem must be one problem — the
+        # classes, the codes, `du`, the masks and every monitor's numbers.
+        du0 = similar(u)
+        gh_rhs!(du0, u, p0, zero(T))
+        A0 = statearray(du0, U)
+        reach = NTuple{3,Int}[]
+        for d in 1:3, a in (-G):G
+            a == 0 || push!(reach, ntuple(l -> l == d ? a : 0, 3))
+        end
+        for (i, j) in ((1, 2), (1, 3), (2, 3)), a in (-G):G, e in (-G):G
+            push!(reach, ntuple(l -> l == i ? a : l == j ? e : 0, 3))
+        end
+        shaved_k = Set(lattice(coordinates(U, b, Tuple(I) .+ G))
+                       for b in 1:nblocks(U), I in owned
+                       if cls(ex, I, b) == TGHx.CLASS_EXCISED &&
+                          cls(ex0, I, b) != TGHx.CLASS_EXCISED)
+        @test length(shaved_k) == ex.nshaved
+        nfar = 0
+        same = 0
+        clsame = 0
+        nnear = 0
+        changed = 0
+        for b in 1:nblocks(U), I in owned
+            (cls(ex, I, b) == TGHx.CLASS_EXCISED || cls(ex0, I, b) == TGHx.CLASS_EXCISED) &&
+                continue
+            k = lattice(coordinates(U, b, Tuple(I) .+ G))
+            if any(o -> (k .+ o) in shaved_k, reach)
+                nnear += 1
+                changed += any(v -> !isequal(A[I, v, b], A0[I, v, b]), 1:20)
+            else
+                nfar += 1
+                clsame += cls(ex, I, b) == cls(ex0, I, b)
+                same += all(v -> isequal(A[I, v, b], A0[I, v, b]), 1:20)
+            end
+        end
+        @info "the shave on the fixture: $same of $nfar points beyond the shaved " *
+              "points' reach bit for bit; $changed of $nnear within it changed"
+        @test clsame == nfar && same == nfar && nfar > 50_000
+        @test changed > 0
+        # The corner-free sphere.
+        tiny(sh) = hole_fixture(T; q=q, variant=:excised, r_0=T(1 // 8),
+                                r_1=T(35 // 128), excision=Excision(T; shave=sh))
+        (ps, us), (pn, un) = setup(tiny(true)), setup(tiny(false))
+        @test ps.excision.nshaved == 0 && ps.excision.nexcised == pn.excision.nexcised > 0
+        @test ps.excision.classes == pn.excision.classes && ps.excision.codes == pn.excision.codes
+        @test evolved_mask(ps, zero(T)) == evolved_mask(pn, zero(T))
+        @test monitor_mask(ps, zero(T)) == monitor_mask(pn, zero(T))
+        dus, dun = similar(us), similar(un)
+        gh_rhs!(dus, us, ps, zero(T))
+        gh_rhs!(dun, un, pn, zero(T))
+        @test isequal(dus, dun)
+        rows(pp, uu) = (gh_constraint!(pp, uu, zero(T)); adm_constraint!(pp, uu, zero(T));
+                        gh_error!(pp, uu, zero(T)); (constraint_norms(pp), error_norms(pp),
+                                                     validity_rows(pp, uu, zero(T)),
+                                                     excision_rows(pp, uu, zero(T))))
+        @test isequal(rows(ps, us), rows(pn, un))
+    end
+
+    @testset "the masks agree with the classes point by point, the monitors read no shaved point, and the horizon guard refuses one" begin
+        # Guards "everything that asks 'is it excised' agrees with the
+        # classes" (step X8). The shave is a predicate every mask evaluates
+        # (`ShavedMask`), so: at every stored point — the ghosts the exchange
+        # filled included — the problem's mask says excised exactly where the
+        # class does; the monitors' mask, widened by `W + h` where the shave
+        # excised a point, leaves no stencil of theirs (the axes to `q/2` and
+        # the plane boxes of half-width `q/2`) reading an excised point; the
+        # validity monitor's band holds no shaved point; the noise exclusion's
+        # mask is the problem's; and the horizon finder's guard refuses a
+        # footprint whose only excised point is a shaved one, which the
+        # sphere's own mask would have read.
+        em = evolved_mask(p, zero(T))
+        bad = 0
+        for b in 1:nblocks(U), S in CartesianIndices(size(ex.classes)[1:3])
+            x = coordinates(U, b, Tuple(S))
+            bad += (!is_evolved(em, x)) != (ex.classes[S, b] == TGHx.CLASS_EXCISED)
+        end
+        @test bad == 0
+        mm = monitor_mask(p, zero(T))
+        @test mm == excision_monitor_mask(p.interior, zero(T), ex.W + ex.h)
+        excised_k = Set(lattice(coordinates(U, b, Tuple(I) .+ G))
+                        for b in 1:nblocks(U), I in owned
+                        if cls(ex, I, b) == TGHx.CLASS_EXCISED)
+        taps = NTuple{3,Int}[]
+        r = q ÷ 2
+        for d in 1:3, a in (-r):r
+            push!(taps, ntuple(l -> l == d ? a : 0, 3))
+        end
+        for (i, j) in ((1, 2), (1, 3), (2, 3)), a in (-r):r, e in (-r):r
+            push!(taps, ntuple(l -> l == i ? a : l == j ? e : 0, 3))
+        end
+        nmon = 0
+        reads = 0
+        inband = 0
+        lmask, _ = TGHx._validity_bands(ex, p.interior, zero(T), ex.W)
+        for b in 1:nblocks(U), I in owned
+            x = coordinates(U, b, Tuple(I) .+ G)
+            k = lattice(x)
+            if is_evolved(mm, x)
+                nmon += 1
+                reads += any(o -> (k .+ o) in excised_k, taps)
+            end
+            inband += is_evolved(lmask, x) && cls(ex, I, b) == TGHx.CLASS_EXCISED
+        end
+        @test nmon > 0 && reads == 0 && inband == 0
+        @test excised_mask(p.interior, zero(T), ex.h) == em
+        # The guard: a corner `P` with positive coordinates, and a query whose
+        # `(q + 2)³` window runs from `P` outward — no point of the sphere in
+        # it, only `P`.
+        TGHx.scatter!(U, u)
+        fill_ghosts!(U, p.schedule; boundary=dirichlet(case, zero(T)))
+        k = first(k for k in sort!(collect(excised_k)) if all(>(0), k) && !inball(k))
+        xq = [SVector{3,T}((k .+ T(3 // 2)) .* ex.h)]
+        @test_throws ArgumentError gh_interpolate(U, xq; q=q, mask=em)
+        @test all(isfinite, first(gh_interpolate(U, xq; q=q,
+                                                 mask=interior_mask(case.interior,
+                                                                    zero(T)))))
+        msg = try
+            gh_interpolate(U, xq; q=q, mask=em)
+            ""
+        catch err
+            sprint(showerror, err)
+        end
+        @test occursin("lego corners shaved", msg)
     end
 
     @testset "the closures are exact on polynomials across faces, edges and corners" begin
@@ -457,8 +660,9 @@ const TGHx = TreeGeneralizedHarmonic
         # At `q = 2` the lopsided derivative of a first evolved point *is* its
         # one-sided closure (`lopsided_weights` starts at `−k_down = 0`), so a
         # zone point whose advected axes are all such faces does not move:
-        # 282 of the 2192 here. The rest do — the zone kernel blends too.
-        @test zmoved == ex.nzone - 282
+        # 194 of the 2312 here (282 of 2192 without the shave, until step X8).
+        # The rest do — the zone kernel blends too.
+        @test zmoved == ex.nzone - 194
         # The two providers' lopsided derivative at a centered point, at full
         # weight, and at zero weight the argument itself.
         I, b = first((I, b) for b in 1:nblocks(U), I in owned
@@ -567,18 +771,31 @@ const TGHx = TreeGeneralizedHarmonic
         # did before the field, so that a checkpoint those steps wrote restarts
         # under its own operator when it is asked for (and its recipe refuses
         # the new default).
-        @test occursin("Excision{Float64, :msn}(1.0, 4.0, Val{:msn}(), true)",
+        # From step X8 they include the shave too, `shave = true` by default,
+        # printed as a fifth field; `shave = false` prints as the struct did
+        # before it — steps X6–X7's layout, and with `mixed = :nested` steps
+        # X2b–X5's — so that the checkpoints of every earlier step restart
+        # under their own excised set when it is asked for.
+        @test occursin("Excision{Float64, :msn}(1.0, 4.0, Val{:msn}(), true, true)",
                        repr(Interior(T; center=(0, 0, 0), r_0=0.4, r_1=0.75,
                                      variant=:excised,
                                      excision=Excision(T; upwind=(1, 4)))))
-        @test occursin("Excision{Float64, :msn}(1.0, 4.0, Val{:msn}())",
+        @test occursin("Excision{Float64, :msn}(1.0, 4.0, Val{:msn}(), true))",
+                       repr(Interior(T; center=(0, 0, 0), r_0=0.4, r_1=0.75,
+                                     variant=:excised,
+                                     excision=Excision(T; upwind=(1, 4), shave=false))))
+        @test occursin("Excision{Float64, :msn}(1.0, 4.0, Val{:msn}()))",
                        repr(Interior(T; center=(0, 0, 0), r_0=0.4, r_1=0.75,
                                      variant=:excised,
                                      excision=Excision(T; upwind=(1, 4),
-                                                       mixed=:nested))))
-        @test repr(Excision(Float32; mixed=:nested)) ==
+                                                       mixed=:nested, shave=false))))
+        @test repr(Excision(Float32; mixed=:nested, shave=false)) ==
               "Excision{Float32, :msn}(0.0f0, 0.0f0, Val{:msn}())"
-        @test excision_mixed(Excision(T)) === :symmetric
+        @test repr(Excision(Float32; shave=false)) ==
+              "Excision{Float32, :msn}(0.0f0, 0.0f0, Val{:msn}(), true)"
+        @test repr(Excision(Float32; mixed=:nested)) ==
+              "Excision{Float32, :msn}(0.0f0, 0.0f0, Val{:msn}(), false, true)"
+        @test excision_mixed(Excision(T)) === :symmetric && excision_shave(Excision(T))
         @test_throws ArgumentError Excision(T; mixed=:outer)
         @test_throws ArgumentError Interior(T; center=(0, 0, 0), r_0=0.4, r_1=1.15,
                                             excision=Excision(T))
@@ -611,6 +828,13 @@ const TGHx = TreeGeneralizedHarmonic
         @test occursin("⌈√3 G⌉",
                        msg(mk(hole_fixture(T; q=q, variant=:excised, r_1=r_E, margin=3,
                                            horizon=Horizon(T; every=1, N=12)))))
+        # With the shave the excised set reaches `h/√3` beyond the surface, and
+        # at `q = 2` the finder's margin is 5 cells where it was 4 (step X8).
+        hz(sh) = mk(hole_fixture(T; q=q, variant=:excised, r_1=r_E, margin=4,
+                                 horizon=Horizon(T; every=1, N=12),
+                                 excision=Excision(T; shave=sh)))
+        @test occursin("⌈√3 G + 1/√3⌉ = 5", msg(hz(true)))
+        @test hz(false)()[1].excision.nshaved == 0
         # The shift pointing into the excised set — X2b's refusal of a spinning
         # hole — is from step X6 a frame-dragged axis with a rule of its own,
         # and what is refused is what the rule does not cover: an excised tap
@@ -736,6 +960,9 @@ const TGHx = TreeGeneralizedHarmonic
         end
         @test planes > 0 && same == planes && zones > 0
         em = pm.excision
+        # (From step X8 the excised set is shaved: its corners are on both
+        # octants, and through the seam and the mirror.)
+        @test er.nshaved == em.nshaved > 0
         @test er.classes == em.classes
         @test (er.nzone, er.nexcised, er.ncentered, er.nzoneblocks) ==
               (em.nzone, em.nexcised, em.ncentered, em.nzoneblocks)
@@ -799,6 +1026,7 @@ const TGHx = TreeGeneralizedHarmonic
         @test all(r -> r.excision_band == ex.nzone && r.excision_band_nonfinite == 0,
                   rows)
         @test all(r -> r.excision_normal_min > 1 && r.excision_into == 0, rows)
+        @test all(r -> r.excision_shaved == ex.nshaved > 0, rows)     # step X8
         # Kerr-Schild `a = 0` has no frame-dragged axis (step X6).
         @test all(r -> r.excision_dragged == 0 && r.excision_faces_dragged == 0 &&
                        r.excision_flips == 0, rows)
@@ -828,7 +1056,9 @@ const TGHx = TreeGeneralizedHarmonic
     # X6 built"). The spinning hole is Kerr-Schild `a = 3/5` on the rotating
     # octant `[0, 5/2]³` (uniform, `h = 5/64`, the fixture's spacing at the
     # hole) with the ball `r < 19/25` excised and the core rule's sphere at
-    # `31/50`, between the ring and the surface: 33 frame-dragged axes.
+    # `31/50`, between the ring and the surface: 27 frame-dragged axes with
+    # the lego corners shaved (24 corners on the octant; 33 axes without the
+    # shave, until step X8).
 
     @testset "the symmetric mixed derivative takes one value across the diagonal, bit for bit, and the nested one does not" begin
         # Guards the symmetrization (step X6, proposed in step X4). Near the
@@ -1057,7 +1287,8 @@ const TGHx = TreeGeneralizedHarmonic
             end
         end
         @test bad == 0 && nzone == e35.nzone
-        @test peraxis == [0, e35.ndragged, 0] && e35.ndragged == 33
+        @test peraxis == [0, e35.ndragged, 0] && e35.ndragged == 27
+        @test e35.nshaved == 24
         @test e35.drag !== nothing
         badcode = 0
         nexc = 0
@@ -1072,6 +1303,7 @@ const TGHx = TreeGeneralizedHarmonic
         r = excision_rows(p35, u35, zero(T))
         @test r.excision_dragged == e35.ndragged == r.excision_into
         @test r.excision_flips == 0 && r.excision_band == e35.nzone
+        @test r.excision_shaved == e35.nshaved > 0                     # step X8
         @test 0 < r.excision_faces_dragged < r.excision_faces
         @test r.excision_normal_min > 0 && r.excision_axis_min < 0
         @test all(isfinite, du35)
@@ -1213,30 +1445,50 @@ const TGHx = TreeGeneralizedHarmonic
         @test worst ≤ 512 * eps(T) * scale
     end
 
-    @testset "the spinning hole runs to M/5 with the frame-dragged rows, no flips, and restarts as the run" begin
+    @testset "the spinning hole runs to M/5 with the frame-dragged rows, and without a flip restarts as the run" begin
         # Guards the driver's path with the rule (step X6): the rule bits are
         # the build state's and a restart rebuilds them from the file's state,
         # so a chain is the run exactly when no axis's shift has changed its
         # sign (`excision_flips == 0` at the checkpoint's row). Two chunks of
         # `M/10` on the rotating octant, and the chain of two one-chunk jobs.
+        # **(Amended in step X8:** on this fixture's lattice the shave makes
+        # `(6, 5, 7) h` a corner of the shaved set — `k⁻ = 0` along all three
+        # axes — whose `y` axis has `b/a = +1.7·10⁻⁴` at the build and flips
+        # its sign by `M/10` (`excision_flips = 1` there, 0 at `0` and
+        # `M/5`), so its chain would not be the run: X6's claim is made on
+        # the same hole without the shave, which has no flip, and the shaved
+        # hole's run is claimed finite with its rows and its one flip, the
+        # staircase's lottery step X7 met, in miniature.**)**
+        c35u = kerr_schild_case(T; a=T(3 // 5), halfwidth=T(5 // 2), r_0=T(31 // 50),
+                                r_1=T(19 // 25), chunk=T(1 // 10), interior=:excised,
+                                octant=:rotating, excision=Excision(T; shave=false))
+        shaved = evolve!(T, c35; forest=deepcopy(f35), q=q, ops=ops, t_end=T(1 // 5))
+        srows = shaved.records
+        @test length(srows) == 3 && all(r -> r.finite && r.excision_band_nonfinite == 0,
+                                        srows)
+        @test all(r -> r.excision_dragged == e35.ndragged &&
+                       r.excision_shaved == e35.nshaved, srows)
+        @test [r.excision_flips for r in srows] == [0, 1, 0]
         common = (forest=deepcopy(f35), q=q, ops=ops, t_end=T(1 // 5))
-        run = evolve!(T, c35; common...)
+        run = evolve!(T, c35u; common...)
         rows = run.records
+        e35u = run.problem.excision
+        @test e35u.ndragged == 33 && e35u.nshaved == 0
         @test length(rows) == 3
         @test all(r -> r.finite && r.excision_band_nonfinite == 0, rows)
-        @test all(r -> r.excision_dragged == e35.ndragged == r.excision_into &&
+        @test all(r -> r.excision_dragged == e35u.ndragged == r.excision_into &&
                        r.excision_flips == 0, rows)
         @test all(r -> r.excision_faces_dragged == rows[1].excision_faces_dragged > 0,
                   rows)
-        @test all(r -> r.excision_normal_min > 0, rows)
+        @test all(r -> r.excision_normal_min > 0 && r.excision_shaved == 0, rows)
         @info "the spinning hole to M/5" err_l2 = [r.err_l2 for r in rows] gauge_l2 =
             [r.gauge_l2 for r in rows] axis_min = [r.excision_axis_min for r in rows]
         pre = joinpath(mktempdir(), "spin")
         ck = (q=q, ops=ops, t_end=T(1 // 5), checkpoint_path_prefix=pre,
               max_walltime_seconds=1e-9, checkpoint_sync_to_disk=false)
-        first_ = evolve!(T, c35; forest=deepcopy(f35), ck...)
+        first_ = evolve!(T, c35u; forest=deepcopy(f35), ck...)
         @test !first_.finished
-        second = evolve!(T, c35; ck..., restart_file=latest_checkpoint(pre))
+        second = evolve!(T, c35u; ck..., restart_file=latest_checkpoint(pre))
         @test second.finished
         @test isequal(second.u, run.u)
         @test isequal(second.records, run.records)

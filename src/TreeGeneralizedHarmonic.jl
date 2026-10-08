@@ -116,6 +116,7 @@ export geometry_radii, layer_radii
 # The `:excised` variant's parameters (step X2b)
 export Excision, excision_closure, upwind_on, excision_monitor_mask
 export MIXED_NESTINGS, excision_mixed           # the mixed derivative's nesting (step X6)
+export excision_shave, ShavedMask, BothMask, is_shaved, excised_mask  # step X8
 
 # The tracked geometry (step 8d): the real harmonics, the kernel argument, its
 # masks and its checks — and, in `tracking.jl`, the track it is built from
@@ -155,6 +156,7 @@ export gh_step_limiter!, paste_interior!
 # Excision (step X2b): the classes, the closures, the zone kernel, the monitors
 export ExcisionData, build_excision, check_excision_mesh, check_excision_case
 export monitor_mask, excision_rows, excision_band_cells, closure_provider
+export evolved_mask                              # step X8: the shaved set's masks
 export ClosureProvider, Lopsided, ExcisionBlend, blend_weight
 # The frame-dragged faces' rule in the zone kernel (step X6)
 export DraggedProvider, dragged_provider, lattice_direction, direction_code

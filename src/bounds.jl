@@ -895,7 +895,9 @@ function validity_rows(p, u, t)
     shell = _validity(p, u, smask)
     # The whole evolved region (added in step 8d): the minimum lapse over it
     # is the lapse-collapse trigger's input, and `det γ` comes with the pass.
-    evolved = _validity(p, u, interior_mask(int, T(t)))
+    # (Amended in step X8: the problem's evolved mask, which is the interior's
+    # own but where the shave excised a corner.)
+    evolved = _validity(p, u, evolved_mask(p, T(t)))
     return (min_detγ_layer=layer.detγ, min_α_layer=layer.α,
             max_h_layer=layer.h, max_Π_layer=layer.Π,
             min_detγ_shell=shell.detγ, min_α_shell=shell.α,
@@ -921,7 +923,7 @@ end
 end
 
 """
-    evolved_nonfinite(p::GHProblem, u, t; mask = interior_mask(p.interior, t)) -> Int
+    evolved_nonfinite(p::GHProblem, u, t; mask = evolved_mask(p, t)) -> Int
 
 How many values of the state vector `u` are `NaN` or `Inf` **at evolved
 points** — `r ≥ r_1` from the hole's center at `t`, or everywhere for a
@@ -935,8 +937,7 @@ layer's stencils do, and the region the range projection exists to repair.
 A `NaN` in the core is a hit, not the end of the run; a `NaN` where the
 equations are evolved still is.
 """
-function evolved_nonfinite(p, u, t; mask=interior_mask(p.interior,
-                                                       eltype(p.U.work)(t)))
+function evolved_nonfinite(p, u, t; mask=evolved_mask(p, eltype(p.U.work)(t)))
     T = eltype(p.U.work)
     map_blocks!(gh_nonfinite_kernel!, p.U, p.diag.work, statearray(u, p.U),
                 p.origins, p.spacings, mask)

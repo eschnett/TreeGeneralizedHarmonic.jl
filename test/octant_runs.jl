@@ -73,6 +73,12 @@
 #   mixed=symmetric                 :excised: the zone points' mixed derivative,
 #                                   symmetric in its two axes (step X6's default)
 #                                   or nested (steps X2b–X5's, for comparison)
+#   shave=on                        :excised: shave the lego corners (step X8's
+#                                   default) — a point whose three neighbours one
+#                                   step toward the center are excised is excised
+#                                   too — or off (steps X2b–X7's excised set). With
+#                                   the shave, the `in` shell's constraint norms
+#                                   start one cell farther out (the monitors' mask)
 #   n_L=0 lmax_fit=8                :fitted only: the ramp in cells (0: step 8c's
 #                                   rule) and the fit's degree
 #   fit_cont=1                      :fitted only: the fit's radial order, 1 (values
@@ -183,8 +189,10 @@ case = if hole
         # `m` cells below the horizon, frozen; no layer, no target, no bounds.
         up = haskey(OPTIONS, "upwind") ? Tuple(rat.(split(OPTIONS["upwind"], ','))) :
              nothing
+        shave = opt("shave", "on")
+        shave in ("on", "off") || error("shave is on or off, got $shave")
         exc = Excision(T; upwind=up, dissipation=Symbol(opt("closure", "msn")),
-                       mixed=Symbol(opt("mixed", "symmetric")))
+                       mixed=Symbol(opt("mixed", "symmetric")), shave=shave == "on")
         # On the rotating octant with a spin (step X4) the margins are taken
         # against the horizon's least radius, `r₊` at the poles, and the core
         # rule's default radius encloses the ring `r = a` (the singular set
@@ -254,7 +262,8 @@ hole && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin,
                  "core rule r_0 = $(case.interior.r_0)") *
                 ", upwind $(upwind_on(case.interior.excision) ? (case.interior.excision.upwind_start, case.interior.excision.upwind_width) : "off"), " *
                 "closure :$(excision_closure(case.interior.excision)), " *
-                "mixed :$(excision_mixed(case.interior.excision))" :
+                "mixed :$(excision_mixed(case.interior.excision)), " *
+                "shave $(excision_shave(case.interior.excision) ? "on" : "off")" :
                 case.interior isa FittedSpec ?
                 "fitted target, tracked, margin $(case.interior.margin)" :
                 "damped layer, r_0 = $(case.interior.r_0), r_1 = $(case.interior.r_1)",
@@ -275,6 +284,11 @@ geom0 = !excised ? nothing :
 W_band = excised ? excision_band_cells(q) * minimum_spacing(T, forest0) : zero(T)
 r_surface = !excised ? zero(T) : geom0 isa FittedInterior ? geom0.r_out - geom0.offset :
             geom0.r_1
+# The excised set as the classes will hold it (step X8): the geometry's, with
+# its lego corners shaved on the surface's lattice unless `shave=off` — what
+# the noise is kept off, by the same predicate the build evaluates.
+excised0 = !excised ? nothing :
+           excised_mask(geom0, zero(T), check_excision_mesh(forest0, geom0, q))
 @printf("        noise %.3g (seed %d), backend %s, %d threads\n", amplitude, seed,
         typeof(backend), Threads.nthreads())
 
@@ -295,7 +309,8 @@ hole && append!(cols, ["err_l2", "err_linf", "residual", "drift", "err_l2_vol"])
 const EXCISION_COLS = ["excision_band", "excision_band_nonfinite",
                        "excision_normal_min", "excision_faces", "excision_axis_min",
                        "excision_inflow", "excision_into", "excision_horizon_margin",
-                       "excision_dragged", "excision_faces_dragged", "excision_flips"]
+                       "excision_dragged", "excision_faces_dragged", "excision_flips",
+                       "excision_shaved"]
 excised && append!(cols, EXCISION_COLS)
 for ℓ in 0:(nlev - 1), c in ("ham_l2", "ham_linf", "mom_l2", "mom_linf", "gauge_l2",
                              "gauge_linf")
@@ -375,6 +390,7 @@ if hole
                                            Float64(ex.upwind_width)] : "off"
         setup["closure"] = String(excision_closure(ex))
         setup["mixed"] = String(excision_mixed(ex))
+        setup["shave"] = excision_shave(ex)
     end
 end
 simwatch_update!(sw; force=true, status="starting", time_end=Float64(t_end),
@@ -427,7 +443,8 @@ function observe(p, t, u, rec)
             "note" => "the band: the evolved points next to the excision surface, " *
                       "where the closures are; normal outflow needs normal_min > 0; " *
                       "dragged: the frame-dragged axes (step X5's rule), whose shift " *
-                      "pointed into the excised set at the build; flips must stay 0",
+                      "pointed into the excised set at the build; flips must stay 0; " *
+                      "shaved: the lego corners excised by step X8's shave",
             (c[10:end] => x for (c, x) in zip(EXCISION_COLS, exv) if x !== nothing)...)
     end
     levels = Dict{String,Any}()
@@ -465,10 +482,15 @@ function observe(p, t, u, rec)
         shells = Dict{String,Any}()
         for i in 1:(length(edges) - 1)
             m = ShellMask(SVector{3,T}(0, 0, 0), edges[i], edges[i + 1])
-            gh_constraint!(p, u, t; mask=m)
-            adm_constraint!(p, u, t; mask=m)
+            # An excised hole's shells keep the problem's own masks too (step
+            # X8): with shaved corners the monitors' reach is widened by a
+            # cell, so that the `in` shell's stencils read no shaved point.
+            mc, me = excised ? (BothMask(m, monitor_mask(p, t)),
+                                BothMask(m, evolved_mask(p, t))) : (m, m)
+            gh_constraint!(p, u, t; mask=mc)
+            adm_constraint!(p, u, t; mask=mc)
             n = constraint_norms(p; weighting=:points)
-            gh_error!(p, u, t; mask=m)
+            gh_error!(p, u, t; mask=me)
             e = masked_norms(p, DIAG_ERR; weighting=:points)
             append!(row, (n.ham_l2, n.ham_linf, mom2(n), gauge2(n), e.l2, e.linf))
             shells[shell_names[i]] = Dict{String,Any}(
@@ -549,12 +571,12 @@ restarting = get(ckw, :restart_file, nothing) !== nothing
 # at the corner is not of definite parity (see `add_noise!`). The default
 # `r_core` of a `:fitted` hole is the horizon's least radius less `5/4` (`3/4`
 # at `a = 0`, as before). An excised hole leaves its whole excised set alone,
-# by the masks' own predicate.
+# by the masks' own predicate — with the shaved corners (step X8).
 core² = !hole ? zero(T) : case.interior isa FittedSpec ?
         (haskey(OPTIONS, "r_core") ? T(rat(OPTIONS["r_core"])) :
          r_plus - 5 // 4)^2 : case.interior.r_0^2
 exclude = !hole ? nothing :
-          excised ? (let m = interior_mask(geom0, zero(T)); x -> !is_evolved(m, x); end) :
+          excised ? (let m = excised0; x -> !is_evolved(m, x); end) :
           (x -> sum(abs2, x) < core²)
 fitkw = if hole && case.interior isa FittedSpec && !excised
     nL = case.interior.n_L > 0 ? case.interior.n_L :
@@ -598,7 +620,7 @@ fields = (:t, :steps, :err_l2, :err_linf, :residual, :drift, :gauge_l2, :horizon
           :excision_band, :excision_band_nonfinite, :excision_normal_min,
           :excision_faces, :excision_axis_min, :excision_inflow, :excision_into,
           :excision_horizon_margin, :excision_dragged, :excision_faces_dragged,
-          :excision_flips)
+          :excision_flips, :excision_shaved)
 open(joinpath(outdir, "records.csv"), "w") do io
     println(io, join(fields, ','))
     for rec in out.records

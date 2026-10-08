@@ -64,7 +64,9 @@ const EXM_INTO = 7          # closure axes whose shift points into the excised s
 const EXM_DRAGGED = 8       # the point's frame-dragged axes, the rule bits of the build
 const EXM_DFACES = 9        # census: excised taps without a source; record: faces on a dragged axis
 const EXM_FLIPS = 10        # record: axes whose shift's sign now disagrees with the rule bit
-const NEXM = 10
+# Step X8's (the shaved corners):
+const EXM_SHAVED = 11       # census: 1 at an owned point excised by the shave; record: 0
+const NEXM = 11
 
 """
     excision_band_cells(q) -> Int
@@ -778,7 +780,7 @@ end
 # it is checked for a source.
 @kernel function _census_kernel!(out, codes, @Const(cls), @Const(work),
                                  @Const(origins), @Const(spacings), ε_KO, t, blend,
-                                 ::Val{G}, ::Val{NMAX}) where {G,NMAX}
+                                 geometry, ::Val{G}, ::Val{NMAX}) where {G,NMAX}
     I = @index(Global, NTuple)
     b = I[4]
     inner = ntuple(d -> I[d], Val(3))
@@ -816,6 +818,11 @@ end
     end
     out[inner..., EXM_INFLOW, b] = zero(T)
     out[inner..., EXM_FLIPS, b] = zero(T)
+    # Step X8: an excised point the geometry itself evolves was excised by the
+    # shave.
+    out[inner..., EXM_SHAVED, b] =
+        cl == CLASS_EXCISED &&
+        is_evolved(geometry, point_position(origins, spacings, b, I)) ? one(T) : zero(T)
 end
 
 # Whether the shift points into the excised set along a closure axis — the
@@ -973,6 +980,7 @@ end
         out[inner..., EXM_DRAGGED, b] = dragged
         out[inner..., EXM_DFACES, b] = dfaces
         out[inner..., EXM_FLIPS, b] = flips
+        out[inner..., EXM_SHAVED, b] = zero(T)
     else
         out[inner..., EXM_BAND, b] = zero(T)
         out[inner..., EXM_NONFINITE, b] = zero(T)
@@ -984,6 +992,7 @@ end
         out[inner..., EXM_DRAGGED, b] = zero(T)
         out[inner..., EXM_DFACES, b] = zero(T)
         out[inner..., EXM_FLIPS, b] = zero(T)
+        out[inner..., EXM_SHAVED, b] = zero(T)
     end
 end
 
@@ -1008,6 +1017,11 @@ at an excised one; `drag`, the frame-dragged kernel's `(codes, ext, blocks)`
 a frame-dragged axis — or `nothing` where no axis is frame-dragged (the
 kernel is then not launched); `valmixed`, the mixed derivative's nesting;
 and `ndragged`, the frame-dragged (zone point, axis) pairs.**)**
+
+**(Amended in step X8:** `nshaved`, the owned points the shave excised —
+the classes' excised set is the geometry's with its lego corners shaved
+([`ShavedMask`](@ref)), and the problem's masks are that set's wherever this
+is positive ([`evolved_mask`](@ref)).**)**
 """
 struct ExcisionData{T,C,Z,TB,BL,M,I,D,R,SYM}
     classes::C
@@ -1028,6 +1042,7 @@ struct ExcisionData{T,C,Z,TB,BL,M,I,D,R,SYM}
     nzoneblocks::Int
     ndragged::Int
     min_ratio::Float64              # the least b/a over the closure axes at the build
+    nshaved::Int                    # the owned points the shave excised (step X8)
 end
 
 excision_classes(::Nothing) = nothing
@@ -1044,6 +1059,12 @@ prolongation reads excised data into a ghost an evolved stencil reads — a
 fine ghost at a coarse-fine face is interpolated from `(q + 2)/2` coarse
 points around it. `h` is the spacing of the blocks containing the surface,
 which it returns. It throws, naming the levels and the remedy.
+
+**(Amended in step X8:** with the shave the excised set reaches up to `h/√3`
+beyond the geometric surface ([`ShavedMask`](@ref)). The neighbourhood is
+not widened for it: what a prolongation needs is `G + (q + 2)/2` cells, and
+`(G + q + 2) h` exceeds that plus `h/√3` by `(q + 2)/2 − 1/√3` cells, 1.4 at
+`q = 2` (proposed in step X8).**)**
 """
 function check_excision_mesh(forest::Forest{3}, int::Interior{T,:excised}, q::Integer;
                              t=zero(T)) where {T}
@@ -1103,7 +1124,9 @@ saying why:
   write the state is not wanted;
 - **`m ≥ ⌈√3 G⌉` with a `Horizon`**: the finder's footprint reaches `√3 G h`
   from its query on a diagonal and must not touch the excised set — `6`
-  cells at `q = 4`, `4` at `q = 2`.
+  cells at `q = 4`, `4` at `q = 2`. **(Amended in step X8:** with the shave
+  the excised set reaches up to `h/√3` beyond the surface, so `m ≥ ⌈√3 G +
+  1/√3⌉` — still `6` at `q = 4`, `5` at `q = 2`.**)**
 """
 function check_excision_case(case::GHCase{T}, int, q::Integer) where {T}
     G = q ÷ 2 + 1
@@ -1124,13 +1147,16 @@ function check_excision_case(case::GHCase{T}, int, q::Integer) where {T}
         "read and its band is evolved by the equations, so a clamp has nothing " *
         "to guard and would be a fourth writer of the state. Leave `bounds = " *
         "nothing`."))
-    need = ceil(Int, sqrt(3) * G)
+    shave = excision_shave(int.excision)
+    need = ceil(Int, sqrt(3) * G + (shave ? 1 / sqrt(3) : 0.0))
     case.horizon === nothing || int.margin ≥ need || throw(ArgumentError(
         "this :excised case finds its horizon, and the finder's interpolation " *
         "footprint reaches √3 G h = $(sqrt(3) * G) h from a query on a " *
         "diagonal: with the surface m = $(int.margin) cells inside the " *
-        "horizon it would read the excised set, so m ≥ ⌈√3 G⌉ = $need at q = " *
-        "$q (CODE.md, \"Excision\", \"The least depth\")."))
+        "horizon it would read the excised set, so m ≥ ⌈√3 G⌉" *
+        (shave ? " — and with the shaved corners, which reach h/√3 beyond the " *
+                 "surface, ⌈√3 G + 1/√3⌉" : "") *
+        " = $need at q = $q (CODE.md, \"Excision\", \"The least depth\")."))
     return nothing
 end
 
@@ -1177,6 +1203,15 @@ build state's, frozen for the problem's life; the record's
 is zero whenever a rebuild from the state at hand — a restart — would set
 the same bits.
 
+**(Amended in step X8:** the first pass's predicate is the excised set with
+its lego corners shaved where the excision asks for it
+([`excised_mask`](@ref), [`ShavedMask`](@ref)) — a point the geometry leaves
+outside whose three neighbours one step toward the center are excised by it
+— on the lattice of the surface's spacing `h`; the census counts the points
+the shave excised (`nshaved`), and everything downstream — the zone, the
+census, the rule bits and the direction codes — reads the classes as it
+did.**)**
+
 `U`'s working array must hold the state at its owned points; the ghosts are
 not read.
 """
@@ -1192,7 +1227,11 @@ function build_excision(U::FieldSet{T,3}, schedule, case::GHCase{T}, int;
     forest = U.forest
     origins = to_backend(backend, block_origins(forest, T))
     spacings = to_backend(backend, block_spacings(forest, T))
-    mask = interior_mask(int, T(t))
+    # The excised set as the classes hold it: the geometry's, with its lego
+    # corners shaved on the surface's lattice where the excision asks for it
+    # (step X8) — the one predicate every mask of the problem evaluates.
+    geometry = interior_mask(int, T(t))
+    mask = excised_mask(int, T(t), h)
 
     # (1) and (2): the bit, exchanged. A scalar: even under a mirror, and
     # turned into itself by the rotating seam's quarter turn (step X4), so
@@ -1231,7 +1270,7 @@ function build_excision(U::FieldSet{T,3}, schedule, case::GHCase{T}, int;
                           parity=even_parity(forest, NEXM),
                           rotation=identity_rotation(forest, NEXM), backend=backend)
     map_blocks!(_census_kernel!, U, monitor.work, codes, classes, U.work, origins,
-                spacings, case.ε_KO, T(t), blend, Val(U.G), Val(size(ext, 1)))
+                spacings, case.ε_KO, T(t), blend, geometry, Val(U.G), Val(size(ext, 1)))
     total(v) = round(Int, tofloat64(mesh_mapreduce(identity, +, zero(T), monitor;
                                                    vars=v)))
     least(v) = mesh_mapreduce(identity, min, floatmax(T), monitor; vars=v)
@@ -1241,6 +1280,7 @@ function build_excision(U::FieldSet{T,3}, schedule, case::GHCase{T}, int;
     ninto = total(EXM_INTO)
     ndragged = total(EXM_DRAGGED)
     nosource = total(EXM_DFACES)
+    nshaved = total(EXM_SHAVED)
     rmin = least(EXM_AXIS)
     εmin = least(EXM_FACES)
     perblock = block_mapreduce(identity, +, zero(T), monitor; vars=EXM_BAND)
@@ -1295,7 +1335,7 @@ function build_excision(U::FieldSet{T,3}, schedule, case::GHCase{T}, int;
                         typeof(drag),int.excision.symmetric}(
         classes, zoneblocks, tab, blend, monitor, int, codes, drag, valmixed, W, h,
         Int(q), nexcised, nzone, ntotal - nzone - nexcised, count(zb), ndragged,
-        tofloat64(rmin))
+        tofloat64(rmin), nshaved)
 end
 
 """
@@ -1309,17 +1349,50 @@ excised set widened by the band `W` ([`excision_monitor_mask`](@ref)), so
 that no monitor's stencil reads an excised value. The error, the speed, the
 non-finite count, the validity monitor and the horizon guard read points,
 not stencils, and keep `interior_mask`, which counts the band.
+
+**(Amended in step X8:** where the build shaved a lego corner the excised set
+reaches up to `h/√3` beyond the geometric surface, and the widening is
+`W + h`; the pointwise monitors take [`evolved_mask`](@ref), the shaved
+set's own mask.**)**
 """
 monitor_mask(p, t) = _monitor_mask(p.excision, p.interior, t)
 _monitor_mask(::Nothing, int, t) = interior_mask(int, t)
-_monitor_mask(ex::ExcisionData, int, t) = excision_monitor_mask(int, t, ex.W)
+# With shaved corners (step X8) the excised set reaches up to `h/√3` beyond the
+# geometric surface, and the widening `W` is taken from `h` farther out.
+_monitor_mask(ex::ExcisionData, int, t) =
+    excision_monitor_mask(int, t, ex.nshaved > 0 ? ex.W + ex.h : ex.W)
+
+"""
+    evolved_mask(p::GHProblem, t) -> mask
+
+The mask of the evolved points of a problem (added in step X8): the one the
+error, the speed, the non-finite count, the validity monitor and the horizon
+finder's footprint guard read by default. It is the interior's own
+([`interior_mask`](@ref)) for every problem but an `:excised` one whose build
+shaved a corner, and for that one the excised set the classes hold — the
+geometry's with its lego corners shaved ([`ShavedMask`](@ref)) — so that
+everything that asks "is it excised" answers as the classes do, point by
+point. Where the shave excised nothing the two masks agree at every point of
+the mesh, and the interior's own is taken, so that such a problem's analysis
+is steps X2b–X7's arithmetic exactly.
+"""
+evolved_mask(p, t) = _evolved_mask(p.excision, p.interior, t)
+_evolved_mask(::Nothing, int, t) = interior_mask(int, t)
+_evolved_mask(ex::ExcisionData, int, t) =
+    ex.nshaved > 0 ? excised_mask(int, t, ex.h) : interior_mask(int, t)
 
 # The validity monitor's two bands: the interior's layer and the shell outside
-# it, or for `:excised` the band `[r_E, r_E + W)` and the `width` beyond it.
+# it, or for `:excised` the band `[r_E, r_E + W)` and the `width` beyond it —
+# the band without the points the shave excised (step X8; the shell lies
+# beyond every one of them).
 _validity_bands(::Nothing, int, t, width) =
     (layer_mask(int, t), shell_mask(int, t, width))
-_validity_bands(ex::ExcisionData, int, t, width) =
-    (layer_mask(int, t; band=ex.W), shell_mask(int, t, width; band=ex.W))
+function _validity_bands(ex::ExcisionData, int, t, width)
+    band = layer_mask(int, t; band=ex.W)
+    shell = shell_mask(int, t, width; band=ex.W)
+    ex.nshaved > 0 || return band, shell
+    return BothMask(band, _evolved_mask(ex, int, t)), shell
+end
 
 """
     excision_rows(p::GHProblem, u, t) -> NamedTuple
@@ -1349,7 +1422,9 @@ is not `:excised`:
 - `excision_flips` (step X6): the axes whose shift's sign now disagrees with
   their rule bit — pointing in without the rule or out with it — which must
   stay zero: the rule is the build state's, and a restart rebuilds it from
-  the state it restarts from, the same bits exactly when this row is zero.
+  the state it restarts from, the same bits exactly when this row is zero;
+- `excision_shaved` (step X8): the owned points the shave excised — the
+  lego corners, a constant of the problem.
 """
 function excision_rows(p, u, t)
     ex = p.excision
@@ -1357,7 +1432,8 @@ function excision_rows(p, u, t)
                               excision_normal_min=nothing, excision_faces=nothing,
                               excision_axis_min=nothing, excision_inflow=nothing,
                               excision_into=nothing, excision_dragged=nothing,
-                              excision_faces_dragged=nothing, excision_flips=nothing)
+                              excision_faces_dragged=nothing, excision_flips=nothing,
+                              excision_shaved=nothing)
     T = eltype(p.U.work)
     map_blocks!(_outflow_kernel!, p.U, ex.monitor.work, statearray(u, p.U),
                 ex.classes, ex.codes, p.origins, p.spacings, p.interior, T(t), p.valG)
@@ -1369,7 +1445,8 @@ function excision_rows(p, u, t)
             excision_normal_min=least(EXM_NORMAL), excision_faces=total(EXM_FACES),
             excision_axis_min=least(EXM_AXIS), excision_inflow=total(EXM_INFLOW),
             excision_into=total(EXM_INTO), excision_dragged=total(EXM_DRAGGED),
-            excision_faces_dragged=total(EXM_DFACES), excision_flips=total(EXM_FLIPS))
+            excision_faces_dragged=total(EXM_DFACES), excision_flips=total(EXM_FLIPS),
+            excision_shaved=ex.nshaved)
 end
 
 """

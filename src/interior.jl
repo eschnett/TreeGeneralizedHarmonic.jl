@@ -121,7 +121,8 @@ makes "`w ∈ [0, 1]` everywhere" a property rather than a near-property.
 end
 
 """
-    Excision(T = Float64; upwind = nothing, dissipation = :msn, mixed = :symmetric)
+    Excision(T = Float64; upwind = nothing, dissipation = :msn, mixed = :symmetric,
+             shave = true)
 
 The parameters of the `:excised` variant (added in step X2b; `CODE.md`,
 "Excision"), carried by the interior or the spec that asks for it, so that a
@@ -144,22 +145,38 @@ every other number of the interior:
   and the rotating octant's quarter turn — or `:nested`, steps X2b–X5's
   outer sum along `i < j` only, kept so that the two can be compared
   (`CODE.md`, "Excision", "What step X6 built").
+- `shave` (added in step X8) **shaves the lego corners**: a lattice point the
+  geometry leaves outside is excised too when its three neighbours one step
+  toward the excision center — one along each axis, the side from the sign
+  of `x − c` — are all excised (a coordinate on the center's plane has no
+  such neighbour, and the point is not shaved). One pass, decided once with
+  the classes ([`ShavedMask`](@ref), [`build_excision`](@ref)): such a
+  corner is a closure point with `k⁻ = 0` along all three axes, and at the
+  pole of a spinning hole, where frame dragging nearly cancels the shift
+  along a tangent axis, step X7 found one growing at `2/M`. `true`, the
+  default; `false` is steps X2b–X7's excised set (`CODE.md`, "Excision",
+  "What step X8 built").
 
 The cells are the excision geometry's own spacing, the level the surface
-lies on. `isbits`: the closure kind is a type parameter, the nesting a
-`Bool` (`symmetric`).
+lies on. `isbits`: the closure kind is a type parameter, the nesting and the
+shave `Bool`s (`symmetric`, `shave`).
 
 **`mixed = :nested` prints as the struct did before the field existed**
 (proposed in step X6): a checkpoint's recipe holds `repr(case.interior)`, so
 a run written by steps X2b–X5 restarts under its own operator when that is
 asked for by name, and its recipe refuses a restart under the new default —
-the operator it would continue with is not the one it ran.
+the operator it would continue with is not the one it ran. **So does
+`shave = false` (proposed in step X8)**: without the shave the struct prints
+as steps X6–X7 printed it — and with `mixed = :nested` as well, as steps
+X2b–X5 did — so that their checkpoints restart under their own excised set
+when it is asked for, and refuse the shaved one.
 """
 struct Excision{T,K}
     upwind_start::T
     upwind_width::T
     valclosure::Val{K}
     symmetric::Bool
+    shave::Bool
 end
 
 """
@@ -172,7 +189,7 @@ outer sum along the lower axis.
 const MIXED_NESTINGS = (:symmetric, :nested)
 
 function Excision(::Type{T}=Float64; upwind=nothing, dissipation::Symbol=:msn,
-                  mixed::Symbol=:symmetric) where {T}
+                  mixed::Symbol=:symmetric, shave::Bool=true) where {T}
     dissipation in DISSIPATION_CLOSURES || throw(ArgumentError(
         "the dissipation's closure at the excision surface is one of " *
         "$(DISSIPATION_CLOSURES), got :$dissipation; step X1 chose :msn, the " *
@@ -189,16 +206,22 @@ function Excision(::Type{T}=Float64; upwind=nothing, dissipation::Symbol=:msn,
         "the lopsided advection's blend starts `start` cells below the horizon " *
         "and rises to full over `width` cells, both non-negative, got upwind " *
         "= $upwind; `nothing` (width 0) switches it off."))
-    return Excision{T,dissipation}(s, w, Val(dissipation), mixed === :symmetric)
+    return Excision{T,dissipation}(s, w, Val(dissipation), mixed === :symmetric, shave)
 end
 
 Excision(::Type{T}, ex::Excision{S,K}) where {T,S,K} =
-    Excision{T,K}(T(ex.upwind_start), T(ex.upwind_width), Val(K), ex.symmetric)
+    Excision{T,K}(T(ex.upwind_start), T(ex.upwind_width), Val(K), ex.symmetric,
+                  ex.shave)
 
-# The nested mixed derivative prints without its field, as the struct printed
-# before step X6 added it (see the docstring).
+# Without the shave the struct prints as it did before step X8 added the
+# field, and without the symmetric mixed derivative as well as before step X6
+# added that one (see the docstring): the layouts the recipes of their
+# checkpoints hold.
 function Base.show(io::IO, ex::Excision{T,K}) where {T,K}
-    ex.symmetric && return invoke(show, Tuple{IO,Any}, io, ex)
+    ex.shave && return invoke(show, Tuple{IO,Any}, io, ex)
+    ex.symmetric && return _show_legacy(io, ex, Excision{T,K},
+                                        (ex.upwind_start, ex.upwind_width,
+                                         ex.valclosure, ex.symmetric))
     return _show_legacy(io, ex, Excision{T,K},
                         (ex.upwind_start, ex.upwind_width, ex.valclosure))
 end
@@ -207,14 +230,17 @@ end
     excision_closure(ex::Excision) -> Symbol
     upwind_on(ex::Excision) -> Bool
     excision_mixed(ex::Excision) -> Symbol
+    excision_shave(ex::Excision) -> Bool
 
 The dissipation's closure kind, whether the lopsided advection blend is
-switched on (`width > 0`), and the zone points' mixed derivative (one of
-[`MIXED_NESTINGS`](@ref), added in step X6).
+switched on (`width > 0`), the zone points' mixed derivative (one of
+[`MIXED_NESTINGS`](@ref), added in step X6), and whether the lego corners are
+shaved (added in step X8).
 """
 excision_closure(::Excision{T,K}) where {T,K} = K
 upwind_on(ex::Excision) = ex.upwind_width > 0
 excision_mixed(ex::Excision) = ex.symmetric ? :symmetric : :nested
+excision_shave(ex::Excision) = ex.shave
 
 # The excision parameters an interior or spec carries: its own for
 # `:excised`, refused for every other variant, and the default where an
@@ -2013,6 +2039,134 @@ end
 excision_monitor_mask(int::FittedInterior{T,:excised,NM}, t, W) where {T,NM} =
     ShapeMask{T,NM}(center_at(int.center, t), int.shape, int.lmax, int.r_in,
                     int.r_out, (int.offset - T(W)) - (int.r_out - int.r_in))
+
+# --- the shaved excised set (step X8) -------------------------------------------
+
+"""
+    ShavedMask(base, h)
+
+The excised set with its **lego corners shaved** (added in step X8;
+`CODE.md`, "Excision", "What step X8 built"), as a mask: a point is not
+evolved where `base` — the geometry's own mask, an [`InteriorMask`](@ref) for
+the sphere or a [`ShapeMask`](@ref) for the frozen tracked surface — does not
+evolve it, **or** where its three neighbours one step `h` toward the excision
+center, one along each axis, are all outside `base`'s evolved region. "Toward
+the center" is per axis, from the sign of `x_d − c_d`; a coordinate on the
+center's plane has no inward neighbour along its axis, and such a point is
+not shaved.
+
+**A predicate every mask evaluates, not a lookup of the classes (proposed in
+step X8).** Everything that asks "is it excised" takes a position: the norms'
+and the speed's kernels, the validity and the non-finite counts, and the
+horizon finder's footprint guard, which TreeAMR asks at stencil positions it
+computes itself and which no class array can answer. So the shave is
+expressed where they all are: the classes are built from this predicate at
+every owned point ([`build_excision`](@ref)'s first pass), and the masks, the
+guard and `test/octant_runs.jl`'s noise exclusion evaluate the same function
+at the same positions — one predicate, as X2b built the classes from the
+masks' own.
+
+**One pass, not a fixed point (proposed in step X8).** Iterated, the rule
+does not stop at the corners: a shaved rim point makes its tangent neighbour
+a corner, and the closure of a lattice sphere under the rule grows along the
+rims of its layers toward square cross-sections — on step X7's surfaces 11
+to 51 passes, reaching 3.9 to 17.7 cells outside the sphere at `h = 1/24 …
+1/48`, which would eat the margin to the horizon. One pass excises the corners the geometry made and no
+more; every shaved point lies within `h/√3` of the geometric surface along
+the ray (measured `0.573 h` at most over every radius from 1 to 90 cells).
+
+`h` is the surface's spacing (the one level [`check_excision_mesh`](@ref)
+asserts within `(G + q + 2) h` of it), and the predicate is meant for that
+lattice's points: within `2h` of the surface every point is on it. Farther
+out the neighbours are not evaluated (`base` alone decides), which is exact —
+a shaved point's inward neighbour is excised, so the point lies within `h`
+of the excised set. `isbits` when `base` is.
+"""
+struct ShavedMask{M,T}
+    base::M
+    h::T
+end
+
+_mask_center(m::InteriorMask) = m.center
+_mask_center(m::ShapeMask) = m.center
+
+# Whether `x` is within `2h` of the geometry's excised set — where a shaved
+# point can be — from its radius alone: the sphere's `r < r_1 + 2h`, the
+# tracked surface's outer bounding sphere plus `2h`.
+@inline function _shave_near(m::InteriorMask, x, h)
+    d1 = x[1] - m.center[1]
+    d2 = x[2] - m.center[2]
+    d3 = x[3] - m.center[3]
+    ρ = m.r_1 + 2 * h
+    return d1 * d1 + d2 * d2 + d3 * d3 < ρ * ρ
+end
+
+@inline function _shave_near(m::ShapeMask, x, h)
+    d1 = x[1] - m.center[1]
+    d2 = x[2] - m.center[2]
+    d3 = x[3] - m.center[3]
+    return sqrt(d1 * d1 + d2 * d2 + d3 * d3) < (m.r_out - m.offset) + 2 * h
+end
+
+"""
+    is_shaved(m::ShavedMask, x) -> Bool
+
+Whether the point `x`, evolved by the geometry, is excised by the shave: its
+three neighbours one step toward the center are all excised by the geometry
+(step X8). Not on the center's planes.
+"""
+@inline is_shaved(m::ShavedMask, x) = is_evolved(m.base, x) && _corner(m, x)
+
+# Whether all three inward neighbours of `x` are excised by the geometry.
+@inline function _corner(m::ShavedMask, x)
+    b = m.base
+    c = _mask_center(b)
+    d1 = x[1] - c[1]
+    d2 = x[2] - c[2]
+    d3 = x[3] - c[3]
+    (iszero(d1) | iszero(d2) | iszero(d3)) && return false
+    _shave_near(b, x, m.h) || return false
+    h = m.h
+    n1 = d1 > zero(d1) ? x[1] - h : x[1] + h
+    n2 = d2 > zero(d2) ? x[2] - h : x[2] + h
+    n3 = d3 > zero(d3) ? x[3] - h : x[3] + h
+    return !is_evolved(b, (n1, x[2], x[3])) & !is_evolved(b, (x[1], n2, x[3])) &
+           !is_evolved(b, (x[1], x[2], n3))
+end
+
+@inline is_evolved(m::ShavedMask, x) = is_evolved(m.base, x) && !_corner(m, x)
+
+"""
+    BothMask(a, b)
+
+The points both masks evolve (added in step X8): how a band — the validity
+monitor's evolved band `[r_E, r_E + W)` of an excised hole — is kept off the
+points the shave excised inside it.
+"""
+struct BothMask{A,B}
+    a::A
+    b::B
+end
+
+@inline is_evolved(m::BothMask, x) = is_evolved(m.a, x) & is_evolved(m.b, x)
+
+"""
+    excised_mask(interior, t, h) -> mask
+
+The `:excised` interior's excised set at `t` as the classes hold it (added in
+step X8): its geometry's mask ([`interior_mask`](@ref)), shaved on the
+lattice of spacing `h` ([`ShavedMask`](@ref)) when its [`Excision`](@ref)
+asks for the shave. What [`build_excision`](@ref) builds the classes from,
+and what a run's noise is kept off (`test/octant_runs.jl`); a problem's masks
+are [`evolved_mask`](@ref)'s.
+"""
+excised_mask(int::Interior{T,:excised}, t, h) where {T} = _excised_mask(int, T, t, h)
+excised_mask(int::FittedInterior{T,:excised}, t, h) where {T} =
+    _excised_mask(int, T, t, h)
+
+_excised_mask(int, ::Type{T}, t, h) where {T} =
+    excision_shave(int.excision) ? ShavedMask(interior_mask(int, t), T(h)) :
+    interior_mask(int, t)
 
 # --- where the tracked layer was put, against the mesh ------------------------
 

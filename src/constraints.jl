@@ -530,7 +530,7 @@ function adm_constraint!(p::GHProblem{T}, u, t;
 end
 
 """
-    gh_error!(p::GHProblem, u, t; mask = interior_mask(p.interior, t),
+    gh_error!(p::GHProblem, u, t; mask = evolved_mask(p, t),
               shell = (0, -1))
 
 Evaluate the error against the analytic solution, the interior residual
@@ -545,9 +545,11 @@ driver passes a band around the horizon.
 The mask defaults to the problem's own interior at this `t`, which is
 `CODE.md`'s rule that the modified region is never reported as a numerical
 solution; [`AllPoints`](@ref) is how a test asks for the unmasked number
-and sees how much larger it is.
+and sees how much larger it is. (Amended in step X8: the problem's
+[`evolved_mask`](@ref), which is the interior's own but for an excised hole
+whose lego corners were shaved.)
 """
-function gh_error!(p::GHProblem{T}, u, t; mask=interior_mask(p.interior, T(t)),
+function gh_error!(p::GHProblem{T}, u, t; mask=evolved_mask(p, T(t)),
                    shell=(zero(T), -one(T))) where {T}
     scatter!(p.U, u)
     map_blocks!(gh_error_kernel!, p.U, p.diag.work, p.U.work, p.origins,
