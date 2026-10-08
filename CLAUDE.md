@@ -1,7 +1,11 @@
 # Working notes for Claude in TreeGeneralizedHarmonic.jl
 
 Read `CODE.md` first — it is the design document and states *why* things
-are the way they are. This file is only about mechanics.
+are the way they are. The runs behind the black hole's interior — step 5's
+layer, steps 8a–8′, the single holes on the octant — are in
+`SINGULARITY_HANDLING.md` (moved out of `CODE.md` on 2026-10-08), and the
+settings they recommend for a single hole are `CODE.md`'s "Single black
+holes: recommended settings". This file is only about mechanics.
 
 ## What this package is
 
@@ -73,7 +77,8 @@ step 8g (excision) is not needed; the analytic layer stays the default where
 a chart admits it and `:fitted` is for G5's chart. **G5 runs at `a = 7/10`
 (decided 2026-09-23)**, which runs at `h = 5/256` (2472 blocks, `10 M` in
 1¾ node-hours) and not at `5/128`; harmonic `a = 9/10` waits with its price
-written down in `CODE.md`'s "Open questions" (`h ≲ 5/1024` on the equator,
+written down in `SINGULARITY_HANDLING.md`'s "The interior's questions"
+(`h ≲ 5/1024` on the equator,
 23 000 blocks, `38 h` a `50 M` run, and a fit that holds 45° first). Step 8,
 the moving hole, has run (2026-09-24) and G5 is **not** done: the mesh
 follows the hole (the `:fitted` cycle on the case's own data, the floor from
@@ -83,14 +88,16 @@ at the hole with 6–9× fewer points, the horizon is found along the
 trajectory with Kerr's numbers and the boost's contraction, `:frozen` fails
 — but on G5's chart the moving layer's error is `3.3×` the static hole's
 at `7 M` and growing, carried out through the layer's trailing side
-(`CODE.md`, G5 and "The moving hole (step 8)"). Step 8′ (2026-09-25) found
+(`CODE.md`'s G5 and `SINGULARITY_HANDLING.md`'s "The moving hole (step 8)").
+Step 8′ (2026-09-25) found
 the lever for the trailing side — `evolve!(…; trail_ramp = 9/10)`, `ρ`'s ramp
 narrowed where grid points leave the layer — which takes the crossing's
 excess over the resting hole from `5.0×` to `2.05×` at `13 M` and makes the
 two sides of the layer equal; G5 is still open on the uniform growth that is
 left and on a drift of the horizon's `J` (`0.846` at `13 M`) that the moving
-spinning hole shows with and without it (`CODE.md`, "The trailing side (step
-8′)" and "Open questions").**
+spinning hole shows with and without it (`SINGULARITY_HANDLING.md`, "The
+trailing side
+(step 8′)" and "The interior's questions").**
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
 layer instead of excision, a single boosted spinning black hole as the
@@ -357,10 +364,12 @@ SimWatch status files (`SimWatchWriter`; https://github.com/eschnett/simwatch).
 second-derivative interpolation; TreeAMR's `main` has it, unreleased).
 `test/reflection_tests.jl`, `gauge_source_tests.jl` and `simwatch_tests.jl`
 are its files; `test/octant_runs.jl` is the run script (`octant_rates.jl`,
-`octant_study.jl`, `octant_diff.jl` analyse its output), and `CODE.md`'s
-Measured results from "Robust stability on the octant" on hold the numbers —
-among them the `:fitted` setup to use: `h = 1/24` at the hole, `m = 16`,
-`n_L = 20`, `fit_cont = 2`.
+`octant_study.jl`, `octant_diff.jl` analyse its output), and
+`SINGULARITY_HANDLING.md`'s
+"Single holes on the octant" holds the numbers — among them the `:fitted`
+setup at `a = 0`: `h = 1/24` at the hole, `m = 16`, `n_L = 20`,
+`fit_cont = 2`; `CODE.md`'s "Single black holes: recommended settings" has
+the table for every spin to `9/10`.
 
 From 2026-10-04 a **spinning** hole has an octant too, on **TreeAMR 0.1.7**'s
 rotating seam (M12): `GHCase(; rotating = (d1, d2))` (stored as `(0, 0)` for
@@ -570,7 +579,9 @@ The black-hole runs that are too long for the suite — the default margin
 `m = 8` at `q = 4`, the `t = 50 M` run of all three interior variants,
 the two harmonic charts, and from step 6 the indicator's calibration and
 its adaptive run — are a **script**, run by hand, with its numbers
-recorded in `CODE.md` under "Measured results" (added in step 5). It takes
+recorded under "Measured results" (added in step 5) — the indicator's and
+the horizon's in `CODE.md`, the interior's in `SINGULARITY_HANDLING.md` (moved there
+2026-10-08). It takes
 an optional list of sections (`order`, `long`, `charts`, `indicator`,
 `horizon`, `bounds`; and `leakage`, `calibration` and `tracked`, which are
 not in the default list). An option `key=value` whose key is a section's name selects
@@ -1146,7 +1157,9 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `r_0 > |a|`; the placement bound needs `r_0 < r_h,min`, and harmonic
   Kerr's `r_h,min = √(M²−a²) = 0.436` is smaller than `0.9`. A ball fits
   only where `a < M/√2`. `check_interior_radii` refuses it by name
-  (`singular_radius`); `CODE.md`'s "Open questions" has the two ways out.
+  (`singular_radius`); `SINGULARITY_HANDLING.md`'s "The interior's questions"
+  has the two
+  ways out.
   Kerr-Schild at `a = 0.9` runs, because `r₊ = 1.436 > 0.9`.
 - **The three interior radii are asserted at every regrid**: `r_1`
   inside the horizon by `m` spacings of the blocks containing it
@@ -1381,7 +1394,9 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `wrap` / `ceilint` / `floorint` / `tofloat64` from `precision.jl`.
 - **Measured numbers go into `CODE.md`**, beside the prediction they
   confirm or correct, so a regression shows up as a changed number and
-  not as a test that merely still passes.
+  not as a test that merely still passes — those of the black hole's
+  interior into `SINGULARITY_HANDLING.md`, and a recommendation that changes into
+  `CODE.md`'s table (2026-10-08).
 - **A refined octant is not the refined full box** (found 2026-10-02):
   vertex centering puts a refinement cube's plane `x = −R` on the fine level
   and `x = +R` on the coarse one, so the box's discretization is not
@@ -1425,8 +1440,8 @@ Match TreeAMR's, since the four packages are read together:
   step lands on `main` only after review.
 - `TODO.md`, when it appears, is Erik's personal to-do list. **Do not
   modify it.** It is gitignored.
-- `CODE.md`, `PLAN.md`, `README.md`, `notes/`, `src/`, `test/`,
-  `.github/` and this file are committed. `Manifest.toml` files,
+- `CODE.md`, `SINGULARITY_HANDLING.md`, `PLAN.md`, `README.md`, `notes/`, `src/`,
+  `test/`, `.github/` and this file are committed. `Manifest.toml` files,
   `bin/output/` and `docs/build/` are gitignored — no `Manifest.toml` is
   tracked, which is what makes the clean-checkout check above mean
   something.
