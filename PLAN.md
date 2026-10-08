@@ -56,7 +56,14 @@ shallow surface (`r_E = 17/15`) fails at a lego corner at the pole — cure
 found on a scratch copy, not built. The spinning round is complete; the next
 (proposed in step X7: the polar corner, then `a = 9/10` on the tracked
 surface, then moving holes) — Erik's decision of 2026-10-08: **the polar
-corner, step X8 below, is next.**
+corner, step X8 below.** X8 is done and merged (2026-10-08), and stopped for
+Erik as its brief asks: the shave (`Excision(T; shave = true)`, the default)
+cures `r_E = 17/15` and `21/20` at `h = 1/24`, but `r_E = 3/2` fails with it at
+`h = 1/24` and `1/32`, at a triple corner the one pass leaves on the
+equatorial cap, which `test/excision_patch.jl`'s spectrum finds at the run's
+rate. Production at `r_E = 4/5` is unchanged. The lottery scan and the two
+H200 rows were cut off on Symmetry by the tunnel and are still to be
+collected. **The next round is Erik's call** ("What step X8 hands over").
 **`main` (`9ab2178`: the CPU's SIMD lanes, `SINGULARITY_HANDLING.md`) is
 merged into the integration branch (2026-10-08): `:excised` runs scalar on the
 CPU, and the suite passes (7138 at one thread, 7146 at four).**
@@ -2282,6 +2289,74 @@ the analysis that says why; record it and stop for Erik.
 - a recommendation for what follows: `a = 9/10` on the tracked offset
   surface (X7's plan: an `m` scan at `h = 1/48`, about 7 H200-hours with
   production), then moving holes.
+
+**What step X8 hands over** (its report's section 6, 2026-10-08; the numbers
+are `CODE.md`'s "Excision", "What step X8 built" and "What step X8
+measured", and `SINGULARITY_HANDLING.md`'s "The polar corner (step X8)").
+Reviewed: the suite is 7183 assertions in 14m23 at four threads on `b80a202`;
+the patch spectrum at `r_E = 3/2`, shaved, `(35, 7, 6)`, `half = 3` reproduces
+as `+0.6569 ± 0.2499i` per `M`; the thread workload's six lines without
+excision are the base's bit for bit, and the two excised lines change by the
+216 shaved points.
+
+- **The shave cannot be the whole cure.** Every sphere-like excised set has
+  triple corners, points whose three inward neighbours are excised. The set
+  with none is the rule's fixed point, 4–18 cells outside the sphere. One
+  pass moves the corners rather than removing them: 192 of 217 remain at
+  `17/15`. The unstable ones sit on the caps, where two axes are nearly
+  tangent to the surface.
+- **The cure belongs in the operator at a cap's triple corner.**
+  `test/excision_patch.jl` tests a candidate in 2–5 minutes. Candidates:
+  - X5's extrapolated advection on the corner's nearly tangent axes,
+    whatever the shift's sign;
+  - X1's per-stencil extrapolation along the normal;
+  - `ε_KO = 1` at the caps.
+- **Production is unchanged.** `r_E = 4/5` with the shave on is stationary,
+  with no triple corner on a cap and its caps' spectrum at `−6.8` and
+  `−9.9/M`. Treat surfaces shallower than about `1.3 M` at `a = 3/5` as
+  unsafe until the corner's operator is fixed.
+- **A flip with the shave** (found in the suite): on `excision_tests.jl`'s
+  small spinning fixture the shave makes `(6, 5, 7) h` a triple corner whose
+  `y` axis has `b/a = +1.7·10⁻⁴` and flips sign by `M/10`. X6's "a restart is
+  the run" claim moved to the same hole without the shave. A chain of jobs
+  with the shave is the run only while `excision_flips = 0`, as before.
+- **`a = 9/10` on the tracked offset surface** (X7's plan) should wait for
+  the corner's operator. As built it cannot start; both checks below need
+  to become direction-aware:
+  - `excision_horizon_margin` (`src/driver.jl:1032`) compares the found
+    horizon's least radius with the surface's largest. That is `−6.2` cells
+    at `m = 6` on the oblate horizon, and it ends the run at `t = 0`.
+  - The singular-set check compares the core surface's polar radius with
+    the equatorial ring, and refuses `m + n_L ≳ 26` at `1/48`.
+
+  A dry build at `m = 6` is otherwise fine: 1614 corners shaved and 1783
+  frame-dragged axes. Once both checks are fixed, the `m` scan is about 1.6
+  H200-hours and production at `1/48, 1/64, 1/96` to `24 M` about 7 in all.
+  Take the patch spectrum at each surface's caps first; that needs a
+  `geometry=tracked` option in `excision_patch.jl`:
+
+  ```
+  for m in 6 9 12 18 21; do julia --project=. --threads=8 test/octant_runs.jl backend=cuda case=ks octant=rotating a=9/10 interior=excised geometry=tracked margin=$m n_L=4 L=64 N=96 roots=2 radii=32,16,8,4 t_end=10 chunk=1 cfl=1/2 out=out/x9/scan/m$m checkpoint=out/x9/scan/ck-m$m walltime=2900; done
+  ```
+
+  With `n_L = 4` the singular-set check allows `m ≤ 21`. Production meshes:
+  `N=96 radii=32,16,8,4` (`1/48`), `N=128 radii=32,16,8,4` (`1/64`),
+  `N=96 radii=32,16,8,4,2` (`1/96`).
+- **Moving holes** come after both: a moving surface passes through every
+  lattice configuration.
+- **Still on Symmetry, cut off by the tunnel:**
+  - the lottery scan: `1/24`, 300 rows, and `1/32`, 108 rows, on
+    `amddebugq` from `excision-x8`; `1/48`, 56 rows, on an H200 from
+    `excision-x8-gpu`;
+  - the H200 row at `17/15`, stationary to `10 M` when last read;
+  - the `4/5` row at `1/32`.
+
+  Two job chains, `x8s24c` and `x8s32b`, resubmit themselves until every row
+  is done. When the tunnel is back, `bin/output/x8/collect.sh` in the step
+  worktree shows the queue, copies the results back without checkpoints,
+  builds the tables and prints the remote sizes. Its commented last step
+  deletes the `ck-*` checkpoints. Then fill the "Blocked" paragraph of
+  `SINGULARITY_HANDLING.md`'s entry.
 
 ## Step 9 — Infrastructure and the H200 (G6)
 
