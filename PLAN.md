@@ -61,9 +61,11 @@ Erik as its brief asks: the shave (`Excision(T; shave = true)`, the default)
 cures `r_E = 17/15` and `21/20` at `h = 1/24`, but `r_E = 3/2` fails with it at
 `h = 1/24` and `1/32`, at a triple corner the one pass leaves on the
 equatorial cap, which `test/excision_patch.jl`'s spectrum finds at the run's
-rate. Production at `r_E = 4/5` is unchanged. The lottery scan and the two
-H200 rows were cut off on Symmetry by the tunnel and are still to be
-collected. **The next round is Erik's call** ("What step X8 hands over").
+rate. Production at `r_E = 4/5` is unchanged. The lottery scan (464 rows at
+`h = 1/24, 1/32, 1/48`, collected the same night) shows the shave relabelling
+the failing cap configurations rather than ending them: every scanned
+configuration holds for `r_E ≤ 1.0` with the shave and `≤ 0.82` without it, at
+every `h`. **The next round is Erik's call** ("What step X8 hands over").
 **`main` (`9ab2178`: the CPU's SIMD lanes, `SINGULARITY_HANDLING.md`) is
 merged into the integration branch (2026-10-08): `:excised` runs scalar on the
 CPU, and the suite passes (7138 at one thread, 7146 at four).**
@@ -2313,8 +2315,9 @@ excision are the base's bit for bit, and the two excised lines change by the
   - `ε_KO = 1` at the caps.
 - **Production is unchanged.** `r_E = 4/5` with the shave on is stationary,
   with no triple corner on a cap and its caps' spectrum at `−6.8` and
-  `−9.9/M`. Treat surfaces shallower than about `1.3 M` at `a = 3/5` as
-  unsafe until the corner's operator is fixed.
+  `−9.9/M`. Treat `r_E > 1.0` at `a = 3/5` (less than `0.8 M` below the
+  polar horizon) as unsafe at any `h` until the corner's operator is fixed —
+  the scan's number, which replaces the report's first estimate of `1.3 M`.
 - **A flip with the shave** (found in the suite): on `excision_tests.jl`'s
   small spinning fixture the shave makes `(6, 5, 7) h` a triple corner whose
   `y` axis has `b/a = +1.7·10⁻⁴` and flips sign by `M/10`. X6's "a restart is
@@ -2344,19 +2347,36 @@ excision are the base's bit for bit, and the two excised lines change by the
   `N=96 radii=32,16,8,4,2` (`1/96`).
 - **Moving holes** come after both: a moving surface passes through every
   lattice configuration.
-- **Still on Symmetry, cut off by the tunnel:**
-  - the lottery scan: `1/24`, 300 rows, and `1/32`, 108 rows, on
-    `amddebugq` from `excision-x8`; `1/48`, 56 rows, on an H200 from
-    `excision-x8-gpu`;
-  - the H200 row at `17/15`, stationary to `10 M` when last read;
-  - the `4/5` row at `1/32`.
-
-  Two job chains, `x8s24c` and `x8s32b`, resubmit themselves until every row
-  is done. When the tunnel is back, `bin/output/x8/collect.sh` in the step
-  worktree shows the queue, copies the results back without checkpoints,
-  builds the tables and prints the remote sizes. Its commented last step
-  deletes the `ck-*` checkpoints. Then fill the "Blocked" paragraph of
-  `SINGULARITY_HANDLING.md`'s entry.
+- **The Symmetry part, collected once the tunnel was back** (`e0f101f`,
+  2026-10-08; reviewed: the H200 row's CSV and the relabelled cap's patch
+  spectrum reproduce, below):
+  - **The lottery scan.** At `h = 1/24` the shave cures the two cap classes
+    that fail without it (top disk `R² − Z² ∈ (10, 13)`, X7's, and
+    `(5, 8)`). It makes `(9, 10)` fail at the same radii and times instead:
+    one pass turns that cap into the unshaved `(10, 13)` one. Its patch
+    spectrum, `+2.0021 ± 0.8014i` at `(3, 2, 27)`, `r_E = 1.1323`,
+    reproduces to every digit X7's corner's.
+  - At `1/32` and `1/48` the shave moves the onset deeper, from `r_E ≈ 0.97`
+    and `0.85` to `1.16` and `1.06`. But `17/15` fails with it at `1/32` and
+    `21/20` at `1/48`, and above `r_E ≈ 1.2` the failures grow faster at
+    finer `h`.
+  - **Safe window:** every scanned configuration holds for `r_E ≤ 1.0` with
+    the shave and `≤ 0.82` without it, at all three `h`. `r_E = 4/5` holds
+    everywhere, with and without.
+  - **The H200 rows**, both with the shave:
+    - `17/15` at `1/24` is stationary to `24 M`: `err_linf` `0.1149` at
+      `1 M` and `0.1171` at `24 M`, no flip, 217 points shaved. X7's blew up
+      at `4.5 M`.
+    - `4/5` at `1/32` is X7's production row outside the horizon to `3 %`,
+      with the drift of `J` to `0.3 %` and the band's ℋ `0.78×`.
+  - **Symmetry cleaned:** `excision-x8` 24 GB → 15 MB, `excision-x8-gpu`
+    33 GB → 4.6 MB, no `.h5` left, the queue empty. The data and the table
+    scripts are in the integration worktree's `bin/output/x8` (gitignored).
+  - **A run-script bug, not fixed:** `test/octant_runs.jl` derives the
+    margin as `floor((r₊ − r_E)/h + 1/1000)`. At `r_E = 1.50837`, `1/24`
+    (row `h24-R36.201`), that rounds up to `m = 7`, and the margin check
+    then refuses the radius. A slack of `1//10^9` fixes it; the next step
+    that touches `test/` should take it.
 
 ## Step 9 — Infrastructure and the H200 (G6)
 
