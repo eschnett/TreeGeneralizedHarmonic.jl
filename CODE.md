@@ -257,9 +257,16 @@ order in space, first order in time** (decided; `notes/methods-ghso2.md`,
 well-posedness argument). The evolved state per point is 20 fields:
 
     h_ab = g_ab − η_ab                                    (10)
-    Π_ab = (√γ/α)(∂_t − β^i ∂_i) g_ab = √|g| n^μ ∂_μ g_ab (10)
+    Π_ab = (√γ/α)(∂_t − β^i ∂_i) g_ab = √γ n^μ ∂_μ g_ab   (10)
 
 in GHSO2's packed order `(tt, tx, ty, tz, xx, xy, xz, yy, yz, zz)`.
+The weight on the normal derivative is `√γ`, not `√|g|` (amended
+2026-10-09): with `n^μ = (1/α, −β^i/α)` and `√|g| = α√γ`, `√|g| n^μ ∂_μ
+g_ab` is `α Π_ab`. `notes/methods-ghso2.md` (equation (10) and the sign
+of the source) and `notes/pointwise-ghso2.jl`'s header write `√|g|`; the
+first form, `(√γ/α)(∂_t − β^i ∂_i) g_ab`, is the one the code evolves, and
+the source's sign argument holds with `√γ`, since `√|g| g^{tν} ∂_ν g_ab =
+−√γ n^ν ∂_ν g_ab = −Π_ab`.
 Storing the offset `h` rather than `g` is GHSO2's floating-point hygiene:
 every derived quantity (`g^{ab} − η^{ab}`, `det g + 1`, `det γ − 1`,
 `α`, `β^i`, `√γ`) is computed as an offset by the identities in

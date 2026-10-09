@@ -76,7 +76,7 @@ end
 # nowhere else; here it is used as it comes.
 #
 # **`∂_t g` is a stand-in for the `Π` slot, not `Π`.** The evolved
-# momentum is `Π_ab = (√γ/α)(∂_t − β^i ∂_i) g_ab = √|g| n^μ ∂_μ g_ab`,
+# momentum is `Π_ab = (√γ/α)(∂_t − β^i ∂_i) g_ab = √γ n^μ ∂_μ g_ab`,
 # densitised and Lie-advected (`CODE.md`, "The equations"); it coincides
 # with `∂_t g` only where the shift vanishes and `α = √γ`, which is
 # nowhere near a black hole. Nothing here evolves anything, and the claim
