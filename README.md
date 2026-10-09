@@ -10,7 +10,7 @@ uniform blocks.
 
 That is `∂ₜh_ab = β^i ∂_i h_ab + (α/√γ) Π_ab` and the second-order
 reduction of `R_ab = 0` for `Π_ab`, with `h_ab = g_ab − η_ab` the offset
-metric and `Π_ab = (√γ/α)(∂ₜ − β^i ∂_i) g_ab = √|g| n^μ ∂_μ g_ab` the
+metric and `Π_ab = (√γ/α)(∂ₜ − β^i ∂_i) g_ab = √γ n^μ ∂_μ g_ab` the
 densitised, Lie-advected momentum — not `∂ₜh_ab`, which is the first
 equation — plus a prescribed gauge source `H_a`, constraint damping,
 Kreiss–Oliger dissipation and RK4 in time. [TreeWave](https://github.com/eschnett/TreeWave.jl) shows the same

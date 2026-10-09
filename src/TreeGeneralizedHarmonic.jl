@@ -11,10 +11,10 @@ blocks:
 
 with `h_ab = g_ab − η_ab` the offset metric and
 
-    Π_ab = (√γ/α)(∂ₜ − β^i ∂_i) g_ab = √|g| n^μ ∂_μ g_ab
+    Π_ab = (√γ/α)(∂ₜ − β^i ∂_i) g_ab = √γ n^μ ∂_μ g_ab
 
 the **densitised, Lie-advected momentum** — the derivative along the unit
-normal, weighted by `√|g|`, and *not* `∂ₜ h_ab`, which is the first line.
+normal, weighted by `√γ`, and *not* `∂ₜ h_ab`, which is the first line.
 `α`, `β^i` and `√γ` are read off `h` pointwise. A prescribed gauge source
 `H_a` and the usual constraint damping close the system; see "The
 equations" in `CODE.md`.
