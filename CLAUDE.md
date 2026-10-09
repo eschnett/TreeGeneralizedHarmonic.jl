@@ -163,12 +163,16 @@ scratch copy — then `a = 9/10` on the tracked surface; `CODE.md`,
 "Excision", "What step X7 measured"). Erik chose the corner (2026-10-08,
 step X8). **X8 is built and stopped for Erik (2026-10-08)**: the shave is the
 default (`Excision(T; shave = true)`), a property of the excised set every
-mask agrees with; it cures `r_E = 17/15` and `21/20` at `h = 1/24`, but
+mask agrees with; it cures `r_E = 17/15` and `21/20` at `h = 1/24` (not
+`17/15` at `1/32` nor `21/20` at `1/48`), but
 `r_E = 3/2` fails with it (at `1/24` and `1/32`) at a corner the one pass
 leaves on the equatorial cap, which a frozen-coefficient spectrum of the operator on a patch
 (`test/excision_patch.jl`) finds at the run's rate — the brief's condition to
 stop. Production at `r_E = 4/5` is unchanged and stationary. The lottery scan
-on Symmetry was cut off by the tunnel (`CODE.md`, "Excision", "What step X8
+(464 rows at `h = 1/24, 1/32, 1/48`, finished on Symmetry once its tunnel was
+back) shows the shave relabelling the failing lattice configurations rather
+than ending them: with it every scanned configuration holds for `r_E ≤ 1.0`,
+without it for `r_E ≤ 0.82` (`CODE.md`, "Excision", "What step X8
 measured"; `SINGULARITY_HANDLING.md`, "The polar corner (step X8)").
 `CODE.md` is complete and reviewed three times (2026-09-16): the expanded
 form of the momentum equation, three dimensions only, a pointwise damping
@@ -722,8 +726,13 @@ corner (step X8)"):
   the analysis: the package's right-hand side linearized about the analytic
   state on a box of lattice points, whose rightmost interior eigenvalue was
   each run's growth rate, positive or negative. The step stopped there for
-  Erik; the lottery scan and the two H200 rows are on Symmetry, cut off by the
-  tunnel (`excision-x8`, `excision-x8-gpu`).
+  Erik. The lottery scan, read back the same night: at `1/24` the shave cures
+  the two cap classes that fail without it and makes a third fail at the same
+  radii and times (one pass maps its cap onto X7's); at `1/32` and `1/48` it
+  moves the onset from `r_E ≈ 0.97` and `0.85` to `1.16` and `1.06`; every
+  scanned configuration holds for `r_E ≤ 1.0` with it (`0.82` without). The
+  H200 rows: `17/15` at `1/24` stationary to `24 M`, `4/5` at `1/32` X7's
+  production row outside the horizon to `3 %`.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -1330,9 +1339,14 @@ resubmitting itself while rows are left — and `scansubmit.sh <rows> <dir>
 <job> <P> <K>`; X7's `rows.sbatch`/`submit.sh` for the two H200 rows; and
 `status.sh <dir>` prints a row a line. The scripts are in the worktree's
 `bin/output/x8`, and `local/runlocal.sh` runs the same rows on this machine.
-The tunnel went down while they ran: collect them as the "Blocked" paragraph of
-`SINGULARITY_HANDLING.md`'s "The polar corner (step X8)" lists, then delete
-their checkpoints (`ck-*`).
+The tunnel went down while they ran; `collect.sh` copied them back once it was
+up (`progress.sh` counts the rows done, failed, running and left), and
+`scantable.py`, `pivot.py` and `matrix.py` turn the CSVs into the tables of
+`SINGULARITY_HANDLING.md`'s "The polar corner (step X8)" (`fill.py` put the
+matrices there). Their checkpoints are deleted (`24 GB` and `33 GB` on
+Symmetry before, `15 MB` and `4.6 MB` after). A chain whose last job hits the queue's limit before it can resubmit
+leaves a stale claim directory: remove the claims without a `.done` before
+submitting again.
 
 Step X6's H200 check ran from `excision-x6/x6` on Symmetry, a copy with
 `CUDA` added, through `out/x6dev.sbatch` (`h200debugq`, eight CPUs): the
@@ -2070,7 +2084,12 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `r_E = 4/5` there are none on the caps and the spectrum is at `−7/M`.
   Before trusting a new depth, spin or `h`, take `test/excision_patch.jl` at
   its caps' triple corners (a few minutes each): its rightmost interior
-  eigenvalue was every run's growth rate.
+  eigenvalue was every run's growth rate. The scan behind this (464 rows at
+  `h = 1/24 … 1/48`) found the shave *relabelling* the lattice lottery — a cap
+  whose top disk has `R² − Z² ∈ (9, 10)` becomes, shaved, X7's `(10, 13)` cap,
+  and fails at its radii and times — and the failures above `r_E ≈ 1.0` (with
+  the shave; `0.82` without) growing faster at finer `h`: a finer mesh does not
+  cure a shallow surface.
 - **An excised problem's masks are `evolved_mask(p, t)`, not
   `interior_mask(p.interior, t)`** (step X8). The interior's own mask is the
   geometry's and does not know the shaved points; the problem's knows them

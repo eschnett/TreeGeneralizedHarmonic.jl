@@ -3958,8 +3958,9 @@ tables are under
 [`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#the-polar-corner-step-x8),
 "The polar corner (step X8)". The tunnel to Symmetry went down two hours into
 the step, with the lottery scan at `h = 1/24`, `1/32` and `1/48` and the two
-H200 rows running there; what follows is what was read back before that and
-what ran on the development machine.
+H200 rows running there; the first five items are what was read back before
+that and what ran on the development machine, and the last, **"The scan read
+back"**, is the scan itself, finished that night — it qualifies the first.
 - **The shave cures the polar corner.** On the small rotating octant at
   `h = 1/24` (which reproduces the H200's rows to four digits and X7's
   diagnostic to its printed digits) `r_E = 17/15` and `21/20` are stationary
@@ -4005,7 +4006,8 @@ what ran on the development machine.
   no triple corner on a cap and its caps' spectrum far in the left half-plane,
   and the shave cures `17/15` and `21/20`; a surface shallower than about
   `1.3 M` at `a = 3/5` is not safe, with the shave or without it, until the
-  corner's operator is fixed. `a = 9/10` on the tracked offset surface, which
+  corner's operator is fixed **(amended below: `1.0 M`, by the scan read
+  back)**. `a = 9/10` on the tracked offset surface, which
   X7 proposed next, would put the surface where this failure lives — shallow
   (normal outflow ends `0.63 M` below the horizon, with a margin of at most
   `+0.08`) and under stronger frame dragging — so it should wait for the
@@ -4023,6 +4025,38 @@ what ran on the development machine.
   there, the ring against the core surface on the equator. The build itself
   is fine — at `m = 6` it shaves 1614 corners and finds 1783 frame-dragged
   axes, twice `a = 3/5`'s at the same `h` (870, X7).
+- **The scan read back (amended the same night, the tunnel back): the shave
+  relabels the lottery; it does not end it.** 464 rows at `h = 1/24`, `1/32`
+  (on `amddebugq`) and `1/48` (on an H200), with and without the shave, sorted
+  by the polar cap's top disk `R² − Z²`:
+  - at `1/24` the shave cures the two classes that fail without it (`R² − Z²
+    ∈ (10, 13)`, X7's, from `r_E ≈ 1.05`; `(5, 8)` from `1.13`) and makes the
+    class `(9, 10)` fail at the same radii and the same times: one pass excises
+    `(3, 1, Z) h` from a `(9, 10)` cap, which is then the unshaved `(10, 13)`
+    cap with X7's rim corner `(3, 2, Z) h` — its patch spectrum is
+    `+2.0021 ± 0.8014i`, X7's corner's to every digit;
+  - at `1/32` and `1/48` the shave moves the onset deeper — the class
+    `(10, 13)` fails from `r_E ≈ 0.97` and `0.85` without it, from `1.16` and
+    `1.06` with it — but `17/15` fails with it at `1/32` and `21/20` at `1/48`,
+    each at a rim corner of its shaved polar cap that the patch spectrum finds
+    (`+1.87/M` with `b/a = +0.017`, `+1.44/M` with `b/a = +0.008` along `y`), and
+    from `r_E ≈ 1.25` every `(10, 13)` row at `1/32` and `1/48` blows up within
+    one to three `M`, shaved or not: the corner's mode grows faster with
+    resolution; at `1/24` every class fails from about `1.2` in one column or
+    the other, the shave only reordering them;
+  - **with the shave every scanned configuration from `r_E = 0.65` to `1.00`
+    holds at all three spacings, without it to `0.82`**; `r_E = 4/5` holds
+    everywhere with and without; the H200 row at `17/15`, `1/24`, is stationary
+    to `24 M` (X7's blew up at `4.5 M`), and `4/5` at `1/32` is X7's production
+    row outside the horizon to `3 %` in every shell, the drift of `J` to
+    `0.3 %`, with the band's ℋ `0.78×`.
+
+  So the recommendation stands, with its number corrected **(proposed in
+  step X8)**: keep the shave on — it widens the safe window by `0.18 M` and
+  costs nothing outside the horizon — and production at `r_E = 4/5`; treat
+  `r_E > 1.0` at `a = 3/5` (less than `0.8 M` below the polar horizon) as
+  unsafe at any `h` until a cap's triple corner has an operator the patch
+  spectrum finds stable, which is Erik's call.
 
 **Scalar on the CPU (proposed in the main merge, 2026-10-08).** `main`'s SIMD
 lanes evaluate `W` points at a time on the CPU; an `:excised` problem does not take
@@ -6826,7 +6860,10 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   X8:** with the shave, the default from step X8, `17/15` and `21/20` are
   stationary at `1/24`, but `r_E = 3/2`, 7 cells, grows at a corner the shave
   leaves on the equatorial cap; keep the 24 cells and `r_E = 4/5`
-  ([`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#the-polar-corner-step-x8)).**)**
+  ([`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#the-polar-corner-step-x8)).
+  The scan at `h = 1/24`, `1/32`, `1/48` holds everywhere for `r_E ≤ 1.0` with
+  the shave and `0.82` without; above that some lattice configurations fail at
+  every `h`, and faster at finer `h`.**)**
   Static holes only, and spins above `3/5` are not measured. An excised
   right-hand side costs about half a `:damped` one on the H200.
 - **Screen a new `:fitted` depth** before a long run: the same tracked

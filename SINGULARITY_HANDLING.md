@@ -3382,8 +3382,10 @@ on the rotating octant, the excised ball `r < r_E`, `r_0 = (0.6 + r_E)/2`,
 17:10 on 2026-10-08**, with the scan's jobs, the H200 rows and the `1/48` scan
 running there; everything below is what was read back before that and what
 ran on the development machine after it (at a load of 12 to 42 from the
-step's own work, so no time here is a benchmark). What is still on Symmetry,
-and how to collect it, is at the end. The local rows' CSVs, records,
+step's own work, so no time here is a benchmark). **(Amended the same night:**
+the tunnel came back, the scans were finished and read back, and "The scan,
+read back from Symmetry", at the end, has them — they qualify the conclusions
+below: the shave relabels the lottery rather than ending it.**)** The local rows' CSVs, records,
 SimWatch files and logs are in the worktree's ignored `bin/output/x8/local`,
 with the patch spectra's logs (`patch/`), X7's diagnostic's (`diag/`) and the
 host-side enumerations (`tools/`).
@@ -3478,8 +3480,9 @@ the others are the Symmetry rows as read back at `2–4 M`):
   `10 M` with it and blow up without it, at `4.5 M` and `9 M` here (`4.5` and
   `5–6 M` in X7). On the H200 (`L = 64`, `N = 96`, job 571759) the shaved
   `17/15` row was stationary to the last row read back, `10 M` (ℋ over the mesh
-  `8.50·10⁻⁵` at `9` and `10 M`, the largest error `0.1168` at `7 M`); its `24 M`
-  is on Symmetry.
+  `8.50·10⁻⁵` at `9` and `10 M`, the largest error `0.1168` at `7 M`), and
+  stayed so to `24 M`. **(Amended:** the scan read back shows the radii next to
+  these failing with the shave instead — "The scan, read back from Symmetry".**)**
 - **It does not hold at `r_E = 3/2`** (7 cells below the polar horizon, 9.4
   below the equator's), between `1.45` and `1.55`, which hold (`1.55`
   saturating slowly), **nor at `1.6`** (4 cells, the least the build allows),
@@ -3529,6 +3532,11 @@ largest (`h = 1/24` unless marked, in `1/M`):
 | `4/5` | on | the pole, `(2, 2, 19)`, `half = 2` | `−6.8` (every mode) | | stationary |
 | `4/5` | on | the `x` cap, `(19, 2, 2)`, `half = 2` | `−9.9` (every mode) | | stationary |
 | `17/15` | off | a box of centered points, `(3, 2, 33)`, `half = 2` | `−0.75` (every mode) | | — |
+| `1.1323` (`R² − Z² = 9.48`) | on | `(3, 2, 27)`, `half = 3` | `+2.0021 ± 0.8014i` | `(3, 2, 27)`, `Π_zz` | fails at `4 M` (Symmetry) |
+| `1.1323` | off | `(3, 1, 27)`, `half = 3` | `−1.34 ± 0.87i` | `(3, 1, 27)` | stationary (Symmetry) |
+| `17/15`, `h = 1/32` | on | `(4, 3, 36)`, `half = 3` | `+1.87 ± 0.81i` | `(4, 3, 36)`, `Π_yz` | fails at `5 M` (Symmetry) |
+| `21/20`, `h = 1/48` | on | `(6, 4, 50)`, `half = 3` | `+1.44 ± 0.90i` | `(6, 4, 50)`, `Π_zz` | fails at `7 M` (the H200) |
+| `21/20`, `h = 1/48` | off | `(6, 4, 50)`, `half = 3` | `+3.09 ± 0.89i` | `(5, 4, 50)`, `Π_zz` | fails at `4 M` (the H200) |
 
 The spectrum is the runs': every growing row has a positive eigenvalue at its
 growing point, at its rate (`+2.0` against X7's `1.9/M`, `+0.66` against the
@@ -3560,34 +3568,240 @@ only where the shift points in — X7 found that worse on the polar corner's own
 axis at `b/a < 0.02–0.05`, so the spectrum should decide which axes; the
 per-stencil extrapolation of every operator along the normal at a triple
 corner (X1's `extrap`, stable at `ε_KO > 0` on the plane); `ε_KO = 1` at the
-caps (it halved X7's rate).
+caps (it halved X7's rate). **(Amended when the scan was read back:** the
+depth that keeps every scanned cap in strong enough outflow is `r_E ≤ 1.0` at
+`a = 3/5` with the shave, `0.82` without, at `h = 1/24 … 1/48`; above it the
+failing configurations grow faster with resolution, so a finer `h` is no
+cure either.**)**
 
-**Blocked: the tunnel to Symmetry** (`ssh symmetry`: "connection refused" from
-about 17:10). Running or queued there, each row writing its `simwatch.toml`:
+**The scan, read back from Symmetry (added the same night, the tunnel back).**
+What ran there, each row writing its `simwatch.toml`, from the study's own
+copies `excision-x8` (CPU) and `excision-x8-gpu` (`CUDA` added):
 
-- the `1/24` scan (300 rows, 150 radii — every topmost layer `Z` from 15 to 38
-  with the top disk `R² − Z² = 3, 6.5, 9.5, 11.5, 14.5, 22.5`, and X7's radii —
-  with and without the shave), `excision-x8/out/x8/scan/h24-*`, jobs
-  `x8s24a`, `x8s24b` and the self-resubmitting chain `x8s24c` (`amddebugq`,
-  16 rows a node at 4 threads, about `30 min` a row);
-- the `1/32` scan (108 rows: every `Z` at `11.5`, every fourth at `6.5` and
-  `14.5`, and X7's radii), `excision-x8/out/x8/scan/h32-*`, jobs `x8s32a` and
-  the chain `x8s32b`;
-- the `1/48` scan on an H200 (56 rows: every second `Z` at `11.5`, and `17/15`,
+- the `1/24` scan, 300 rows: 150 radii — every topmost layer `Z` from 15 to
+  38 with the top disk `R² − Z² = 3, 6.5, 9.5, 11.5, 14.5, 22.5`, and X7's
+  radii — with and without the shave, on `amddebugq` (jobs `x8s24a`, `x8s24b`
+  and the self-resubmitting chains `x8s24c`, `x8s24d`, 16 rows a node at 4
+  threads, about `35 min` a row);
+- the `1/32` scan, 108 rows (every `Z` at `11.5`, every fourth at `6.5` and
+  `14.5`, and X7's radii), `amddebugq` (`x8s32a` … `x8s32d`, about `100 min` a
+  row, each a chain of two jobs; one chain died at its job's limit before it
+  could resubmit, and the job's margins were widened for its successors);
+- the `1/48` scan on an H200, 56 rows (every second `Z` at `11.5`, and `17/15`,
   `21/20`, `4/5` — coarser, as the brief allows, and on the GPU because a `1/48`
-  row is 16 times a `1/24` one, hours a row on four EPYC threads),
-  `excision-x8-gpu/out/x8/scan/h48-*`, job `x8g48a` (`h200q`, 6 h, four rows at
-  once), and the GPU's check of `17/15` at `1/24` against the CPU
-  (`h24g-R27.200-*`, job `x8g24`);
-- the H200 rows: `17/15` at `h = 1/24` to `24 M` with the shave
-  (`excision-x8-gpu/out/x8/h200/n113s`, job 571759, at `10 M` when last read),
-  and `4/5` at `1/32` to `24 M` with the shave (`p32s`, job 571760, at `3 M`
-  when last read, the largest error `1.152`), against X7's `p32`.
+  row is 16 times a `1/24` one: hours a row on four EPYC threads, minutes on
+  the H200), job `x8g48a`, four rows at once, `1 h 20` for all 56;
+- the GPU's check of `17/15` at `1/24` against the CPU: both rows equal the
+  CPU's to all ten printed digits at every row, the shaved one stationary and
+  the unshaved one blown up after `4 M`;
+- the two H200 rows (below).
 
-Collecting them is `bin/output/x8/collect.sh` (the status, the copy-back
-without the checkpoints, the tables by `scantable.py`, the remote sizes, and
-the deletion of the checkpoints — Erik's standing instruction — which waits
-for the copies and is therefore not done: neither size was measured).
+The scans as matrices: one line per topmost layer `Z` (`r_E ≈ Z h`), one
+column per class of the polar cap's top disk `R² − Z²` (the column names the
+value scanned, the class is the interval between two consecutive sums of two
+squares that holds it: `3.0` in `(2, 4)`, `6.5` in `(5, 8)`, `9.5` in `(9,
+10)`, `11.5` in `(10, 13)`, `14.5` in `(13, 16)`, `22.5` in `(20, 25)`), each entry the
+shaved and the unshaved row — `·` stationary to `10 M`, `g` growing (the
+largest error up by half or more from `5` to `10 M`), `F t` blown up after
+its last row at `t M`, `r` refused at the build, `…` not run. The one `r`,
+`R = 36.201` at `1/24` (`r_E = 1.50837`), is the script's: `test/octant_runs.jl`
+derives the margin as `⌊(r₊ − r_E)/h + 1/1000⌋`, and this radius lies within
+a thousandth of a cell outside `r₊ − 7h = 1.50833`, so it asked for `m = 7`
+and the check refused its own number. At `h = 1/24`:
+
+| `Z` | `r_E` | `3.0` | `6.5` | `9.5` | `11.5` | `14.5` | `22.5` |
+|---|---|---|---|---|---|---|---|
+| 15 | 0.625 |  |  |  |  |  | · / · |
+| 16 | 0.667 | · / · | · / · | · / · | · / · | · / · | · / · |
+| 17 | 0.708 | · / · | · / · | · / · | · / · | · / · | · / · |
+| 18 | 0.750 | · / · | · / · | · / · | · / · | · / · | · / · |
+| 19 | 0.792 | · / · | · / · | · / · | · / · | · / · | · / · |
+| 20 | 0.833 | · / · | · / · | · / · | · / · | · / · | · / · |
+| 21 | 0.875 | · / · | · / · | · / · | · / · | · / · | · / · |
+| 22 | 0.917 | · / · | · / · | · / · | · / · | · / · | · / · |
+| 23 | 0.958 | · / · | · / · | · / · | · / · | · / · | · / · |
+| 24 | 1.000 | · / · | · / · | g / · | · / g | · / · | · / · |
+| 25 | 1.042 | · / · | · / · | F9 / · | · / F9 | · / · | · / · |
+| 26 | 1.083 | · / · | · / g | F6 / · | · / F6 | · / · | · / · |
+| 27 | 1.125 | · / · | · / F8 | F4 / · | · / F4 | · / · | · / · |
+| 28 | 1.167 | · / · | · / F6 | F3 / · | · / F3 | · / · | · / g |
+| 29 | 1.208 | · / · | · / F4 | F3 / · | g / F3 | · / g | · / F6 |
+| 30 | 1.250 | · / · | · / F3 | F2 / · | g / F2 | · / g | · / F4 |
+| 31 | 1.292 | · / · | · / F3 | F2 / g | F5 / F2 | · / F5 | · / F3 |
+| 32 | 1.333 | · / · | · / F2 | F2 / F5 | F4 / F2 | · / F4 | g / F3 |
+| 33 | 1.375 | · / · | · / F2 | F2 / F4 | F3 / F2 | · / F3 | F6 / F2 |
+| 34 | 1.417 | · / g | g / F2 | F2 / F3 | F2 / F2 | · / F2 | F4 / F2 |
+| 35 | 1.458 | · / F6 | · / F1 | F1 / F2 | F2 / F1 | g / F2 | F3 / F2 |
+| 36 | 1.500 | F4 / F3 | · / F1 | F1 / F2 | F2 / F1 | r / r | F3 / F2 |
+| 37 | 1.542 | g / F5 | · / F1 | F1 / F2 | F2 / F1 | · / F2 | F2 / F1 |
+| 38 | 1.583 | g / F3 | F3 / F1 | F1 / F1 | F1 / F1 | F6 / F1 | F2 / F1 |
+
+X7's radii at `1/24`:
+
+| `r_E` | `R = r_E/h` | `Z` | top disk | shaved / unshaved |
+|---|---|---|---|---|
+| `0.65` | 15.60 | 15 | 18.36 | · / · |
+| `7/10` | 16.80 | 16 | 26.24 | · / · |
+| `4/5` | 19.20 | 19 | 7.64 | · / · |
+| `9/10` | 21.60 | 21 | 25.56 | · / · |
+| `1` | 24.00 | 23 | 47.00 | · / · |
+| `21/20` | 25.20 | 25 | 10.04 | · / F9 |
+| `11/10` | 26.40 | 26 | 20.96 | · / · |
+| `17/15` | 27.20 | 27 | 10.84 | · / F4 |
+| `23/20` | 27.60 | 27 | 32.76 | · / · |
+| `5/4` | 30.00 | 29 | 59.00 | · / · |
+| `3/2` | 36.00 | 35 | 71.00 | F9 / F3 |
+
+At `h = 1/32`:
+
+| `Z` | `r_E` | `6.5` | `11.5` | `14.5` |
+|---|---|---|---|---|
+| 21 | 0.656 |  | · / · |  |
+| 22 | 0.688 |  | · / · |  |
+| 23 | 0.719 |  | · / · |  |
+| 24 | 0.750 | · / · | · / · | · / · |
+| 25 | 0.781 |  | · / · |  |
+| 26 | 0.812 |  | · / · |  |
+| 27 | 0.844 |  | · / · |  |
+| 28 | 0.875 | · / · | · / · | · / · |
+| 29 | 0.906 |  | · / · |  |
+| 30 | 0.938 |  | · / g |  |
+| 31 | 0.969 |  | · / F7 |  |
+| 32 | 1.000 | · / · | · / F5 | · / · |
+| 33 | 1.031 |  | · / F4 |  |
+| 34 | 1.062 |  | · / F3 |  |
+| 35 | 1.094 |  | · / F3 |  |
+| 36 | 1.125 | · / F5 | g / F2 | · / g |
+| 37 | 1.156 |  | F9 / F2 |  |
+| 38 | 1.188 |  | F6 / F2 |  |
+| 39 | 1.219 |  | F4 / F2 |  |
+| 40 | 1.250 | · / F2 | F3 / F2 | · / F3 |
+| 41 | 1.281 |  | F3 / F1 |  |
+| 42 | 1.312 |  | F2 / F1 |  |
+| 43 | 1.344 |  | F2 / F1 |  |
+| 44 | 1.375 | · / F1 | F2 / F1 | · / F2 |
+| 45 | 1.406 |  | F2 / F1 |  |
+| 46 | 1.438 |  | F1 / F1 |  |
+| 47 | 1.469 |  | F1 / F1 |  |
+| 48 | 1.500 | F7 / F1 | F1 / F1 | F3 / F1 |
+| 49 | 1.531 |  | F1 / F1 |  |
+| 50 | 1.562 |  | F1 / F1 |  |
+| 51 | 1.594 |  | F1 / F1 |  |
+| 52 | 1.625 | F1 / F1 | F1 / F1 | F2 / F1 |
+| 53 | 1.656 |  | F1 / F1 |  |
+
+X7's radii at `1/32`:
+
+| `r_E` | `R = r_E/h` | `Z` | top disk | shaved / unshaved |
+|---|---|---|---|---|
+| `7/10` | 22.40 | 22 | 17.76 | · / · |
+| `4/5` | 25.60 | 25 | 30.36 | · / · |
+| `1` | 32.00 | 31 | 63.00 | · / · |
+| `21/20` | 33.60 | 33 | 39.96 | · / · |
+| `17/15` | 36.27 | 36 | 19.30 | F5 / · |
+
+At `h = 1/48` (on the H200):
+
+| `Z` | `r_E` | `11.5` |
+|---|---|---|
+| 33 | 0.688 | · / · |
+| 35 | 0.729 | · / · |
+| 37 | 0.771 | · / · |
+| 39 | 0.812 | · / · |
+| 41 | 0.854 | · / F8 |
+| 43 | 0.896 | · / F5 |
+| 45 | 0.938 | · / F3 |
+| 47 | 0.979 | · / F2 |
+| 49 | 1.021 | · / F2 |
+| 51 | 1.062 | F8 / F2 |
+| 53 | 1.104 | F5 / F1 |
+| 55 | 1.146 | F3 / F1 |
+| 57 | 1.188 | F2 / F1 |
+| 59 | 1.229 | F2 / F1 |
+| 61 | 1.271 | F1 / F1 |
+| 63 | 1.312 | F1 / F1 |
+| 65 | 1.354 | F1 / F1 |
+| 67 | 1.396 | F1 / F1 |
+| 69 | 1.438 | F1 / F0 |
+| 71 | 1.479 | F1 / F0 |
+| 73 | 1.521 | F1 / F0 |
+| 75 | 1.562 | F0 / F0 |
+| 77 | 1.604 | F0 / F0 |
+| 79 | 1.646 | F0 / F0 |
+| 81 | 1.688 | F0 / F0 |
+
+X7's radii at `1/48`:
+
+| `r_E` | `R = r_E/h` | `Z` | top disk | shaved / unshaved |
+|---|---|---|---|---|
+| `4/5` | 38.40 | 38 | 30.56 | · / · |
+| `21/20` | 50.40 | 50 | 40.16 | F7 / F4 |
+| `17/15` | 54.40 | 54 | 43.36 | · / · |
+
+- **At `1/24` the shave relabels the lottery; it does not end it.** Without
+  it two classes fail — the top disk `R² − Z² ∈ (10, 13)` (X7's `17/15` and
+  `21/20`) from `Z = 25`, `r_E ≈ 1.05` (growing at `Z = 24`), and `(5, 8)` from
+  `Z = 27` (growing at `26`). With it both hold, and the class `(9, 10)` fails
+  instead — from `Z = 25`, growing at `24`, **at the very times the class
+  `(10, 13)` failed without it** (`F9`, `F6`, `F4`, `F3` at `Z = 25 … 28`). One
+  pass maps the one onto the other at the pole: a top disk of `R² − Z² ∈ (9,
+  10)` leaves `(3, 1, Z) h` outside, the shave excises it, and the cap is then
+  the unshaved `(10, 13)` cap, whose rim corner `(3, 2, Z) h` is X7's. The patch
+  spectrum says so to every digit: at `R = 27.175` (`R² − Z² = 9.48`) with the
+  shave the box about `(3, 2, 27)` has `+2.0021 ± 0.8014i`, X7's `17/15` corner
+  without it (`+2.0021 ± 0.8014i`), and the same radius without the shave
+  `−1.34` at `(3, 1, 27)`. From `Z = 29`, `r_E ≈ 1.2`, the other classes
+  follow in both columns — with the shave `(10, 13)` from `Z = 29`, `(20, 25)`
+  from `32`, `(5, 8)` from `34`, `(13, 16)` from `35`, `(2, 4)` from `36`;
+  without it `(20, 25)` from `28`, `(13, 16)` from `29`, `(9, 10)` from `31`,
+  `(2, 4)` from `34` — so above `1.2` the shave only reorders which caps fail.
+- **At `1/32` and `1/48` it moves the onset deeper, and the failures come
+  faster with resolution.** The class `(10, 13)` fails without the shave from
+  `r_E ≈ 0.97` at `1/32` (growing at `0.94`) and `0.85` at `1/48`, and with it
+  from `1.16` (growing at `1.13`) and `1.06`; with it `17/15` fails at `1/32`
+  (top disk `19.3`, `F5`) and `21/20` at
+  `1/48` (top disk `40.2`), and the patch spectrum finds their corners — the
+  shaved sets' rim corners at the pole, `(4, 3, 36) h` at `+1.87/M` with
+  `b/a = +0.017` along `y`, and `(6, 4, 50) h` at `+1.44/M` with `b/a = +0.008`
+  (the unshaved `21/20` at `1/48`: `(5, 4, 50) h`, `+3.09/M`, blown up at
+  `4 M` against the shaved row's `7 M`). From `r_E ≈ 1.25` every `(10, 13)`
+  row at `1/32` and `1/48` blows up within one to three `M`, with the shave or
+  without, and so does every unshaved row at `1/32`; the shaved `(5, 8)` and
+  `(13, 16)` rows at `1/32` hold to `1.375` and blow up at `1.5`.
+- **What holds everywhere:** with the shave every scanned configuration from
+  `r_E = 0.65` to `1.00` is stationary to `10 M` at all three spacings (the
+  first to grow is `1.008` at `1/24`); without it, to `0.82` (the first failure
+  `0.857` at `1/48`). Production at `r_E = 4/5` holds with and without the
+  shave at `1/24`, `1/32` and `1/48`. So the shave widens the safe window, by
+  about `0.18 M` — to `0.8 M` below the polar horizon from `1.0 M` — and the
+  failures above it are the lego corner's, which the patch spectrum
+  predicted wherever it was asked: every growing row tested has a positive
+  interior eigenvalue at its growing point, every stationary one none.
+
+**The two H200 rows** (`L = 64`, `roots = 2`, the default noise for `17/15`,
+none for `4/5`, the shave on):
+
+- `r_E = 17/15` at `h = 1/24` (`N = 96`, job 571759, `29 min`): stationary to
+  `24 M` — the largest error `0.1149`, `0.1177`, `0.1171` at `1`, `4`, `24 M`,
+  ℋ over the mesh `7.32·10⁻⁵` at `1 M` and `8.49–8.51·10⁻⁵` from `9 M` to `24 M`, all
+  217 shaved points, `excision_flips = 0` at every row. X7's same row blew up at
+  `4.5 M`.
+- `r_E = 4/5` at `h = 1/32` (`N = 128`, job 571760, `1 h 08`), against X7's
+  `p32` at `24 M` (`test/octant_study.jl … at=24 a=3/5`): the shave changes
+  nothing outside the horizon — ℋ in `[1.90, 2.25)` `7.16·10⁻⁷` against
+  `7.37·10⁻⁷` (`0.97×`), in `[2.25, 3)` `1.569·10⁻⁷` against `1.577·10⁻⁷`, the
+  error there `1.415·10⁻⁶` against `1.432·10⁻⁶`, `dJ/dt = 5.546·10⁻⁸/M` against
+  `5.562·10⁻⁸`, `M_irr − M_Kerr = +1.25·10⁻⁸` against `+1.30·10⁻⁸`, the drift of
+  `h_tt` `9.27·10⁻⁷` against `9.25·10⁻⁷` — and inside it lowers ℋ: `0.94×` in
+  `[3/2, 1.90)` and `0.78×` in the band (`2.15·10⁻²` against `2.75·10⁻²`); 337
+  frame-dragged axes against 365, `excision_flips = 0` at every row.
+
+**Symmetry, cleaned.** Every row's CSV, `records.csv`, `simwatch.toml` and log
+are in the worktree's ignored `bin/output/x8` (`scan/`, `scan-gpu/`, `h200/`;
+`table24.md`, `table32.md`, `table48.md` by `scantable.py`, the matrices by
+`matrix.py`). The checkpoints were deleted afterwards (Erik's standing
+instruction): `excision-x8` `24 GB` → `15 MB`, `excision-x8-gpu`
+`33 GB` → `4.6 MB` (466 checkpoint directories; no `.h5` is left).
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 
