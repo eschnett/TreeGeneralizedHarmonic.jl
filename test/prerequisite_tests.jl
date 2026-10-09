@@ -219,10 +219,13 @@ const TREEAMR_NAMES = (
     # Point interpolation (M11): the horizon finder and the fit's sampler
     # (from 2026-09-26; `find_leaf` was the stopgap's and is no longer called)
     :locate_point, :interpolate, :Lagrange, :Region,
-    # Checkpoint and restart (M9a, TreeAMR 0.1.4; added 2026-10-01): the
-    # driver's `checkpoint_path_prefix` and `restart_file`
-    :save_checkpoint, :load_checkpoint,
 )
+
+# Checkpoint and restart (TreeAMR's M9a; added 2026-10-01): the driver's
+# `checkpoint_path_prefix` and `restart_file`. TreeAMR's HDF5 extension until
+# TreeAMR 0.2.0 moved them into its companion package TreeIOHDF5, which this
+# package loads as a hard dependency.
+const TREEIOHDF5_NAMES = (:save_checkpoint, :load_checkpoint)
 
 # The TreeAMR internals this package reaches for. `threadchunks`, the
 # ownership partition, which `state_partition` turns into the integrator's
@@ -280,10 +283,14 @@ const KORZYNSKI_NAMES = (:horizon_spin, :SpinResult, :shape_embedding)
     # `[sources]` pins are moving branches, which is exactly why this test
     # exists — see `CLAUDE.md`, "Things that will bite".
     @test setdiff(TREEAMR_NAMES, names(TreeAMR)) == Symbol[]
-    # The checkpoint functions have methods only through TreeAMR's HDF5
-    # extension, which this package's `using HDF5` loads (decided
-    # 2026-10-01: HDF5 is a hard dependency here, unlike TreeHydro's).
-    @test Base.get_extension(TreeAMR, :TreeAMRHDF5Ext) !== nothing
+    # The checkpoint functions are TreeIOHDF5's, and the package calls those:
+    # a TreeAMR that exported the same names again would make them ambiguous
+    # inside the package, and the failure would be a run's first checkpoint.
+    TreeIOHDF5 = TreeGeneralizedHarmonic.TreeIOHDF5
+    @test setdiff(TREEIOHDF5_NAMES, names(TreeIOHDF5)) == Symbol[]
+    @test filter(n -> getfield(TreeGeneralizedHarmonic, n) !== getfield(TreeIOHDF5, n),
+                 collect(TREEIOHDF5_NAMES)) == Symbol[]
+    @test filter(n -> isdefined(TreeAMR, n), collect(TREEIOHDF5_NAMES)) == Symbol[]
     @test filter(n -> !isdefined(TreeAMR, n),
                  collect(TREEAMR_INTERNAL)) == Symbol[]
     @test setdiff(SPACETIMEMETRICS_NAMES, names(SpacetimeMetrics)) == Symbol[]

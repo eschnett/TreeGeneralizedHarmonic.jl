@@ -2,15 +2,15 @@
 # M9a; Erik's decision of that day reversed `CODE.md`'s "no checkpoint and
 # restart").
 #
-# Everything about the *file* is upstream: TreeAMR's `save_checkpoint` writes
+# Everything about the *file* is upstream: TreeIOHDF5's `save_checkpoint` writes
 # the forest, the evolved field set and an application's plain data, and
 # writes them atomically, durably, with element types as limbs where they are
 # not HDF5 natives and with the provenance of the writer; its
 # `load_checkpoint` rebuilds a forest and a field set through their own
-# validating constructors. Both live in the package extension
-# `TreeAMRHDF5Ext`, which this package's `import HDF5` loads — HDF5 is a hard
-# dependency here (decided 2026-10-01), where TreeHydro leaves it to the
-# caller.
+# validating constructors. Both live in TreeIOHDF5, TreeAMR's companion
+# package for checkpoints (they were TreeAMR's HDF5 extension `TreeAMRHDF5Ext`
+# until TreeAMR 0.2.0), which is a hard dependency here (decided 2026-10-01,
+# for HDF5 then).
 #
 # The mechanism is TreeHydro's (`src/checkpoint.jl` there, 2026-09-29) on
 # purpose, so that the applications of TreeAMR checkpoint alike — the same
@@ -55,7 +55,7 @@ regex_quote(s::AbstractString) = replace(s, r"[\\^$.|?*+()\[\]{}]" => s"\\\0")
 The checkpoint files of `prefix`, as `(iteration, path)` pairs sorted by
 iteration: the files in `prefix`'s directory whose names are exactly
 `"<basename>.it<digits>.h5"`. Nothing else matches — in particular not
-TreeAMR's `"….h5.partial"`, the file a write in progress or a failed one
+TreeIOHDF5's `"….h5.partial"`, the file a write in progress or a failed one
 leaves, and not another prefix that merely starts with this one. A
 directory that does not exist holds no checkpoints.
 """
@@ -119,11 +119,11 @@ end
 
 # --- exact reals as plain data -------------------------------------------------
 #
-# TreeAMR's `write_plain` refuses a MultiFloat scalar, and a run's `t`, its
+# TreeIOHDF5's `write_plain` refuses a MultiFloat scalar, and a run's `t`, its
 # track and its fits are in `T`. A native float is stored as itself and any
 # other `isbits` real made of one native float throughout (`Float32x2`) as the
-# matrix of its limbs — TreeHydro's rule, which is TreeAMR's for a field set's
-# element type, restated because that function is internal to the extension.
+# matrix of its limbs — TreeHydro's rule, which is TreeIOHDF5's for a field
+# set's element type, restated because that function is internal to it.
 
 const NativeFloat = Union{Float16,Float32,Float64}
 
@@ -195,7 +195,7 @@ from_plain_scalar(::Type{R}, a) where {R} = only(from_plain_reals(R, a))
 
 # A type's name as a module importing nothing but Base prints it, and not
 # `string(T)`, which qualifies a name or not according to what the writer had
-# imported into `Main` (TreeHydro's, and TreeAMR's extension's).
+# imported into `Main` (TreeHydro's, and TreeIOHDF5's).
 module TypeNames end
 type_name(::Type{T}) where {T} = sprint(show, T; context=:module => TypeNames)
 
@@ -236,7 +236,7 @@ to_plain(x::EquiangularGrid; path="run") = (; kind="EquiangularGrid", lmax=x.lma
 function to_plain(x::T; path="run") where {T}
     (isstructtype(T) && parentmodule(T) === @__MODULE__) || throw(ArgumentError(
         "the run state at $path is a $T, which a checkpoint cannot store: " *
-        "TreeAMR's plain data hold numbers, strings, symbols, tuples and named " *
+        "TreeIOHDF5's plain data hold numbers, strings, symbols, tuples and named " *
         "tuples, and this package takes apart only its own structs. Extend " *
         "`to_plain` and `from_plain` for it (src/checkpoint.jl)."))
     names = fieldnames(T)
@@ -466,7 +466,7 @@ end
 
 One checkpoint: the forest, the state field set `U` with its state vector
 `u`, and this package's plain data `(; recipe, criterion, run)`, through
-TreeAMR's `save_checkpoint` — atomically, so a failed write leaves the
+TreeIOHDF5's `save_checkpoint` — atomically, so a failed write leaves the
 previous file alone. `u` and not `U.work`: the checkpoint is taken after the
 analysis row, whose horizon find, fit and indicator have scattered into
 `U.work` and filled its ghosts, and after a chunk without a regrid the
@@ -503,7 +503,7 @@ function load_run(path::AbstractString, ::Type{T}; backend=CPU()) where {T}
         "$(repr(path)) stores TreeGeneralizedHarmonic's run state in format " *
         "version $version, and this version of the package reads version " *
         "$(CHECKPOINT_VERSION) only. A file from a newer version is read by that " *
-        "version — TreeAMR's `checkpoint_environment(path, dir)` writes the " *
+        "version — TreeIOHDF5's `checkpoint_environment(path, dir)` writes the " *
         "environment that wrote it. $written"))
     (ck.data isa NamedTuple && haskey(ck.data, :recipe) && haskey(ck.data, :run) &&
      haskey(ck.data, :criterion) && haskey(ck.fieldsets, "state")) ||
@@ -523,7 +523,7 @@ end
 # The checkpoint keywords of `evolve!`, refused up front — before the
 # initial-data cycle — so that a job script's mistake costs a second and not
 # the queue wait and the hours before the first write. TreeHydro's, less its
-# check that HDF5 is loaded: here it always is.
+# check that the checkpoint code is loaded: here it always is.
 function check_checkpoint_keywords(; checkpoint_path_prefix, checkpoint_every_chunks,
                                    checkpoint_interval_seconds, max_walltime_seconds,
                                    num_checkpoints_keep, restart_file)

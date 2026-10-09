@@ -80,8 +80,9 @@ indicator, no black-hole interior and no driver yet; those are the next
 three steps.
 
 **Checkpoint and restart** (2026-10-01, on TreeAMR 0.1.4): `evolve!`
-writes checkpoints through TreeAMR's HDF5 extension — before the regrid, so
-that a restart may change the regridding criterion — and a chain of
+writes checkpoints through TreeIOHDF5, TreeAMR's companion package for
+checkpoints (TreeAMR's HDF5 extension until TreeAMR 0.2.0) — before the
+regrid, so that a restart may change the regridding criterion — and a chain of
 restarts, one chunk per job, is the uninterrupted run bit for bit. The
 keywords and the file names are TreeHydro's; `latest_checkpoint(prefix)`
 makes a job chain one command. See `CODE.md`, "Checkpoint and restart".

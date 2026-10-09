@@ -3679,7 +3679,10 @@ break it:
 that day reversed "No checkpoint and restart" above; the mechanism is
 TreeHydro's — its `CODE.md`, "Checkpoint and restart", 2026-09-29 — on
 purpose, so that the applications of TreeAMR checkpoint alike, with the
-two differences marked.)* G5's crossing is eleven hours on a node, the
+two differences marked. **Amended 2026-10-09:** TreeAMR 0.2.0 moved the
+checkpoint functions, with their names, signatures and file format, out of
+its HDF5 extension into the companion package TreeIOHDF5, which this package
+now calls.)* G5's crossing is eleven hours on a node, the
 `a = 9/10` run `38`–`149 h`, and a queue's day is the limit. **Everything
 about the file is upstream**: the forest, the field-set layout, the atomic
 and durable write, element types as limbs, the provenance and the refusal
@@ -3687,11 +3690,15 @@ of a file a version cannot read — "no mesh machinery" applied to I/O. What
 `src/checkpoint.jl` holds is when to write, the run state, the refusal of a
 restart with other parameters, and the files' names and rotation.
 
-**HDF5 is a hard dependency** (decided 2026-10-01; *TreeHydro leaves it to
-the caller*). `TreeGeneralizedHarmonic.jl` imports it, which loads
-TreeAMR's `TreeAMRHDF5Ext`, so a run can always be checkpointed and no job
-script has to remember `using HDF5`; `prerequisite_tests.jl` asserts the
-extension is loaded.
+**The checkpoint code is a hard dependency** (decided 2026-10-01; *TreeHydro
+leaves it to the caller*). `TreeGeneralizedHarmonic.jl` has `using
+TreeIOHDF5`, TreeAMR's companion package for checkpoints, so a run can always
+be checkpointed and no job script has to load anything; `src/` uses HDF5 for
+nothing else, so HDF5 itself is TreeIOHDF5's dependency, not this package's
+(until 2026-10-09 it was HDF5 that was the dependency here, loading TreeAMR's
+`TreeAMRHDF5Ext`). `prerequisite_tests.jl` asserts that `save_checkpoint` and
+`load_checkpoint` are TreeIOHDF5's and that TreeAMR defines neither, which
+would make them ambiguous inside the package.
 
 **Where: at a chunk boundary, after the analysis row and before the regrid**
 (decided 2026-10-01; *TreeHydro writes after the regrid*). At a chunk
@@ -3951,7 +3958,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`; **amended 2026-09-26**: `gh_interpolate`/`gh_interpolate_grad` over TreeAMR's `interpolate`, and the guard as the `Region` `UnevolvedRegion`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
 | `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl` |
 | `src/fit.jl` | the fitted target (added in step 8e, after `tracking.jl` and before `driver.jl`): the fit's variables (`fit_variables`, `state_from_fit`), the real solid harmonics (`_solid_harmonic_fold`, `real_solid_harmonics`, `fit_directions`), the two samplers (`state_sampler`, `analytic_sampler`), the least squares (`solve_fit`, `fit_row_weights`), the validity sweep (`fit_sweep`), `FitParams` and `InteriorFit` with `build_fit`, `fit_residual` and `fit_valid`, the kernel-callable evaluator `fit_variables_at`/`fit_state`, and the kernel half (8e-ii): `derive_target_bounds`, the 40-variable cache (`target_cache`, `fit_target_kernel!`, `fill_target!`) and the initial data's `fitted_state_kernel!`. The variant's branch is in `evolution.jl` (`GHProblem`'s `target`/`fits`/`t_target`, `refill_target`), its residual in `constraints.jl`'s error kernel, its flow in `driver.jl` (`refit!`, the refill and the pieces of a moving chunk) |
-| `src/checkpoint.jl` | checkpoint and restart (added 2026-10-01, after `fit.jl` and before `driver.jl`): the file names and their rotation and `latest_checkpoint` (TreeHydro's), `plain_reals` for exact reals, `to_plain`/`from_plain` for the run state's own structs and `fit_from_plain` for an `InteriorFit`, `run_recipe` and `run_criterion`, `check_recipe`, `save_run`/`load_run` over TreeAMR's `save_checkpoint`/`load_checkpoint`, and `check_checkpoint_keywords`. `evolve!` writes and reads through it; `test/checkpoint_tests.jl` is its file |
+| `src/checkpoint.jl` | checkpoint and restart (added 2026-10-01, after `fit.jl` and before `driver.jl`): the file names and their rotation and `latest_checkpoint` (TreeHydro's), `plain_reals` for exact reals, `to_plain`/`from_plain` for the run state's own structs and `fit_from_plain` for an `InteriorFit`, `run_recipe` and `run_criterion`, `check_recipe`, `save_run`/`load_run` over TreeIOHDF5's `save_checkpoint`/`load_checkpoint`, and `check_checkpoint_keywords`. `evolve!` writes and reads through it; `test/checkpoint_tests.jl` is its file |
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written (added in step 8c′) — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
@@ -3967,9 +3974,11 @@ replaced `OrdinaryDiffEqLowOrderRK` and `SciMLBase` on 2026-09-26, and
 neither is a dependency of the package or of its tests since), `LinearAlgebra` (`det`, `dot`
 and `tr` on `StaticArrays`, which the pointwise algebra uses; a standard
 library, added in step 1 and not listed when `PLAN.md` enumerated step 0's
-`Project.toml` **(proposed in step 1)**), `HDF5` (from G6; **from
-2026-10-01** a hard dependency for the checkpoints, whose writer is
-TreeAMR's HDF5 extension),
+`Project.toml` **(proposed in step 1)**), `TreeIOHDF5` (**from
+2026-10-09**, TreeAMR's companion package for checkpoints, unregistered and
+pinned to GitHub `main` by `[sources]`, `[compat]` `0.1.0`; it replaced `HDF5`,
+a hard dependency from 2026-10-01 to load TreeAMR's HDF5 extension, when
+TreeAMR 0.2.0 moved the checkpoint functions there),
 `ApparentHorizonFinder` and `KorzynskiSpin` (from G4, added in step 7,
 both pinned to GitHub `main` by `[sources]` like the first two and both
 listed in `test/Project.toml` as well, because `prerequisite_tests.jl`
@@ -3983,10 +3992,11 @@ The pin is the plain `https` URL of the others, the deploy key, the
 an anonymous clean checkout and a fork's pull request both resolve it, so
 the clean-checkout check proves what it claims for the first time.)**
 `TreeAMR` left `[sources]` the same day: it is registered, and `[compat]`
-selects **0.1.1**. The remaining three entries are what keeps the Julia
-floor at 1.11, and two of them are necessary rather than chosen —
-`KorzynskiSpin` is not in General at all, and `ApparentHorizonFinder`
-`2.1` is not released there (General has `2.0.0`). Vendoring a package or
+selects **0.1.1**. The remaining entries (three until TreeIOHDF5 joined them
+on 2026-10-09) are what keeps the Julia floor at 1.11, and three of them are
+necessary rather than chosen — `KorzynskiSpin` and `TreeIOHDF5` are not in
+General at all, and `ApparentHorizonFinder` `2.1` is not released there
+(General has `2.0.0`). Vendoring a package or
 adding a local-path source would hide that instead of stating it.
 **`AbstractSphericalHarmonics` is a direct dependency from step 8d** (`1.2`,
 registered; it was already in the manifest through `ApparentHorizonFinder`):
