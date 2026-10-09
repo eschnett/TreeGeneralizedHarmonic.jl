@@ -279,6 +279,43 @@ end
     @test f32.gauge_l2 ≈ f64.gauge_l2 rtol = 0.25
 end
 
+@testset "Float32 evaluates an excised right-hand side" begin
+    # Guards the `:excised` variant's genericity (step X2b): the classes, the
+    # closure table rounded once into `T`, the zone kernel's provider and the
+    # outflow monitor in `Float32` — a `Float64` literal or a table built in
+    # the wrong type would show as a `du` that is not the `Float64` one to
+    # `Float32`'s accuracy, or as classes that differ.
+    q = 2
+    rows = map((Float64, Float32)) do T
+        case = hole_fixture(T; q=q, variant=:excised, r_1=T(3 // 4))
+        forest = hole_fixture_forest(T, case; N=8)
+        fs = FieldSet{T}(forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3))
+        fill_exact!(fs, case, zero(T))
+        p = GHProblem(fs, GhostSchedule(fs, Operators(prolongation=q + 2,
+                                                      restriction=q + 2)),
+                      case; q=q)
+        u = statevector(fs)
+        gather!(u, fs)
+        du = similar(u)
+        gh_rhs!(du, u, p, zero(T))
+        r = excision_rows(p, u, zero(T))
+        (T=T, du=Float64.(du), classes=Array(p.excision.classes), rows=r,
+         tab=eltype(p.excision.table.d1))
+    end
+    f64, f32 = rows
+    @test f32.tab === Float32
+    @test f32.classes == f64.classes
+    @test all(isfinite, f32.du)
+    err = maximum(abs, f32.du - f64.du) / maximum(abs, f64.du)
+    @info "the excised fixture's du at Float32 against Float64: $err of its scale"
+    # `Float32`'s roundoff of a second difference at `h = 5/64` next to the
+    # hole, `eps(Float32)/h²` times data of order five, is `1e−4` of the
+    # largest `du`: `8.0e−5` measured (step X2b, Apple silicon).
+    @test err < 3e-4
+    @test f32.rows.excision_band == f64.rows.excision_band
+    @test f32.rows.excision_normal_min ≈ f64.rows.excision_normal_min rtol = 1e-5
+end
+
 # The horizon finder is `Float64` host-side code over a field set that may
 # not be: the interpolation runs in the field set's own `T` and is
 # converted once, at the provider's exit. A conversion done anywhere else

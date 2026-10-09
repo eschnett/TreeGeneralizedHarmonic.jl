@@ -10,7 +10,11 @@ the measured results of the interior — step 5's layer, steps 8a–8′, and th
 open questions they answered — moved from `CODE.md` to
 `SINGULARITY_HANDLING.md`; where
 a brief below says "`CODE.md`, Measured results" or "Open questions" for
-those, read `SINGULARITY_HANDLING.md`.**)**
+those, read `SINGULARITY_HANDLING.md`.**)** **(Amended 2026-10-08**, when
+`main` was merged into the excision round: so did the excision round's own
+entries, steps X1–X7 — `SINGULARITY_HANDLING.md`, "Excision, steps X1–X7";
+`CODE.md` keeps "Excision", the design, with each step's "What step X…
+built" and "… measured".**)**
 
 **Steps 0–7, 8a–8f and 8c′ are done; the generic interior is *(Done.)*
 and step 8g is not needed (`:fitted` reaches `50 M` on 8f's first row).
@@ -25,6 +29,46 @@ G5 open, with the recommendation "more interior work, the spin drift
 first, before excision" (proposed in step 8′) awaiting Erik's decision.
 Step 9 (G6), which does not depend on it, is running (started
 2026-09-25).**
+
+**Excision is reopened (2026-10-05, Erik's decision): steps X1, X2a, X2b
+and X3 below, static holes first, as per-step agents on the integration
+branch `claude/excision-singularity-handling-30feec`.** They supersede step
+8g's brief. **X1 is done and merged (2026-10-05): go for the static
+Kerr-Schild `a = 0` hole with per-axis closures and `:msn` dissipation,
+`ε_KO > 0` required, spinning holes not covered. X2a is done and merged
+(the stencil provider, no bit changed). X2b is done and merged (the
+`:excised` variant on both geometries, every other run bit for bit). X3 is
+done and merged (2026-10-06): feasible — the excised static Kerr-Schild
+`a = 0` hole at `r_E = M/2`, without the blend, matches `:damped` outside
+the horizon to three digits at `h = 1/32`, beats `:fitted`, and shows no
+gauge drift to `50 M`. The static round is complete. Erik's decision of
+2026-10-06: the static spinning hole at `a = 3/5`, with `main` merged
+first — steps X4–X7 below. X5 is done and merged (2026-10-06): go for
+`a = 3/5` with the hybrid rule (`hybrid-adv`). X4 is done and merged
+(2026-10-06): the branch is on `main`'s spill-free kernel and the rotating
+octant, and the merged suite passes (6952 at one thread, 6960 at four). X6
+is done and merged (2026-10-06): the frame-dragged rule and the symmetric
+zone mixed derivative; the `a = 3/5` smoke runs on the CPU and an H200. X7
+is done and merged (2026-10-08): the excised static `a = 3/5` hole at
+`r_E = 4/5` is the `:damped` layer outside the horizon from `h = 1/32` on (to
+four digits at `1/48`), its `J` drifts as the layer's does (`1.03×`), and a
+shallow surface (`r_E = 17/15`) fails at a lego corner at the pole — cure
+found on a scratch copy, not built. The spinning round is complete; the next
+(proposed in step X7: the polar corner, then `a = 9/10` on the tracked
+surface, then moving holes) — Erik's decision of 2026-10-08: **the polar
+corner, step X8 below.** X8 is done and merged (2026-10-08), and stopped for
+Erik as its brief asks: the shave (`Excision(T; shave = true)`, the default)
+cures `r_E = 17/15` and `21/20` at `h = 1/24`, but `r_E = 3/2` fails with it at
+`h = 1/24` and `1/32`, at a triple corner the one pass leaves on the
+equatorial cap, which `test/excision_patch.jl`'s spectrum finds at the run's
+rate. Production at `r_E = 4/5` is unchanged. The lottery scan (464 rows at
+`h = 1/24, 1/32, 1/48`, collected the same night) shows the shave relabelling
+the failing cap configurations rather than ending them: every scanned
+configuration holds for `r_E ≤ 1.0` with the shave and `≤ 0.82` without it, at
+every `h`. **The next round is Erik's call** ("What step X8 hands over").
+**`main` (`9ab2178`: the CPU's SIMD lanes, `SINGULARITY_HANDLING.md`) is
+merged into the integration branch (2026-10-08): `:excised` runs scalar on the
+CPU, and the suite passes (7138 at one thread, 7146 at four).**
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1042,6 +1086,10 @@ entry.
 
 ## Step 8g — Excision by a host reference (only if 8f says so)
 
+**(Superseded 2026-10-05 by steps X1–X3 below**: excision by per-stencil
+closures in a zone kernel rather than a fill by host extrapolation. The
+brief is kept as history.**)**
+
 `CODE.md`: "Possible extensions" (excision), "The interior"; finding 4
 above; `notes/methods-ghso2.md` lines 210–233 for the sonic-surface
 recipe. Run only if the `:fitted` variant does not reach `50 M` on the
@@ -1175,6 +1223,1160 @@ then G5 *(Done.)* — or not, with the trailing side's excess per lever in
 `CODE.md`'s open question and a recommendation between the interior and
 excision's price (step 8g); the suite green at one and four threads; the
 step-8 record completed from the unread jobs.
+
+## Steps X1–X3 — Excision for static holes (added 2026-10-05)
+
+Erik reopened excision on 2026-10-05: as an interior variant, `:excised`,
+beside the layer and not instead of it, for **static holes first**.
+- The design is `CODE.md`'s "Excision (added 2026-10-05)". Read it, and
+  "The tracked geometry", step 5's layer, "Kreiss–Oliger dissipation" (step
+  8a's analysis), "The margin", and "Robust stability on the octant".
+- Steps X1 → X2a → X2b → X3 run in that order, one agent each. Each works
+  in its own worktree on `claude/step-xN-<slug>`, branched from the
+  integration branch `claude/excision-singularity-handling-30feec` (not
+  `main`). Each is reviewed and fast-forwarded into the integration branch
+  before the next starts.
+- Nothing goes to `main`.
+- The ground rules above hold, with "off `main`" read as "off the
+  integration branch".
+
+### Sharp edges for steps X1–X3
+
+- **Every simulation writes SimWatch status** (Erik's request):
+  `test/octant_runs.jl` writes `simwatch.toml` in its `out` directory, and
+  any new run script does the same through `SimWatchWriter`
+  (`src/simwatch.jl`).
+- **The exterior's operator is unchanged bit for bit.** A point none of
+  whose stencil taps is excised is evolved by today's centered code.
+  `isequal`, not a tolerance, says so. A change that makes it a tolerance
+  has broken the design.
+- **No kernel reads an excised value**, not even with weight zero:
+  `0 · NaN = NaN`. Tests plant a degenerate metric (`h = −η`) on every
+  excised point and require every non-excised `du` to be `isequal` to the
+  clean run's.
+- **The per-point classes are the single source of truth** for what is
+  excised, in every kernel, for the life of a problem. No kernel re-asks
+  the geometry at a stage's time.
+- **No fourth state writer.** The `:excised` step limiter is a no-op; the
+  RHS kernels write no `diag`.
+- **`diag` slots are appended** after `NDIAG = 22`, contiguous, never
+  inserted.
+- **`Val`s per chunk, not per stage**, and the `Core.Box` rule — each
+  captured name assigned once — in every kernel body. No `return` in a
+  kernel.
+- **Excision's parameters are fields of the interior or its spec**, so that
+  `run_recipe` carries them through `repr(case.interior)`. A new `evolve!`
+  keyword makes every old checkpoint refuse to restart unless
+  `check_recipe` reads its absence as the default.
+- **Symmetry**: `.claude/orchestration/symmetry-run.sh` and
+  `symmetry-status.sh`, and the `symmetry-hpc` skill.
+  - Give each study its own remote directory.
+  - Stagger job starts.
+  - Every run longer than an hour gets `checkpoint=` and `walltime=`.
+  - Use `ssh -n` inside loops.
+  - Wait with a polling loop; never end the turn to wait for a job.
+  - H200 runs use a copy of the worktree with `CUDA` added to its
+    `Project.toml` (CLAUDE.md, "The octant runs").
+
+## Step X1 — The host-side analysis: closures, outflow, and the go/no-go
+
+`CODE.md`: "Excision", "Kreiss–Oliger dissipation", "The margin";
+`notes/methods-ghso2.md` (boundary classes, the sonic-surface recipe) and
+`notes/sonic-surface.md`. **No kernel change.**
+
+**Changes.**
+
+1. **The closure weights** in `src/stencils.jl`, all built on
+   `lagrange_derivative_weights`, in `Rational`:
+   - the closure nodes and weights for `∂` and `∂²` at a point with
+     `k⁻, k⁺ ∈ 0…G` non-excised points on each side, capped at reach `G`;
+   - the dissipation's closure options: reduced rank, one-sided, or
+     Mattsson–Svärd–Nordström's boundary-modified form;
+   - the lopsided advection stencils;
+   - a host table rounded once into `T` (`T(num)/T(den)`) for the kernel
+     step to use.
+
+   The starting family: centered when `min(k⁻, k⁺) ≥ q/2` (`≥ G` for the
+   dissipation), otherwise the most nodes inside `[−k⁻, min(k⁺, G)]`, which
+   gives orders `(2, 1)` at `q = 2` and `(3, 2)` at `q = 4` for
+   `(∂, ∂²)`.
+
+   Exact claims in `test/stencils_tests.jl`:
+   - every closure is exact to its degree and not one further;
+   - its nodes lie inside `[−k⁻, k⁺] ∩ [−G, G]`;
+   - the full-width code is `rational_derivative_weights`/
+     `rational_dissipation_weights`;
+   - the table's centered rows are `derivative_weights(T, …)` bit for bit
+     at `Float64` and `Float32`;
+   - the dissipation closures have the damping sign in the norm the step
+     chooses.
+2. **`test/excision_model.jl`**, a standalone script in `dispersion.jl`'s
+   manner (no `Test`, Markdown tables, `key=value` options selecting
+   sections), in three sections:
+   1. **`margins`**: Kerr-Schild `a = 0, 3/5, 9/10` and harmonic `7/10,
+      9/10`, on the seed's offset surfaces at depths of `m` cells for the
+      resolutions the octant runs use. Read the coefficients through
+      `background_state` and `metric_quantities`, as `dispersion.jl`'s
+      `frozen_coefficients` does.
+      - The outflow margin along the true normal, and its least value over
+        the surface.
+      - The per-axis ratios over the lego surface's closure faces: their
+        distribution and the inflow-like fraction. The prediction for
+        Kerr-Schild `a = 0` is `r_E/(2M)`.
+      - The clearance of the chart's singular set.
+      - The answer per chart: the shallowest surface with normal outflow,
+        and for Kerr-Schild `a = 9/10` whether there is room between the
+        ring and the horizon at all.
+   2. **`model1d`**: the frozen-coefficient system of `dispersion.jl` and
+      the variable-coefficient radial line of its `model_run` (Kerr-Schild
+      `a = 0`), with the `w = 0` core replaced by a closure at `r_E`. Run
+      at `q = 2, 4`, `b/a` from below 1 (inflow along an axis) to 2,
+      closure widths, the dissipation's closures, and centered against
+      lopsided advection. Report:
+      - the dense semi-discrete spectrum's largest `Re λ`;
+      - the RK4 step the closures allow;
+      - what the closure reflects (amplitude, group velocity);
+      - a pulse into the surface and what crosses the horizon, against
+        `model_run`'s layer.
+   3. **`model2d`**, **the go/no-go**: the principal part of one component
+      on Kerr-Schild's equatorial plane — the anisotropic `γ^{ij}`, so that
+      an axis at angle `θ` to the normal has
+      `b/a = H cos θ / √(1 + H sin²θ)` — with a lego circle of radius `r_E`
+      and nested mixed derivatives.
+      - Dense eigenvalues at `48²`–`64²`, and long noise evolutions on
+        finer grids.
+      - It compares per-axis closures with per-stencil extrapolation along
+        the lattice direction nearest the normal (sources inside the
+        point's `G`-box), each with and without lopsided advection, at
+        `ε_KO = 1/2` and `1`, over `r_E` from `M/2` to `3M/2`.
+
+**Records**, in `CODE.md`'s "Excision" and a new Measured results entry,
+"Excision: the analysis (step X1)":
+- every table;
+- the closure family and the dissipation's closure;
+- whether to upwind, and with what depth profile;
+- the least depth in `M` and in cells, per chart;
+- the step's cost.
+
+**Accept:**
+- the weights exact;
+- the three sections' tables recorded;
+- a **go/no-go with the two-dimensional numbers**: which family is stable
+  on a lego circle, and from which `r_E`. If none is, the report says so,
+  and X2a and X2b do not start until Erik has read it;
+- the suite green at one and four threads.
+
+**What step X1 hands over** (its report's section 6, 2026-10-05; the
+numbers are `CODE.md`'s "Excision" and "Excision: the analysis (step X1)").
+X1 found a **go** for the static Kerr-Schild `a = 0` hole with per-axis
+closures and `:msn` dissipation, at every `r_E` from `M/2` to `7M/4`, with
+`ε_KO > 0` required. Spinning holes are not covered.
+
+- **For X2a — the advection must be a provider method of its own.** X2b's
+  optional lopsided advection replaces the centered `D₁` in the two
+  advective terms `β^k ∂_k h` and `β^k ∂_k Π` — and only there. So the
+  provider takes the shift's component:
+  - `adv(S, β_d, ∂f_d, work, base, d)` for both fields;
+  - the centered provider returns the `∂f_d` it is handed, so the main
+    kernel forms no new stencil and stays bit for bit.
+- **The closure family is the per-axis one, as built**: `closure_table(T,
+  Val(q); dissipation = :msn)`, with the mixed derivative nested.
+  - The table layout: `d1`, `d2` and `ko` are `[slot, k⁻ + 1, k⁺ + 1]` on
+    the slots `−G … G` (slot `j + G + 1`, zeros outside each closure's
+    nodes).
+  - `lop` has a fourth index for `up = −1, +1`.
+  - `d_lo/d_hi`, `ko_lo/ko_hi` and `lop_lo/lop_hi` (`Int8`) are the nodes
+    each closure reads, and `admissible` is the refusal.
+  - **Contract over `d_lo:d_hi` in ascending order**, as `axis_stencil`
+    does: the centered rows are `derivative_weights` bit for bit, so "no
+    excised tap ⇒ the centered `F`" can be `isequal`.
+- **The table is 4624 bytes at `q = 4`, `Float64`.** That is above CUDA's
+  classic 4 kB kernel-parameter limit, so pass it as a **device array**
+  (`to_backend`), not as an `isbits` argument.
+- **The dissipation's closure is `:msn`**, the only one negative
+  semidefinite in `l²`. It reads `[−k⁻, G]`.
+- **`ε_KO > 0` at the surface is part of the variant.** Refuse `:excised`
+  with `ε_KO = 0`, or with a profile that vanishes at the surface, saying
+  why: without dissipation the extrapolation family grows `+1–4/M`, and the
+  per-axis one as the interior does.
+- **Spinning holes are refused in this round.** On their lego faces frame
+  dragging can turn the shift *into* the excised set along an axis
+  (`b/a < 0`, 2–18 % of the faces), and there the closure is unstable on
+  the frozen line, `0.03–0.19/h`.
+  - The refusal is the physics, not the spin: `build_excision` computes, at
+    every band point and closure axis, the shift's component toward the
+    excised side from the state it is built on, and refuses any negative
+    one by name.
+  - The record carries the count every chunk.
+- **The lopsided advection is an option, off by default.** It is a `C²`
+  blend (`smoothstep`) in the depth below the horizon: zero at `1` cell
+  below, full from `5` cells (`start = 1`, `width = 4`), the profile X1
+  measured.
+  - With it on, every point from the surface to one cell below the horizon
+    is non-centered. That is a thick shell (about 23 cells at `h = 1/16`,
+    `r_E = M/2`), not the zone of a few cells the brief sized.
+  - So **the blend lives in the main kernel's `:excised` specialisation**,
+    through the provider's `adv`, gated by a `Val`, so that no other
+    variant's kernel changes. The zone kernel keeps the band points only,
+    with the blend applied there too.
+  - It costs RK4's step: the plane's stable `cfl` falls from `1.86` to
+    `1.52–1.79` at `q = 4`, which `cfl = 1/2` absorbs.
+- **The least depth.** `check_interior_radii`'s `:excised` method asserts
+  `m ≥ G + 1`. A case with a `Horizon` asserts `m ≥ ⌈√3 G⌉`, 6 cells at
+  `q = 4`: the finder's footprint reaches `√3 G h` on a diagonal and must
+  not touch the excised set.
+- **For X3:**
+  - the depth window at `h = 1/16` is `r_E = M/2 … 13M/8` (6 to 24 cells);
+  - run every depth with and without the lopsided advection;
+  - `ε_KO = 1/2`;
+  - X1's plane reached an inflow-like fraction of `0.73` against `0.875` on
+    the 3D sphere at the same `r_E`. The go rests on the kind of face
+    (`0 ≤ b/a < 1`), which both share, and X3 is the 3D test.
+- **Still open:** the gauge drift, which X3 measures.
+
+## Step X2a — The stencil provider (one copy of the physics)
+
+`CODE.md`: "One right-hand-side evaluation", "Finite-difference stencils",
+"Excision". **Only `src/evolution.jl`** (and tests).
+
+**Changes.** `gh_rhs_at_point` takes a stencil *provider* `S` with methods
+`d1(S, work, base, d)`, `d2`, `dmix(S, work, base, i, j)` (outer sum along
+`i`, inner along `j`, as now), `ko`, and — amended after X1 —
+`adv(S, β_d, ∂f_d, work, base, d)`. `adv` is the derivative that multiplies
+`β^d` in the two advective terms, `β^k ∂_k h` and `β^k ∂_k Π`, and only
+there.
+- `Centered{T,q}` holds the strides and the three `@generated` weight
+  vectors.
+  - Its methods are today's `axis_stencil`/`mixed_stencil` calls, in
+    today's order.
+  - Its `adv` returns the `∂f_d` it is handed, so the main kernel forms no
+    new stencil.
+- X2b's lopsided blend is another `adv`, which reads the sign of `β_d`.
+- The existing `gh_rhs_at_point` signature builds `Centered` itself, so
+  `gh_rhs_kernel!`'s call site is unchanged.
+- No other provider yet: X2b adds the closure one.
+
+**Accept** — the refactor is invisible:
+- `test/thread_workload.jl`'s output and a one-chunk `test/octant_runs.jl`
+  CSV are identical, character for character, to the integration
+  branch's, at one and four threads;
+- every existing `isequal` claim holds;
+- `bench/stepping.jl` (`wave`, `hole`) is within noise of the base, run
+  back to back on the same machine;
+- the suite green at one and four threads.
+
+The H200's register count and `ld.local` spills for the `:damped` `q = 4`
+kernel are measured in X3.
+
+**What step X2a hands over** (its report's section 6, 2026-10-05; the
+interface is `CODE.md`'s "One right-hand-side evaluation", "The stencils come
+from a provider"). The refactor changed no bit: the thread digest, one-chunk
+octant CSVs, eleven CPU and three Metal kernel variants are identical to the
+base.
+
+- **A closure provider subtypes `TreeGeneralizedHarmonic.StencilProvider`**
+  and implements all five methods with exactly these signatures:
+  - `d1(S, work, base::Int, d::Int)`, `d2(…)` and `ko(…)` — raw
+    contractions on unit spacing;
+  - `dmix(S, work, base::Int, i::Int, j::Int)` — the same, outer sum along
+    `i`, inner along `j`;
+  - `adv(S, β_d, ∂f_d, work, base::Int, d::Int)` — handed and returning a
+    **scaled** derivative, so a lopsided `adv` carries its own `1/h`.
+
+  The caller applies `1/h`, `1/h²` and `ε_KO/h` to the first four as before.
+- **Calling it.** The zone kernel calls `gh_rhs_at_point(S, T, work, Hwork,
+  inner, b, var, sv, inv_h, γ0, γ2, εh, Val(HASH), Val(DISS))`, with `var`,
+  `sv`, `inv_h`, `γ0` and `εh` computed exactly as `gh_rhs_kernel!` does
+  them. `q` enters only through the provider.
+- **What it is asked for, per point:**
+  - `d1` of all 20 fields along each axis (`h`'s feed the coefficients too);
+  - `adv` of all 20 along each axis;
+  - `d2` and `dmix` (pairs `(1,2)`, `(1,3)`, `(2,3)`) of `h` only;
+  - `ko` of all 20.
+
+  `base` is the component's linear index in `work`, so **the per-point
+  codes live in the provider**: `base` cannot be decoded into them. The
+  provider holds:
+  - the point's `k±` along the three axes;
+  - the class array, with the working array's spatial strides, plus the
+    point's index in it and `st`, for `dmix`'s per-outer-node `j`-codes;
+  - the table (a device array);
+  - `1/h`;
+  - the blend weight.
+- **The lopsided blend** is a provider that wraps `Centered` and overrides
+  only `adv`. It is used in the main kernel's `:excised` specialisation,
+  behind a `Val`, and in the closure provider.
+  - Where the weight is zero it must return `∂f_d` through a **branch**,
+    not as `(1 − λ) ∂f + λ L`, to keep the exterior bit for bit.
+  - Price the centered `d1/h` of `Π`, which is still formed where the blend
+    is full, across the main kernel's thick blend shell.
+- **Traps:**
+  - The module-level names `d1`, `d2` and `ko` collide with common locals
+    (`constraints.jl`, `interior.jl`, `ClosureTable`'s fields). A function
+    that calls them must not have a local of the same name.
+  - Providers are `isbits`, with `@inline` methods.
+  - `test/evolution_tests.jl`'s host-only `ProbeProvider` is a template for
+    the closure provider's host tests.
+  - "No excised tap ⇒ the centered `F`" was bit for bit on Apple silicon
+    for a non-inlined provider. Claim `isequal` where it holds and keep a
+    `64 eps` fallback for x86-64.
+- **Benchmarks:** at this machine's load the base alone varies 6–8 %, and
+  the refactor measured ±3 % with opposite signs in the two cases (read as
+  code layout, proposed). Interleave base and branch runs when the zone
+  launch is added.
+- **Environment:**
+  - a fresh resolve takes TreeAMR **0.1.7** (`[compat]` `0.1.4` allows it),
+    and the suite passes with it;
+  - running a single test file needs a scratch environment combining
+    `test/Project.toml`, the four `[sources]` and a path source for the
+    package;
+  - a Metal check needs a fresh resolve: the current Manifest pins LLVM 10,
+    which Metal 1.11.1 cannot use.
+
+## Step X2b — The `:excised` variant
+
+`CODE.md`: "Excision" (and its "On the mesh, and on a device"), "The
+tracked geometry", "The range projection", "Analysis quantities",
+"Checkpoint and restart". Starts from X1's recommendation and X2a's
+provider. **Read "What step X1 hands over" above first.** Where it and the
+list below differ, it wins:
+- the per-axis family with `:msn`, from `closure_table`, as a device array;
+- the refusals of `ε_KO = 0` and of a shift pointing into the excised set;
+- the lopsided blend in the main kernel's `:excised` specialisation;
+- `m ≥ ⌈√3 G⌉` with a `Horizon`.
+
+**What a review of the code found** (2026-10-05). Each item is a thing the
+naive design gets wrong:
+- `FittedInterior` refuses `thickness = 0` and `fitted_interior` refuses
+  `n_L = 0`; `check_interior_radii` asserts a least thickness, and
+  `horizon_floor_level` divides by it. For `:excised` the thickness is
+  only the core rule's depth, or zero where the code is taught it.
+- `chunk_interior` calls `with_ρ_max(…, factor/dt)`, which fails with no
+  factor. `:excised` has no rate, so `chunk_interior` returns its interior
+  unchanged.
+- `discrete_gradient_momentum!` (the `Π` post-pass) takes centered
+  stencils everywhere: refuse it for `:excised`.
+- `in_layer` must be false everywhere for `:excised`. `layer_mask` and
+  `shell_mask` become the band `[r_E, r_E + W)` and the `G h` beyond it.
+- `InteriorMask` compares squared radii and `is_outside` compares a
+  `sqrt`. Build the excised bit from **one** predicate, the masks'
+  `is_evolved(interior_mask(int, t), x)`, so that the classes, the norms,
+  the speed and the horizon guard exclude the same set.
+- `check_recipe` compares every recipe field (see the sharp edges).
+
+**Changes.**
+1. **`src/interior.jl`**:
+   - `:excised` in `INTERIOR_VARIANTS`.
+   - On `Interior`, excised where `r < r_1`; `r_0` is the core rule's
+     radius only.
+   - On `FittedSpec`/`FittedInterior`, excised where `d > 0`.
+   - `is_frozen = !is_outside`, and `in_layer = false`.
+   - `check_interior_radii`'s `:excised` method: `m ≥ G + 1`,
+     `r_1 ≤ r_h,min − m h`, the singular set inside the core surface, and
+     no thickness check.
+   - The excision parameters — the upwind blend's start and width below
+     the horizon in cells (0 off), and the dissipation's closure kind — as
+     fields, per the sharp edges.
+2. **The geometry is frozen for the run** (proposed in review): built once
+   from the case's sphere or the seed's shape, with the center's velocity
+   zero.
+   - A tracked case still finds and tracks every chunk, for the record and
+     for an assertion that the found horizon stays `m h` outside the
+     surface.
+   - A restart takes the same frozen geometry, so there is no new carried
+     state.
+   - `regrid`, `adapt`, `bounds`, `handover`, `target_source`, the rate
+     keywords and the `Π` post-pass are refused for `:excised`, each
+     saying why.
+3. **New `src/excision.jl`**:
+   - `ExcisionData`: the classes (`UInt8`, stored points), a device `Bool`
+     vector of blocks that touch the zone, the weight table, `W`, `h`, the
+     geometry it was built for, and the counts.
+   - `build_excision` makes three passes:
+     1. the excised bit on owned points;
+     2. one `fill_ghosts!` of a one-variable `FieldSet{T}` with even
+        parity, so that every ghost equals its owner and the octant's
+        walls mirror it;
+     3. a `stored = true` pass writing the class (centered, excised, zone)
+        and refusing a zone point with no admissible closure — excised on
+        both sides of one axis within reach.
+   - `check_excision_mesh`: every leaf meeting `r_E ± (G + q + 2) h` is on
+     one level.
+   - The zone kernel with the closure provider. Its contractions run over
+     the closure's own nodes only; neighbour codes are read for the nested
+     mixed derivatives; the lopsided advection blend comes in where the
+     interior asks for it.
+   - The record-time outflow monitor and its rows: the least normal
+     margin, the least per-axis ratio, the inflow-like count, and the
+     band's point and non-finite counts.
+4. **`src/evolution.jl`**:
+   - `GHProblem` gets an `excision` field. The constructor builds it for
+     `:excised`; `with_interior` rebuilds it only when the geometry
+     differs, carries it otherwise, and drops it for other variants.
+   - `gh_rhs_kernel!` gets the classes as an argument (`nothing`
+     otherwise). Its `:excised` branch computes `F` at centered points,
+     writes `0` at excised ones and nothing at zone points.
+   - `gh_rhs!` launches the zone kernel right after the main one.
+   - `gh_step_limiter!` gets a no-op `:excised` method.
+   - `monitor_mask(p, t)` — the excised set widened by `W =
+     max(G, ⌈√2 q/2⌉) h`, plus slack for the shape's slope — is the
+     default mask of `gh_constraint!`, `adm_constraint!` and the indicator
+     (a `mask` keyword on `indicator_flags`). The error, `max_speed`,
+     `evolved_nonfinite`, `validity_rows` and the horizon guard keep
+     `interior_mask`, which reads the band.
+5. **`test/octant_runs.jl`**:
+   - `interior=excised` with `geometry=sphere|tracked`, `r_E=` or
+     `margin=`, `upwind=<start>,<width>` and the dissipation closure;
+   - the `in` shell starts at `r_E + W`;
+   - the noise excludes the excised set;
+   - the CSV, `records.csv` and SimWatch's `setup` and `extra` get the
+     excision rows.
+6. **`bench/stepping.jl`**: `BENCH_CASE=excised`.
+
+**Tests**, a new `test/excision_tests.jl` on the `q = 2`, `N = 8` hole
+fixture with `r_E = 3/4`, each testset a claim:
+- the classes are the geometry's, the ghosts their owners', the zone the
+  enumeration's;
+- the closures are exact on polynomials across faces, edges and corners
+  (host calls of the provider);
+- with no excised tap the closure provider's `F` is the centered one —
+  `isequal` if it is, otherwise recorded and held to `64 eps`;
+- with a degenerate metric planted on every excised point, every
+  non-excised `du` is `isequal` to the clean run's and every excised `du`
+  is exactly zero;
+- the centered points' `du` is `:none`'s, to `512 eps` (two kernel
+  specialisations), and the zone points' is not;
+- an excised sphere and a `FittedInterior` holding it give identical
+  classes and `du`;
+- the monitors are finite with `NaN` in the excised set, the non-finite
+  count is zero, and the horizon guard refuses a footprint that reaches an
+  excised point;
+- the refusals: mixed levels at the surface, the singular set, the margin,
+  `regrid`/`adapt`/`bounds`;
+- a two-chunk run to `M/5` with finite rows and a positive normal margin,
+  and a restart after the first chunk `isequal` to the run.
+
+Elsewhere:
+- one `:excised` right-hand side in `test/thread_workload.jl`'s digest;
+- one `Float32` `:excised` right-hand side in `type_tests.jl`.
+
+About 60 s at one thread. Price it in the report, as `driver_tests.jl`'s
+is.
+
+**Accept:**
+- all of the above;
+- the suite green at one and four threads, with its times;
+- the zone kernel's cost per point and as a share of a right-hand side on
+  the CPU;
+- a local smoke run that writes `simwatch.toml`:
+  `test/octant_runs.jl case=ks interior=excised L=8 N=16 roots=2 radii=4,2
+  t_end=1 out=…`;
+- `CODE.md`'s "Excision" amended with what was built, marked
+  **(amended in step X2b)**.
+
+**What step X2b hands over** (its report's section 6, 2026-10-05; the
+numbers are `CODE.md`'s "Excision", "What step X2b built", and Measured
+results, "Excision: the variant (step X2b)").
+
+`:excised` runs on both geometries:
+- every other run is unchanged bit for bit;
+- the exterior's `du` is `:none`'s exactly at all 55 505 centered points of
+  the fixture;
+- a degenerate metric planted in the excised set changes no non-excised
+  `du`.
+
+Its run to `M/5` matches `:damped`'s error outside `r = 23/20` to 0.1 %. The
+zone kernel costs 620 ns a zone point at four threads, 0.64 % of a
+right-hand side; the blend adds 0.3 %.
+
+- **The depth scan** (`h = 1/16`, about `10 M` a row), with and without
+  `upwind=1,4`:
+
+  ```
+  julia --project=. --threads=<n> test/octant_runs.jl case=ks interior=excised geometry=sphere L=64 N=64 roots=2 radii=32,16,8 r_E=<1/2|3/4|1|5/4|3/2|13/8> t_end=10 chunk=1 cfl=1/2 [upwind=1,4] backend=cuda out=<dir>/rE<r>[-up] checkpoint=<dir>/ck-rE<r>[-up] walltime=<s>
+  ```
+
+  - The defaults give `q = 4`, `eps = 1/2`, the algebraic source, the finder
+    every chunk with the spin, noise `1e-8` and `:msn`.
+  - `r_0 = r_E/2` and the margin `m = ⌊(2 − r_E)·16⌋` (24 down to 6 cells)
+    are derived.
+  - `r_E = 13/8` is the shallowest the finder allows at `h = 1/16`
+    (`m = ⌈√3 G⌉ = 6`).
+  - **Pass `cfl=1/2`**: the script's default is `1/4`.
+- **The production rows:** the same with `N = 64, 96, 128` (`h = 1/16, 1/24,
+  1/32`), the chosen `r_E`, `t_end=24`, and one row to `50`.
+  - The tracked alternative is `geometry=tracked margin=<cells>`.
+  - The surface's `(G + q + 2) h` neighbourhood lies inside the finest cube
+    `[0, 8]³` for every `r_E` in the window.
+- **Compare on the shells outside the horizon, not on `err_l2`.** The
+  record's masked error now counts the band, where the one-sided closures'
+  truncation error is largest: on the `q = 2` fixture `err_linf` is `0.5`
+  there against `0.04` outside `r = 1.15`. The CSV's shells `[2, 2.25)`,
+  `[2.25, 3)`, … are what `CODE.md`'s `:damped`/`:fitted` tables use.
+- **CUDA at `Float64` is untested.** The kernels compiled and ran on Metal
+  at `Float32`, within `6.5e−5` of the CPU's scale. Run a short CUDA smoke
+  row first:
+  - the classes are `UInt8` device arrays;
+  - the closure table is a `NamedTuple` of `CuArray`s;
+  - the kernels to inspect for registers and spills are `gh_rhs_kernel!`
+    specialised for `:excised` and `gh_zone_kernel!`, beside the `:damped`
+    `q = 4` kernel (X2a's check).
+- **On the H200 the zone kernel launches over all blocks.** In the bench,
+  32 of 512 blocks do work. A subset launch stays a TreeAMR wish.
+- A spinning Kerr-Schild hole is refused at build time by the shift's sign
+  (checked at `a = 3/5`). Spinning rows are not part of X3.
+- **The monitor rows in the CSV and `simwatch.toml`'s `[extra.excision]`:**
+  - `excision_band` and `_band_nonfinite`;
+  - `_normal_min`, the outflow margin along the true normal;
+  - `_faces`, `_axis_min` and `_inflow`, X1's per-axis faces;
+  - `_into` (shift into the excised set, must stay 0);
+  - `_horizon_margin` when tracked; it ends a run below `m − G/2`.
+
+## Step X3 — The static hole on the octant, on Symmetry's H200
+
+`CODE.md`: "Excision", "Robust stability on the octant" (the `:damped` and
+`:fitted` tables this step is compared with). Runs through
+`test/octant_runs.jl`; each row has its own `out=` (the CSV, `records.csv`
+and `simwatch.toml`) and its own `checkpoint=` with a `walltime=`.
+
+**Rows**: Kerr-Schild `a = 0` on the octant, with the algebraic source,
+`q = 4`, `cfl = 1/2`, `ε_KO = 1/2`.
+1. **The depth scan** at `h = 1/16`, about `10 M` a row: `r_E` across X1's
+   window, with and without lopsided advection. This gives the stability
+   boundary.
+2. **At the chosen depth**: `h = 1/16`, `1/24` and `1/32` to `24 M`, and one
+   row to `50 M`, on the mesh of the exterior study (the octant `[0, 64]³`,
+   root brick `2³`, cubes `32, 16, 8`, `N = 64, 96, 128`). Report:
+   - the shells' `ℋ` and error and their orders;
+   - `M_irr`, `dM_irr/dt` and the drift of `h_tt`;
+   - the band inside the horizon;
+   - the outflow rows;
+
+   against the recorded `:damped` and `:fitted` rows.
+3. **Cost**: the zone kernel's share of a right-hand side on the H200, and
+   the PTX register and spill counts of both kernels (X2a's check).
+
+**Records**: a Measured results entry, "Excision on the static hole (step
+X3)", and the recommendation:
+- whether excision is feasible here, and at what depth;
+- whether its exterior matches `:damped`'s and beats `:fitted`'s;
+- whether the gauge drift returned;
+- what the moving round and the spinning holes need.
+
+**Accept**: every row run or its failure diagnosed; the tables in
+`CODE.md`; the suite green at one and four threads.
+
+## Steps X4–X7 — Excision of a static spinning hole, `a = 3/5` (added 2026-10-06)
+
+Erik's decision of 2026-10-06, after X3: go on to the spinning hole, **at
+`a = 3/5` as the stepping stone** (not `9/10`), **with sufficient
+resolution**, and **bring `main` into the integration branch first**.
+`main` carries the GPU kernel rewrite: PR #4, 92c7f0f, "Evaluate the
+right-hand side without spills or calls on a device".
+
+Two things stand between the static round and this one:
+- **X1 found the per-axis closures unstable** on the lego faces where frame
+  dragging turns the shift *into* the excised set along the face's axis
+  (`b/a < 0`, 2–14 % of the faces at Kerr-Schild `a = 3/5`). X2b refuses
+  such a case at build time.
+- **The rotating octant**, the only octant a spinning hole fits, is on the
+  branch `claude/octant-mode-spinning-bh-75bd22` (0a96f27), not on the
+  integration branch. That branch's `CODE.md` holds the `a = 3/5` reference
+  rows: `:damped` and `:fitted` at `h = 1/32` to `64 M`, and the
+  convergence pair `1/16`, `1/24`. They are what X7 is compared with.
+
+The steps:
+- **X4** (sync) and **X5** (host analysis) are independent and run as two
+  agents at once, like 8a and 8b.
+- **X6** starts from both, merged into the integration branch.
+- **X7** runs on Symmetry's H200s, with SimWatch status for every run.
+
+The sharp edges of steps X1–X3 hold throughout.
+
+## Step X4 — The integration branch on `main` and on the rotating octant
+
+`CODE.md`: on `main`, the GPU kernel work's sections (read `git show
+origin/main:CODE.md`). On the integration branch: "One right-hand-side
+evaluation" (the stencil provider) and "Excision". On the rotating-octant
+branch: its "rotating octant" section and its `a = 3/5` and `a = 9/10`
+records.
+
+**Changes.**
+1. **Merge `origin/main` (cbe3662) into the step branch.** The conflict that
+   matters is `src/evolution.jl`. `main`'s spill-free right-hand side and
+   the excision round's stencil provider (X2a), main-kernel `:excised`
+   branch and zone kernel (X2b) must become one design:
+   - `main`'s device performance is kept for every existing variant;
+   - the excision invariants hold: the exterior bit for bit against
+     `main`'s own centered kernel, no excised value read, no fourth writer;
+   - the zone kernel may stay generic, since it is a thin shell.
+
+   Where the provider cannot be `main`'s arithmetic bit for bit, say why
+   and hold it to roundoff. Resolve `CODE.md` and `CLAUDE.md` by keeping
+   both sides' content.
+2. **Then merge `claude/octant-mode-spinning-bh-75bd22` (0a96f27)**, its
+   committed head only.
+   - **Do not touch its worktree** (`.claude/worktrees/
+     optimistic-ramanujan-852fdf`), whose uncommitted changes belong to
+     another session.
+   - Reconcile `hole_case`/`GHCase` (`octant = :rotating`, `a`, beside
+     `excision`), `test/octant_runs.jl` (`octant=rotating a=` beside
+     `interior=excised …`), `CODE.md` and `CLAUDE.md`.
+   - Make `build_excision`'s one-variable class field set correct on the
+     rotating octant: its parity and its seam rotation, for a scalar. The
+     classes must be consistent across the seam, and a test must say so.
+3. **TreeAMR 0.1.7** (the seam) becomes the `[compat]` floor if the rotating
+   branch needs it.
+
+**Accept:**
+- the suite green at one and four threads;
+- the thread digest against `main`'s for the lines both have;
+- the excision tests unchanged in strength;
+- a static `a = 0` excised row on the rotating octant with the same
+  classes and the same record as on the mirror octant, where the two are
+  comparable;
+- on an H200: the right-hand side's ns per point and the register and
+  spill counts of `:damped`, the `:excised` main kernel and the zone kernel,
+  against `main`'s recorded numbers, and whether X2a's `+5 %` is gone;
+- `CODE.md` amended **(amended in step X4)**.
+
+## Step X5 — The frame-dragged faces: a closure, and the go/no-go for `a = 3/5`
+
+`CODE.md`: "Excision", "Excision: the analysis (step X1)", and the
+rotating-octant branch's `a = 3/5` record (`git show
+claude/octant-mode-spinning-bh-75bd22:CODE.md`). **No kernel change.**
+
+**Changes** — `test/excision_model.jl` grows, and so does `src/stencils.jl`
+if a new family needs weights (with exact tests).
+1. **`margins` at Kerr-Schild `a = 3/5`**, for the sphere `r_E` and the
+   tracked offset surface, at `h = 1/24, 1/32, 1/48`:
+   - the window — normal outflow to the inner horizon, which is at `0.632`
+     on the equator, with the ring at `0.6` and the core rule's surface
+     outside the ring;
+   - the `b/a < 0` face fraction and its least value against `r_E`;
+   - the depth in cells at the poles (`r₊ = 1.8`) and on the equator
+     (`1.897`) for each `h`.
+2. **`model2d` on Kerr-Schild `a = 3/5`'s equatorial plane**, where frame
+   dragging is in the plane, keeping X1's conservation form. Compare
+   (a) per-axis closures (X1's), (b) per-stencil extrapolation along the
+   lattice direction nearest the normal, with sources inside the point's
+   `G`-box (X1's `extrap`), and (c) a **hybrid**: per-axis where the
+   face's shift points out of the excised set, the extrapolation where it
+   points in.
+   - Each with and without lopsided advection, at `ε_KO = 1/2, 1` and
+     `q = 4` (and 2), over the window's `r_E`, against the `:damped` layer
+     on the same plane.
+   - Dense spectra and noise evolutions, as X1's `eig` and `noise`.
+   - Add another family if one of these fails and a better one is
+     visible.
+
+**Records**: `CODE.md`'s "Excision" and a Measured results entry,
+"Excision: the frame-dragged faces (step X5)". The step decides:
+- the family X6 builds, as a per-face rule X6 can implement from the
+  per-point classes;
+- the `r_E` window and the resolutions X7 should run;
+- whether lopsided advection is needed here.
+
+**Accept:**
+- a **go/no-go with the plane's numbers**: which family is stable at
+  `a = 3/5`, and from which `r_E`. If none, say so; X6 and X7 then wait for
+  Erik;
+- the suite green at one and four threads.
+
+**What step X4 hands over** (its report's section 6, 2026-10-06; the
+numbers are `CODE.md`'s "One right-hand-side evaluation", "One design after
+`main`'s rewrite", "Excision", "What step X4 changed", and Measured results,
+"The merge with `main` and the rotating octant (step X4)").
+
+The integration branch is on `main`'s spill-free right-hand side and on the
+rotating octant (TreeAMR `0.1.7`).
+- `:damped` on the H200 is `main`'s kernel to `ptxas`'s report.
+- The excised right-hand side is `2.88 ns` a point on the octant, `3.9×`
+  faster than before.
+- The zone kernel is `238 ns` a zone point, `1.5 %` of a right-hand side.
+- The lopsided blend costs `+2.7 %`.
+- X2a's `+5 %` is gone.
+
+- **Where a closure provider and a per-face rule plug in.**
+  `gh_zone_kernel!` (`src/excision.jl`) builds `closure_provider(T, Val(G),
+  st, cls, cb, tab, inv_h, λ)` per zone point and calls `gh_rhs_store!(du,
+  o, sd, S, T, work, Hwork, inner, b, var, sv, inv_h, γ0, γ2, εh,
+  Val(HASH), Val(DISS))`.
+  - `main`'s head asks for `d1` of all 20 variables, plus `adv` and `ko` of
+    `h`. Each `Π` component then asks for `d1` of `h_v` again, `d1` of
+    `Π_v`, `d2` and the three `dmix` of `h_v`, and `adv` and `ko` of `Π_v`.
+  - A per-face rule is another row family chosen per (point, axis) inside
+    `closure_provider`. It is decided at build time and stored in extra
+    bits of the `UInt8` classes or in a second per-point array; the
+    classes stay the single source of truth.
+  - New table rows go in as extra fields of `closure_arrays`' `NamedTuple`.
+  - The zone set is `_reads_excised` (`±G` along axes, `q/2` boxes for the
+    mixed derivatives). A family that reads farther must widen it and
+    `closure_admissible`.
+  - The refusal to narrow is `build_excision`'s `ninto == 0` (census slot
+    `EXM_INTO`). The outflow rows come from `_outflow_kernel!`.
+- **What to claim bit for bit.** Any provider other than `Centered` changes
+  how LLVM fuses `muladd`s into FMAs around the head.
+  - Keep every non-zone point on the `:none` call, which also keeps a
+    blend weight of zero bit for bit.
+  - Claim only *contractions* as `isequal`.
+  - Claim `F` to roundoff on each variable's largest `|du|`. X4 held the
+    closure provider at points with no excised tap to `512 eps` (measured
+    `103`) for that reason.
+- **The nested mixed derivative is not symmetric** (measured in step X4).
+  Outer `i`, inner `j`, with `i < j`, is not invariant under `x ↔ y` or the
+  seam's quarter turn. At zone points the two nestings differ by `3·10⁻³`
+  (`5·10⁻¹⁴` under `:damped`), so the rotating octant reproduces the mirror
+  octant's excised `a = 0` record only to `1.4·10⁻³` in L∞ inside the
+  horizon at `t = 1`. Averaging both nestings made the two agree to every
+  printed digit on a scratch copy.
+  - **X6 builds the symmetrized zone-point mixed derivative,
+    `½(D_i D_j + D_j D_i)`** (proposed in step X4; taken into X6 by the
+    orchestrating session on 2026-10-06, for Erik to confirm in review). It changes X3's validated zone operator at
+    truncation level.
+  - X6 re-measures what it changes: the fixture's excised run against X2b's
+    record, the static `a = 0` excised row on the rotating octant against
+    the mirror octant's, and one short `a = 0` octant row against X3's.
+- **The rotating octant's mechanics:**
+  - the seam is `(1,2)`: `R` takes `e_x → e_y` and `e_y → −e_x`, and
+    `u(Rp) = Q u(p)` with `state_rotation`. There is a mirror at `z = 0`
+    only;
+  - every `FieldSet` over the forest needs `rotation=`; the classes' bit
+    field set is a scalar, `identity_rotation(forest, 1)`;
+  - the seam planes `x = 0` and `y = 0` are the same physical points;
+  - ghost classes across the seam are the rotated owner's;
+  - the census reads each owned point's own `β`, so it needs no rotation;
+  - `hole_case(…; octant = :rotating, …)`;
+  - `test/octant_runs.jl octant=rotating a=… interior=excised …`. With a
+    spin it measures margins against `r₊`, and the core rule's default
+    radius is `max(r_E/2, (r_E + a)/2)`.
+- **The `a = 3/5` smoke** (`h = 1/16`, `r_E = 1`, `r_0 = 0.8`, `m = 12`) is
+  refused at the build today: 72 pairs with the shift into the excised set,
+  least `b/a = −0.499`. SimWatch writes status `failed` with that message.
+  X6's rule lifts the refusal for what it covers.
+
+**What step X5 hands over** (its report's section 6, 2026-10-06; the
+numbers are `CODE.md`'s "Excision", "The frame-dragged faces (step X5)", and
+Measured results, "Excision: the frame-dragged faces (step X5)").
+
+**Go for Kerr-Schild `a = 3/5`**, with the rule `hybrid-adv`.
+- On the equatorial plane it is stable at every `r_E` from `0.65`, just
+  above the inner horizon, to the horizon, at `q = 2, 4`, `ε_KO = 1/2, 1`,
+  `h = 5/48 … 5/96`, with and without the blend.
+- Its rightmost eigenvalue is within `0.002/M` of the `:damped` layer's, and
+  its noise decays at the layer's rate to `100 M`.
+- The per-axis closures alone are unstable near the inner horizon, at
+  `+1.2` to `+4.8/M` from `r_E = 0.65`. Extrapolating the advection on
+  every closure axis is unstable too, at `+2.6` to `+18/M`, so the rule
+  must be selective.
+- `ε_KO > 0` is still required.
+
+- **The rule (`hybrid-adv`).** At a zone point and axis `d`, it applies when
+  a side `s` with `k_s < G` has `−s β^d < 0` in the build state: the shift
+  points into the excised set along that axis. `d1`, `d2`, `dmix` and `ko`
+  stay per-axis everywhere. **Only `adv`** along such an axis becomes
+  `inv_h · Σ_j w_j ũ(x + j e_d)`:
+  - `w` is the centered `D₁` weights;
+  - `ũ = u` at non-excised taps;
+  - at an excised tap `Q`, `ũ = Σ_i tab[i, k₀, n] · u(Q + (k₀ + i − 1) e)`;
+  - `e` is the nearest of the 26 lattice directions to the outward normal at
+    `Q`;
+  - `k₀` is the first non-excised step along `e`, and `n ≤ 3` the
+    consecutive non-excised sources inside the point's `G`-box;
+  - `tab = extrapolation_table(T, Val(q))` (`src/stencils.jl`, `isbits`,
+    `3 × G × 3`, 216 bytes at `q = 4`), which covers every
+    `k₀ + n − 1 ≤ G`. That is all that occurs at `a = 3/5`: X5 counted every
+    tap in 3D.
+
+  Kerr-Schild `a = 0` has no such axis, so its runs stay X2b's bit for bit.
+- **The per-point information**, built once from the frozen geometry and
+  the build state:
+  - three rule bits per zone point, set from the state's shift in the
+    census pass. They go beside the three-valued `UInt8` class or in a
+    second `UInt8` array;
+  - a direction code (0–25) per excised point within `q/2` of a zone point
+    along an axis, from the geometry's normal (the sphere: `x − c`; tracked:
+    `excision_normal`).
+
+  The kernel reads codes, never geometry. The sources' classes come from the
+  class array.
+- **Refusals and the record:**
+  - X2b's refusal of a shift into the excised set becomes a refusal only of
+    an excised tap with no source;
+  - `excision_into` keeps counting every chunk;
+  - add a count of rule axes whose current shift sign disagrees with the
+    build's, which must stay 0;
+  - report the faces per rule;
+  - no `z` axis is frame-dragged at `a = 3/5`.
+- **With the blend on**, the lopsided row at such an axis is the open row
+  with its excised taps extrapolated. That is what X5 measured, but the
+  blend is not needed.
+- **For X7:**
+  - sphere geometry, the algebraic source, `q = 4`, `cfl = 1/2`,
+    `ε_KO = 1/2`, blend off;
+  - **always pass `r_0=`** inside `(0.6, r_E)`: the default `r_E/2` lies
+    inside the ring below `r_E = 1.2` and is refused by name;
+  - the depth scan at `h = 1/24` over `r_E ∈ {0.70, 0.80, 0.90, 1.00,
+    1.133}` (26.4 down to 16 cells at the poles);
+  - production at **`r_E = 0.80`, `r_0 = 0.70`**: 24, 32 and 48 cells below
+    the poles at `h = 1/24, 1/32, 1/48`, `1.0 M` under `r₊`;
+  - normal outflow ends at `r_E = 0.641`.
+- **CLAUDE.md** has no X5 paragraph yet: X5 left it alone for X4's merge. X6
+  adds it beside its own. The `excision_model.jl` commands are in the
+  script's header. X1's `margins` is now `margins=margins`; bare `margins`
+  runs both parts.
+
+## Step X6 — The frame-dragged faces in the zone kernel
+
+Starts from the integration branch with X4 and X5 merged. `CODE.md`:
+"Excision", X5's records, "One right-hand-side evaluation" as X4 left it.
+
+**Changes:**
+- the family X5 chose, in the zone kernel's closure provider, selected per
+  face from the classes. The build records which rule each closure axis
+  uses;
+- the zone points' mixed derivative symmetrized, `½(D_i D_j + D_j D_i)`
+  (X4's hand-over). The interior or excision parameters may carry a switch
+  for it, so the old nesting can still be compared; if so, it is on by
+  default;
+- X2b's build-time refusal of a shift into the excised set becomes a
+  refusal only of what the chosen family does not cover;
+- the record's outflow rows report the faces per rule;
+- `test/octant_runs.jl octant=rotating a=3/5 interior=excised …` runs.
+
+**Tests** (claims, priced):
+- every existing excision claim still holds;
+- the frame-dragged rule changes nothing where no axis is frame-dragged: a
+  static `a = 0` excised right-hand side with the rule built in is bit for
+  bit the same build's without it (X1: `a = 0` has no such faces);
+- the symmetrized mixed derivative:
+  - is exact on polynomials to its degree;
+  - makes the rotating octant's excised `a = 0` right-hand side the mirror
+    octant's to roundoff;
+  - its change to the fixture's run against X2b's record, and to one short
+    `a = 0` octant row against X3's, is measured and recorded;
+- the new rule is exact on polynomials to its degree;
+- a planted degenerate metric in the excised set leaves every
+  non-excised `du` `isequal`;
+- one `a = 3/5` excised right-hand side and a short run on the rotating
+  octant, finite, with the new rows.
+
+**Accept:**
+- the above;
+- the suite green at one and four threads;
+- a local smoke run at `a = 3/5` that writes `simwatch.toml`;
+- `CODE.md` amended **(amended in step X6)**.
+
+**What step X6 hands over** (its report's section 6, 2026-10-06; the
+numbers are `CODE.md`'s "Excision", "What step X6 built", and Measured
+results, step X6).
+
+The frame-dragged rule is built: `DraggedProvider`, launched by
+`gh_dragged_kernel!` after the zone kernel. The zone points' mixed
+derivative is symmetric by default (`Excision(T; mixed = :symmetric)`;
+`:nested` is the X3-era operator, for comparisons only).
+- **The `a = 3/5` smoke** (`h = 1/16`, `r_E = 1`, `r_0 = 0.8`) runs end to
+  end on the CPU and on an H200, the CSV within `3.2·10⁻⁹`: 72
+  frame-dragged axes, all along `y`, and `excision_flips = 0` at every row.
+- **The rotating and mirror octants agree to `8.5·10⁻¹⁰`** at `a = 0`.
+- **The symmetric derivative** moves X2b's fixture error outside `r = 23/20`
+  by `7·10⁻⁸` relative, and X3's shells by at most `3.5·10⁻⁵`.
+- **Cost:** the rule is about `0.5 ms` a right-hand side on the H200,
+  latency-bound, predicted `0.6 %` of a right-hand side at `h = 1/24` and
+  `0.3 %` at `1/32`. The new kernel has 255 registers and a 1872-byte frame.
+
+- **Every row** is Kerr-Schild `a = 3/5` on the rotating octant with the
+  sphere geometry, the algebraic source, `q = 4`, `ε_KO = 1/2`, `cfl = 1/2`,
+  no blend, on an H200 from a copy with `CUDA` added, one row a job. The
+  scan has the default noise; production has `amplitude=0`. **Check the
+  reference rows' own noise and options** in `CODE.md`'s `a = 3/5` record
+  and match them, or run both.
+- **The depth scan at `h = 1/24`, `10 M` a row, five rows:**
+
+  ```
+  julia --project=. --threads=8 test/octant_runs.jl backend=cuda case=ks octant=rotating a=3/5 interior=excised geometry=sphere L=64 N=96 roots=2 radii=32,16,8 r_E=<rE> r_0=<r0> t_end=10 chunk=1 cfl=1/2 out=<dir>/scan/rE<rE> checkpoint=<dir>/scan/ck-rE<rE> walltime=<s>
+  ```
+
+  | `r_E` | `r_0` | cells below the poles | below the equator |
+  |---|---|---|---|
+  | 7/10 | 13/20 | 26 | 28.7 |
+  | 4/5 | 7/10 | 24 | 26.3 |
+  | 9/10 | 3/4 | 21 | 23.9 |
+  | 1 | 4/5 | 19 | 21.5 |
+  | 17/15 | 13/15 | 16 | 18.3 |
+
+  `r_0 = (0.6 + r_E)/2` in every row: the script's default with a spin,
+  passed anyway so it is on record.
+- **Production at `r_E = 4/5`, `r_0 = 7/10`** (unless the scan prefers
+  another), `amplitude=0 t_end=24`, and the `1/32` row also to `t_end=64`:
+
+  | `h` | mesh options | blocks | points | cells below the poles |
+  |---|---|---|---|---|
+  | 1/24 | `L=64 N=96 roots=2 radii=32,16,8` | 29 | 25.7 M | 24 |
+  | 1/32 | `L=64 N=128 roots=2 radii=32,16,8` | 29 | 60.8 M | 32 |
+  | 1/48 | `L=64 N=96 roots=2 radii=32,16,8,4` | 36 | 31.9 M | 48 |
+
+  - `1/32` is the reference rows' mesh.
+  - At `1/48` only `[0, 4]³` is at `1/48`, while `r = 4 … 8` stays at
+    `1/24`. Only the shells inside `r < 4` form a clean
+    `1/24 – 1/32 – 1/48` series, and the `[3, 5)` shell straddles the
+    boundary. If an order is wanted there, use radii that keep the shells
+    on one level, or report only the shells inside `r = 4`.
+  - The excision's one-level check passed for all fifteen
+    `(h, r_E)` combinations: the surface's `9h` neighbourhood lies inside
+    the finest cube.
+- **Predicted cost** (X3's H200 rates, plus about 3 % for `a = 3/5`):
+
+  | `h` | per `M` | a `10 M` scan row | `24 M` | `64 M` |
+  |---|---|---|---|---|
+  | 1/24 | ~140 s | ~25 min | ~1 h | — |
+  | 1/32 | ~380 s | — | ~2.5 h | ~7 h |
+  | 1/48 | ~350 s | — | ~2.3 h | — |
+- **Expected frame-dragged axes on the octant:** about 190, 355 and 850 at
+  `1/24`, `1/32` and `1/48`.
+- **Read `excision_flips` at every row before trusting a checkpoint
+  chain.** A restart rebuilds the rule bits from its own state, so a chain
+  is the uninterrupted run only while flips are 0.
+- **Report the faces per rule** as `excision_faces_dragged` against
+  `excision_faces`.
+- **Symmetry leftovers:** X6's `excision-x6` directory holds a CUDA copy
+  and logs. X7 uses a directory of its own, and deletes its checkpoints once
+  the data are copied back.
+
+## Step X7 — The static `a = 3/5` hole on the rotating octant, on the H200s
+
+`CODE.md`: "Excision" with X5's window, the rotating octant's `a = 3/5`
+reference rows, and X3's entry (the method).
+
+**Resolution** (Erik: "ensure you have sufficient resolution"):
+- the reference `a = 3/5` convergence pair found `h = 1/16` outside the
+  asymptotic regime, so production runs at **`h = 1/24, 1/32, 1/48`** (an
+  extra cube for `1/48`);
+- the excision surface sits **at least about 16 cells** below the horizon
+  at the poles at the coarsest production `h`, and the depth scan decides
+  how much more.
+
+**Rows**: Kerr-Schild `a = 3/5`, static, on the rotating octant, with the
+algebraic source, `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, and `amplitude = 0` for
+the convergence rows. Each row has its own `out=` with `simwatch.toml` and
+its own `checkpoint=`/`walltime=`.
+1. **The depth scan** at `h = 1/24` across X5's window, about `10 M` a row,
+   with and without the blend if X5 asks.
+2. **Production** at the chosen `r_E`: `h = 1/24, 1/32, 1/48` to `24 M`,
+   and the `1/32` row to `64 M`, against the reference rows. Report:
+   - the shells' `ℋ` and error with their orders;
+   - `J` and `M_irr` and their drifts. The reference `:damped` has `J`
+     rising at `5.2·10⁻⁸/M` at `h = 1/32`, as truncation error at order
+     four;
+   - the band;
+   - the outflow rows, with the faces per rule.
+3. **Cost** on the H200.
+
+**Records**: a Measured results entry, "Excision of the static spinning
+hole (step X7)", and the recommendation: `a = 9/10` (which X1's window puts
+at about `h ≲ 1/40` there), moving holes, or stop. Delete the run's
+checkpoints on Symmetry once the CSVs, records and `simwatch.toml` are copied
+back (Erik's instruction of 2026-10-06 for X3's).
+
+**Accept**: every row run or its failure diagnosed; the tables in `CODE.md`;
+the suite green at one and four threads.
+
+## Step X8 — The polar corner: shave the lego corners (added 2026-10-08)
+
+Erik's decision of 2026-10-08, after X7: **continue with the corner cure.**
+`CODE.md`: "Excision", above all X7's "What step X7 measured, and the
+recommendation", with its diagnosis of the polar corner; and
+`SINGULARITY_HANDLING.md`, "Excision, steps X1–X7", the entry "Excision of the
+static spinning hole (step X7)" with its table of variants. (From the merge
+with `main` on 2026-10-08, new measured results for excision go into
+`SINGULARITY_HANDLING.md`, design amendments into `CODE.md`'s "Excision", and
+a changed recommendation into `CODE.md`'s "Single black holes: recommended
+settings". Everything excised runs scalar on the CPU (`W = 1`, Erik's
+guidance), so a change to the classes needs nothing from `src/lanes.jl`.)
+
+**The failure** (diagnosed in step X7):
+- Kerr-Schild `a = 3/5` on the rotating octant at `h = 1/24`, excised at
+  `r_E = 17/15` (16 cells below the poles) or `21/20`, grows at about
+  `2/M` from `2 M` and ends near `4.5–5 M`.
+- The growing points are zone points on the rim of the excised ball's
+  topmost lattice layer at the pole, `(3h, 2h, 27h)` and its image, whose
+  inward neighbours along all three axes are excised (`k⁻ = 0` on every
+  axis). Frame dragging nearly cancels the shift along the nearly tangent
+  axis there (`b/a = +0.011`).
+- It is not the frame-dragged rule (no rule bit), nor noise, the nested
+  mixed derivative or the blend. `ε_KO = 1` halves the rate; widening the
+  rule makes it worse.
+- It is the staircase's lottery: absent at `a = 0`, at `h = 1/32`, and at
+  `r_E = 1.10, 1.15`.
+
+**The cure, on a scratch copy:** excise every point whose inward
+neighbours along all three axes are excised. That was about 200 points of
+the octant's band at `1/24`. It made `17/15` and `21/20` stationary to `8 M`
+and left `r_E = 4/5` unchanged. The scratch patch is
+`.claude/worktrees/step-x7/bin/output/x7/local/pkg-shave.diff`, with the
+diagnostic script `diag_surface.jl` and the logs beside it. It changed only
+the classes' excised bit, and its "inward" was the sign of each coordinate,
+correct only for a hole at the origin.
+
+**Changes:**
+1. **The shave as a property of the excised set**, decided once at the
+   build, on both geometries (the sphere and the frozen tracked surface).
+   - A point is excised if the geometry excises it, **or** if its three
+     neighbours one step toward the excision center along each axis are
+     all excised.
+   - "Toward the center" is per axis from `x − c`. A coordinate on the
+     center's plane has no inward neighbour along that axis and is not
+     shaved by it.
+   - Decide whether one pass suffices or the rule is iterated to a fixed
+     point, and say which.
+   - The classes stay the single source of truth, and **everything that
+     asks "is it excised" agrees with them**:
+     - the zone kernel's classes and counts;
+     - the census and the frame-dragged rule bits and direction codes;
+     - `monitor_mask` and `interior_mask` (the error, the speed, the
+       non-finite count, the validity rows);
+     - the horizon finder's footprint guard;
+     - the core rule;
+     - `octant_runs.jl`'s noise exclusion.
+
+     If a mask is position-based, build it from the shaved set: for
+     example, the masks consult the classes, or the shave is expressed as
+     a geometric predicate every mask can evaluate. Say which, and why.
+   - The rotating octant's seam and the mirror: the shave must give
+     classes consistent across the seam (X4's test) and through the
+     reflecting faces.
+2. **A switch** in `Excision(T; …)` (e.g. `shave = true`, on by default), so
+   the X3/X7 behaviour can still be compared, with a legacy `repr` so that
+   older checkpoints restart (X2b's and X6's pattern).
+3. **The record** reports the shaved points' count.
+
+**Tests** (claims, priced):
+- with no shaved point, everything is bit for bit as before: the exterior,
+  the classes, `du`. For example, `a = 0` at `r_E = 4/5` if it has none;
+  otherwise say what it has;
+- the shaved set is exactly the rule's enumeration on the host;
+- the masks and the classes agree point by point;
+- a planted degenerate metric in the (shaved) excised set leaves every
+  non-excised `du` `isequal`;
+- the classes agree across the rotating seam;
+- a short run is finite.
+
+**The lottery, measured:**
+- every `r_E` of X5's window (`0.65 … 1.70`, finely enough to meet both cap
+  configurations X7 found) at `h = 1/24, 1/32, 1/48`, built and run to
+  `10 M` on the small rotating octant (`L = 8`, the same spacing at the
+  hole), which X7 found reproduces the H200 rows bit for bit at minutes a
+  row on the CPU — with and without the shave;
+- one H200 row at `r_E = 17/15`, `h = 1/24`, to `24 M`, with the shave;
+- `r_E = 4/5` at `1/32` against X7's production row, to show what the
+  shave changes there.
+
+If the shave does not hold at some lattice, a frozen-coefficient spectrum
+of a patch around the cap (X1's and X5's model machinery, in 3D, small) is
+the analysis that says why; record it and stop for Erik.
+
+**Mechanics:**
+- SimWatch status for every simulation;
+- Symmetry in a directory of its own, at most 8 CPUs on the H200 debug
+  QOS, Erik's jobs untouched;
+- delete the checkpoints once the data are copied back (Erik's standing
+  instruction).
+
+**Accept:**
+- the above;
+- the suite green at one and four threads;
+- `CODE.md` amended **(amended in step X8)**;
+- a measured-results entry, "The polar corner (step X8)", in
+  `SINGULARITY_HANDLING.md`;
+- a recommendation for what follows: `a = 9/10` on the tracked offset
+  surface (X7's plan: an `m` scan at `h = 1/48`, about 7 H200-hours with
+  production), then moving holes.
+
+**What step X8 hands over** (its report's section 6, 2026-10-08; the numbers
+are `CODE.md`'s "Excision", "What step X8 built" and "What step X8
+measured", and `SINGULARITY_HANDLING.md`'s "The polar corner (step X8)").
+Reviewed: the suite is 7183 assertions in 14m23 at four threads on `b80a202`;
+the patch spectrum at `r_E = 3/2`, shaved, `(35, 7, 6)`, `half = 3` reproduces
+as `+0.6569 ± 0.2499i` per `M`; the thread workload's six lines without
+excision are the base's bit for bit, and the two excised lines change by the
+216 shaved points.
+
+- **The shave cannot be the whole cure.** Every sphere-like excised set has
+  triple corners, points whose three inward neighbours are excised. The set
+  with none is the rule's fixed point, 4–18 cells outside the sphere. One
+  pass moves the corners rather than removing them: 192 of 217 remain at
+  `17/15`. The unstable ones sit on the caps, where two axes are nearly
+  tangent to the surface.
+- **The cure belongs in the operator at a cap's triple corner.**
+  `test/excision_patch.jl` tests a candidate in 2–5 minutes. Candidates:
+  - X5's extrapolated advection on the corner's nearly tangent axes,
+    whatever the shift's sign;
+  - X1's per-stencil extrapolation along the normal;
+  - `ε_KO = 1` at the caps.
+- **Production is unchanged.** `r_E = 4/5` with the shave on is stationary,
+  with no triple corner on a cap and its caps' spectrum at `−6.8` and
+  `−9.9/M`. Treat `r_E > 1.0` at `a = 3/5` (less than `0.8 M` below the
+  polar horizon) as unsafe at any `h` until the corner's operator is fixed —
+  the scan's number, which replaces the report's first estimate of `1.3 M`.
+- **A flip with the shave** (found in the suite): on `excision_tests.jl`'s
+  small spinning fixture the shave makes `(6, 5, 7) h` a triple corner whose
+  `y` axis has `b/a = +1.7·10⁻⁴` and flips sign by `M/10`. X6's "a restart is
+  the run" claim moved to the same hole without the shave. A chain of jobs
+  with the shave is the run only while `excision_flips = 0`, as before.
+- **`a = 9/10` on the tracked offset surface** (X7's plan) should wait for
+  the corner's operator. As built it cannot start; both checks below need
+  to become direction-aware:
+  - `excision_horizon_margin` (`src/driver.jl:1032`) compares the found
+    horizon's least radius with the surface's largest. That is `−6.2` cells
+    at `m = 6` on the oblate horizon, and it ends the run at `t = 0`.
+  - The singular-set check compares the core surface's polar radius with
+    the equatorial ring, and refuses `m + n_L ≳ 26` at `1/48`.
+
+  A dry build at `m = 6` is otherwise fine: 1614 corners shaved and 1783
+  frame-dragged axes. Once both checks are fixed, the `m` scan is about 1.6
+  H200-hours and production at `1/48, 1/64, 1/96` to `24 M` about 7 in all.
+  Take the patch spectrum at each surface's caps first; that needs a
+  `geometry=tracked` option in `excision_patch.jl`:
+
+  ```
+  for m in 6 9 12 18 21; do julia --project=. --threads=8 test/octant_runs.jl backend=cuda case=ks octant=rotating a=9/10 interior=excised geometry=tracked margin=$m n_L=4 L=64 N=96 roots=2 radii=32,16,8,4 t_end=10 chunk=1 cfl=1/2 out=out/x9/scan/m$m checkpoint=out/x9/scan/ck-m$m walltime=2900; done
+  ```
+
+  With `n_L = 4` the singular-set check allows `m ≤ 21`. Production meshes:
+  `N=96 radii=32,16,8,4` (`1/48`), `N=128 radii=32,16,8,4` (`1/64`),
+  `N=96 radii=32,16,8,4,2` (`1/96`).
+- **Moving holes** come after both: a moving surface passes through every
+  lattice configuration.
+- **The Symmetry part, collected once the tunnel was back** (`e0f101f`,
+  2026-10-08; reviewed: the H200 row's CSV and the relabelled cap's patch
+  spectrum reproduce, below):
+  - **The lottery scan.** At `h = 1/24` the shave cures the two cap classes
+    that fail without it (top disk `R² − Z² ∈ (10, 13)`, X7's, and
+    `(5, 8)`). It makes `(9, 10)` fail at the same radii and times instead:
+    one pass turns that cap into the unshaved `(10, 13)` one. Its patch
+    spectrum, `+2.0021 ± 0.8014i` at `(3, 2, 27)`, `r_E = 1.1323`,
+    reproduces to every digit X7's corner's.
+  - At `1/32` and `1/48` the shave moves the onset deeper, from `r_E ≈ 0.97`
+    and `0.85` to `1.16` and `1.06`. But `17/15` fails with it at `1/32` and
+    `21/20` at `1/48`, and above `r_E ≈ 1.2` the failures grow faster at
+    finer `h`.
+  - **Safe window:** every scanned configuration holds for `r_E ≤ 1.0` with
+    the shave and `≤ 0.82` without it, at all three `h`. `r_E = 4/5` holds
+    everywhere, with and without.
+  - **The H200 rows**, both with the shave:
+    - `17/15` at `1/24` is stationary to `24 M`: `err_linf` `0.1149` at
+      `1 M` and `0.1171` at `24 M`, no flip, 217 points shaved. X7's blew up
+      at `4.5 M`.
+    - `4/5` at `1/32` is X7's production row outside the horizon to `3 %`,
+      with the drift of `J` to `0.3 %` and the band's ℋ `0.78×`.
+  - **Symmetry cleaned:** `excision-x8` 24 GB → 15 MB, `excision-x8-gpu`
+    33 GB → 4.6 MB, no `.h5` left, the queue empty. The data and the table
+    scripts are in the integration worktree's `bin/output/x8` (gitignored).
+  - **A run-script bug, not fixed:** `test/octant_runs.jl` derives the
+    margin as `floor((r₊ − r_E)/h + 1/1000)`. At `r_E = 1.50837`, `1/24`
+    (row `h24-R36.201`), that rounds up to `m = 7`, and the margin check
+    then refuses the radius. A slack of `1//10^9` fixes it; the next step
+    that touches `test/` should take it.
 
 ## Step 9 — Infrastructure and the H200 (G6)
 

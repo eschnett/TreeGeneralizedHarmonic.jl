@@ -39,6 +39,15 @@
 # spacings and origins travel to the backend once per chunk, as TreeWave's
 # spacings do.
 #
+# Every stencil it takes comes from a **stencil provider** (step X2a): the
+# centered one, [`Centered`](@ref), is the arithmetic above bit for bit, and
+# step X2b's closures at an excision surface are another provider of the
+# same five methods, so the physics stays one copy.
+#
+# An `:excised` problem (step X2b) adds a second launch: the zone kernel of
+# `excision.jl`, at the evolved points next to the excision surface, with the
+# closures; the main kernel skips those points.
+#
 # Two things this file does *not* do, and must not start doing: it never
 # mutates `u` (the right-hand side is a pure function of `(u, t)`,
 # TreeAMR's contract), and it never consults the tree — the schedule is
@@ -208,9 +217,111 @@ end
     return Expr(:block, Expr(:meta, :inline), :(@inbounds $outer))
 end
 
+# --- the stencil provider (added in step X2a) --------------------------------
+#
+# `CODE.md`, "Excision": the physics is one copy. The right-hand side asks a
+# *provider* for every stencil it takes, and the provider decides which
+# weights and which taps: the centered one below is the kernel's arithmetic,
+# and step X2b's closure provider reads the per-point codes `k±` and the
+# closure table at the points next to an excision surface. The right-hand
+# side itself — the coefficients, the streaming order, the source — is not
+# repeated. **(Amended in step X4:** `main`'s rewrite of the kernel for a
+# device split the body into [`gh_rhs_head`](@ref) and [`gh_rhs_pi`](@ref);
+# the provider is now their argument, so the one copy is those two functions,
+# and every caller — the store, the two-vector form, the zone kernel — reaches
+# the stencils through them.**)**
+
+"""
+    StencilProvider
+
+What the right-hand side takes its stencils from (added in step X2a): the
+argument of [`gh_rhs_head`](@ref), [`gh_rhs_pi`](@ref) and therefore of
+[`gh_rhs_store!`](@ref) and [`gh_rhs_at_point`](@ref). A provider is an
+`isbits` value built per point, and it answers five questions, each about
+**one component at one point**, addressed as the stencils address the
+working array — by `base`, the linear index of that component at the point
+(`var + (v − 1)·sv` for `h_v`, plus `NC·sv` for `Π_v`):
+
+| method | returns | the caller scales by |
+|---|---|---|
+| `d1(S, work, base, d)` | the first derivative along `d`, unit spacing | `1/h` |
+| `d2(S, work, base, d)` | the second derivative along `d` | `1/h²` |
+| `dmix(S, work, base, i, j)` | `∂_i∂_j`, `i < j`: outer sum along `i`, inner along `j` | `1/h²` |
+| `ko(S, work, base, d)` | the Kreiss–Oliger contraction along `d` | `ε_KO/h` |
+| `adv(S, β_d, ∂f_d, work, base, d)` | the derivative that multiplies `β^d` | — |
+
+The first four are raw contractions on unit spacing, as
+[`derivative_weights`](@ref) and [`dissipation_weights`](@ref) are, so the
+caller's `1/h`, `1/h²` and `ε_KO/h` are applied where they always were.
+
+`adv` is the one that differs: it is asked for the derivative in the two
+advective terms `β^k ∂_k h_ab` and `β^k ∂_k Π_ab` — and **only** there —
+and it is handed the shift's component `β_d` and the *scaled* derivative
+`∂f_d` the right-hand side has already formed along `d` (for `h`, the head's
+`∂_d h`, which also feeds the coefficients; for `Π`, `d1/h`). It returns a
+scaled derivative. The centered provider returns `∂f_d` itself; step X2b's
+lopsided blend returns a mix of `∂f_d` and an upwinded derivative, the side
+read from the sign of `β_d` (`CODE.md`, "Excision", and
+[`lopsided_weights`](@ref)), and so needs `1/h` of its own.
+
+**`d1` of `h` is asked twice per component and axis** (amended in step X4):
+once by the head, for the coefficients and the advection of `h`, and once by
+[`gh_rhs_pi`](@ref), for `∂_i(α√γγ^{ij}) ∂_j h` — `main`'s choice of three
+stencils of cached loads over thirty values kept live across the source. A
+provider must answer both alike, which any provider whose methods are
+functions of `(work, base, d)` does.
+"""
+abstract type StencilProvider end
+
+"""
+    Centered(T, ::Val{q}, st) -> Centered{T,q}
+
+The centered stencils of order `q` — the provider of every kernel but the
+excision's zone kernel, and the one the original signatures of
+[`gh_rhs_head`](@ref), [`gh_rhs_pi`](@ref), [`gh_rhs_store!`](@ref) and
+[`gh_rhs_at_point`](@ref) build (added in step X2a). It holds the working
+array's per-axis strides `st` ([`work_strides`](@ref)) and nothing else.
+
+Its methods are the [`axis_stencil`](@ref) and [`mixed_stencil`](@ref)
+calls of the kernel, with the weights the kernel used —
+[`derivative_weights`](@ref) for `m = 1, 2` and [`dissipation_weights`](@ref)
+at rank `q/2 + 1`, `@generated` constants formed **inside** each method — the
+same strides and summation order; its `adv` returns the `∂f_d` it is handed,
+so the kernel forms no new stencil. Inlined, the code is the kernel's without
+a provider (`CODE.md`, "One right-hand-side evaluation", measured in steps
+X2a and X4). **(Amended in step X4:** until then it carried the three weight
+vectors as fields, 160 bytes a point that a device which does not inline the
+right-hand side passes through the stack — the `+5 %` step X3 measured on the
+H200. Formed in the method they are constants wherever the method is
+compiled.**)**
+"""
+struct Centered{T,q} <: StencilProvider
+    st::NTuple{3,Int}
+end
+
+@inline Centered(::Type{T}, ::Val{q}, st::NTuple{3,Int}) where {T,q} =
+    Centered{T,q}(st)
+
+# The five methods. Their names are short because the right-hand side reads
+# as the equation with them; a function that calls them must not have a
+# local of the same name (`d1`, `d2` and `ko` are common ones elsewhere).
+@inline d1(S::Centered{T,q}, work, base::Int, d::Int) where {T,q} =
+    axis_stencil(derivative_weights(T, Val(q), Val(1)), work, base, S.st[d])
+@inline d2(S::Centered{T,q}, work, base::Int, d::Int) where {T,q} =
+    axis_stencil(derivative_weights(T, Val(q), Val(2)), work, base, S.st[d])
+@inline dmix(S::Centered{T,q}, work, base::Int, i::Int, j::Int) where {T,q} =
+    mixed_stencil(derivative_weights(T, Val(q), Val(1)), work, base, S.st[i],
+                  S.st[j])
+@inline ko(S::Centered{T,q}, work, base::Int, d::Int) where {T,q} =
+    axis_stencil(dissipation_weights(T, dissipation_rank(Val(q))), work, base,
+                 S.st[d])
+@inline adv(S::Centered, β_d, ∂f_d, work, base::Int, d::Int) = ∂f_d
+
 """
     gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
                 ::Val{q}, ::Val{HASH}, ::Val{DISS}) -> (; ∂ₜh, msrc, β, divβ, divA, A)
+    gh_rhs_head(S::StencilProvider, T, work, Hwork, inner, b, var, sv, inv_h,
+                γ0, γ2, εh, ::Val{HASH}, ::Val{DISS})
 
 What every component of `F(u)` at one owned point needs. In `CODE.md`'s streaming
 order, as amended 2026-10-05:
@@ -236,6 +347,12 @@ derivative of the numerical solution, which is what the reduced source's
 **(recorded in step 3**, where `CODE.md` had said only "from `h`, `∂_i h`, `∂_t h`
 and the coefficients"**)**.
 
+**Every stencil comes from a provider** (step X2a; amended in step X4). The
+second form takes one, `S` ([`StencilProvider`](@ref)), in place of `st` and
+`q`, and asks it for each `d1`, `ko` and `adv`; the first builds
+[`Centered`](@ref) from `st` and `q` and calls the second, which inlined is
+the head without a provider.
+
 `var` is the point's linear index in `work`, `st` the per-axis strides and `sv` the
 per-variable one ([`work_strides`](@ref)); `γ0` is this point's constraint-damping
 rate, a **profile** the caller evaluates (`CODE.md`, "Gauge and constraint
@@ -245,22 +362,26 @@ is a call on a device whether or not inlining is forced.
 @inline function gh_rhs_head(::Type{T}, work, Hwork, inner, b::Int, var::Int, st,
                              sv::Int, inv_h, γ0, γ2, εh, ::Val{q}, ::Val{HASH},
                              ::Val{DISS}) where {T,q,HASH,DISS}
-    w1 = derivative_weights(T, Val(q), Val(1))
-    wD = dissipation_weights(T, dissipation_rank(Val(q)))
+    return gh_rhs_head(Centered(T, Val(q), st), T, work, Hwork, inner, b, var, sv,
+                       inv_h, γ0, γ2, εh, Val(HASH), Val(DISS))
+end
 
+@inline function gh_rhs_head(S::StencilProvider, ::Type{T}, work, Hwork, inner,
+                             b::Int, var::Int, sv::Int, inv_h, γ0, γ2, εh,
+                             ::Val{HASH}, ::Val{DISS}) where {T,HASH,DISS}
     # (1) the state at the point, the 30 first derivatives of `h`, and the
     #     coefficients built from them once.
     hv = SVector{NC,T}(@ntuple 10 v -> (@inbounds work[var + (v - 1) * sv]))
     Πv = SVector{NC,T}(@ntuple 10 v -> (@inbounds work[var + (NC + v - 1) * sv]))
     ∂h = @ntuple 3 d -> inv_h * SVector{NC,T}(@ntuple 10 v ->
-        axis_stencil(w1, work, var + (v - 1) * sv, st[d]))
+        d1(S, work, var + (v - 1) * sv, d))
     g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(hv))
     a_div = α / sqrtγ
 
     # (2) `∂ₜh`, complete: the advection, the momentum and the dissipation.
     ∂ₜh = SVector{NC,T}(@ntuple 10 v ->
-        _dth(work, var + (v - 1) * sv, st, εh, β, a_div, ∂h[1][v], ∂h[2][v], ∂h[3][v],
-             Πv[v], wD, Val(DISS)))
+        _dth(S, work, var + (v - 1) * sv, εh, β, a_div, ∂h[1][v], ∂h[2][v], ∂h[3][v],
+             Πv[v], Val(DISS)))
 
     # (3) the source, from the state, its gradients and `∂ₜh` — the gauge source
     #     read at the owned point (`Hsrc` has no ghosts to read) or, for the
@@ -276,17 +397,20 @@ is a call on a device whether or not inlining is forced.
 end
 
 # One component of `∂ₜh`: `β^i ∂_i h + (α/√γ) Π`, then the dissipation —
-# the package's summation order since step 3.
-@inline function _dth(work, bh, st, εh, β, a_div, ∂h1, ∂h2, ∂h3, Π_v, wD,
+# the package's summation order since step 3. The advective derivatives go
+# through the provider's `adv` (step X2a), which the centered provider answers
+# with the derivative it is handed.
+@inline function _dth(S, work, bh, εh, β, a_div, ∂h1, ∂h2, ∂h3, Π_v,
                       ::Val{DISS}) where {DISS}
-    s = β[1] * ∂h1 + β[2] * ∂h2 + β[3] * ∂h3 + a_div * Π_v
+    s = β[1] * adv(S, β[1], ∂h1, work, bh, 1) + β[2] * adv(S, β[2], ∂h2, work, bh, 2) +
+        β[3] * adv(S, β[3], ∂h3, work, bh, 3) + a_div * Π_v
     DISS || return s
-    return s + εh * (axis_stencil(wD, work, bh, st[1]) + axis_stencil(wD, work, bh, st[2]) +
-                     axis_stencil(wD, work, bh, st[3]))
+    return s + εh * (ko(S, work, bh, 1) + ko(S, work, bh, 2) + ko(S, work, bh, 3))
 end
 
 """
     gh_rhs_pi(T, work, var, st, sv, v, inv_h, εh, head, ::Val{q}, ::Val{DISS})
+    gh_rhs_pi(S::StencilProvider, T, work, var, sv, v, inv_h, εh, head, ::Val{DISS})
 
 Component `v` of `∂ₜΠ` without its source: nine stencils of `h_v` (`∂_i h`, the
 compact `∂_i∂_i`, the tensor-product `∂_i∂_j`) and seven of `Π_v` (the value, `∂_i Π`,
@@ -298,36 +422,42 @@ dropped:
 in the package's summation order since step 3. `∂_i h_v` is formed again here
 rather than kept from the head (amended 2026-10-05): three stencils of cached
 loads cost less than thirty values live across the source. `v` may be a run-time
-index — the kernel loops over the components — or a constant.
+index — the kernel loops over the components — or a constant. The advective
+derivatives of `Π` go through the provider's `adv`; `∂_i(α√γγ^{ij}) ∂_j h` takes
+the plain `d1` (step X2a). The second form takes the provider in place of `st`
+and `q` (amended in step X4).
 """
 @inline function gh_rhs_pi(::Type{T}, work, var::Int, st, sv::Int, v::Int, inv_h, εh,
                            head, ::Val{q}, ::Val{DISS}) where {T,q,DISS}
+    return gh_rhs_pi(Centered(T, Val(q), st), T, work, var, sv, v, inv_h, εh, head,
+                     Val(DISS))
+end
+
+@inline function gh_rhs_pi(S::StencilProvider, ::Type{T}, work, var::Int, sv::Int,
+                           v::Int, inv_h, εh, head, ::Val{DISS}) where {T,DISS}
     inv_h² = inv_h * inv_h
-    w1 = derivative_weights(T, Val(q), Val(1))
-    w2 = derivative_weights(T, Val(q), Val(2))
-    wD = dissipation_weights(T, dissipation_rank(Val(q)))
     β, divβ, divA, A = head.β, head.divβ, head.divA, head.A
     bh = var + (v - 1) * sv                       # this component of `h`
     bΠ = bh + NC * sv                             # and of `Π`
     Π_v = @inbounds work[bΠ]
-    ∂h1 = inv_h * axis_stencil(w1, work, bh, st[1])
-    ∂h2 = inv_h * axis_stencil(w1, work, bh, st[2])
-    ∂h3 = inv_h * axis_stencil(w1, work, bh, st[3])
-    ∂Π1 = inv_h * axis_stencil(w1, work, bΠ, st[1])
-    ∂Π2 = inv_h * axis_stencil(w1, work, bΠ, st[2])
-    ∂Π3 = inv_h * axis_stencil(w1, work, bΠ, st[3])
-    s = β[1] * ∂Π1 + β[2] * ∂Π2 + β[3] * ∂Π3 + divβ * Π_v +
+    ∂h1 = inv_h * d1(S, work, bh, 1)
+    ∂h2 = inv_h * d1(S, work, bh, 2)
+    ∂h3 = inv_h * d1(S, work, bh, 3)
+    ∂Π1 = inv_h * d1(S, work, bΠ, 1)
+    ∂Π2 = inv_h * d1(S, work, bΠ, 2)
+    ∂Π3 = inv_h * d1(S, work, bΠ, 3)
+    s = β[1] * adv(S, β[1], ∂Π1, work, bΠ, 1) + β[2] * adv(S, β[2], ∂Π2, work, bΠ, 2) +
+        β[3] * adv(S, β[3], ∂Π3, work, bΠ, 3) + divβ * Π_v +
         divA[1] * ∂h1 + divA[2] * ∂h2 + divA[3] * ∂h3
-    s += A[1, 1] * (inv_h² * axis_stencil(w2, work, bh, st[1])) +
-         A[2, 2] * (inv_h² * axis_stencil(w2, work, bh, st[2])) +
-         A[3, 3] * (inv_h² * axis_stencil(w2, work, bh, st[3]))
-    ∂xy = inv_h² * mixed_stencil(w1, work, bh, st[1], st[2])
-    ∂xz = inv_h² * mixed_stencil(w1, work, bh, st[1], st[3])
-    ∂yz = inv_h² * mixed_stencil(w1, work, bh, st[2], st[3])
+    s += A[1, 1] * (inv_h² * d2(S, work, bh, 1)) +
+         A[2, 2] * (inv_h² * d2(S, work, bh, 2)) +
+         A[3, 3] * (inv_h² * d2(S, work, bh, 3))
+    ∂xy = inv_h² * dmix(S, work, bh, 1, 2)
+    ∂xz = inv_h² * dmix(S, work, bh, 1, 3)
+    ∂yz = inv_h² * dmix(S, work, bh, 2, 3)
     s += 2 * (A[1, 2] * ∂xy + A[1, 3] * ∂xz + A[2, 3] * ∂yz)
     if DISS
-        s += εh * (axis_stencil(wD, work, bΠ, st[1]) + axis_stencil(wD, work, bΠ, st[2]) +
-                   axis_stencil(wD, work, bΠ, st[3]))
+        s += εh * (ko(S, work, bΠ, 1) + ko(S, work, bΠ, 2) + ko(S, work, bΠ, 3))
     end
     return s
 end
@@ -335,6 +465,8 @@ end
 """
     gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
                   ::Val{q}, ::Val{HASH}, ::Val{DISS})
+    gh_rhs_store!(du, o, sd, S::StencilProvider, T, work, Hwork, inner, b, var, sv,
+                  inv_h, γ0, γ2, εh, ::Val{HASH}, ::Val{DISS})
 
 `F(u)` at one owned point written straight into `du`, component `v` at
 `du[o + (v − 1) sd]`, as each is finished (added 2026-10-05). The ten `∂ₜh` are
@@ -342,7 +474,10 @@ stored after [`gh_rhs_head`](@ref), and the ten `∂ₜΠ` one at a time by a **
 loop** over [`gh_rhs_pi`](@ref): nothing of `F` stays live longer than it takes to
 store it.
 
-This is the kernel where nothing modifies `F` (no hole). The interior variants
+This is the kernel where nothing modifies `F`: no hole, and the `:excised`
+variant's evolved points — the centered ones in the main kernel, through
+[`Centered`](@ref) or the lopsided blend's provider, and the zone points in the
+zone kernel, through the closures (amended in step X4). The layer variants
 combine `F` with the layer's terms and take it as two vectors
 ([`gh_rhs_at_point`](@ref)), from the same two functions. Measured on an H200, with
 the source before the components and the loop at run time, it is 1.2 ns a point
@@ -351,15 +486,22 @@ against 8.5 for step 3's kernel (`CODE.md`, "The right-hand side on an H200").
 @inline function gh_rhs_store!(du, o::Int, sd::Int, ::Type{T}, work, Hwork, inner,
                                b::Int, var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
                                ::Val{q}, ::Val{HASH}, ::Val{DISS}) where {T,q,HASH,DISS}
-    head = gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
-                       Val(q), Val(HASH), Val(DISS))
+    return gh_rhs_store!(du, o, sd, Centered(T, Val(q), st), T, work, Hwork, inner, b,
+                         var, sv, inv_h, γ0, γ2, εh, Val(HASH), Val(DISS))
+end
+
+@inline function gh_rhs_store!(du, o::Int, sd::Int, S::StencilProvider, ::Type{T},
+                               work, Hwork, inner, b::Int, var::Int, sv::Int, inv_h,
+                               γ0, γ2, εh, ::Val{HASH},
+                               ::Val{DISS}) where {T,HASH,DISS}
+    head = gh_rhs_head(S, T, work, Hwork, inner, b, var, sv, inv_h, γ0, γ2, εh,
+                       Val(HASH), Val(DISS))
     ∂ₜh = head.∂ₜh
     @nexprs 10 v -> (@inbounds du[o + (v - 1) * sd] = ∂ₜh[v])
     msrc = head.msrc
     for v in 1:NC
         @inbounds du[o + (NC + v - 1) * sd] =
-            gh_rhs_pi(T, work, var, st, sv, v, inv_h, εh, head, Val(q), Val(DISS)) +
-            msrc[v]
+            gh_rhs_pi(S, T, work, var, sv, v, inv_h, εh, head, Val(DISS)) + msrc[v]
     end
     return nothing
 end
@@ -367,6 +509,8 @@ end
 """
     gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
                     ::Val{q}, ::Val{HASH}, ::Val{DISS}) -> (∂ₜh, ∂ₜΠ)
+    gh_rhs_at_point(S::StencilProvider, T, work, Hwork, inner, b, var, sv,
+                    inv_h, γ0, γ2, εh, ::Val{HASH}, ::Val{DISS}) -> (∂ₜh, ∂ₜΠ)
 
 `F(u)` at one owned point, as two `SVector{10}`s: the fused right-hand side of
 `(EXPANDED)`, with the Kreiss–Oliger term and the source already in it.
@@ -381,6 +525,13 @@ arithmetic as [`gh_rhs_store!`](@ref) in the same order, so the two agree bit fo
 bit wherever they are compiled alike. The interior variants call it, because they
 combine `F` with the layer's terms before storing (amended 2026-10-05; until then
 it was the whole kernel's body).
+
+**Every stencil comes from a provider** (added in step X2a). The second form
+takes one, `S` ([`StencilProvider`](@ref)), in place of `st` and `q`; the first
+builds [`Centered`](@ref) from `st` and `q` and calls the second. The centered
+provider's `adv` is the identity on the derivative it is handed, so the two forms
+are the same arithmetic in the same order; step X2b's closure provider is the
+second form at the points next to an excision surface (`CODE.md`, "Excision").
 
 It is a **plain function called from the kernel** rather than the kernel's own body
 (restructured in step 5). The reason is `CODE.md`'s rule that `F` is never
@@ -401,28 +552,37 @@ contracted into fused multiply-adds differently (`CODE.md`, "Measured results").
                                  var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
                                  ::Val{q}, ::Val{HASH},
                                  ::Val{DISS}) where {T,q,HASH,DISS}
-    head = gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
-                       Val(q), Val(HASH), Val(DISS))
+    return gh_rhs_at_point(Centered(T, Val(q), st), T, work, Hwork, inner, b, var,
+                           sv, inv_h, γ0, γ2, εh, Val(HASH), Val(DISS))
+end
+
+@inline function gh_rhs_at_point(S::StencilProvider, ::Type{T}, work, Hwork,
+                                 inner, b::Int, var::Int, sv::Int, inv_h, γ0,
+                                 γ2, εh, ::Val{HASH},
+                                 ::Val{DISS}) where {T,HASH,DISS}
+    head = gh_rhs_head(S, T, work, Hwork, inner, b, var, sv, inv_h, γ0, γ2, εh,
+                       Val(HASH), Val(DISS))
     msrc = head.msrc
     ∂ₜΠ = SVector{NC,T}(@ntuple 10 v ->
-        gh_rhs_pi(T, work, var, st, sv, v, inv_h, εh, head, Val(q), Val(DISS)) + msrc[v])
+        gh_rhs_pi(S, T, work, var, sv, v, inv_h, εh, head, Val(DISS)) + msrc[v])
     return head.∂ₜh, ∂ₜΠ
 end
 
 """
     gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO, interior,
-                  t, tw, t_f, rate, trail, fitp, I, ::Val{G}, ::Val{q}, ::Val{HASH},
-                  ::Val{DISS}, ::Val{INT})
+                  t, tw, t_f, rate, trail, fitp, cls, blend, I, ::Val{G}, ::Val{q},
+                  ::Val{HASH}, ::Val{DISS}, ::Val{INT})
 
 The right-hand side at the one owned point `I = (i1, i2, i3, block)`: the body
 [`gh_rhs_kernel!`](@ref) had until 2026-10-05, moved here unchanged so that the
 kernel can run it for one point (`W = 1`: every device, and the types SIMD.jl has
 no lanes for) or for each point of a group of `W` that straddles the hole's layer
-([`gh_rhs_lanes!`](@ref)). The kernel's docstring describes it.
+([`gh_rhs_lanes!`](@ref)) — and, for `:excised`, at every point whatever `W` is
+(merged 2026-10-08). The kernel's docstring describes it.
 """
 @inline function gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2,
-                               ε_KO, interior, t, tw, t_f, rate, trail, fitp, I,
-                               ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS},
+                               ε_KO, interior, t, tw, t_f, rate, trail, fitp, cls,
+                               blend, I, ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS},
                                ::Val{INT}) where {G,q,HASH,DISS,INT}
     b = I[4]
     inner = (I[1], I[2], I[3])                    # state-layout index
@@ -466,6 +626,44 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
         o, sd = state_offset(du, I)
         gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, var, st, sv, inv_h, γ0,
                       γ2, εh, Val(q), Val(HASH), Val(DISS))
+    elseif INT === :excised
+        # **Excision (added in step X2b)**: the class of the point decides,
+        # and nothing else does — the classes are the single source of truth
+        # for what is excised, built once per problem (`build_excision`). A
+        # centered point is the `:none` branch's call — the same function with
+        # the same arguments — or, inside the lopsided advection's shell, the
+        # same through the `Lopsided` provider. An excised point's `du` is
+        # zero and `F` is not evaluated. A zone point is the zone kernel's,
+        # launched next, and nothing is written here. The class array has the
+        # working array's spatial strides and one variable. **(Amended in step
+        # X4:** stored as it is finished, `main`'s spill-free store, and
+        # closure-free like the `:none` branch, so a device compiles this
+        # branch without calls too. And where the blend's weight is zero the
+        # point takes the `:none` call itself, not `Lopsided` at `λ = 0`: the
+        # arithmetic is the same, but `main`'s head compiled around a provider
+        # with a branch in its `adv` fuses `metric_quantities`' `muladd`s
+        # differently, and the exterior beyond the shell differed from the
+        # blend-free run in the last place at 496 of 25 165 points of the
+        # suite's fixture.**)**
+        cb = 1 + (b - 1) * sv + (I[1] + G[1] - 1) * st[1] +
+             (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
+        cl = cls[cb]
+        oe, sde = state_offset(du, I)
+        λe = blend_weight(blend, x)
+        if cl == CLASS_CENTERED
+            if blend === nothing || iszero(λe)
+                gh_rhs_store!(du, oe, sde, T, work, Hwork, inner, b, var, st, sv,
+                              inv_h, γ0, γ2, εh, Val(q), Val(HASH), Val(DISS))
+            else
+                gh_rhs_store!(du, oe, sde, Lopsided(T, Val(q), st, inv_h, λe), T,
+                              work, Hwork, inner, b, var, sv, inv_h, γ0, γ2, εh,
+                              Val(HASH), Val(DISS))
+            end
+        elseif cl == CLASS_EXCISED
+            for v in 1:(2 * NC)
+                @inbounds du[oe + (v - 1) * sde] = zero(T)
+            end
+        end
     else
         # The interior's view of the point (step 8d): the radius for step
         # 5's sphere, and for the tracked geometry the radius with the two
@@ -620,6 +818,8 @@ fused into FMAs differently in the two contexts (`test/simd_tests.jl`).
   the layer — most of the mesh — and [`gh_rhs_point!`](@ref) one at a time
   otherwise, so that the frozen core, the layer and its target are the scalar
   code's, branch for branch.
+- **`:excised`** never comes here: [`gh_rhs_kernel!`](@ref) gives it the scalar
+  path (merged 2026-10-08).
 
 A lane's `sqrt` is the instruction, so a degenerate metric gives a `NaN` here where
 the scalar code throws a `DomainError`; the record's `finite` and the next chunk's
@@ -659,7 +859,7 @@ speed check read it.
     else
         for l in 1:W
             gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
-                          interior, t, tw, t_f, rate, trail, fitp,
+                          interior, t, tw, t_f, rate, trail, fitp, nothing, nothing,
                           (I[1] + l - 1, I[2], I[3], b), Val(G), Val(q), Val(HASH),
                           Val(DISS), Val(INT))
         end
@@ -669,8 +869,8 @@ end
 
 """
     gh_rhs_kernel!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
-                   interior, t, tw, t_f, rate, trail, fitp, ::Val{G}, ::Val{q},
-                   ::Val{HASH}, ::Val{DISS}, ::Val{INT}, ::Val{W})
+                   interior, t, tw, t_f, rate, trail, fitp, cls, blend, ::Val{G},
+                   ::Val{q}, ::Val{HASH}, ::Val{DISS}, ::Val{INT}, ::Val{W})
 
 The right-hand side at one owned point: `F(u)`, modified inside the hole by
 `CODE.md`'s `(INTERIOR)`,
@@ -718,6 +918,19 @@ a [`HorizonDissipation`](@ref) evaluated per point by
 layer's `u_exact` is the interior's [`layer_target`](@ref), the background
 itself unless the interior names another metric (step 8c).
 
+**`:excised` (added in step X2b)** has a branch of its own, before the
+interior's: `cls` is the problem's class array and `blend` its lopsided
+blend (both `nothing` for every other variant). A centered point is the
+`:none` branch's `F` — through the [`Lopsided`](@ref) provider where the
+blend is on — an excised point's `du` is zero with `F` not evaluated, and a
+zone point is left to [`gh_zone_kernel!`](@ref), which [`gh_rhs!`](@ref)
+launches next (`CODE.md`, "Excision"). **It runs scalar on the CPU too**
+(proposed in the main merge, 2026-10-08): whatever the problem's `W`, every work
+item of an `:excised` problem is its own point, [`gh_rhs_point!`](@ref) — the path
+`W = 1` takes on every device — so no lane ever holds an excised value, and the
+zone and frame-dragged kernels are launches of their own, one point an item. SIMD
+lanes for excision are future work (`CODE.md`, "Possible extensions").
+
 **The three branches, in the order they must be in.** The core predicate
 is asked *before* any stencil is touched, because the frozen core holds
 finite but stale data on which `F` may be `NaN` and `0 · NaN = NaN`
@@ -728,14 +941,16 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
 @kernel function gh_rhs_kernel!(du, @Const(work), Hwork, @Const(origins),
                                 @Const(spacings), bg, damping, γ2, ε_KO,
                                 interior, t, tw, t_f, rate, trail, fitp,
-                                ::Val{G}, ::Val{q},
+                                cls, blend, ::Val{G}, ::Val{q},
                                 ::Val{HASH}, ::Val{DISS},
                                 ::Val{INT}, ::Val{W}) where {G,q,HASH,DISS,INT,W}
     I = @index(Global, NTuple)                    # (i1, i2, i3, block)
-    if W == 1
+    # `:excised` takes the scalar path whatever `W` is (proposed in the main
+    # merge, 2026-10-08): every item its own point, as on a device.
+    if W == 1 || INT === :excised
         gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
-                      interior, t, tw, t_f, rate, trail, fitp, I, Val(G), Val(q),
-                      Val(HASH), Val(DISS), Val(INT))
+                      interior, t, tw, t_f, rate, trail, fitp, cls, blend, I, Val(G),
+                      Val(q), Val(HASH), Val(DISS), Val(INT))
     elseif is_lane_leader(I[1], size(du, 1), W)
         gh_rhs_lanes!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
                       interior, t, tw, t_f, rate, trail, fitp, I, Val(W), Val(G),
@@ -873,7 +1088,7 @@ aarch64, eight with AVX-512, one on a device), and `1` is the scalar kernel. The
 lanes compute the scalar kernel's numbers to roundoff, and the same numbers at any
 thread count.
 """
-struct GHProblem{T,G,q,HASH,DISS,INT,W,F,S,H,D,O,V,C,I,A,X,Y}
+struct GHProblem{T,G,q,HASH,DISS,INT,W,F,S,H,D,O,V,C,I,A,X,Y,Z}
     U::F
     schedule::S
     Hsrc::H                      # the sampled gauge source, or `nothing`
@@ -901,6 +1116,9 @@ struct GHProblem{T,G,q,HASH,DISS,INT,W,F,S,H,D,O,V,C,I,A,X,Y}
     # and the exact target (the latest fit evaluated in the kernel at `t`).
     trail::T
     target_exact::Bool
+    # The `:excised` variant's classes, closures and monitor (step X2b): an
+    # `ExcisionData` built with the problem, or `nothing`.
+    excision::Z
     hasdirichlet::Bool
     valG::Val{G}
     valq::Val{q}
@@ -1005,6 +1223,10 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         "cache field set, and this problem has none: pass `target = " *
         "target_cache(U)` and fill it (fill_target!), which is what evolve! " *
         "does (CODE.md, \"The fitted target\")."))
+    # The `:excised` variant's classes (step X2b), from the geometry and the
+    # state in `U`'s working array — built here, once, with the problem.
+    excision = INT === :excised ?
+               build_excision(U, schedule, case, interior; q=q, t=T(t)) : nothing
     # The kernel's SIMD width (added 2026-10-05): the host's, unless the caller
     # asks for another — `simd_width = 1` is the scalar kernel.
     W = simd_width === nothing ? default_simd_width(T, backend, U.forest.N) :
@@ -1012,10 +1234,11 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
     return GHProblem{T,U.G,Int(q),HASH,DISS,INT,W,typeof(U),typeof(schedule),
                      typeof(Hsrc),typeof(diag),typeof(origins),
                      typeof(spacings),typeof(case),typeof(interior),
-                     typeof(accounting),typeof(target),typeof(fits)}(
+                     typeof(accounting),typeof(target),typeof(fits),
+                     typeof(excision)}(
         U, schedule, Hsrc, diag, origins, spacings, case, interior,
         accounting, target, fits, T(t_target), target_rate, T(trail),
-        target_exact, hasdirichlet, Val(U.G),
+        target_exact, excision, hasdirichlet, Val(U.G),
         Val(Int(q)), Val(HASH), Val(DISS), Val(INT), Val(W))
 end
 
@@ -1044,13 +1267,21 @@ function with_interior(p::GHProblem{T,G,q,HASH,DISS,INT0,W}, interior;
     INT === :fitted && target === nothing && throw(ArgumentError(
         "a :fitted interior needs the problem's target cache; this problem " *
         "has none (see GHProblem's `target`)."))
+    # The excision is carried while the geometry is the one it was built for
+    # — which on a run is always, the geometry being frozen — rebuilt for
+    # another, and dropped for another variant (step X2b).
+    excision = INT !== :excised ? nothing :
+               p.excision !== nothing && p.excision.interior === interior ?
+               p.excision :
+               build_excision(p.U, p.schedule, p.case, interior; q=q, t=zero(T))
     return GHProblem{T,G,q,HASH,DISS,INT,W,typeof(p.U),typeof(p.schedule),
                      typeof(p.Hsrc),typeof(p.diag),typeof(p.origins),
                      typeof(p.spacings),typeof(p.case),typeof(interior),
-                     typeof(p.accounting),typeof(target),typeof(fits)}(
+                     typeof(p.accounting),typeof(target),typeof(fits),
+                     typeof(excision)}(
         p.U, p.schedule, p.Hsrc, p.diag, p.origins, p.spacings, p.case,
         interior, p.accounting, target, fits, T(t_target), target_rate,
-        T(trail), target_exact, p.hasdirichlet,
+        T(trail), target_exact, excision, p.hasdirichlet,
         p.valG, p.valq, p.valH, p.valdiss, Val(INT), p.valsimd)
 end
 
@@ -1146,6 +1377,10 @@ function gh_rhs!(du, u, p::GHProblem, t)
         fill_ghosts!(p.U, p.schedule)
     end
     map_blocks!(gh_rhs_kernel!, p.U, gh_rhs_kernel_args(p, du, t)...)
+    # The zone points of an excised hole (step X2b): the closures, on the
+    # working array the main kernel just read — after it, since the main
+    # kernel writes nothing there.
+    p.excision === nothing || gh_zone!(du, p, t)
     return nothing
 end
 
@@ -1155,7 +1390,8 @@ gh_rhs_kernel_args(p::GHProblem, du, t) =
     (statearray(du, p.U), p.U.work, gauge_work(p.Hsrc), p.origins, p.spacings,
      p.case.background, p.case.γ0, p.case.γ2, p.case.ε_KO, p.interior,
      eltype(p.U.work)(t), target_work(p.target), p.t_target, p.target_rate, p.trail,
-     _exact_fit(p), p.valG, p.valq, p.valH, p.valdiss, p.valint, p.valsimd)
+     _exact_fit(p), excision_classes(p.excision), excision_blend(p.excision),
+     p.valG, p.valq, p.valH, p.valdiss, p.valint, p.valsimd)
 
 """
     gh_step_limiter!(u, integrator, p::GHProblem, t)
@@ -1186,6 +1422,10 @@ gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:frozen},
                  t) where {T,G,q,HASH,DISS} = nothing
 # The fitted layer writes nothing (step 8e): its target is a term of `du`.
 gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:fitted},
+                 t) where {T,G,q,HASH,DISS} = nothing
+# Nor does an excised hole (step X2b): its excised points have `du = 0`, and
+# there is no fourth writer of the state.
+gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:excised},
                  t) where {T,G,q,HASH,DISS} = nothing
 
 function gh_step_limiter!(u, integrator,
@@ -1223,7 +1463,7 @@ It reads the working array, not a state vector: call it after a
 `scatter!`, which is what [`gh_dt`](@ref) does.
 """
 function max_speed(p::GHProblem{T}; t=zero(T),
-                   mask=interior_mask(p.interior, t)) where {T}
+                   mask=evolved_mask(p, t)) where {T}
     map_blocks!(gh_speed_kernel!, p.U, p.diag.work, p.U.work, p.origins,
                 p.spacings, mask, p.valG)
     # `zero(T)` as the identity rather than `typemin`: a characteristic

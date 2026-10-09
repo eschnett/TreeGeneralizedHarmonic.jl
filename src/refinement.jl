@@ -476,6 +476,22 @@ function horizon_floor_level(forest::Forest{3}, int::FittedInterior{T},
     return _floor_level(forest, T, h_needed * (1 + 8 * eps(T)))
 end
 
+# An excised hole has no layer to resolve (step X2b): its floor asks only for
+# the margin, `h ≤ (r_h,min − r_1)/m`, or for the tracked geometry the spacing
+# its offset was stated in.
+function horizon_floor_level(forest::Forest{3}, int::Interior{T,:excised},
+                             background, G::Integer) where {T}
+    r_h, _ = geometry_radii(int, background)
+    r_h > int.r_1 || throw(ArgumentError(
+        "the excision surface r_1 = $(int.r_1) is not inside the horizon's " *
+        "smallest coordinate radius r_h,min = $r_h."))
+    return _floor_level(forest, T, (r_h - int.r_1) / int.margin)
+end
+
+horizon_floor_level(forest::Forest{3}, int::FittedInterior{T,:excised},
+                    background, G::Integer) where {T} =
+    _floor_level(forest, T, (int.offset / int.margin) * (1 + 8 * eps(T)))
+
 function _floor_level(forest::Forest{3}, ::Type{T}, h_needed) where {T}
     ℓ = 0
     h = spacing(T, forest, 0)
@@ -913,11 +929,16 @@ built before the pass would have the wrong number of blocks.
 rather than by `regrid!` — see [`refine_flags`](@ref) for why. A caller that
 passes it here passes `buffer = 0` to `regrid!` and to
 `adapt_to_initial_data!`.
+
+`mask` is the region the indicator and its reference amplitude read —
+`interior_mask(interior, t)` unless given; [`gh_indicator!`](@ref) passes
+its problem's [`monitor_mask`](@ref) (added in step X2b).
 """
 function indicator_flags(U::FieldSet{T,3}, case::GHCase{T}, t;
                          scratch=nothing, G::Integer=first(U.G),
                          buffer::Integer=0, interior=case.interior,
-                         travel=zero(T)) where {T}
+                         travel=zero(T),
+                         mask=interior_mask(interior, T(t))) where {T}
     ref = case.refinement
     ref === nothing && throw(ArgumentError(
         "this case carries no refinement parameters: build it with " *
@@ -928,8 +949,10 @@ function indicator_flags(U::FieldSet{T,3}, case::GHCase{T}, t;
     origins = to_backend(backend, block_origins(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))
     # The interior is the one the run holds (amended in step 8d): a tracked
-    # case's geometry is the chunk's, not the case's rule.
-    mask = interior_mask(interior, T(t))
+    # case's geometry is the chunk's, not the case's rule. The mask is its
+    # own unless the caller passes one — an excised hole's problem passes its
+    # `monitor_mask`, since Löhner's stencil must not read the excised set
+    # (added in step X2b).
     scale = field_scale(U, mask, origins, spacings)
     τfs = scratch === nothing ?
           FieldSet{T}(U.forest, NDIAG; G=0, centering=U.centering,
@@ -961,5 +984,6 @@ function gh_indicator!(p::GHProblem{T}, u, t; buffer::Integer=0,
                        travel=zero(T)) where {T}
     _prepare_monitor!(p, u, t)
     return indicator_flags(p.U, p.case, T(t); scratch=p.diag, G=first(p.U.G),
-                           buffer=buffer, interior=p.interior, travel=travel)
+                           buffer=buffer, interior=p.interior, travel=travel,
+                           mask=monitor_mask(p, T(t)))
 end

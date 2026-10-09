@@ -179,7 +179,7 @@ function GHCase(::Type{T}, background; box, periodic,
                 interior=nothing, r_0=zero(T), r_1=zero(T), margin::Integer=8,
                 w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), target=nothing,
                 refinement=nothing, horizon=nothing, bounds=nothing,
-                chunk=zero(T), gauge_source=nothing) where {T}
+                chunk=zero(T), gauge_source=nothing, excision=nothing) where {T}
     gauge_source === nothing || gauge_source isa KerrSchildSource{T} ||
         throw(ArgumentError(
             "gauge_source is nothing (the sampled H_a(x), or none on a harmonic " *
@@ -237,11 +237,23 @@ function GHCase(::Type{T}, background; box, periodic,
         target === nothing || throw(ArgumentError(
             "a tracked case's layer target is the FittedSpec's own `target`; " *
             "the case's `target` keyword is for step 5's sphere."))
+        excision === nothing || throw(ArgumentError(
+            "a tracked case's excision parameters are the FittedSpec's own " *
+            "`excision`; the case's keyword is for step 5's sphere."))
         interior
     else
         Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
-                 margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp, target=target)
+                 margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp, target=target,
+                 excision=excision)
     end
+    # An excised hole takes no range projection (step X2b): nothing it does
+    # guards a set that is never read, and it would be a writer of the state.
+    interior_variant(int) === :excised && bounds !== nothing &&
+        throw(ArgumentError(
+            "an :excised hole takes no range projection: its excised set is " *
+            "never read and its band is evolved by the equations, so a clamp " *
+            "has nothing to guard and would be a fourth writer of the state " *
+            "(CODE.md, \"Excision\"). Leave `bounds = nothing`."))
     check_case_bounds(bounds, int, T)
     ε = case_dissipation(ε_KO, c, T)
     # The algebraic source must make this background exact, or the run starts
@@ -665,6 +677,15 @@ same as `:reflecting`.
 source on a harmonic background — a [`KerrSchildSource`](@ref), or
 `:algebraic`, which builds the source of an unrotated, unboosted `KerrSchild`
 background at any position from its own mass and spin (`spin = (0, 0, a)`).
+
+`interior = :excised` (added in step X2b) excises the ball `r < r_1`;
+`r_0` is then only where the core rule puts the initial data inside it, and
+`excision` its [`Excision`](@ref) parameters (the default when `nothing`).
+It takes either octant (amended in step X4): on the rotating one the
+excision's classes are exchanged across the seam as a scalar, and a spinning
+hole there is refused by [`build_excision`](@ref) where frame dragging turns
+the shift into the excised set — the physics of `PLAN.md`'s steps X5–X6, not
+the octant.
 """
 function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                    chunk,
@@ -674,7 +695,7 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                    γ2=zero(T), w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
                    target=nothing, refinement=nothing, horizon=nothing,
                    bounds=nothing, octant=false,
-                   gauge_source=nothing) where {T}
+                   gauge_source=nothing, excision=nothing) where {T}
     # `r_0` and `r_1` have no default for step 5's sphere — they are what
     # `check_interior_radii` measures — and no meaning for the tracked
     # geometry, whose radii come from the horizon that was found (step 8d).
@@ -750,7 +771,8 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                   r_1=r_1 === nothing ? zero(T) : r_1, margin=margin,
                   w_ramp=w_ramp,
                   ρ_ramp=ρ_ramp, target=target, refinement=refinement,
-                  horizon=horizon, bounds=bounds, chunk=chunk, gauge_source=src)
+                  horizon=horizon, bounds=bounds, chunk=chunk, gauge_source=src,
+                  excision=excision)
 end
 
 hole_case(background; kwargs...) = hole_case(Float64, background; kwargs...)

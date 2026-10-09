@@ -37,17 +37,48 @@
 #   eps=1/2 gamma0=1 gamma2=0       ε_KO, γ0, γ2
 #   case=minkowski|ks               flat space, or the Kerr-Schild hole
 #   octant=reflecting|rotating      three mirrors (a = 0 only), or the quarter turn
-#                                   about z and the mirror at z = 0 (any a)
+#                                   about z and the mirror at z = 0 (any a; every
+#                                   interior, :excised included — step X4; a
+#                                   spinning :excised hole's frame-dragged faces
+#                                   take step X5's rule from step X6)
 #   a=0                             the hole's spin along z, in M (ks only; a ≠ 0
 #                                   needs octant=rotating, and r_0 > a for :damped,
 #                                   which the ring of radius a must be inside)
 #   r_0=3/4 r_1=3/2 source=algebraic|sampled   the hole's layer and gauge source
-#   interior=damped|fitted          step 5's analytic layer, or step 8's fitted
+#   interior=damped|fitted|excised  step 5's analytic layer, step 8's fitted
 #                                   target on the tracked horizon (margin m=8,
 #                                   lmax_shape=4, lmax_fit=8, the finder every
-#                                   chunk with the spin, default_bounds at 9/10)
+#                                   chunk with the spin, default_bounds at 9/10),
+#                                   or step X2b's excision (no layer, no target)
 #   margin=8                        cells from the horizon to the layer's outer edge
-#                                   (:damped: the check on r_1; :fitted: the offset)
+#                                   (:damped: the check on r_1; :fitted: the offset;
+#                                   :excised: see below)
+#   geometry=sphere|tracked         :excised only: the ball r < r_E about the
+#                                   origin, or the seed's offset surface m cells
+#                                   below the horizon (frozen for the run; the
+#                                   finder every chunk with the spin)
+#   r_E=1                           :excised sphere: the surface (default 1, or
+#                                   r₊ − margin·h when margin= is given); its margin
+#                                   is then the whole cells between it and r₊, the
+#                                   horizon's least radius (2 at a = 0)
+#   r_0=r_E/2                       :excised sphere: the core rule's radius (with a
+#                                   spin, max(r_E/2, (r_E + a)/2): outside the ring)
+#   margin=1/h                      :excised tracked: the offset in cells (default:
+#                                   the surface at r ≈ M)
+#   upwind=<start>,<width>          :excised: the lopsided advection's blend, from
+#                                   start cells below the horizon, full at
+#                                   start + width (step X1's 1,4); off by default
+#   closure=msn                     :excised: the dissipation's closure, msn,
+#                                   reduced or onesided
+#   mixed=symmetric                 :excised: the zone points' mixed derivative,
+#                                   symmetric in its two axes (step X6's default)
+#                                   or nested (steps X2b–X5's, for comparison)
+#   shave=on                        :excised: shave the lego corners (step X8's
+#                                   default) — a point whose three neighbours one
+#                                   step toward the center are excised is excised
+#                                   too — or off (steps X2b–X7's excised set). With
+#                                   the shave, the `in` shell's constraint norms
+#                                   start one cell farther out (the monitors' mask)
 #   n_L=0 lmax_fit=8                :fitted only: the ramp in cells (0: step 8c's
 #                                   rule) and the fit's degree
 #   fit_cont=1                      :fitted only: the fit's radial order, 1 (values
@@ -152,7 +183,43 @@ case = if hole
     # `ρ_ramp = 1`, `r_1 − r_0 ≥ n_L h`; GHSO2's `ε_KO`, the Gaussian `γ0`.
     gs = src == "algebraic" ? :algebraic : nothing
     finder = opt("finder", "1") != "0" ? Horizon(T; every=1, N=12, spin=true) : nothing
-    if opt("interior", "damped") == "fitted"
+    hfine = T(L) / (roots * N) / 2^length(radii)    # the finest spacing
+    if opt("interior", "damped") == "excised"
+        # Step X2b's variant: the ball `r < r_E`, or the seed's offset surface
+        # `m` cells below the horizon, frozen; no layer, no target, no bounds.
+        up = haskey(OPTIONS, "upwind") ? Tuple(rat.(split(OPTIONS["upwind"], ','))) :
+             nothing
+        shave = opt("shave", "on")
+        shave in ("on", "off") || error("shave is on or off, got $shave")
+        exc = Excision(T; upwind=up, dissipation=Symbol(opt("closure", "msn")),
+                       mixed=Symbol(opt("mixed", "symmetric")), shave=shave == "on")
+        # On the rotating octant with a spin (step X4) the margins are taken
+        # against the horizon's least radius, `r₊` at the poles, and the core
+        # rule's default radius encloses the ring `r = a` (the singular set
+        # must lie inside it); at `a = 0` both are what they were.
+        if opt("geometry", "sphere") == "tracked"
+            m = haskey(OPTIONS, "margin") ? parse(Int, OPTIONS["margin"]) :
+                round(Int, 1 / hfine)
+            spec = FittedSpec(T; variant=:excised, margin=m,
+                              n_L=parse(Int, opt("n_L", "0")), lmax_shape=4,
+                              excision=exc)
+            kerr_schild_case(T; a=a_spin, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
+                             octant=Symbol(symmetry), gauge_source=gs, interior=spec,
+                             horizon=Horizon(T; every=1, N=12, spin=true))
+        else
+            r_E = haskey(OPTIONS, "r_E") ? T(rat(OPTIONS["r_E"])) :
+                  haskey(OPTIONS, "margin") ?
+                  r_plus - parse(Int, OPTIONS["margin"]) * hfine : one(T)
+            m = haskey(OPTIONS, "margin") ? parse(Int, OPTIONS["margin"]) :
+                floor(Int, (r_plus - r_E) / hfine + 1 // 1000)
+            r_0 = haskey(OPTIONS, "r_0") ? T(rat(OPTIONS["r_0"])) :
+                  max(r_E / 2, (r_E + abs(T(a_spin))) / 2)
+            kerr_schild_case(T; a=a_spin, halfwidth=L, r_0=r_0, r_1=r_E, chunk=chunk,
+                             ε_KO=ε_KO, γ2=γ2, octant=Symbol(symmetry),
+                             gauge_source=gs, interior=:excised, margin=m,
+                             horizon=finder, excision=exc)
+        end
+    elseif opt("interior", "damped") == "fitted"
         m = parse(Int, opt("margin", "8"))
         spec = FittedSpec(T; variant=:fitted, margin=m,
                           n_L=parse(Int, opt("n_L", "0")), lmax_shape=4,
@@ -162,7 +229,6 @@ case = if hole
         # rule — the offset surface less `2G` spacings — where that is deeper
         # (a margin of 12 cells or more at `h = 1/16`).
         # Against the horizon's least radius, `r₊` at the poles.
-        hfine = T(L) / (roots * N) / 2^length(radii)    # the finest spacing
         r_gate = min(T(9 // 10), r_plus - (m + 2 * (q ÷ 2 + 1)) * hfine)
         kerr_schild_case(T; a=a_spin, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
                          octant=Symbol(symmetry),
@@ -187,11 +253,42 @@ nlev = length(radii) + 1
         maximum(k -> spacing(T, forest0, k), forest0.leaves), minimum_spacing(T, forest0))
 @printf("        case %s, t_end = %s, chunk = %s, cfl = %s, q = %d, ε_KO = %s, γ0 = %s, γ2 = %s\n",
         casename, t_end, chunk, cfl, q, ε_KO, hole ? "Gaussian 1/M → 1/(10M)" : γ0, γ2)
+excised = hole && interior_variant(case.interior) === :excised
 hole && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin,
+                excised ?
+                (case.interior isa FittedSpec ?
+                 "excised, tracked and frozen, margin $(case.interior.margin)" :
+                 "excised, r_E = $(case.interior.r_1) (m = $(case.interior.margin)), " *
+                 "core rule r_0 = $(case.interior.r_0)") *
+                ", upwind $(upwind_on(case.interior.excision) ? (case.interior.excision.upwind_start, case.interior.excision.upwind_width) : "off"), " *
+                "closure :$(excision_closure(case.interior.excision)), " *
+                "mixed :$(excision_mixed(case.interior.excision)), " *
+                "shave $(excision_shave(case.interior.excision) ? "on" : "off")" :
                 case.interior isa FittedSpec ?
                 "fitted target, tracked, margin $(case.interior.margin)" :
                 "damped layer, r_0 = $(case.interior.r_0), r_1 = $(case.interior.r_1)",
                 case.gauge === nothing ? "sampled" : "algebraic")
+
+# An excised hole's frozen geometry, as `evolve!` builds it (for the noise's
+# exclusion and the band's shells): the case's sphere, or the seed's offset
+# surface on this mesh with `n_L` the core rule's depth.
+G_ = q ÷ 2 + 1
+geom0 = !excised ? nothing :
+        case.interior isa FittedSpec ?
+        fitted_interior(case.interior, seed_track(case, zero(T)), forest0, G_; t=zero(T),
+                        n_L=case.interior.n_L > 0 ? case.interior.n_L :
+                            TreeGeneralizedHarmonic.layer_cells(G_, T(4), one(T))) :
+        case.interior
+# The band `[r_E, r_E + W)` outside the surface, in which the closures and
+# the monitors' reach live; the shells' `in` starts beyond it.
+W_band = excised ? excision_band_cells(q) * minimum_spacing(T, forest0) : zero(T)
+r_surface = !excised ? zero(T) : geom0 isa FittedInterior ? geom0.r_out - geom0.offset :
+            geom0.r_1
+# The excised set as the classes will hold it (step X8): the geometry's, with
+# its lego corners shaved on the surface's lattice unless `shave=off` — what
+# the noise is kept off, by the same predicate the build evaluates.
+excised0 = !excised ? nothing :
+           excised_mask(geom0, zero(T), check_excision_mesh(forest0, geom0, q))
 @printf("        noise %.3g (seed %d), backend %s, %d threads\n", amplitude, seed,
         typeof(backend), Threads.nthreads())
 
@@ -202,6 +299,19 @@ cols = ["t", "wall", "ham_l2", "ham_linf", "mom_l2", "mom_linf", "gauge_l2",
         "gauge_linf", "ham_l2_vol", "mom_l2_vol", "gauge_l2_vol", "state_l2",
         "state_linf"]
 hole && append!(cols, ["err_l2", "err_linf", "residual", "drift", "err_l2_vol"])
+# The excision rows (step X2b): the band's points and non-finite values, the
+# normal outflow margin, the faces, their least b/a and the inflow-like ones,
+# the closure axes whose shift points into the excised set, and — tracked —
+# the found horizon's distance from the frozen surface in cells. From step X6
+# the frame-dragged axes (the rule bits of the build), the faces on them — the
+# faces per rule are those and `excision_faces` less them — and the axes whose
+# shift's sign now disagrees with their bit, which must stay 0.
+const EXCISION_COLS = ["excision_band", "excision_band_nonfinite",
+                       "excision_normal_min", "excision_faces", "excision_axis_min",
+                       "excision_inflow", "excision_into", "excision_horizon_margin",
+                       "excision_dragged", "excision_faces_dragged", "excision_flips",
+                       "excision_shaved"]
+excised && append!(cols, EXCISION_COLS)
 for ℓ in 0:(nlev - 1), c in ("ham_l2", "ham_linf", "mom_l2", "mom_linf", "gauge_l2",
                              "gauge_linf")
     push!(cols, "$(c)_L$ℓ")
@@ -264,11 +374,24 @@ setup = Dict{String,Any}(
 if hole
     setup["a"] = Float64(a_spin)
     setup["M_irr_kerr"] = M_irr_kerr
-    setup["interior"] = case.interior isa FittedSpec ? "fitted" : "damped"
+    setup["interior"] = excised ? "excised" :
+                        case.interior isa FittedSpec ? "fitted" : "damped"
     setup["gauge_source"] = case.gauge === nothing ? "sampled" : "algebraic"
     case.interior isa FittedSpec ? (setup["margin_cells"] = case.interior.margin) :
                                    (setup["r_0"] = Float64(case.interior.r_0);
                                     setup["r_1"] = Float64(case.interior.r_1))
+    if excised
+        ex = case.interior.excision
+        setup["geometry"] = case.interior isa FittedSpec ? "tracked" : "sphere"
+        setup["margin_cells"] = case.interior.margin
+        setup["r_E"] = Float64(r_surface)
+        setup["band_width"] = Float64(W_band)
+        setup["upwind"] = upwind_on(ex) ? [Float64(ex.upwind_start),
+                                           Float64(ex.upwind_width)] : "off"
+        setup["closure"] = String(excision_closure(ex))
+        setup["mixed"] = String(excision_mixed(ex))
+        setup["shave"] = excision_shave(ex)
+    end
 end
 simwatch_update!(sw; force=true, status="starting", time_end=Float64(t_end),
                  time_unit=time_unit,
@@ -313,6 +436,17 @@ function observe(p, t, u, rec)
         extra["error"] = Dict("l2" => ep.l2, "linf" => ep.linf, "l2_volume" => e.err_l2,
                               "layer_residual" => e.residual, "drift_htt" => e.drift)
     end
+    if excised
+        exv = [getproperty(rec, Symbol(c)) for c in EXCISION_COLS]
+        append!(row, [x === nothing ? "" : x for x in exv])
+        extra["excision"] = Dict{String,Any}(
+            "note" => "the band: the evolved points next to the excision surface, " *
+                      "where the closures are; normal outflow needs normal_min > 0; " *
+                      "dragged: the frame-dragged axes (step X5's rule), whose shift " *
+                      "pointed into the excised set at the build; flips must stay 0; " *
+                      "shaved: the lego corners excised by step X8's shave",
+            (c[10:end] => x for (c, x) in zip(EXCISION_COLS, exv) if x !== nothing)...)
+    end
     levels = Dict{String,Any}()
     for n in lev
         append!(row, (n.ham_l2, n.ham_linf, mom2(n), mom∞(n), gauge2(n), gauge∞(n)))
@@ -340,17 +474,23 @@ function observe(p, t, u, rec)
     extra["boundary"] = boundary
     # The shells: each monitor once per shell, masked to it.
     if hole
-        r_in = case.interior isa FittedSpec ?
+        r_in = excised ? r_surface + W_band :
+               case.interior isa FittedSpec ?
                shell_r[1] - case.interior.margin * minimum_spacing(T, p.U.forest) :
                case.interior.r_1
         edges = vcat([r_in], shell_r, [T(Inf)])
         shells = Dict{String,Any}()
         for i in 1:(length(edges) - 1)
             m = ShellMask(SVector{3,T}(0, 0, 0), edges[i], edges[i + 1])
-            gh_constraint!(p, u, t; mask=m)
-            adm_constraint!(p, u, t; mask=m)
+            # An excised hole's shells keep the problem's own masks too (step
+            # X8): with shaved corners the monitors' reach is widened by a
+            # cell, so that the `in` shell's stencils read no shaved point.
+            mc, me = excised ? (BothMask(m, monitor_mask(p, t)),
+                                BothMask(m, evolved_mask(p, t))) : (m, m)
+            gh_constraint!(p, u, t; mask=mc)
+            adm_constraint!(p, u, t; mask=mc)
             n = constraint_norms(p; weighting=:points)
-            gh_error!(p, u, t; mask=m)
+            gh_error!(p, u, t; mask=me)
             e = masked_norms(p, DIAG_ERR; weighting=:points)
             append!(row, (n.ham_l2, n.ham_linf, mom2(n), gauge2(n), e.l2, e.linf))
             shells[shell_names[i]] = Dict{String,Any}(
@@ -430,11 +570,15 @@ restarting = get(ckw, :restart_file, nothing) !== nothing
 # A hole's frozen core is left alone: it is never evolved, and its stale data
 # at the corner is not of definite parity (see `add_noise!`). The default
 # `r_core` of a `:fitted` hole is the horizon's least radius less `5/4` (`3/4`
-# at `a = 0`, as before).
+# at `a = 0`, as before). An excised hole leaves its whole excised set alone,
+# by the masks' own predicate — with the shaved corners (step X8).
 core² = !hole ? zero(T) : case.interior isa FittedSpec ?
         (haskey(OPTIONS, "r_core") ? T(rat(OPTIONS["r_core"])) :
          r_plus - 5 // 4)^2 : case.interior.r_0^2
-fitkw = if hole && case.interior isa FittedSpec
+exclude = !hole ? nothing :
+          excised ? (let m = excised0; x -> !is_evolved(m, x); end) :
+          (x -> sum(abs2, x) < core²)
+fitkw = if hole && case.interior isa FittedSpec && !excised
     nL = case.interior.n_L > 0 ? case.interior.n_L :
          TreeGeneralizedHarmonic.layer_cells(q ÷ 2 + 1, T(4), one(T))
     depth = haskey(OPTIONS, "fit_depth") ? T(rat(OPTIONS["fit_depth"])) :
@@ -445,8 +589,7 @@ else
 end
 haskey(OPTIONS, "rho") && (fitkw = (; fitkw..., ρ_max_fixed=T(rat(OPTIONS["rho"]))))
 perturb = iszero(amplitude) ? nothing :
-          U -> add_noise!(U, Xoshiro(seed); amplitude=amplitude,
-                          exclude=hole ? (x -> sum(abs2, x) < core²) : nothing)
+          U -> add_noise!(U, Xoshiro(seed); amplitude=amplitude, exclude=exclude)
 out = try
     evolve!(T, case; forest=restarting ? nothing : forest0, q=q,
             ops=Operators(prolongation=q + 2, restriction=q + 2), t_end=t_end,
@@ -473,7 +616,11 @@ end
 # The run's own record, the horizon's numbers and the track included.
 fields = (:t, :steps, :err_l2, :err_linf, :residual, :drift, :gauge_l2, :horizon_success,
           :r_min, :r_mean, :r_max, :area, :M_irr, :J, :M_ch, :track_offset,
-          :track_r_min, :fit_valid, :fit_residual, :bounds_hits, :variant)
+          :track_r_min, :fit_valid, :fit_residual, :bounds_hits, :variant,
+          :excision_band, :excision_band_nonfinite, :excision_normal_min,
+          :excision_faces, :excision_axis_min, :excision_inflow, :excision_into,
+          :excision_horizon_margin, :excision_dragged, :excision_faces_dragged,
+          :excision_flips, :excision_shaved)
 open(joinpath(outdir, "records.csv"), "w") do io
     println(io, join(fields, ','))
     for rec in out.records

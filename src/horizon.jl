@@ -225,6 +225,34 @@ end
     return false
 end
 
+# The shaved excised set (step X8): every stencil point is classified by the
+# shaved predicate itself, unless the whole stencil lies `2h` or more outside
+# the geometry's excised set — the predicate's own fast path, `_shave_near`,
+# compared at the nearest point exactly as the predicate compares each point,
+# so the shortcut agrees with the enumeration bit for bit.
+@inline function TreeAMR.stencil_hits(r::UnevolvedRegion{<:ShavedMask},
+                                      origin::NTuple{3}, h, base, off,
+                                      ::Val{n}) where {n}
+    m = r.mask
+    _stencil_far(m.base, m.h, origin, h, base, off, Val(n)) && return false
+    for J in CartesianIndices(ntuple(_ -> n, Val(3)))
+        x = ntuple(d -> TreeAMR.stencil_position(origin, h, base, off, d,
+                                                 J[d] - 1), Val(3))
+        is_evolved(m, x) || return true
+    end
+    return false
+end
+
+@inline function _stencil_far(b::InteriorMask, hs, origin, h, base, off,
+                              ::Val{n}) where {n}
+    ρ = b.r_1 + 2 * hs
+    return nearest_r2(b.center, origin, h, base, off, Val(n)) ≥ ρ * ρ
+end
+
+@inline _stencil_far(b::ShapeMask, hs, origin, h, base, off, ::Val{n}) where {n} =
+    sqrt(nearest_r2(b.center, origin, h, base, off, Val(n))) ≥
+    (b.r_out - b.offset) + 2 * hs
+
 # The refusal, dispatched on the mask so that the trivial one carries no
 # message about a radius it does not have.
 footprint_error(::AllPoints, x, n) = ErrorException("unreachable")
@@ -243,6 +271,12 @@ footprint_error(m::ShapeMask, x, n) = ArgumentError(
     "numerical solution (CODE.md, \"The interior\"). The horizon lies outside " *
     "the layer by the margin m, and so must everything interpolated from " *
     "the state.")
+
+footprint_error(m::ShavedMask, x, n) = ArgumentError(
+    footprint_error(m.base, x, n).msg * " (The excised set here " *
+    "is the geometry's with its lego corners shaved on the lattice of spacing " *
+    "$(m.h), step X8: a corner within h/√3 outside the surface counts as " *
+    "excised.)")
 
 footprint_error(m::InteriorMask, x, n) = ArgumentError(
     "the interpolation footprint of $(Tuple(x)) reaches inside r_1 = " *
@@ -464,14 +498,16 @@ is read where it is and only the surface points and their answers cross —
 not the whole state, which `hostcopy` copied once per find until the port
 to TreeAMR's M11 (amended 2026-09-26).
 
-The mask is the one every norm takes, [`interior_mask`](@ref), so "the
-horizon finder reads only the evolved region" and "the norms count only the
-evolved region" are the same statement with the same radius — and the guard
+The mask is the one every norm takes, [`evolved_mask`](@ref) — the
+interior's own, [`interior_mask`](@ref), but for an excised hole whose lego
+corners were shaved (amended in step X8) — so "the horizon finder reads only
+the evolved region" and "the norms count only the evolved region" are the
+same statement with the same set — and the guard
 moves with the hole, because it is built at this call's `t` like every
 other hook (`CLAUDE.md`, "Hooks depend on time").
 """
 function gh_adm_provider(p::GHProblem{T,G,q}, t) where {T,G,q}
-    return GHADMProvider(p.U, q, interior_mask(p.interior, T(t)))
+    return GHADMProvider(p.U, q, evolved_mask(p, T(t)))
 end
 
 # --- the find ---------------------------------------------------------------

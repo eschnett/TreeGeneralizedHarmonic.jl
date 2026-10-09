@@ -1,0 +1,1475 @@
+# Excision: the `:excised` interior variant (added in step X2b).
+#
+# `CODE.md`, "Excision (added 2026-10-05)". Points beyond the **excision
+# surface** — the sphere `r = r_1` of step 5's layer, or the tracked offset
+# surface `d = 0`, frozen for the run — are not evolved: `du = 0`, `F` never
+# evaluated, their data finite and never read. The evolved points whose
+# stencils would reach them take **closures** (`src/stencils.jl`, step X1):
+# per axis and side the point counts `k⁻, k⁺ ∈ 0…G` consecutive non-excised
+# points, and every stencil that would reach past them reads the closure on
+# the nodes `−k⁻ … k⁺` instead — the mixed derivative nested, the
+# dissipation Mattsson–Svärd–Nordström's.
+#
+# Four pieces, in the order a problem meets them:
+#
+#   1. **The classes** ([`build_excision`](@ref)), built once per problem: a
+#      `UInt8` per stored point — centered, zone or excised — from the masks'
+#      own predicate `is_evolved(interior_mask(int, t), x)` on owned points,
+#      one ghost exchange of that bit through TreeAMR (so every ghost is its
+#      owner's and an octant's walls mirror it), and a pass over the stored
+#      points that marks a **zone** point: one some stencil of the right-hand
+#      side would read an excised value through. Within a problem the classes
+#      are the single source of truth for what is excised, in every kernel.
+#   2. **The main kernel** (`evolution.jl`'s `gh_rhs_kernel!`) computes `F`
+#      with the centered stencils at centered points — today's operator, bit
+#      for bit — writes `0` at excised ones and nothing at zone points. With
+#      the lopsided advection on, its centered points take the blend through
+#      [`Lopsided`](@ref), a provider whose `adv` is the only difference.
+#   3. **The zone kernel** ([`gh_zone_kernel!`](@ref)) computes `F` at zone
+#      points with [`ClosureProvider`](@ref): the same physics,
+#      `gh_rhs_at_point`, with the closures' stencils (step X2a's provider).
+#      At a zone point with a **frame-dragged** axis — a closure axis whose
+#      shift points into the excised set in the state the problem was built
+#      on (step X6, the rule step X5 chose) — a second launch,
+#      [`gh_dragged_kernel!`](@ref), overwrites it with
+#      [`DraggedProvider`](@ref)'s `F`, which differs in the advection along
+#      that axis only.
+#   4. **The outflow monitor** ([`excision_rows`](@ref)), at record time: the
+#      characteristic margins at the band, from the evolved state.
+#
+# No kernel reads an excised value, not even with weight zero (`0 · NaN =
+# NaN`): every contraction here runs over a closure's own nodes, which lie in
+# `[−k⁻, k⁺]`, and the frame-dragged rule replaces each excised tap by an
+# extrapolation from non-excised points. And there is no fourth state writer:
+# the `:excised` step limiter is a no-op, and the right-hand side writes `du`
+# and nothing else.
+
+# The per-point classes. Ghost points carry only the excised bit: their
+# zone/centered distinction is never read.
+const CLASS_CENTERED = 0x00
+const CLASS_ZONE = 0x01
+const CLASS_EXCISED = 0x02
+
+# The monitor field set's variables: what the build's census and the record's
+# outflow monitor write, one launch each (a field set of the excision's own,
+# so that no other run's `diag` grows; proposed in step X2b).
+const EXM_BAND = 1          # 1 at a zone point
+const EXM_NONFINITE = 2     # census: 1 at an excised owned point; record: non-finite values
+const EXM_NORMAL = 3        # census: inadmissible; record: b_n/a_n − 1 (floatmax off the band)
+const EXM_AXIS = 4          # least per-axis b/a (census: over closure axes; record: over faces)
+const EXM_FACES = 5         # census: least ε_KO; record: faces at the point
+const EXM_INFLOW = 6        # record: faces with b/a < 1
+const EXM_INTO = 7          # closure axes whose shift points into the excised set, b < 0
+# Step X6's (the frame-dragged rule):
+const EXM_DRAGGED = 8       # the point's frame-dragged axes, the rule bits of the build
+const EXM_DFACES = 9        # census: excised taps without a source; record: faces on a dragged axis
+const EXM_FLIPS = 10        # record: axes whose shift's sign now disagrees with the rule bit
+# Step X8's (the shaved corners):
+const EXM_SHAVED = 11       # census: 1 at an owned point excised by the shave; record: 0
+const NEXM = 11
+
+"""
+    excision_band_cells(q) -> Int
+
+`W/h = max(G, ⌈√2 q/2⌉)`: how far, in cells, a stencil of the right-hand
+side or of a monitor reaches from its point — the dissipation's `G` along an
+axis, the mixed derivative's diagonal `√2 q/2`, strictly less than its
+ceiling since `2(q/2)²` is never a square. The band `[r_E, r_E + W)` is
+what the validity monitor reads as `:excised`'s layer, and the excised set
+widened by `W` is the stencil monitors' mask ([`monitor_mask`](@ref)).
+"""
+function excision_band_cells(q::Integer)
+    r = q ÷ 2
+    return max(r + 1, isqrt(2 * r * r) + 1)
+end
+
+# --- the lopsided advection's blend ------------------------------------------
+
+"""
+    ExcisionBlend{T,NM}
+
+Where the lopsided shift advection is switched on, as a function of position
+(added in step X2b; `CODE.md`, "Excision"): `λ = smoothstep((d/h − start) /
+width)` with `d = r_h(n̂) − r` the depth below the horizon `r_h(n̂)` about the
+hole's static center — zero above `start` cells, full below `start + width`
+— `h` the surface's spacing. The horizon is the tracked geometry's seed
+shape, or for the sphere the background's smallest horizon radius as a
+degree-0 shape with `r_in = r_out`, which the clamp makes exact. `isbits`; a
+kernel argument of the main and the zone kernel, which evaluate it the same
+way.
+"""
+struct ExcisionBlend{T,NM}
+    center::SVector{3,T}
+    shape::SVector{NM,T}
+    lmax::Int
+    r_in::T
+    r_out::T
+    h::T
+    start::T
+    width::T
+end
+
+@inline blend_weight(::Nothing, x) = zero(x[1])
+
+@inline function blend_weight(bl::ExcisionBlend{T}, x) where {T}
+    d1 = x[1] - bl.center[1]
+    d2 = x[2] - bl.center[2]
+    d3 = x[3] - bl.center[3]
+    r = sqrt(d1 * d1 + d2 * d2 + d3 * d3)
+    # Above every horizon radius less `start` cells: zero, without the series.
+    r ≥ bl.r_out - bl.start * bl.h && return zero(T)
+    n = iszero(r) ? SVector{3,T}(zero(T), zero(T), one(T)) :
+        SVector{3,T}(d1 / r, d2 / r, d3 / r)
+    rh = _surface_radius(bl.shape, bl.lmax, bl.r_in, bl.r_out, n)
+    return smoothstep(((rh - r) / bl.h - bl.start) / bl.width)
+end
+
+# The blend for an interior and the surface's spacing, or `nothing` when the
+# lopsided advection is off.
+function excision_blend(int::Interior{T,:excised}, background, h) where {T}
+    ex = int.excision
+    upwind_on(ex) || return nothing
+    rh = T(horizon_min_radius(background))
+    c = center_at(int.center, zero(T))
+    return ExcisionBlend{T,1}(c, SVector{1,T}(rh), 0, rh, rh, T(h),
+                              ex.upwind_start, ex.upwind_width)
+end
+
+function excision_blend(int::FittedInterior{T,:excised,NM}, background,
+                        h) where {T,NM}
+    ex = int.excision
+    upwind_on(ex) || return nothing
+    c = center_at(int.center, zero(T))
+    return ExcisionBlend{T,NM}(c, int.shape, int.lmax, int.r_in, int.r_out, T(h),
+                               ex.upwind_start, ex.upwind_width)
+end
+
+# --- the stencil providers -------------------------------------------------------
+
+"""
+    Lopsided(T, ::Val{q}, st, inv_h, λ) -> Lopsided
+
+The centered stencils with the lopsided shift advection blended in at weight
+`λ` (added in step X2b): the main kernel's provider at the `:excised`
+variant's centered points when the blend is on. `d1`, `d2`, `dmix` and `ko`
+are [`Centered`](@ref)'s; `adv` returns the derivative it is handed **through
+a branch** where `λ = 0` — so the exterior beyond the blend shell is today's
+operator bit for bit — and otherwise `(1 − λ) ∂f_d + λ L`, `L` the order-`q`
+lopsided derivative ([`lopsided_centered_weights`](@ref)) on the side the
+shift points to, scaled by `1/h` itself.
+
+**(Amended in step X4:** it holds the centered provider, `1/h` and `λ` and no
+weights — the two lopsided rows are `@generated` constants formed in `adv`, as
+[`Centered`](@ref)'s are in its methods — and the lopsided contraction is
+generated term by term, so that the main kernel's `:excised` branch forms no
+closure, which a device compiles as a call.**)**
+"""
+struct Lopsided{T,q} <: StencilProvider
+    c::Centered{T,q}
+    inv_h::T
+    λ::T
+end
+
+@inline Lopsided(::Type{T}, ::Val{q}, st::NTuple{3,Int}, inv_h, λ) where {T,q} =
+    Lopsided{T,q}(Centered(T, Val(q), st), T(inv_h), T(λ))
+
+@inline d1(S::Lopsided, work, base::Int, d::Int) = d1(S.c, work, base, d)
+@inline d2(S::Lopsided, work, base::Int, d::Int) = d2(S.c, work, base, d)
+@inline dmix(S::Lopsided, work, base::Int, i::Int, j::Int) =
+    dmix(S.c, work, base, i, j)
+@inline ko(S::Lopsided, work, base::Int, d::Int) = ko(S.c, work, base, d)
+
+# `∑_k w[k] u[base + (lo + k − 1)·stride]`, left to right from the first
+# product — the left fold the table's contraction in the zone kernel forms, so
+# the two kernels' blends are one operator. Generated with an explicit
+# `:inline` meta, as `axis_stencil` is (amended in step X4: it was an
+# `ntuple(Val(n)) do … end` folded by `_fold`, the same arithmetic, a closure).
+@generated function _shifted_stencil(w::SVector{n}, work, base::Int, stride::Int,
+                                     lo::Int) where {n}
+    ex = :(w[1] * work[base + lo * stride])
+    for k in 2:n
+        ex = :($ex + w[$k] * work[base + (lo + $(k - 1)) * stride])
+    end
+    return Expr(:block, Expr(:meta, :inline), :(@inbounds $ex))
+end
+
+@inline function adv(S::Lopsided{T,q}, β_d, ∂f_d, work, base::Int,
+                     d::Int) where {T,q}
+    iszero(S.λ) && return ∂f_d
+    stride = S.c.st[d]
+    L = β_d ≥ 0 ?
+        S.inv_h * _shifted_stencil(lopsided_centered_weights(T, Val(q), Val(1)), work,
+                                   base, stride, lopsided_first(Val(q), Val(1))) :
+        S.inv_h * _shifted_stencil(lopsided_centered_weights(T, Val(q), Val(-1)), work,
+                                   base, stride, lopsided_first(Val(q), Val(-1)))
+    return (one(T) - S.λ) * ∂f_d + S.λ * L
+end
+
+"""
+    ClosureProvider
+
+The stencils of an evolved point next to the excision surface (added in step
+X2b; `CODE.md`, "Excision", "How the closure provider plugs in"): built per
+zone point by [`closure_provider`](@ref), it holds the point's codes `k⁻, k⁺`
+along the three axes, the class array and the point's linear index in it —
+the class array has the working array's spatial strides, so a neighbour at
+offset `a` along `i` is that index plus `a·st[i]` — the closure table (device
+arrays), `1/h` and the lopsided blend's weight.
+
+- `d1`, `d2` and `ko` contract the table's row `[·, k⁻ + 1, k⁺ + 1]` of the
+  axis over its own nodes `lo:hi`, in ascending order, from the first
+  product — `axis_stencil`'s order, so that the centered rows (the table's
+  are `derivative_weights` bit for bit) give the centered contraction bit for
+  bit;
+- `dmix` runs the outer sum along `i` over the point's `i`-closure and, at
+  each outer node `x + a e_i`, the inner sum along `j` over **that node's**
+  `j`-closure, its codes read from the class array — `mixed_stencil`'s order;
+  with `SYM` (the default from step X6, [`Excision`](@ref)'s `mixed =
+  :symmetric`) it is the mean of that and the nesting the other way round,
+  `½(D_i D_j + D_j D_i)`, wherever the two differ (see [`dmix`](@ref)'s
+  method below);
+- `adv` returns `∂f_d` where the blend is zero, and otherwise blends it with
+  the table's lopsided row for the side the shift points to.
+
+Every node a contraction reads is in `[−k⁻, k⁺]`: no excised value is read.
+"""
+struct ClosureProvider{T,G,C,TB,SYM} <: StencilProvider
+    st::NTuple{3,Int}
+    cls::C
+    cbase::Int
+    km::NTuple{3,Int}
+    kp::NTuple{3,Int}
+    tab::TB
+    inv_h::T
+    λ::T
+end
+
+# The number of consecutive non-excised points from `c` in steps of `step`,
+# capped at `G`.
+@inline function _run(cls, c::Int, step::Int, ::Val{G}) where {G}
+    k = 0
+    while k < G && (@inbounds cls[c + (k + 1) * step]) != CLASS_EXCISED
+        k += 1
+    end
+    return k
+end
+
+"""
+    closure_provider(T, ::Val{G}, st, cls, cbase, tab, inv_h, λ[, ::Val{SYM} = Val(true)])
+        -> ClosureProvider
+
+The [`ClosureProvider`](@ref) of the point at linear index `cbase` of the
+class array `cls`, with its codes `k±` read from it along the three axes.
+`SYM` chooses the mixed derivative: the symmetric mean of the two nestings
+(the default, step X6) or steps X2b–X5's single nesting.
+"""
+@inline function closure_provider(::Type{T}, ::Val{G}, st::NTuple{3,Int}, cls,
+                                  cbase::Int, tab, inv_h, λ,
+                                  ::Val{SYM}=Val(true)) where {T,G,SYM}
+    # Spelled out rather than `ntuple(d -> …, Val(3))`: no closure (step X4).
+    km = (_run(cls, cbase, -st[1], Val(G)), _run(cls, cbase, -st[2], Val(G)),
+          _run(cls, cbase, -st[3], Val(G)))
+    kp = (_run(cls, cbase, st[1], Val(G)), _run(cls, cbase, st[2], Val(G)),
+          _run(cls, cbase, st[3], Val(G)))
+    return ClosureProvider{T,G,typeof(cls),typeof(tab),SYM}(st, cls, cbase, km, kp,
+                                                            tab, T(inv_h), T(λ))
+end
+
+# `∑_{j = lo}^{hi} w[j + G + 1, k⁻ + 1, k⁺ + 1] u[base + j·stride]`, left to
+# right from the first product; zero where the closure has no nodes.
+@inline function _contract(w, lo::Int, hi::Int, km::Int, kp::Int, G::Int, work,
+                           base::Int, stride::Int)
+    lo > hi && return zero(eltype(w)) * zero(eltype(work))
+    s = (@inbounds w[lo + G + 1, km + 1, kp + 1]) *
+        (@inbounds work[base + lo * stride])
+    j = lo + 1
+    while j ≤ hi
+        s += (@inbounds w[j + G + 1, km + 1, kp + 1]) *
+             (@inbounds work[base + j * stride])
+        j += 1
+    end
+    return s
+end
+
+@inline function _contract4(w, lo::Int, hi::Int, km::Int, kp::Int, iu::Int,
+                            G::Int, work, base::Int, stride::Int)
+    lo > hi && return zero(eltype(w)) * zero(eltype(work))
+    s = (@inbounds w[lo + G + 1, km + 1, kp + 1, iu]) *
+        (@inbounds work[base + lo * stride])
+    j = lo + 1
+    while j ≤ hi
+        s += (@inbounds w[j + G + 1, km + 1, kp + 1, iu]) *
+             (@inbounds work[base + j * stride])
+        j += 1
+    end
+    return s
+end
+
+@inline function _closure_axis(w, lot, hit, S::ClosureProvider{T,G}, work,
+                               base::Int, d::Int) where {T,G}
+    km = S.km[d]
+    kp = S.kp[d]
+    lo = Int(@inbounds lot[km + 1, kp + 1])
+    hi = Int(@inbounds hit[km + 1, kp + 1])
+    return _contract(w, lo, hi, km, kp, G, work, base, S.st[d])
+end
+
+@inline d1(S::ClosureProvider, work, base::Int, d::Int) =
+    _closure_axis(S.tab.d1, S.tab.d_lo, S.tab.d_hi, S, work, base, d)
+@inline d2(S::ClosureProvider, work, base::Int, d::Int) =
+    _closure_axis(S.tab.d2, S.tab.d_lo, S.tab.d_hi, S, work, base, d)
+@inline ko(S::ClosureProvider, work, base::Int, d::Int) =
+    _closure_axis(S.tab.ko, S.tab.ko_lo, S.tab.ko_hi, S, work, base, d)
+
+# One outer node `a` of the nested mixed derivative: the point's `i`-weight at
+# `a` times the `j`-closure of the point `x + a e_i`, with that point's own
+# codes along `j` — and whether that inner closure is the centered stencil.
+@inline function _dmix_term(S::ClosureProvider{T,G}, work, base::Int, i::Int,
+                            j::Int, a::Int, kmi::Int, kpi::Int) where {T,G}
+    ca = S.cbase + a * S.st[i]
+    kmj = _run(S.cls, ca, -S.st[j], Val(G))
+    kpj = _run(S.cls, ca, S.st[j], Val(G))
+    loj = Int(@inbounds S.tab.d_lo[kmj + 1, kpj + 1])
+    hij = Int(@inbounds S.tab.d_hi[kmj + 1, kpj + 1])
+    inner = _contract(S.tab.d1, loj, hij, kmj, kpj, G, work, base + a * S.st[i],
+                      S.st[j])
+    return (@inbounds S.tab.d1[a + G + 1, kmi + 1, kpi + 1]) * inner,
+           min(kmj, kpj) ≥ G - 1
+end
+
+# The nested mixed derivative, outer sum along `i` over the point's `i`-closure,
+# inner along `j` over each outer node's own `j`-closure (steps X2b–X5's), and
+# whether every closure it took was the centered stencil — which is when its
+# `(q + 1)²` box about the point holds no excised point, and the two nestings
+# are the same tensor product of centered weights.
+@inline function _dmix_nested(S::ClosureProvider{T,G}, work, base::Int, i::Int,
+                              j::Int) where {T,G}
+    kmi = S.km[i]
+    kpi = S.kp[i]
+    lo = Int(@inbounds S.tab.d_lo[kmi + 1, kpi + 1])
+    hi = Int(@inbounds S.tab.d_hi[kmi + 1, kpi + 1])
+    lo > hi && return zero(T) * zero(eltype(work)), false
+    acc, clean = _dmix_term(S, work, base, i, j, lo, kmi, kpi)
+    clean &= min(kmi, kpi) ≥ G - 1
+    a = lo + 1
+    while a ≤ hi
+        t, c = _dmix_term(S, work, base, i, j, a, kmi, kpi)
+        acc += t
+        clean &= c
+        a += 1
+    end
+    return acc, clean
+end
+
+# **The zone points' mixed derivative is symmetric in its two axes (added in
+# step X6**, proposed in step X4, `CODE.md`, "Excision", "What step X4
+# changed"): near the surface the `i`- and the `j`-closures differ, so the
+# nesting with the outer sum along `i` is not the one along `j`, and the
+# operator with a single nesting is not equivariant under `x ↔ y` — nor under
+# the rotating octant's quarter turn. With `SYM` it is `½(D_i D_j + D_j D_i)`
+# wherever its box meets the excised set; where it does not, both nestings are
+# the centered tensor product and the one along `i` is `mixed_stencil`'s, bit
+# for bit, as it was. The mean of two exact closures is exact to the same
+# degree, and `a + b == b + a` in floating point, so a point and its mirror
+# image across the diagonal take the same value bit for bit.
+@inline function dmix(S::ClosureProvider{T,G,C,TB,SYM}, work, base::Int, i::Int,
+                      j::Int) where {T,G,C,TB,SYM}
+    a, clean = _dmix_nested(S, work, base, i, j)
+    (SYM && !clean) || return a
+    b, _ = _dmix_nested(S, work, base, j, i)
+    return T(1 // 2) * (a + b)
+end
+
+@inline function adv(S::ClosureProvider{T,G}, β_d, ∂f_d, work, base::Int,
+                     d::Int) where {T,G}
+    iszero(S.λ) && return ∂f_d
+    iu = β_d ≥ 0 ? 2 : 1
+    km = S.km[d]
+    kp = S.kp[d]
+    lo = Int(@inbounds S.tab.lop_lo[km + 1, kp + 1, iu])
+    hi = Int(@inbounds S.tab.lop_hi[km + 1, kp + 1, iu])
+    L = S.inv_h * _contract4(S.tab.lop, lo, hi, km, kp, iu, G, work, base, S.st[d])
+    return (one(T) - S.λ) * ∂f_d + S.λ * L
+end
+
+# --- the frame-dragged faces (step X6) ----------------------------------------
+#
+# `CODE.md`, "Excision", "The frame-dragged faces (step X5)" and "What step X6
+# built": on a spinning hole's lego surface frame dragging turns the shift
+# *into* the excised set along some closure axes, `b/a = −s β^d/(α√γ^{dd}) <
+# 0` on the side `s` whose run `k_s` is shorter than `G`, and there the
+# per-axis closure of the advection is a downwind one-sided difference —
+# unstable on X1's frozen line, and on X5's plane where faces reach `b/a ≲
+# −1`. Step X5's rule (`hybrid-adv`) keeps every other stencil and, along such
+# an axis only, forms the **advective derivative** from the centered `D₁` with
+# each excised tap `Q` replaced by its extrapolation along the lattice
+# direction `e` (of 26) nearest the surface's outward normal at `Q`, from the
+# first consecutive non-excised points `Q + k e` inside the point's `G`-box,
+# at most three, with `extrapolation_table`'s weights. Which axes are
+# frame-dragged is decided once, from the state the problem is built on, and
+# stored as three rule bits per zone point; the direction of every excised
+# point is decided once, from the frozen geometry, and stored as a code — the
+# kernel reads codes, never the geometry. Both live in `ExcisionData.codes`,
+# an array of the classes' layout: rule bits at a zone point, the direction
+# code `1…26` at an excised one (the two sets are disjoint).
+
+"""
+    lattice_direction(code) -> NTuple{3,Int}
+
+The lattice direction a direction code stands for (added in step X6): the
+26 vectors of `{−1, 0, 1}³ ∖ 0`, numbered `1 … 26` with the first component
+slowest and the last fastest — step X5's `DIRS26` order
+(`test/excision_model.jl`) — and `0`, no direction, as the zero vector.
+"""
+@inline function lattice_direction(code::Integer)
+    iszero(code) && return (0, 0, 0)
+    k = Int(code) - 1
+    k ≥ 13 && (k += 1)                            # skip the zero vector
+    return (k ÷ 9 - 1, (k ÷ 3) % 3 - 1, k % 3 - 1)
+end
+
+"""
+    direction_code(n₁, n₂, n₃) -> Int
+
+The code (`1 … 26`, [`lattice_direction`](@ref)) of the lattice direction
+nearest the unit vector `n` — the largest `e·n/|e|`, the first in the codes'
+order on a tie, as step X5's `nearest_direction26` chose it (added in step
+X6).
+"""
+@inline function direction_code(n1::T, n2::T, n3::T) where {T}
+    best = 0
+    bd = -floatmax(T)
+    for c in 1:26
+        e = lattice_direction(c)
+        m = abs(e[1]) + abs(e[2]) + abs(e[3])          # |e|², each entry ±1 or 0
+        cosine = (e[1] * n1 + e[2] * n2 + e[3] * n3) / sqrt(T(m))
+        if cosine > bd
+            bd = cosine
+            best = c
+        end
+    end
+    return best
+end
+
+# The sources of the excised tap `Q` (class-array index `cQ`) of a
+# frame-dragged axis's stencil at a zone point `P`, `o = Q − P` in cells: the
+# first consecutive non-excised points `Q + k e`, `k = k₀ … k₀ + n − 1`, along
+# the lattice direction `e` of `Q`'s code, inside `P`'s `G`-box and at most
+# `G` steps out — as far as `extrapolation_table` holds — and at most `nmax`.
+# Returns `(k₀, n, stride of e)`; `n = 0` is a tap with no source, which the
+# build refuses. The census and the kernel call this one function.
+@inline function _tap_sources(cls, codes, cQ::Int, st::NTuple{3,Int}, o1::Int,
+                              o2::Int, o3::Int, ::Val{G}, ::Val{NMAX}) where {G,NMAX}
+    e = lattice_direction(@inbounds codes[cQ])
+    es = e[1] * st[1] + e[2] * st[2] + e[3] * st[3]
+    k0 = 0
+    n = 0
+    k = 1
+    while k ≤ G && n < NMAX && es != 0
+        (abs(o1 + k * e[1]) ≤ G && abs(o2 + k * e[2]) ≤ G &&
+         abs(o3 + k * e[3]) ≤ G) || break
+        if (@inbounds cls[cQ + k * es]) == CLASS_EXCISED
+            n > 0 && break
+        else
+            n == 0 && (k0 = k)
+            n += 1
+        end
+        k += 1
+    end
+    return k0, n, es
+end
+
+# `Σ_i w[i, k₀, n] u(Q + (k₀ + i − 1) e)`, from the first product.
+@inline function _extrapolate(ext, work, bQ::Int, k0::Int, n::Int, es::Int)
+    s = (@inbounds ext[1, k0, n]) * (@inbounds work[bQ + k0 * es])
+    i = 2
+    while i ≤ n
+        s += (@inbounds ext[i, k0, n]) * (@inbounds work[bQ + (k0 + i - 1) * es])
+        i += 1
+    end
+    return s
+end
+
+"""
+    DraggedProvider
+
+The stencils of a zone point with a **frame-dragged** axis (added in step X6;
+`CODE.md`, "Excision", "What step X6 built"): its [`ClosureProvider`](@ref)
+`c`, the codes array (rule bits at zone points, direction codes at excised
+ones), `extrapolation_table`'s weights and the point's rule bits. `d1`, `d2`,
+`dmix` and `ko` are the closure provider's everywhere; so is `adv` along an
+axis whose bit is clear. Along an axis whose bit is set, `adv` is `1/h`
+times the centered `D₁` with every excised tap `Q` replaced by its
+extrapolation from its sources ([`lattice_direction`](@ref)), and — with the
+lopsided blend on — that blended with the open lopsided row filled the same
+way. A centered `D₁` that reaches no excised point (`k_s = q/2`) is the
+`∂f_d` it is handed. No excised value is read: a tap is read where the class
+array says it is not excised, and extrapolated where it says it is.
+"""
+struct DraggedProvider{T,G,P,D,E,NMAX} <: StencilProvider
+    c::P
+    codes::D
+    ext::E
+    rule::Int
+end
+
+@inline dragged_provider(c::ClosureProvider{T,G}, codes, ext::SArray{Tuple{A,B,C}},
+                         rule::Integer) where {T,G,A,B,C} =
+    DraggedProvider{T,G,typeof(c),typeof(codes),typeof(ext),A}(c, codes, ext, Int(rule))
+
+@inline d1(S::DraggedProvider, work, base::Int, d::Int) = d1(S.c, work, base, d)
+@inline d2(S::DraggedProvider, work, base::Int, d::Int) = d2(S.c, work, base, d)
+@inline dmix(S::DraggedProvider, work, base::Int, i::Int, j::Int) =
+    dmix(S.c, work, base, i, j)
+@inline ko(S::DraggedProvider, work, base::Int, d::Int) = ko(S.c, work, base, d)
+
+# The value the rule's stencil takes at offset `j` along `d`: the state at a
+# non-excised tap, the extrapolation at an excised one (`NaN` where there is
+# no source — which the build refuses, so it is never met).
+@inline function _dragged_value(S::DraggedProvider{T,G,P,D,E,NMAX}, work, base::Int,
+                                d::Int, j::Int) where {T,G,P,D,E,NMAX}
+    c = S.c
+    std = c.st[d]
+    cQ = c.cbase + j * std
+    bQ = base + j * std
+    (@inbounds c.cls[cQ]) == CLASS_EXCISED || return @inbounds work[bQ]
+    k0, n, es = _tap_sources(c.cls, S.codes, cQ, c.st, d == 1 ? j : 0,
+                             d == 2 ? j : 0, d == 3 ? j : 0, Val(G), Val(NMAX))
+    n == 0 && return T(NaN)
+    return _extrapolate(S.ext, work, bQ, k0, n, es)
+end
+
+# `Σ_k w[k] ũ(x + (lo + k − 1) e_d)`, left to right from the first product —
+# `axis_stencil`'s order, so that where no tap is excised it is that
+# contraction bit for bit. Generated with an `:inline` meta, as the kernel's
+# stencils are.
+@generated function _dragged_stencil(S::DraggedProvider, w::SVector{n}, lo::Int,
+                                     work, base::Int, d::Int) where {n}
+    ex = :(w[1] * _dragged_value(S, work, base, d, lo))
+    for k in 2:n
+        ex = :($ex + w[$k] * _dragged_value(S, work, base, d, lo + $(k - 1)))
+    end
+    return Expr(:block, Expr(:meta, :inline), ex)
+end
+
+@inline function adv(S::DraggedProvider{T,G}, β_d, ∂f_d, work, base::Int,
+                     d::Int) where {T,G}
+    c = S.c
+    (S.rule >> (d - 1)) & 1 == 1 || return adv(c, β_d, ∂f_d, work, base, d)
+    # The excised side is the one whose run is shorter than `G` (the other is
+    # clear to `G`: `closure_admissible`). Its centered `D₁` reaches excised
+    # taps only where that run is shorter than `q/2 = G − 1`.
+    R = min(c.km[d], c.kp[d]) ≥ G - 1 ? ∂f_d :
+        c.inv_h * _dragged_stencil(S, derivative_weights(T, Val(2G - 2), Val(1)),
+                                   1 - G, work, base, d)
+    iszero(c.λ) && return R
+    L = β_d ≥ 0 ?
+        c.inv_h * _dragged_stencil(S, lopsided_centered_weights(T, Val(2G - 2), Val(1)),
+                                   lopsided_first(Val(2G - 2), Val(1)), work, base, d) :
+        c.inv_h * _dragged_stencil(S, lopsided_centered_weights(T, Val(2G - 2), Val(-1)),
+                                   lopsided_first(Val(2G - 2), Val(-1)), work, base, d)
+    return (one(T) - c.λ) * R + c.λ * L
+end
+
+"""
+    closure_arrays(T, ::Val{q}, dissipation, backend) -> NamedTuple
+
+[`closure_table`](@ref)`(T, Val(q); dissipation)` as arrays on `backend` —
+the zone kernel's argument (added in step X2b). Step X1 measured the
+`isbits` table at 4624 bytes at `q = 4`, `Float64`, above CUDA's classic
+4 kB kernel-parameter limit, so it travels as device arrays; a `NamedTuple`
+of them, which KernelAbstractions adapts field by field.
+"""
+function closure_arrays(::Type{T}, ::Val{q}, dissipation::Symbol,
+                        backend) where {T,q}
+    ct = closure_table(T, Val(q); dissipation=dissipation)
+    up(a) = to_backend(backend, Array(a))
+    return (d1=up(ct.d1), d2=up(ct.d2), ko=up(ct.ko), lop=up(ct.lop),
+            d_lo=up(ct.d_lo), d_hi=up(ct.d_hi), ko_lo=up(ct.ko_lo),
+            ko_hi=up(ct.ko_hi), lop_lo=up(ct.lop_lo), lop_hi=up(ct.lop_hi))
+end
+
+# --- the zone kernel ---------------------------------------------------------------
+
+"""
+    gh_zone_kernel!(du, work, Hwork, origins, spacings, damping, γ2, ε_KO, t,
+                    cls, zoneblocks, tab, blend, ::Val{G}, ::Val{q},
+                    ::Val{HASH}, ::Val{DISS}, ::Val{SYM})
+
+`F(u)` at the **zone** points of an `:excised` problem with the closures
+(added in step X2b): [`gh_rhs_store!`](@ref)'s provider form with a
+[`ClosureProvider`](@ref), everything else — `γ0`, `ε_KO/h`, the gauge source
+— computed exactly as [`gh_rhs_kernel!`](@ref) computes it. Launched right
+after the main kernel, over every owned point of every block, with a
+block-uniform early exit through `zoneblocks` (TreeAMR has no launch over a
+subset of blocks), and writing `du` at zone points only — the main kernel
+wrote every other point.
+
+**(Amended in step X4:** the store, not the two-vector form: `main`'s head and
+Π components through the closure provider, each component stored as it is
+finished, and no closure in the kernel's own body. The provider's contractions
+stay generic — run-time loops over the table's rows — since the zone is a
+shell of `10⁴`–`10⁵` points.**)**
+
+**(Amended in step X6:** `SYM` is the mixed derivative's nesting,
+[`Excision`](@ref)'s `mixed`, symmetric by default. The frame-dragged rule is
+not in this kernel: it is [`gh_dragged_kernel!`](@ref), launched after it,
+which overwrites the zone points with a frame-dragged axis. So every other
+zone point is computed by this kernel, the same compiled code with or without
+the rule, and the rule changes nothing where no axis is frame-dragged — bit
+for bit, whatever the compiler makes of the rule's code.**)**
+"""
+@kernel function gh_zone_kernel!(du, @Const(work), Hwork, @Const(origins),
+                                 @Const(spacings), damping, γ2, ε_KO, t,
+                                 @Const(cls), @Const(zoneblocks), tab, blend,
+                                 ::Val{G}, ::Val{q}, ::Val{HASH},
+                                 ::Val{DISS}, ::Val{SYM}) where {G,q,HASH,DISS,SYM}
+    I = @index(Global, NTuple)
+    b = I[4]
+    if zoneblocks[b]
+        st, sv, sb = work_strides(work)
+        # The point in the class array: the working array's spatial strides,
+        # one variable.
+        cb = 1 + (b - 1) * sv + (I[1] + G[1] - 1) * st[1] +
+             (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
+        if cls[cb] == CLASS_ZONE
+            T = eltype(du)
+            inner = (I[1], I[2], I[3])
+            inv_h = inv(spacings[b])
+            var = 1 + (b - 1) * sb + (I[1] + G[1] - 1) * st[1] +
+                  (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
+            x = point_position(origins, spacings, b, I)
+            γ0 = damping_rate(damping, t, x)
+            εh = dissipation_rate(ε_KO, t, x) * inv_h
+            S = closure_provider(T, Val(G[1]), st, cls, cb, tab, inv_h,
+                                 blend_weight(blend, x), Val(SYM))
+            o, sd = state_offset(du, I)
+            gh_rhs_store!(du, o, sd, S, T, work, Hwork, inner, b, var, sv, inv_h, γ0,
+                          γ2, εh, Val(HASH), Val(DISS))
+        end
+    end
+end
+
+"""
+    gh_dragged_kernel!(du, work, Hwork, origins, spacings, damping, γ2, ε_KO, t,
+                       cls, codes, dragblocks, tab, ext, blend, ::Val{G}, ::Val{q},
+                       ::Val{HASH}, ::Val{DISS}, ::Val{SYM})
+
+`F(u)` at the zone points with a **frame-dragged** axis (added in step X6;
+`CODE.md`, "Excision", "What step X6 built"): [`gh_zone_kernel!`](@ref)'s
+call with a [`DraggedProvider`](@ref) — the point's closure provider, the
+codes array, `extrapolation_table`'s weights `ext` and the point's rule
+bits — in place of the closure provider. Launched after the zone kernel,
+when the build found such an axis, with a block-uniform early exit through
+`dragblocks` (the blocks holding one), it overwrites the `du` the zone kernel
+wrote at those points and nothing else: a point whose rule bits are clear is
+not touched. The zone kernel's work at the overwritten points — 5–12 % of
+the zone at `a = 3/5` — is the price of keeping every other zone point's
+code the code it was.
+"""
+@kernel function gh_dragged_kernel!(du, @Const(work), Hwork, @Const(origins),
+                                    @Const(spacings), damping, γ2, ε_KO, t,
+                                    @Const(cls), @Const(codes), @Const(dragblocks), tab,
+                                    ext, blend, ::Val{G}, ::Val{q}, ::Val{HASH},
+                                    ::Val{DISS}, ::Val{SYM}) where {G,q,HASH,DISS,SYM}
+    I = @index(Global, NTuple)
+    b = I[4]
+    if dragblocks[b]
+        st, sv, sb = work_strides(work)
+        cb = 1 + (b - 1) * sv + (I[1] + G[1] - 1) * st[1] +
+             (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
+        rule = Int(codes[cb])
+        if cls[cb] == CLASS_ZONE && rule != 0
+            T = eltype(du)
+            inner = (I[1], I[2], I[3])
+            inv_h = inv(spacings[b])
+            var = 1 + (b - 1) * sb + (I[1] + G[1] - 1) * st[1] +
+                  (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
+            x = point_position(origins, spacings, b, I)
+            γ0 = damping_rate(damping, t, x)
+            εh = dissipation_rate(ε_KO, t, x) * inv_h
+            S = dragged_provider(closure_provider(T, Val(G[1]), st, cls, cb, tab, inv_h,
+                                                  blend_weight(blend, x), Val(SYM)),
+                                 codes, ext, rule)
+            o, sd = state_offset(du, I)
+            gh_rhs_store!(du, o, sd, S, T, work, Hwork, inner, b, var, sv, inv_h, γ0,
+                          γ2, εh, Val(HASH), Val(DISS))
+        end
+    end
+end
+
+# --- the classes ------------------------------------------------------------------
+
+# Pass 1: the excised bit at every owned point, from the masks' predicate.
+@kernel function _excised_bit_kernel!(bits, @Const(origins), @Const(spacings),
+                                      mask, ::Val{G}) where {G}
+    I = @index(Global, NTuple)
+    b = I[4]
+    c = ntuple(d -> I[d] + G[d], Val(3))
+    T = eltype(bits)
+    bits[c..., 1, b] = is_evolved(mask, point_position(origins, spacings, b, I)) ?
+                       zero(T) : one(T)
+end
+
+@inline _bit(bits, i::Int) = (@inbounds bits[i]) > one(eltype(bits)) / 2
+
+# Whether a stencil of the right-hand side at the point `base` reads an
+# excised point: the dissipation's `±G` along each axis, and the mixed
+# derivatives' plane boxes of half-width `q/2`.
+@inline function _reads_excised(bits, base::Int, st::NTuple{3,Int}, ::Val{G},
+                                ::Val{q}) where {G,q}
+    found = false
+    for d in 1:3, a in 1:G
+        found |= _bit(bits, base + a * st[d]) | _bit(bits, base - a * st[d])
+    end
+    r = q ÷ 2
+    for (i, j) in ((1, 2), (1, 3), (2, 3)), a in (-r):r, e in (-r):r
+        found |= _bit(bits, base + a * st[i] + e * st[j])
+    end
+    return found
+end
+
+# Pass 3, over every stored point: excised from the exchanged bit; at an owned
+# point zone where a stencil reads an excised point, centered otherwise; a
+# ghost that is not excised is marked centered, a placeholder never read.
+@kernel function _class_kernel!(cls, @Const(bits), ::Val{G}, ::Val{q},
+                                ::Val{N}) where {G,q,N}
+    S = @index(Global, NTuple)                 # a stored index
+    b = S[4]
+    st, sv, _ = work_strides(bits)
+    base = 1 + (b - 1) * sv + (S[1] - 1) * st[1] + (S[2] - 1) * st[2] +
+           (S[3] - 1) * st[3]
+    owned = (G[1] < S[1] ≤ G[1] + N) & (G[2] < S[2] ≤ G[2] + N) &
+            (G[3] < S[3] ≤ G[3] + N)
+    cls[base] = _bit(bits, base) ? CLASS_EXCISED :
+                owned && _reads_excised(bits, base, st, Val(G[1]), Val(q)) ?
+                CLASS_ZONE : CLASS_CENTERED
+end
+
+# Pass 4 (step X6), over every stored point: the direction code of every
+# excised point — the lattice direction nearest the excision surface's
+# outward normal there, from the frozen geometry (`excision_normal`; a ghost
+# at its own position, which on an octant is the image of its owner's) — and
+# `0` everywhere else. The census then writes the rule bits of the zone points
+# into the same array.
+@kernel function _direction_kernel!(codes, @Const(cls), @Const(origins),
+                                    @Const(spacings), interior, t,
+                                    ::Val{G}) where {G}
+    S = @index(Global, NTuple)                 # a stored index
+    b = S[4]
+    n1, n2, n3 = size(cls, 1), size(cls, 2), size(cls, 3)
+    c = 1 + (b - 1) * (n1 * n2 * n3) + (S[1] - 1) + (S[2] - 1) * n1 +
+        (S[3] - 1) * (n1 * n2)
+    if cls[c] == CLASS_EXCISED
+        x = point_position(origins, spacings, b,
+                           (S[1] - G[1], S[2] - G[2], S[3] - G[3]))
+        n = excision_normal(interior, t, x)
+        codes[c] = UInt8(direction_code(n[1], n[2], n[3]))
+    else
+        codes[c] = 0x00
+    end
+end
+
+# The census at the build, over the owned points (one launch): the zone and
+# excised indicators, the inadmissible zone points, and at every zone point
+# the shift's component toward the excised side along every closure axis
+# (`k_s < G`) as `b/a`, `b = −s β^d`, `a = α√γ^{dd}` — the least, and the
+# count of negative ones — and the dissipation there. From step X6 a negative
+# one sets the axis's **rule bit** (written into `codes`, the rule frozen for
+# the problem's life), and every excised tap the rule's stencils read along
+# it is checked for a source.
+@kernel function _census_kernel!(out, codes, @Const(cls), @Const(work),
+                                 @Const(origins), @Const(spacings), ε_KO, t, blend,
+                                 geometry, ::Val{G}, ::Val{NMAX}) where {G,NMAX}
+    I = @index(Global, NTuple)
+    b = I[4]
+    inner = ntuple(d -> I[d], Val(3))
+    T = eltype(out)
+    st, sv, sb = work_strides(work)
+    # The class array has the working array's spatial layout, one variable.
+    cb = 1 + (b - 1) * sv + (I[1] + G[1] - 1) * st[1] +
+         (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
+    cl = cls[cb]
+    out[inner..., EXM_BAND, b] = cl == CLASS_ZONE ? one(T) : zero(T)
+    out[inner..., EXM_NONFINITE, b] = cl == CLASS_EXCISED ? one(T) : zero(T)
+    if cl == CLASS_ZONE
+        var = 1 + (b - 1) * sb + (I[1] + G[1] - 1) * st[1] +
+              (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
+        hv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (v - 1) * sv]),
+                                  Val(NC)))
+        x = point_position(origins, spacings, b, I)
+        bad, rmin, nneg, rule, nosrc =
+            _census_at(cls, codes, cb, st, hv, blend_weight(blend, x) > 0, Val(G[1]),
+                       Val(NMAX))
+        codes[cb] = UInt8(rule)
+        out[inner..., EXM_NORMAL, b] = bad
+        out[inner..., EXM_AXIS, b] = rmin
+        out[inner..., EXM_FACES, b] = dissipation_rate(ε_KO, t, x)
+        out[inner..., EXM_INTO, b] = nneg
+        out[inner..., EXM_DRAGGED, b] = T(count_ones(rule))
+        out[inner..., EXM_DFACES, b] = nosrc
+    else
+        out[inner..., EXM_NORMAL, b] = zero(T)
+        out[inner..., EXM_AXIS, b] = floatmax(T)
+        out[inner..., EXM_FACES, b] = floatmax(T)
+        out[inner..., EXM_INTO, b] = zero(T)
+        out[inner..., EXM_DRAGGED, b] = zero(T)
+        out[inner..., EXM_DFACES, b] = zero(T)
+    end
+    out[inner..., EXM_INFLOW, b] = zero(T)
+    out[inner..., EXM_FLIPS, b] = zero(T)
+    # Step X8: an excised point the geometry itself evolves was excised by the
+    # shave.
+    out[inner..., EXM_SHAVED, b] =
+        cl == CLASS_EXCISED &&
+        is_evolved(geometry, point_position(origins, spacings, b, I)) ? one(T) : zero(T)
+end
+
+# Whether the shift points into the excised set along a closure axis — the
+# frame-dragged axes' criterion, `b/a < 0` on the side whose run is shorter
+# than `G` — and `b/a` per side: one function for the census, which sets the
+# rule bits from it, and the outflow monitor, which compares them with it, so
+# that "no flip" means the bits a rebuild from this state would set.
+@inline function _axis_ratio(β, a, s::Int, d::Int)
+    return -s * β[d] / a
+end
+
+@inline function _census_at(cls, codes, cb::Int, st::NTuple{3,Int},
+                            hv::SVector{NC,T}, blended::Bool, ::Val{G},
+                            ::Val{NMAX}) where {T,G,NMAX}
+    _, _, α, β, γu, _ = metric_quantities(_sym4(hv))
+    bad = zero(T)
+    rmin = floatmax(T)
+    nneg = zero(T)
+    nosrc = zero(T)
+    rule = 0
+    for d in 1:3
+        km = _run(cls, cb, -st[d], Val(G))
+        kp = _run(cls, cb, st[d], Val(G))
+        max(km, kp) ≥ G || (bad = one(T))
+        a = α * sqrt(γu[d, d])
+        for (s, k) in ((-1, km), (1, kp))
+            k < G || continue
+            ratio = _axis_ratio(β, a, s, d)
+            rmin = min(rmin, ratio)
+            ratio < 0 || continue
+            nneg += one(T)
+            rule |= 1 << (d - 1)
+            # The excised taps the rule's stencils read on that side: the
+            # centered `D₁`'s, to `q/2 = G − 1`, and where the lopsided blend
+            # is on the lopsided row's, to `G` (its upwind side is this one).
+            for j in (k + 1):(blended ? G : G - 1)
+                cQ = cb + s * j * st[d]
+                (@inbounds cls[cQ]) == CLASS_EXCISED || continue
+                o = s * j
+                _, n, _ = _tap_sources(cls, codes, cQ, st, d == 1 ? o : 0,
+                                       d == 2 ? o : 0, d == 3 ? o : 0, Val(G),
+                                       Val(NMAX))
+                n == 0 && (nosrc += one(T))
+            end
+        end
+    end
+    return bad, rmin, nneg, rule, nosrc
+end
+
+# --- the outflow monitor --------------------------------------------------------
+
+"""
+    excision_normal(interior, t, x) -> SVector{3}
+
+The outward unit normal covector of the excision surface's level set through
+`x` (added in step X2b): radial for the sphere; for the tracked geometry the
+gradient of `|y − c| − r_h(n̂(y))`, by central differences of relative step
+`∛eps`, which for a diagnostic margin is ample.
+"""
+@inline function excision_normal(int::Interior{T}, t, x) where {T}
+    c = center_at(int.center, t)
+    d = SVector{3,T}(x[1] - c[1], x[2] - c[2], x[3] - c[3])
+    r = sqrt(d[1] * d[1] + d[2] * d[2] + d[3] * d[3])
+    return iszero(r) ? SVector{3,T}(zero(T), zero(T), one(T)) : d / r
+end
+
+@inline function excision_normal(int::FittedInterior{T}, t, x) where {T}
+    c = center_at(int.center, t)
+    p = SVector{3,T}(x[1] - c[1], x[2] - c[2], x[3] - c[3])
+    r = sqrt(p[1] * p[1] + p[2] * p[2] + p[3] * p[3])
+    iszero(r) && return SVector{3,T}(zero(T), zero(T), one(T))
+    δ = cbrt(eps(T)) * r
+    F(y) = (ry = sqrt(y[1] * y[1] + y[2] * y[2] + y[3] * y[3]);
+            ry - shape_radius(int, y / ry))
+    g = SVector{3,T}(ntuple(Val(3)) do k
+        e = SVector{3,T}(ntuple(l -> l == k ? δ : zero(T), Val(3)))
+        (F(p + e) - F(p - e)) / (2δ)
+    end)
+    return g / sqrt(g[1] * g[1] + g[2] * g[2] + g[3] * g[3])
+end
+
+# The record's numbers at one band point: the non-finite count, the normal
+# margin `b_n/a_n − 1`, and over the faces (`(d, s)` with the immediate
+# neighbour excised, step X1's definition) the least `b/a`, their number and
+# the inflow-like ones (`b/a < 1`); over the closure axes (`k_s < G`) the ones
+# whose shift points into the excised set (`b < 0`). From step X6, with the
+# point's rule bits `rule`: its frame-dragged axes, the faces on them, and the
+# axes whose shift's sign now disagrees with its bit — those whose shift
+# points in without the rule, or out with it.
+@inline function _outflow_at(cls, cb::Int, st::NTuple{3,Int}, hv::SVector{NC,T},
+                             Πv::SVector{NC,T}, n, rule::Int, ::Val{G}) where {T,G}
+    nf = zero(T)
+    for v in 1:NC
+        isfinite(hv[v]) || (nf += one(T))
+        isfinite(Πv[v]) || (nf += one(T))
+    end
+    _, _, α, β, γu, _ = metric_quantities(_sym4(hv))
+    bn = β[1] * n[1] + β[2] * n[2] + β[3] * n[3]
+    an = α * sqrt(n[1] * (γu[1, 1] * n[1] + γu[1, 2] * n[2] + γu[1, 3] * n[3]) +
+                  n[2] * (γu[2, 1] * n[1] + γu[2, 2] * n[2] + γu[2, 3] * n[3]) +
+                  n[3] * (γu[3, 1] * n[1] + γu[3, 2] * n[2] + γu[3, 3] * n[3]))
+    normal = bn / an - one(T)
+    rmin = floatmax(T)
+    faces = zero(T)
+    inflow = zero(T)
+    into = zero(T)
+    dfaces = zero(T)
+    now = 0
+    for d in 1:3
+        a = α * sqrt(γu[d, d])
+        dragged = (rule >> (d - 1)) & 1 == 1
+        for s in (-1, 1)
+            ratio = _axis_ratio(β, a, s, d)
+            if (@inbounds cls[cb + s * st[d]]) == CLASS_EXCISED
+                faces += one(T)
+                rmin = min(rmin, ratio)
+                ratio < 1 && (inflow += one(T))
+                dragged && (dfaces += one(T))
+            end
+            if _run(cls, cb, s * st[d], Val(G)) < G && ratio < 0
+                into += one(T)
+                now |= 1 << (d - 1)
+            end
+        end
+    end
+    return nf, normal, rmin, faces, inflow, into, T(count_ones(rule)), dfaces,
+           T(count_ones(xor(now, rule)))
+end
+
+@kernel function _outflow_kernel!(out, @Const(state), @Const(cls), @Const(codes),
+                                  @Const(origins), @Const(spacings), interior, t,
+                                  ::Val{G}) where {G}
+    I = @index(Global, NTuple)
+    b = I[4]
+    inner = ntuple(d -> I[d], Val(3))
+    T = eltype(out)
+    n1, n2, n3 = size(cls, 1), size(cls, 2), size(cls, 3)
+    st = (1, n1, n1 * n2)
+    cb = 1 + (b - 1) * (n1 * n2 * n3) + (I[1] + G[1] - 1) * st[1] +
+         (I[2] + G[2] - 1) * st[2] + (I[3] + G[3] - 1) * st[3]
+    if cls[cb] == CLASS_ZONE
+        hv = SVector{NC,T}(ntuple(v -> state[inner..., v, b], Val(NC)))
+        Πv = SVector{NC,T}(ntuple(v -> state[inner..., NC + v, b], Val(NC)))
+        x = point_position(origins, spacings, b, I)
+        nf, normal, rmin, faces, inflow, into, dragged, dfaces, flips =
+            _outflow_at(cls, cb, st, hv, Πv, excision_normal(interior, t, x),
+                        Int(codes[cb]), Val(G[1]))
+        out[inner..., EXM_BAND, b] = one(T)
+        out[inner..., EXM_NONFINITE, b] = nf
+        out[inner..., EXM_NORMAL, b] = normal
+        out[inner..., EXM_AXIS, b] = rmin
+        out[inner..., EXM_FACES, b] = faces
+        out[inner..., EXM_INFLOW, b] = inflow
+        out[inner..., EXM_INTO, b] = into
+        out[inner..., EXM_DRAGGED, b] = dragged
+        out[inner..., EXM_DFACES, b] = dfaces
+        out[inner..., EXM_FLIPS, b] = flips
+        out[inner..., EXM_SHAVED, b] = zero(T)
+    else
+        out[inner..., EXM_BAND, b] = zero(T)
+        out[inner..., EXM_NONFINITE, b] = zero(T)
+        out[inner..., EXM_NORMAL, b] = floatmax(T)
+        out[inner..., EXM_AXIS, b] = floatmax(T)
+        out[inner..., EXM_FACES, b] = zero(T)
+        out[inner..., EXM_INFLOW, b] = zero(T)
+        out[inner..., EXM_INTO, b] = zero(T)
+        out[inner..., EXM_DRAGGED, b] = zero(T)
+        out[inner..., EXM_DFACES, b] = zero(T)
+        out[inner..., EXM_FLIPS, b] = zero(T)
+        out[inner..., EXM_SHAVED, b] = zero(T)
+    end
+end
+
+# --- the problem's excision -------------------------------------------------------
+
+"""
+    ExcisionData
+
+What an `:excised` [`GHProblem`](@ref) carries (added in step X2b), built
+once by [`build_excision`](@ref): the per-point classes (`UInt8`, one per
+stored point, the working array's spatial layout), a device `Bool` per block
+— whether it holds a zone point — the closure table as device arrays, the
+lopsided blend (`nothing` when off), a ghost-free field set of
+[`NEXM`](@ref) variables the census and the outflow monitor write into, the
+geometry it was built for, the band's width `W`, the surface's spacing `h`,
+and the counts over the owned points.
+
+**(Amended in step X6:** `codes`, the frame-dragged rule's per-point array
+of the classes' layout — the rule bits at a zone point, the direction code
+at an excised one; `drag`, the frame-dragged kernel's `(codes, ext, blocks)`
+— with `extrapolation_table`'s weights and a device `Bool` per block holding
+a frame-dragged axis — or `nothing` where no axis is frame-dragged (the
+kernel is then not launched); `valmixed`, the mixed derivative's nesting;
+and `ndragged`, the frame-dragged (zone point, axis) pairs.**)**
+
+**(Amended in step X8:** `nshaved`, the owned points the shave excised —
+the classes' excised set is the geometry's with its lego corners shaved
+([`ShavedMask`](@ref)), and the problem's masks are that set's wherever this
+is positive ([`evolved_mask`](@ref)).**)**
+"""
+struct ExcisionData{T,C,Z,TB,BL,M,I,D,R,SYM}
+    classes::C
+    zoneblocks::Z
+    table::TB
+    blend::BL
+    monitor::M
+    interior::I
+    codes::D
+    drag::R
+    valmixed::Val{SYM}
+    W::T
+    h::T
+    q::Int
+    nexcised::Int
+    nzone::Int
+    ncentered::Int
+    nzoneblocks::Int
+    ndragged::Int
+    min_ratio::Float64              # the least b/a over the closure axes at the build
+    nshaved::Int                    # the owned points the shave excised (step X8)
+end
+
+excision_classes(::Nothing) = nothing
+excision_classes(ex::ExcisionData) = ex.classes
+excision_blend(::Nothing) = nothing
+excision_blend(ex::ExcisionData) = ex.blend
+
+"""
+    check_excision_mesh(forest, interior, q; t = 0) -> h
+
+`CODE.md`'s third check (added in step X2b): every leaf within `(G + q + 2)
+h` of the excision surface, on either side, is on **one level**, so that no
+prolongation reads excised data into a ghost an evolved stencil reads — a
+fine ghost at a coarse-fine face is interpolated from `(q + 2)/2` coarse
+points around it. `h` is the spacing of the blocks containing the surface,
+which it returns. It throws, naming the levels and the remedy.
+
+**(Amended in step X8:** with the shave the excised set reaches up to `h/√3`
+beyond the geometric surface ([`ShavedMask`](@ref)). The neighbourhood is
+not widened for it: what a prolongation needs is `G + (q + 2)/2` cells, and
+`(G + q + 2) h` exceeds that plus `h/√3` by `(q + 2)/2 − 1/√3` cells, 1.4 at
+`q = 2` (proposed in step X8).**)**
+"""
+function check_excision_mesh(forest::Forest{3}, int::Interior{T,:excised}, q::Integer;
+                             t=zero(T)) where {T}
+    h, _ = layer_spacing(forest, int, T(t))
+    w = (q ÷ 2 + 1 + q + 2) * h
+    return _check_one_level(forest, center_at(int.center, T(t)), int.r_1 - w,
+                            int.r_1 + w, w, h)
+end
+
+function check_excision_mesh(forest::Forest{3}, int::FittedInterior{T,:excised},
+                             q::Integer; t=zero(T)) where {T}
+    c = center_at(int.center, T(t))
+    h, _ = _annulus_spacing(forest, T, c, int.r_in - int.offset,
+                            int.r_out - int.offset)
+    w = (q ÷ 2 + 1 + q + 2) * h
+    return _check_one_level(forest, c, (int.r_in - int.offset) - w,
+                            (int.r_out - int.offset) + w, w, h)
+end
+
+function _check_one_level(forest, c, lo, hi, w, h)
+    T = typeof(h)
+    levels = Int[]
+    for k in forest.leaves
+        _box_meets_annulus(block_extent(T, forest, k), c, lo, hi) || continue
+        push!(levels, level(k))
+    end
+    isempty(levels) && throw(ArgumentError(
+        "no block of this forest meets the excision surface's neighbourhood " *
+        "[$lo, $hi] about $(Tuple(c)): the surface is outside the domain."))
+    allequal(levels) || throw(ArgumentError(
+        "the blocks within (G + q + 2) h = $w of the excision " *
+        "surface lie on levels $(sort!(unique(levels))): every leaf meeting " *
+        "[$lo, $hi] about $(Tuple(c)) must be on one level (CODE.md, " *
+        "\"Excision\", \"Checks\"). A coarse-fine face there prolongs from " *
+        "(q + 2)/2 coarse points around each fine ghost, and near the surface " *
+        "those include excised data, which would reach an evolved stencil. Put " *
+        "the surface inside one refinement level — a hole_forest shell that " *
+        "covers the annulus, or a deeper r_1."))
+    return h
+end
+
+"""
+    check_excision_case(case, interior, q)
+
+The refusals of an `:excised` problem that the case decides (added in step
+X2b; `CODE.md`, "Excision", and `PLAN.md`'s hand-over from step X1), each
+saying why:
+
+- **`ε_KO > 0`**: without dissipation the closures grow as the interior
+  itself does (`+0.08` to `+0.14/M` on X1's plane), and the extrapolation
+  family at `+1–4/M` on the surface; a profile that vanishes at the surface
+  is refused by [`build_excision`](@ref), which reads it at every zone point;
+- **a static hole**: the geometry is frozen for the run, and a point that
+  leaves the excised set would need values — the moving round's;
+- **no range projection**: the excised set is never read and the band is
+  evolved, so there is nothing for a clamp to guard, and a fourth reason to
+  write the state is not wanted;
+- **`m ≥ ⌈√3 G⌉` with a `Horizon`**: the finder's footprint reaches `√3 G h`
+  from its query on a diagonal and must not touch the excised set — `6`
+  cells at `q = 4`, `4` at `q = 2`. **(Amended in step X8:** with the shave
+  the excised set reaches up to `h/√3` beyond the surface, so `m ≥ ⌈√3 G +
+  1/√3⌉` — still `6` at `q = 4`, `5` at `q = 2`.**)**
+"""
+function check_excision_case(case::GHCase{T}, int, q::Integer) where {T}
+    G = q ÷ 2 + 1
+    has_dissipation(case.ε_KO) || throw(ArgumentError(
+        "an :excised hole needs Kreiss–Oliger dissipation at its surface, and " *
+        "this case has ε_KO = $(case.ε_KO): without it the per-axis closures " *
+        "grow as the interior itself does (+0.08 to +0.14/M on step X1's " *
+        "plane) and the extrapolation family at +1 to +4/M on the surface " *
+        "(SINGULARITY_HANDLING.md, \"Excision: the analysis (step X1)\"). Use " *
+        "GHSO2's recipe, ε_KO ≈ 1/2."))
+    iszero(case.center.v) || throw(ArgumentError(
+        "an :excised hole is static in this round (CODE.md, \"Excision\"): its " *
+        "geometry is frozen for the run, and a hole that moves leaves points " *
+        "behind it that were excised and have no values — the moving round's " *
+        "problem. This case moves at $(Tuple(case.center.v))."))
+    case.bounds === nothing || throw(ArgumentError(
+        "an :excised hole takes no range projection: its excised set is never " *
+        "read and its band is evolved by the equations, so a clamp has nothing " *
+        "to guard and would be a fourth writer of the state. Leave `bounds = " *
+        "nothing`."))
+    shave = excision_shave(int.excision)
+    need = ceil(Int, sqrt(3) * G + (shave ? 1 / sqrt(3) : 0.0))
+    case.horizon === nothing || int.margin ≥ need || throw(ArgumentError(
+        "this :excised case finds its horizon, and the finder's interpolation " *
+        "footprint reaches √3 G h = $(sqrt(3) * G) h from a query on a " *
+        "diagonal: with the surface m = $(int.margin) cells inside the " *
+        "horizon it would read the excised set, so m ≥ ⌈√3 G⌉" *
+        (shave ? " — and with the shaved corners, which reach h/√3 beyond the " *
+                 "surface, ⌈√3 G + 1/√3⌉" : "") *
+        " = $need at q = $q (CODE.md, \"Excision\", \"The least depth\")."))
+    return nothing
+end
+
+"""
+    build_excision(U, schedule, case, interior; q, t = 0) -> ExcisionData
+
+The classes of an `:excised` problem and everything its kernels need (added
+in step X2b), in three passes over the mesh:
+
+1. the excised bit at every owned point, `!is_evolved(interior_mask(int, t),
+   x)` — the masks' own predicate, so that the classes, the norms, the speed
+   and the horizon guard exclude the same set;
+2. one `fill_ghosts!` of a one-variable field set with even parity and the
+   identity rotation — the bit is a scalar, which a mirror and a quarter turn
+   leave as it is — so that every ghost is its owner's bit, an octant's walls
+   mirror it and a rotating octant's seam turns it (the outer faces' ghosts
+   take the predicate at their own positions);
+3. a pass over every stored point writing the class — excised, zone (an
+   owned point some stencil of the right-hand side would read an excised
+   point through: the dissipation's `±G` along an axis, the mixed
+   derivatives' boxes of half-width `q/2`) or centered.
+
+Then a census of the owned points, and the refusals that need the mesh or
+the state: [`check_excision_case`](@ref)'s, the one level at the surface
+([`check_excision_mesh`](@ref)), a zone point with no admissible closure
+(excised on both sides of one axis within reach, which a convex excised set
+never makes), the dissipation vanishing at a zone point, and an excised tap
+of a frame-dragged axis's advective stencil with no source.
+
+**(Amended in step X6:** until then the last refusal was every closure axis
+along which the shift of the state in `U`'s working array points into the
+excised set (`b/a < 0`) — the spinning holes' faces, where X1's frozen line
+found the closure unstable at `0.03–0.19/h`. Now such an axis is
+**frame-dragged**: a fourth pass writes the direction code of every excised
+stored point (the lattice direction nearest the surface's normal there,
+[`direction_code`](@ref)), the census sets the axis's rule bit beside it, and
+the zone kernel forms that axis's advection with step X5's rule
+([`DraggedProvider`](@ref)). What is refused is what the rule does not
+cover: an excised tap the rule's stencils read — the centered `D₁`'s, and
+with the lopsided blend on the lopsided row's — with no non-excised point
+along its direction inside the point's `G`-box.**)** The rule bits are the
+build state's, frozen for the problem's life; the record's
+`excision_flips` counts the axes whose shift's sign has since changed, which
+is zero whenever a rebuild from the state at hand — a restart — would set
+the same bits.
+
+**(Amended in step X8:** the first pass's predicate is the excised set with
+its lego corners shaved where the excision asks for it
+([`excised_mask`](@ref), [`ShavedMask`](@ref)) — a point the geometry leaves
+outside whose three neighbours one step toward the center are excised by it
+— on the lattice of the surface's spacing `h`; the census counts the points
+the shave excised (`nshaved`), and everything downstream — the zone, the
+census, the rule bits and the direction codes — reads the classes as it
+did.**)**
+
+`U`'s working array must hold the state at its owned points; the ghosts are
+not read.
+"""
+function build_excision(U::FieldSet{T,3}, schedule, case::GHCase{T}, int;
+                        q::Integer, t=zero(T)) where {T}
+    interior_variant(int) === :excised || throw(ArgumentError(
+        "build_excision builds the classes of an :excised interior; this one " *
+        "is :$(interior_variant(int))."))
+    check_excision_case(case, int, q)
+    h = check_excision_mesh(U.forest, int, q; t=T(t))
+    G = q ÷ 2 + 1
+    backend = get_backend(U.work)
+    forest = U.forest
+    origins = to_backend(backend, block_origins(forest, T))
+    spacings = to_backend(backend, block_spacings(forest, T))
+    # The excised set as the classes hold it: the geometry's, with its lego
+    # corners shaved on the surface's lattice where the excision asks for it
+    # (step X8) — the one predicate every mask of the problem evaluates.
+    geometry = interior_mask(int, T(t))
+    mask = excised_mask(int, T(t), h)
+
+    # (1) and (2): the bit, exchanged. A scalar: even under a mirror, and
+    # turned into itself by the rotating seam's quarter turn (step X4), so
+    # that a ghost across the seam holds the bit of the owned point it is the
+    # image of.
+    bits = FieldSet{T}(forest, 1; G=U.G, centering=U.centering,
+                       parity=even_parity(forest, 1),
+                       rotation=identity_rotation(forest, 1), backend=backend)
+    fill!(bits.work, zero(T))
+    map_blocks!(_excised_bit_kernel!, bits, bits.work, origins, spacings, mask,
+                Val(U.G))
+    if has_outer_face(case)
+        fill_ghosts!(bits, schedule;
+                     boundary=CellBoundary(AllVariables(
+                         (x, δ) -> (is_evolved(mask, x) ? zero(x[1]) : one(x[1]),))))
+    else
+        fill_ghosts!(bits, schedule)
+    end
+
+    # (3): the classes, over every stored point.
+    n = size(U.work)
+    classes = allocate(backend, UInt8, (n[1], n[2], n[3], nblocks(U)))
+    map_blocks!(_class_kernel!, bits, classes, bits.work, Val(U.G), Val(Int(q)),
+                Val(forest.N); stored=true)
+
+    # (4), step X6: the direction code of every excised stored point, from the
+    # frozen geometry; the census adds the zone points' rule bits.
+    codes = allocate(backend, UInt8, (n[1], n[2], n[3], nblocks(U)))
+    map_blocks!(_direction_kernel!, bits, codes, classes, origins, spacings, int, T(t),
+                Val(U.G); stored=true)
+    blend = excision_blend(int, case.background, h)
+    ext = extrapolation_table(T, Val(Int(q)))
+
+    # The census.
+    monitor = FieldSet{T}(forest, NEXM; G=0, centering=U.centering,
+                          parity=even_parity(forest, NEXM),
+                          rotation=identity_rotation(forest, NEXM), backend=backend)
+    map_blocks!(_census_kernel!, U, monitor.work, codes, classes, U.work, origins,
+                spacings, case.ε_KO, T(t), blend, geometry, Val(U.G), Val(size(ext, 1)))
+    total(v) = round(Int, tofloat64(mesh_mapreduce(identity, +, zero(T), monitor;
+                                                   vars=v)))
+    least(v) = mesh_mapreduce(identity, min, floatmax(T), monitor; vars=v)
+    nzone = total(EXM_BAND)
+    nexcised = total(EXM_NONFINITE)
+    nbad = total(EXM_NORMAL)
+    ninto = total(EXM_INTO)
+    ndragged = total(EXM_DRAGGED)
+    nosource = total(EXM_DFACES)
+    nshaved = total(EXM_SHAVED)
+    rmin = least(EXM_AXIS)
+    εmin = least(EXM_FACES)
+    perblock = block_mapreduce(identity, +, zero(T), monitor; vars=EXM_BAND)
+    zb = Bool[x > 0 for x in perblock]
+
+    nzone > 0 || throw(ArgumentError(
+        "the excision surface of this :excised interior has no zone point on " *
+        "this mesh — no evolved stencil reads the excised set — so nothing is " *
+        "excised where it matters: $nexcised owned points are excised. The " *
+        "surface is outside the domain, or smaller than a cell."))
+    nbad == 0 || throw(ArgumentError(
+        "$nbad zone points of this :excised interior have excised points on " *
+        "both sides of one axis within the reach G = $G, so no closure of the " *
+        "per-axis family applies to them (closure_admissible; CODE.md, " *
+        "\"Excision\"). A convex excised set never makes such a point: the " *
+        "surface is not convex at this resolution — refine, or move it."))
+    εmin > 0 || throw(ArgumentError(
+        "the Kreiss–Oliger amplitude vanishes at a zone point of this :excised " *
+        "interior (its least value there is $εmin): the closures need " *
+        "dissipation at the surface, without which they grow as the interior " *
+        "itself does (SINGULARITY_HANDLING.md, \"Excision: the analysis (step " *
+        "X1)\"). Give the case a profile that is positive at the surface."))
+    nosource == 0 || throw(ArgumentError(
+        "at $nosource excised taps of the advective stencils of this :excised " *
+        "interior's frame-dragged axes — the $ninto (zone point, closure axis) " *
+        "pairs whose shift points into the excised set, b/a = " *
+        "−s β^d/(α√γ^{dd}) < 0, the least $(tofloat64(rmin)) — there is no " *
+        "non-excised point along the lattice direction nearest the surface's " *
+        "normal inside the point's G-box (G = $G), so step X5's rule has nothing " *
+        "to extrapolate from (CODE.md, \"Excision\", \"The frame-dragged faces " *
+        "(step X5)\"). X5 found none on Kerr-Schild a = 3/5's sphere and tracked " *
+        "surface at h = 1/24 … 1/48; the per-axis closure there would be the " *
+        "downwind one-sided difference X1's frozen line found unstable. Move " *
+        "the surface, or switch off the lopsided blend, whose row reaches G " *
+        "into the excised side."))
+
+    tab = closure_arrays(T, Val(Int(q)), excision_closure(int.excision), backend)
+    W = T(excision_band_cells(q)) * h
+    ntotal = nleaves(forest) * forest.N^3
+    zoneblocks = to_backend(backend, zb)
+    # The frame-dragged rule's data (step X6), with the blocks that hold a
+    # frame-dragged axis, or `nothing` where none does.
+    drag = if ndragged > 0
+        perdrag = block_mapreduce(identity, +, zero(T), monitor; vars=EXM_DRAGGED)
+        (codes=codes, ext=ext, blocks=to_backend(backend, Bool[x > 0 for x in perdrag]))
+    else
+        nothing
+    end
+    valmixed = Val(int.excision.symmetric)
+    return ExcisionData{T,typeof(classes),typeof(zoneblocks),typeof(tab),
+                        typeof(blend),typeof(monitor),typeof(int),typeof(codes),
+                        typeof(drag),int.excision.symmetric}(
+        classes, zoneblocks, tab, blend, monitor, int, codes, drag, valmixed, W, h,
+        Int(q), nexcised, nzone, ntotal - nzone - nexcised, count(zb), ndragged,
+        tofloat64(rmin), nshaved)
+end
+
+"""
+    monitor_mask(p::GHProblem, t) -> mask
+
+The mask of the monitors that take stencils — [`gh_constraint!`](@ref),
+[`adm_constraint!`](@ref) and the indicator ([`gh_indicator!`](@ref)) — by
+default (added in step X2b): the interior's own mask
+([`interior_mask`](@ref)) for every variant but `:excised`, and for it the
+excised set widened by the band `W` ([`excision_monitor_mask`](@ref)), so
+that no monitor's stencil reads an excised value. The error, the speed, the
+non-finite count, the validity monitor and the horizon guard read points,
+not stencils, and keep `interior_mask`, which counts the band.
+
+**(Amended in step X8:** where the build shaved a lego corner the excised set
+reaches up to `h/√3` beyond the geometric surface, and the widening is
+`W + h`; the pointwise monitors take [`evolved_mask`](@ref), the shaved
+set's own mask.**)**
+"""
+monitor_mask(p, t) = _monitor_mask(p.excision, p.interior, t)
+_monitor_mask(::Nothing, int, t) = interior_mask(int, t)
+# With shaved corners (step X8) the excised set reaches up to `h/√3` beyond the
+# geometric surface, and the widening `W` is taken from `h` farther out.
+_monitor_mask(ex::ExcisionData, int, t) =
+    excision_monitor_mask(int, t, ex.nshaved > 0 ? ex.W + ex.h : ex.W)
+
+"""
+    evolved_mask(p::GHProblem, t) -> mask
+
+The mask of the evolved points of a problem (added in step X8): the one the
+error, the speed, the non-finite count, the validity monitor and the horizon
+finder's footprint guard read by default. It is the interior's own
+([`interior_mask`](@ref)) for every problem but an `:excised` one whose build
+shaved a corner, and for that one the excised set the classes hold — the
+geometry's with its lego corners shaved ([`ShavedMask`](@ref)) — so that
+everything that asks "is it excised" answers as the classes do, point by
+point. Where the shave excised nothing the two masks agree at every point of
+the mesh, and the interior's own is taken, so that such a problem's analysis
+is steps X2b–X7's arithmetic exactly.
+"""
+evolved_mask(p, t) = _evolved_mask(p.excision, p.interior, t)
+_evolved_mask(::Nothing, int, t) = interior_mask(int, t)
+_evolved_mask(ex::ExcisionData, int, t) =
+    ex.nshaved > 0 ? excised_mask(int, t, ex.h) : interior_mask(int, t)
+
+# The validity monitor's two bands: the interior's layer and the shell outside
+# it, or for `:excised` the band `[r_E, r_E + W)` and the `width` beyond it —
+# the band without the points the shave excised (step X8; the shell lies
+# beyond every one of them).
+_validity_bands(::Nothing, int, t, width) =
+    (layer_mask(int, t), shell_mask(int, t, width))
+function _validity_bands(ex::ExcisionData, int, t, width)
+    band = layer_mask(int, t; band=ex.W)
+    shell = shell_mask(int, t, width; band=ex.W)
+    ex.nshaved > 0 || return band, shell
+    return BothMask(band, _evolved_mask(ex, int, t)), shell
+end
+
+"""
+    excision_rows(p::GHProblem, u, t) -> NamedTuple
+
+The outflow monitor's rows of the analysis record (added in step X2b;
+`CODE.md`, "Excision", "Record rows"), from the state `u` at the band's
+points — the zone points — and `nothing` in every row for a problem that
+is not `:excised`:
+
+- `excision_band`, `excision_band_nonfinite`: the band's points and the
+  non-finite values among their states;
+- `excision_normal_min`: the least `b_n/a_n − 1` along the surface's normal
+  (`b_n = β^i n_i`, `a_n = α√(γ^{ij} n_i n_j)`), which must stay positive —
+  normal outflow;
+- `excision_faces`, `excision_axis_min`, `excision_inflow`: step X1's faces —
+  a band point with an excised immediate neighbour along an axis — their
+  number, their least per-axis `b/a` (`b = −s β^d` toward the excised side
+  `s`, `a = α√γ^{dd}`) and the inflow-like ones, `b/a < 1`;
+- `excision_into`: the (band point, closure axis) pairs whose shift points
+  into the excised set, `b < 0` — the build's refusal until step X6, counted
+  every chunk; from X6 the frame-dragged axes as the state now has them;
+- `excision_dragged` (step X6): the (band point, axis) pairs whose rule bit
+  the build set — the frame-dragged axes, whose advection takes step X5's
+  rule — a constant of the problem;
+- `excision_faces_dragged` (step X6): the faces on those axes, so that the
+  faces per rule are `excision_faces_dragged` and `excision_faces` less it;
+- `excision_flips` (step X6): the axes whose shift's sign now disagrees with
+  their rule bit — pointing in without the rule or out with it — which must
+  stay zero: the rule is the build state's, and a restart rebuilds it from
+  the state it restarts from, the same bits exactly when this row is zero;
+- `excision_shaved` (step X8): the owned points the shave excised — the
+  lego corners, a constant of the problem.
+"""
+function excision_rows(p, u, t)
+    ex = p.excision
+    ex === nothing && return (excision_band=nothing, excision_band_nonfinite=nothing,
+                              excision_normal_min=nothing, excision_faces=nothing,
+                              excision_axis_min=nothing, excision_inflow=nothing,
+                              excision_into=nothing, excision_dragged=nothing,
+                              excision_faces_dragged=nothing, excision_flips=nothing,
+                              excision_shaved=nothing)
+    T = eltype(p.U.work)
+    map_blocks!(_outflow_kernel!, p.U, ex.monitor.work, statearray(u, p.U),
+                ex.classes, ex.codes, p.origins, p.spacings, p.interior, T(t), p.valG)
+    total(v) = round(Int, tofloat64(mesh_mapreduce(identity, +, zero(T), ex.monitor;
+                                                   vars=v)))
+    least(v) = (x = mesh_mapreduce(identity, min, floatmax(T), ex.monitor; vars=v);
+                x == floatmax(T) ? nothing : tofloat64(x))
+    return (excision_band=total(EXM_BAND), excision_band_nonfinite=total(EXM_NONFINITE),
+            excision_normal_min=least(EXM_NORMAL), excision_faces=total(EXM_FACES),
+            excision_axis_min=least(EXM_AXIS), excision_inflow=total(EXM_INFLOW),
+            excision_into=total(EXM_INTO), excision_dragged=total(EXM_DRAGGED),
+            excision_faces_dragged=total(EXM_DFACES), excision_flips=total(EXM_FLIPS),
+            excision_shaved=ex.nshaved)
+end
+
+"""
+    gh_zone!(du, p::GHProblem, t; drag = p.excision.drag)
+
+The zone kernel's launch for an `:excised` problem, right after the main
+kernel in [`gh_rhs!`](@ref), on the working array the main kernel read, and
+— where the build found a frame-dragged axis (step X6) — the frame-dragged
+kernel's after it. `drag` is that rule's data, `(codes, ext, blocks)`; the
+tests pass `nothing` to leave the rule out and the codes with every zone
+block to launch it where the build found no frame-dragged axis.
+"""
+function gh_zone!(du, p, t; drag=p.excision.drag)
+    ex = p.excision
+    T = eltype(p.U.work)
+    map_blocks!(gh_zone_kernel!, p.U, statearray(du, p.U), p.U.work,
+                gauge_work(p.Hsrc), p.origins, p.spacings, p.case.γ0, p.case.γ2,
+                p.case.ε_KO, T(t), ex.classes, ex.zoneblocks, ex.table, ex.blend,
+                p.valG, p.valq, p.valH, p.valdiss, ex.valmixed)
+    drag === nothing && return nothing
+    map_blocks!(gh_dragged_kernel!, p.U, statearray(du, p.U), p.U.work,
+                gauge_work(p.Hsrc), p.origins, p.spacings, p.case.γ0, p.case.γ2,
+                p.case.ε_KO, T(t), ex.classes, drag.codes, drag.blocks, ex.table,
+                drag.ext, ex.blend, p.valG, p.valq, p.valH, p.valdiss, ex.valmixed)
+    return nothing
+end

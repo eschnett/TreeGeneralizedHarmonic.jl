@@ -1,7 +1,7 @@
 # The interior: a pointwise damping layer, and nothing about the mesh.
 #
-# `CODE.md`, "The interior: a pointwise damping layer". There is no
-# excision. Inside the horizon the right-hand side is
+# `CODE.md`, "The interior: a pointwise damping layer". Inside the horizon
+# the right-hand side is
 #
 #     ∂_t u = w(r) · F(u)  −  ρ(r) · (u − u_exact(x, t))          (INTERIOR)
 #
@@ -23,6 +23,12 @@
 # `is_outside`, `interior_profiles`, `in_layer(int, t, x)`, `core_position`,
 # `interior_mask`, `layer_mask`, `shell_mask`, `geometry_radii`), so that the
 # kernels do not know which one they hold.
+#
+# **The one variant that is not a layer is `:excised` (added in step X2b;
+# `CODE.md`, "Excision")**: both geometries can hold it, and here it is only
+# its predicates, its masks and its checks — everything inside the surface
+# excised, no profiles. The per-point classes the kernels read, the closures
+# and the zone kernel are `excision.jl`'s.
 #
 # Everything in this file is a function of position and time. Nothing here
 # knows about a block, a level or a ghost width, and a change that makes
@@ -115,8 +121,169 @@ makes "`w ∈ [0, 1]` everywhere" a property rather than a near-property.
 end
 
 """
+    Excision(T = Float64; upwind = nothing, dissipation = :msn, mixed = :symmetric,
+             shave = true)
+
+The parameters of the `:excised` variant (added in step X2b; `CODE.md`,
+"Excision"), carried by the interior or the spec that asks for it, so that a
+checkpoint's recipe holds them through `repr(case.interior)` as it holds
+every other number of the interior:
+
+- `upwind = (start, width)` switches on the lopsided shift advection — a
+  `C²` blend (`smoothstep`) in the depth below the horizon, zero at `start`
+  cells and full from `start + width` cells — and `nothing`, the default, is
+  off (stored as `width = 0`). Step X1 measured `(1, 4)`, the lever on the
+  grid-scale leakage through the horizon; it is not needed for stability.
+- `dissipation` is the Kreiss–Oliger operator's closure at the surface, one
+  of [`DISSIPATION_CLOSURES`](@ref); `:msn`, the default, is step X1's
+  choice, the only one negative semidefinite in `l²` on any excised
+  pattern.
+- `mixed` is the zone points' mixed derivative, one of
+  [`MIXED_NESTINGS`](@ref) (added in step X6): `:symmetric`, the default,
+  `½(D_i D_j + D_j D_i)` of the two nested closures wherever they differ —
+  the operator symmetric in its two axes, and so equivariant under `x ↔ y`
+  and the rotating octant's quarter turn — or `:nested`, steps X2b–X5's
+  outer sum along `i < j` only, kept so that the two can be compared
+  (`CODE.md`, "Excision", "What step X6 built").
+- `shave` (added in step X8) **shaves the lego corners**: a lattice point the
+  geometry leaves outside is excised too when its three neighbours one step
+  toward the excision center — one along each axis, the side from the sign
+  of `x − c` — are all excised (a coordinate on the center's plane has no
+  such neighbour, and the point is not shaved). One pass, decided once with
+  the classes ([`ShavedMask`](@ref), [`build_excision`](@ref)): such a
+  corner is a closure point with `k⁻ = 0` along all three axes, and at the
+  pole of a spinning hole, where frame dragging nearly cancels the shift
+  along a tangent axis, step X7 found one growing at `2/M`. `true`, the
+  default; `false` is steps X2b–X7's excised set (`CODE.md`, "Excision",
+  "What step X8 built").
+
+The cells are the excision geometry's own spacing, the level the surface
+lies on. `isbits`: the closure kind is a type parameter, the nesting and the
+shave `Bool`s (`symmetric`, `shave`).
+
+**`mixed = :nested` prints as the struct did before the field existed**
+(proposed in step X6): a checkpoint's recipe holds `repr(case.interior)`, so
+a run written by steps X2b–X5 restarts under its own operator when that is
+asked for by name, and its recipe refuses a restart under the new default —
+the operator it would continue with is not the one it ran. **So does
+`shave = false` (proposed in step X8)**: without the shave the struct prints
+as steps X6–X7 printed it — and with `mixed = :nested` as well, as steps
+X2b–X5 did — so that their checkpoints restart under their own excised set
+when it is asked for, and refuse the shaved one.
+"""
+struct Excision{T,K}
+    upwind_start::T
+    upwind_width::T
+    valclosure::Val{K}
+    symmetric::Bool
+    shave::Bool
+end
+
+"""
+    MIXED_NESTINGS
+
+The zone points' mixed derivatives an [`Excision`](@ref) can ask for (added
+in step X6): `:symmetric`, the mean of the two nestings, and `:nested`, the
+outer sum along the lower axis.
+"""
+const MIXED_NESTINGS = (:symmetric, :nested)
+
+function Excision(::Type{T}=Float64; upwind=nothing, dissipation::Symbol=:msn,
+                  mixed::Symbol=:symmetric, shave::Bool=true) where {T}
+    dissipation in DISSIPATION_CLOSURES || throw(ArgumentError(
+        "the dissipation's closure at the excision surface is one of " *
+        "$(DISSIPATION_CLOSURES), got :$dissipation; step X1 chose :msn, the " *
+        "only one with the damping sign in l² on any excised pattern " *
+        "(CODE.md, \"Excision\")."))
+    mixed in MIXED_NESTINGS || throw(ArgumentError(
+        "the zone points' mixed derivative is one of $(MIXED_NESTINGS), got " *
+        ":$mixed: :symmetric averages the two nestings of the closures, so that " *
+        "the operator is symmetric in its two axes, and :nested is steps " *
+        "X2b–X5's outer sum along the lower axis (CODE.md, \"Excision\")."))
+    s, w = upwind === nothing ? (zero(T), zero(T)) :
+           (T(upwind[1]), T(upwind[2]))
+    (s ≥ 0 && w ≥ 0) || throw(ArgumentError(
+        "the lopsided advection's blend starts `start` cells below the horizon " *
+        "and rises to full over `width` cells, both non-negative, got upwind " *
+        "= $upwind; `nothing` (width 0) switches it off."))
+    return Excision{T,dissipation}(s, w, Val(dissipation), mixed === :symmetric, shave)
+end
+
+Excision(::Type{T}, ex::Excision{S,K}) where {T,S,K} =
+    Excision{T,K}(T(ex.upwind_start), T(ex.upwind_width), Val(K), ex.symmetric,
+                  ex.shave)
+
+# Without the shave the struct prints as it did before step X8 added the
+# field, and without the symmetric mixed derivative as well as before step X6
+# added that one (see the docstring): the layouts the recipes of their
+# checkpoints hold.
+function Base.show(io::IO, ex::Excision{T,K}) where {T,K}
+    ex.shave && return invoke(show, Tuple{IO,Any}, io, ex)
+    ex.symmetric && return _show_legacy(io, ex, Excision{T,K},
+                                        (ex.upwind_start, ex.upwind_width,
+                                         ex.valclosure, ex.symmetric))
+    return _show_legacy(io, ex, Excision{T,K},
+                        (ex.upwind_start, ex.upwind_width, ex.valclosure))
+end
+
+"""
+    excision_closure(ex::Excision) -> Symbol
+    upwind_on(ex::Excision) -> Bool
+    excision_mixed(ex::Excision) -> Symbol
+    excision_shave(ex::Excision) -> Bool
+
+The dissipation's closure kind, whether the lopsided advection blend is
+switched on (`width > 0`), the zone points' mixed derivative (one of
+[`MIXED_NESTINGS`](@ref), added in step X6), and whether the lego corners are
+shaved (added in step X8).
+"""
+excision_closure(::Excision{T,K}) where {T,K} = K
+upwind_on(ex::Excision) = ex.upwind_width > 0
+excision_mixed(ex::Excision) = ex.symmetric ? :symmetric : :nested
+excision_shave(ex::Excision) = ex.shave
+
+# The excision parameters an interior or spec carries: its own for
+# `:excised`, refused for every other variant, and the default where an
+# `:excised` one was given none.
+function _excision_params(::Type{T}, variant::Symbol, excision) where {T}
+    if variant === :excised
+        return excision === nothing ? Excision(T) :
+               excision isa Excision ? Excision(T, excision) :
+               throw(ArgumentError(
+                   "excision is an Excision (the :excised variant's " *
+                   "parameters) or nothing, got a $(typeof(excision))."))
+    end
+    excision === nothing || throw(ArgumentError(
+        "excision parameters were given to a :$variant interior; they are the " *
+        ":excised variant's (CODE.md, \"Excision\"), and a layer has none."))
+    return nothing
+end
+
+# The `repr` an interior without excision parameters had before step X2b added
+# the field: Julia's default `show` of the struct without its last field and
+# its last type parameter. A checkpoint's recipe holds `repr(case.interior)`,
+# so a `:damped` or `:fitted` case must keep printing exactly as it did, or
+# every checkpoint written before the field existed would refuse to restart
+# (`PLAN.md`, steps X1–X3, "Excision's parameters are fields of the interior";
+# proposed in step X2b). An `:excised` interior prints with the field, by
+# Julia's default.
+function _show_legacy(io::IO, x, legacy_type, fields)
+    show(io, legacy_type)
+    print(io, '(')
+    recur_io = IOContext(io, Pair{Symbol,Any}(:SHOWN_SET, x),
+                         Pair{Symbol,Any}(:typeinfo, Any))
+    for (i, f) in enumerate(fields)
+        show(recur_io, f)
+        i < length(fields) && print(io, ", ")
+    end
+    print(io, ')')
+    return nothing
+end
+
+"""
     Interior(T = Float64; center, r_0, r_1, ρ_max = 0, variant = :damped,
-             w_ramp = 1//2, ρ_ramp = 1//2, margin = 8, target = nothing)
+             w_ramp = 1//2, ρ_ramp = 1//2, margin = 8, target = nothing,
+             excision = nothing)
 
 The damping layer: where it is, how strong it is, and which of `CODE.md`'s
 three variants is running.
@@ -148,6 +315,15 @@ is both frozen and undamped.
 | `:damped` | `(INTERIOR)` in full — the default | `r < r_0` |
 | `:frozen` | the pure mask, `ρ ≡ 0`, `du = w F(u)` | `r < r_0` |
 | `:pasted` | `du = 0` inside `r_1`, the state overwritten by RK4's `step_limiter!` | `r < r_1` |
+| `:excised` | `du = 0` inside `r_1`, one-sided closures at the evolved points next to it (step X2b) | `r < r_1` |
+
+**`:excised` (added in step X2b**, `CODE.md`, "Excision"**)** has no layer:
+the points with `r < r_1` are not evolved and never read, and the evolved
+points whose stencils would reach them take closures in a zone kernel of
+their own. `r_0` is only where the core rule puts the initial data inside,
+there is no rate and no target, and `excision` holds its parameters
+([`Excision`](@ref); the default where it is `nothing`). Every other variant
+refuses `excision`.
 
 `margin` is the `m` of `r_1 ≤ r_h,min − m·h` and belongs here because it
 is a statement about where this layer was put; no kernel reads it, and
@@ -170,7 +346,7 @@ The struct is `isbits` — it is a kernel argument at every right-hand-side
 evaluation — and `variant` lives in a `Val` for that reason, a `Symbol`
 field not being `isbits`.
 """
-struct Interior{T,V,X}
+struct Interior{T,V,X,E}
     center::HoleCenter{T}
     r_0::T
     r_1::T
@@ -180,22 +356,35 @@ struct Interior{T,V,X}
     margin::Int
     valvariant::Val{V}
     target::X                    # the layer's target metric, or `nothing`
+    excision::E                  # `:excised`'s `Excision`, or `nothing` (step X2b)
 end
 
 # `:fitted` (added in step 8e) relaxes toward the fitted target on the
 # tracked geometry and is a `FittedInterior`'s only: `Interior` refuses it.
-const INTERIOR_VARIANTS = (:damped, :pasted, :frozen, :fitted)
+# `:excised` (added in step X2b) runs on both geometries.
+const INTERIOR_VARIANTS = (:damped, :pasted, :frozen, :fitted, :excised)
+
+Base.show(io::IO, int::Interior{T,V,X,Nothing}) where {T,V,X} =
+    _show_legacy(io, int, Interior{T,V,X},
+                 (int.center, int.r_0, int.r_1, int.ρ_max, int.w_ramp,
+                  int.ρ_ramp, int.margin, int.valvariant, int.target))
 
 function Interior(::Type{T}=Float64; center, r_0, r_1, ρ_max=zero(T),
                   variant::Symbol=:damped, w_ramp=T(1 // 2), ρ_ramp=T(1 // 2),
-                  margin::Integer=8, target=nothing) where {T}
+                  margin::Integer=8, target=nothing, excision=nothing) where {T}
     variant in INTERIOR_VARIANTS || throw(ArgumentError(
         "the interior variant must be one of $(INTERIOR_VARIANTS), got " *
-        ":$variant. CODE.md names exactly three and measures all three on " *
+        ":$variant. CODE.md names the three layers and measures all three on " *
         "the static hole: :damped is (INTERIOR) itself and the default, " *
         ":frozen is the pure mask ρ = 0 that pile-up at the freezing radius " *
         "is expected to defeat, and :pasted is the hard overwrite through " *
-        "RK4's step_limiter!."))
+        "RK4's step_limiter!; :fitted is the tracked geometry's and :excised " *
+        "(step X2b) has no layer at all."))
+    variant === :excised && target !== nothing && throw(ArgumentError(
+        "an :excised interior has no layer and no target: its points inside " *
+        "r_1 are never evolved and never read (CODE.md, \"Excision\"), so " *
+        "there is nothing to relax toward. Leave `target = nothing`."))
+    ex = _excision_params(T, variant, excision)
     variant === :fitted && throw(ArgumentError(
         "the :fitted variant relaxes toward a fit of the state on the tracked " *
         "geometry's offset surface (CODE.md, \"The fitted target\"), and a " *
@@ -228,8 +417,8 @@ function Interior(::Type{T}=Float64; center, r_0, r_1, ρ_max=zero(T),
         "the margin m is a number of grid points and must be at least 1, " *
         "got $margin; CODE.md's default is 8 and its floor is G + 1."))
     check_layer_target(target)
-    return Interior{T,variant,typeof(target)}(c, r0, r1, T(ρ_max), wr, ρr,
-                                              Int(margin), Val(variant), target)
+    return Interior{T,variant,typeof(target),typeof(ex)}(
+        c, r0, r1, T(ρ_max), wr, ρr, Int(margin), Val(variant), target, ex)
 end
 
 # The one refusal a target needs (added in step 8c): it is evaluated inside
@@ -275,9 +464,10 @@ It is a reconstruction rather than a mutation because the interior is a
 kernel argument: an `isbits` value that a kernel closed over must not
 change underneath it.
 """
-with_ρ_max(int::Interior{T,V,X}, ρ_max) where {T,V,X} =
-    Interior{T,V,X}(int.center, int.r_0, int.r_1, T(ρ_max), int.w_ramp,
-                    int.ρ_ramp, int.margin, int.valvariant, int.target)
+with_ρ_max(int::Interior{T,V,X,E}, ρ_max) where {T,V,X,E} =
+    Interior{T,V,X,E}(int.center, int.r_0, int.r_1, T(ρ_max), int.w_ramp,
+                      int.ρ_ramp, int.margin, int.valvariant, int.target,
+                      int.excision)
 
 """
     interior_variant(int) -> Symbol
@@ -355,6 +545,14 @@ is singular inside it, `F` of that data may be `NaN`, and `0 · NaN = NaN`
 @inline is_frozen(int::Interior{T,:damped}, r) where {T} = r < int.r_0
 @inline is_frozen(int::Interior{T,:frozen}, r) where {T} = r < int.r_0
 @inline is_frozen(int::Interior{T,:pasted}, r) where {T} = r < int.r_1
+# `:excised` (step X2b): the whole inside of the excision surface, the
+# complement of `is_outside`. No kernel decides by it — the per-point classes
+# are what the right-hand side reads ([`build_excision`](@ref)) — but every
+# protocol answer is the variant's.
+@inline is_frozen(int::Interior{T,:excised}, r) where {T} = !is_outside(int, r)
+
+# An excised hole has no layer (step X2b): no residual is measured anywhere.
+@inline in_layer(::Interior{T,:excised}, t, x) where {T} = false
 
 """
     interior_profiles(int::Interior, r) -> (w, ρ)
@@ -521,6 +719,44 @@ layer_mask(int::Interior{T}, t) where {T} =
 
 shell_mask(int::Interior{T}, t, width) where {T} =
     ShellMask{T}(center_at(int.center, t), int.r_1, int.r_1 + T(width))
+
+# **An excised hole has no layer** (step X2b): its two bands are the evolved
+# band `[r_E, r_E + W)` just outside the excision surface — the points the
+# closures and the reach of the monitors' stencils touch, `W = max(G, ⌈√2
+# q/2⌉) h` — and the `width` beyond it. `W` is the problem's
+# ([`ExcisionData`](@ref)), so it is passed; without it the call is refused.
+function layer_mask(int::Interior{T,:excised}, t; band=nothing) where {T}
+    band === nothing && _no_band()
+    return ShellMask{T}(center_at(int.center, t), int.r_1, int.r_1 + T(band))
+end
+
+function shell_mask(int::Interior{T,:excised}, t, width; band=nothing) where {T}
+    band === nothing && _no_band()
+    return ShellMask{T}(center_at(int.center, t), int.r_1 + T(band),
+                        int.r_1 + T(band) + T(width))
+end
+
+_no_band() = throw(ArgumentError(
+    "an :excised interior has no layer: its bands are the evolved band [r_E, " *
+    "r_E + W) outside the excision surface and the width beyond it, and W = " *
+    "max(G, ⌈√2 q/2⌉) h is the problem's — pass `band = p.excision.W` " *
+    "(CODE.md, \"Excision\")."))
+
+"""
+    excision_monitor_mask(interior, t, W) -> mask
+
+The mask of the monitors that take stencils on an `:excised` hole — the gauge
+and ADM constraints and Löhner's `τ` (added in step X2b): the excised set
+widened by `W = max(G, ⌈√2 q/2⌉) h`, the farthest any of their stencils
+reaches (the mixed derivative's diagonal `√2 q/2`, strictly less than its
+ceiling), so that no monitor reads an excised value. A ball `r < r_1 + W` for
+the sphere; for the tracked geometry the offset surface moved out by `W`
+plus the shape's own variation `r_out − r_in`, which bounds how much farther
+than `W` along the ray an excised point within `W` can lie. The problem's
+[`monitor_mask`](@ref) is what calls it.
+"""
+excision_monitor_mask(int::Interior{T,:excised}, t, W) where {T} =
+    InteriorMask{T}(center_at(int.center, t), int.r_1 + T(W))
 
 # --- where the horizon is, analytically -------------------------------------
 #
@@ -891,6 +1127,53 @@ function check_interior_radii(forest::Forest{3}, int::Interior{T}, background,
             needed=needed)
 end
 
+"""
+    check_interior_radii(forest, int::Interior{T,:excised}, background, G;
+                         t = 0, center = nothing)
+
+The `:excised` sphere's placement (added in step X2b; `CODE.md`,
+"Excision", "Checks"): the margin `m ≥ G + 1` between the excision surface
+and the horizon, `r_1 ≤ r_h,min − m h` at the spacing of the blocks
+containing `r_1`, and the chart's singular set inside the core rule's sphere
+`r_0`, which is where the initial data inside the surface come from. There
+is **no thickness requirement**: there is no layer, and `r_0` only says where
+the analytic solution is evaluated for data no kernel reads. Two more checks
+need what this function does not have — the horizon finder's `m ≥ ⌈√3 G⌉`
+and the one level at the surface — and are [`build_excision`](@ref)'s.
+"""
+function check_interior_radii(forest::Forest{3}, int::Interior{T,:excised},
+                              background, G::Integer; t=zero(T),
+                              center=nothing) where {T}
+    int.margin ≥ G + 1 || throw(ArgumentError(
+        "the excised interior's margin is m = $(int.margin) but the ghost width " *
+        "is G = $G, and CODE.md's floor is m ≥ G + 1 = $(G + 1): the closures " *
+        "and the dissipation reach G points, and the horizon must be evolved " *
+        "by the centered operator."))
+    h, nb = layer_spacing(forest, int, t)
+    nb > 0 || throw(ArgumentError(
+        "no block of this forest contains the excision surface r_1 = " *
+        "$(int.r_1) around $(center_at(int.center, t)) at t = $t: the surface " *
+        "is outside the domain."))
+    r_sing = T(singular_radius(background))
+    int.r_0 > r_sing || throw(ArgumentError(
+        "the core rule's sphere does not contain the chart's singular set: " *
+        "r_0 = $(int.r_0) but $(typeof(background)) is singular out to a " *
+        "coordinate radius of $r_sing. The excised set is never read, but its " *
+        "initial data are the analytic solution on the sphere r_0 along the " *
+        "ray, and must be finite: raise r_0 above $r_sing (below r_1 = " *
+        "$(int.r_1))."))
+    r_h = T(horizon_min_radius(background))
+    allowed = r_h - int.margin * h
+    int.r_1 ≤ allowed || throw(ArgumentError(
+        "the excision surface is not far enough inside the horizon: r_1 = " *
+        "$(int.r_1), but the horizon's smallest coordinate radius is " *
+        "r_h,min = $r_h and the blocks containing r_1 have h = $h, so the " *
+        "margin m = $(int.margin) allows at most r_1 = $allowed. Refine around " *
+        "the hole or move r_1 inward; never lower m below G + 1."))
+    return (h=h, nblocks=nb, r_h_min=r_h, allowed=allowed,
+            thickness=int.r_1 - int.r_0, needed=zero(T))
+end
+
 # --- the tracked geometry (step 8d) -----------------------------------------
 #
 # `CODE.md`, "The interior" — "The tracked geometry" — and `PLAN.md`'s
@@ -1240,11 +1523,19 @@ the hole; the geometry is a function of the run.
   octant"). The initial data's fit is
   `evolve!`'s `fit_initial_cont`.
 
+- `excision` holds the `:excised` variant's parameters ([`Excision`](@ref);
+  the default when it is `nothing` and the variant is `:excised`, refused
+  for every other variant; added in step X2b). An `:excised` spec's geometry
+  is built **once**, from the seed's shape, and frozen for the run; `n_L` is
+  then only the core rule's depth, and the track is kept for the record and
+  for the assertion that the found horizon stays `m h` outside the surface
+  (`CODE.md`, "Excision").
+
 `isbits`: the numbers that have a "use the rule" value spell it `0`, since a
-`Union{Nothing, T}` field would not be; the two optional objects are type
+`Union{Nothing, T}` field would not be; the three optional objects are type
 parameters.
 """
-struct FittedSpec{T,V,X,B}
+struct FittedSpec{T,V,X,B,E}
     margin::Int
     n_L::Int
     core_min::Int
@@ -1260,7 +1551,17 @@ struct FittedSpec{T,V,X,B}
     target_bounds::B
     fit_tilde::Bool
     fit_cont::Int
+    excision::E                  # `:excised`'s `Excision`, or `nothing` (step X2b)
 end
+
+# The `repr` of a spec without excision parameters is the one it had before
+# the field existed (step X2b; see `_show_legacy`).
+Base.show(io::IO, s::FittedSpec{T,V,X,B,Nothing}) where {T,V,X,B} =
+    _show_legacy(io, s, FittedSpec{T,V,X,B},
+                 (s.margin, s.n_L, s.core_min, s.lmax_shape, s.lmax_fit,
+                  s.ρ_max, s.w_ramp, s.ρ_ramp, s.max_misses, s.α_trigger,
+                  s.valvariant, s.target, s.target_bounds, s.fit_tilde,
+                  s.fit_cont))
 
 function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
                     margin::Integer=8, n_L::Integer=0, core_min::Integer=2,
@@ -1269,15 +1570,23 @@ function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
                     ρ_ramp=one(T), max_misses::Integer=3,
                     α_trigger=T(1 // 10), target=nothing,
                     target_bounds=nothing, fit_tilde::Bool=true,
-                    fit_cont::Integer=1) where {T}
+                    fit_cont::Integer=1, excision=nothing) where {T}
     variant in INTERIOR_VARIANTS || throw(ArgumentError(
         "the interior variant must be one of $(INTERIOR_VARIANTS), got " *
         ":$variant; the tracked geometry runs CODE.md's three analytic " *
-        "variants as the sphere does, and step 8e's :fitted."))
+        "variants as the sphere does, step 8e's :fitted and step X2b's " *
+        ":excised."))
     variant === :fitted && target !== nothing && throw(ArgumentError(
         "a :fitted layer relaxes toward the fit of the evolved state, so it " *
         "takes no analytic target metric; `target` is for :damped, :frozen " *
         "and :pasted."))
+    variant === :excised && (target !== nothing || target_bounds !== nothing) &&
+        throw(ArgumentError(
+            "an :excised geometry has no layer, no target and no target ranges: " *
+            "its points below the offset surface are never evolved and never " *
+            "read (CODE.md, \"Excision\"). Leave `target` and `target_bounds` " *
+            "unset."))
+    ex = _excision_params(T, variant, excision)
     target_bounds === nothing || target_bounds isa StateBounds || throw(ArgumentError(
         "target_bounds is a StateBounds (the ranges the :fitted target is " *
         "projected into) or nothing, to derive them from the seed's data; " *
@@ -1317,11 +1626,11 @@ function FittedSpec(::Type{T}=Float64; variant::Symbol=:damped,
         "slopes) or 2 (and curvatures), got $fit_cont."))
     check_layer_target(target)
     tb = target_bounds === nothing ? nothing : _bounds_in(T, target_bounds)
-    return FittedSpec{T,variant,typeof(target),typeof(tb)}(
+    return FittedSpec{T,variant,typeof(target),typeof(tb),typeof(ex)}(
         Int(margin), Int(n_L), Int(core_min), Int(lmax_shape), Int(lmax_fit),
         T(ρ_max), wr,
         ρr, Int(max_misses), T(α_trigger), Val(variant), target, tb,
-        fit_tilde, Int(fit_cont))
+        fit_tilde, Int(fit_cont), ex)
 end
 
 interior_variant(::FittedSpec{T,V}) where {T,V} = V
@@ -1340,10 +1649,14 @@ function with_variant(spec::FittedSpec{T}, variant::Symbol) where {T}
     variant in INTERIOR_VARIANTS || throw(ArgumentError(
         "the interior variant must be one of $(INTERIOR_VARIANTS), got :$variant."))
     target = variant === :fitted ? nothing : spec.target
-    return FittedSpec{T,variant,typeof(target),typeof(spec.target_bounds)}(
+    ex = variant === :excised ?
+         (spec.excision === nothing ? Excision(T) : spec.excision) : nothing
+    return FittedSpec{T,variant,typeof(target),typeof(spec.target_bounds),
+                      typeof(ex)}(
         spec.margin, spec.n_L, spec.core_min, spec.lmax_shape, spec.lmax_fit,
         spec.ρ_max, spec.w_ramp, spec.ρ_ramp, spec.max_misses, spec.α_trigger,
-        Val(variant), target, spec.target_bounds, spec.fit_tilde, spec.fit_cont)
+        Val(variant), target, spec.target_bounds, spec.fit_tilde, spec.fit_cont,
+        ex)
 end
 
 """
@@ -1392,8 +1705,13 @@ for both — and its profiles.
 
 The regions keep the sphere's conventions at their boundaries: a point on
 the offset surface is evolved, a point on the core surface is in the layer.
+
+**`:excised` (added in step X2b)**: everything below the offset surface,
+depth `d > 0`, is excised; `thickness` is then only the core rule's depth,
+and `excision` the variant's [`Excision`](@ref) parameters (refused for
+every other variant).
 """
-struct FittedInterior{T,V,NM,X}
+struct FittedInterior{T,V,NM,X,E}
     center::HoleCenter{T}
     shape::SVector{NM,T}
     lmax::Int
@@ -1409,6 +1727,7 @@ struct FittedInterior{T,V,NM,X}
     h::T
     valvariant::Val{V}
     target::X
+    excision::E
 end
 
 function FittedInterior(::Type{T}=Float64; center, shape, lmax=nothing,
@@ -1416,10 +1735,14 @@ function FittedInterior(::Type{T}=Float64; center, shape, lmax=nothing,
                         variant::Symbol=:damped, w_ramp=T(1 // 2),
                         ρ_ramp=T(1 // 2), margin::Integer=8, n_L::Integer=0,
                         h=zero(T), target=nothing, r_in=nothing,
-                        r_out=nothing) where {T}
+                        r_out=nothing, excision=nothing) where {T}
     variant in INTERIOR_VARIANTS || throw(ArgumentError(
         "the interior variant must be one of $(INTERIOR_VARIANTS), got " *
         ":$variant."))
+    variant === :excised && target !== nothing && throw(ArgumentError(
+        "an :excised geometry has no layer and no target (CODE.md, " *
+        "\"Excision\"); leave `target = nothing`."))
+    ex = _excision_params(T, variant, excision)
     L = lmax === nothing ? isqrt(length(shape)) - 1 : Int(lmax)
     (L + 1)^2 == length(shape) || throw(ArgumentError(
         "a shape of degree lmax = $L has (lmax + 1)² = $((L + 1)^2) real " *
@@ -1455,27 +1778,28 @@ function FittedInterior(::Type{T}=Float64; center, shape, lmax=nothing,
         "the margin m is a number of grid points and must be at least 1, " *
         "got $margin."))
     check_layer_target(target)
-    return FittedInterior{T,variant,(L + 1)^2,typeof(target)}(
+    return FittedInterior{T,variant,(L + 1)^2,typeof(target),typeof(ex)}(
         c, sv, L, lo, hi, off, th, T(ρ_max), wr, ρr, Int(margin), Int(n_L),
-        T(h), Val(variant), target)
+        T(h), Val(variant), target, ex)
 end
 
-with_ρ_max(int::FittedInterior{T,V,NM,X}, ρ_max) where {T,V,NM,X} =
-    FittedInterior{T,V,NM,X}(int.center, int.shape, int.lmax, int.r_in,
-                             int.r_out, int.offset, int.thickness, T(ρ_max),
-                             int.w_ramp, int.ρ_ramp, int.margin, int.n_L,
-                             int.h, int.valvariant, int.target)
+with_ρ_max(int::FittedInterior{T,V,NM,X,E}, ρ_max) where {T,V,NM,X,E} =
+    FittedInterior{T,V,NM,X,E}(int.center, int.shape, int.lmax, int.r_in,
+                               int.r_out, int.offset, int.thickness, T(ρ_max),
+                               int.w_ramp, int.ρ_ramp, int.margin, int.n_L,
+                               int.h, int.valvariant, int.target, int.excision)
 
 interior_variant(::FittedInterior{T,V}) where {T,V} = V
 
 function with_variant(int::FittedInterior{T,V,NM,X}, variant::Symbol) where {T,V,NM,X}
     variant in INTERIOR_VARIANTS || throw(ArgumentError(
         "the interior variant must be one of $(INTERIOR_VARIANTS), got :$variant."))
-    return FittedInterior{T,variant,NM,X}(int.center, int.shape, int.lmax,
-                                          int.r_in, int.r_out, int.offset,
-                                          int.thickness, int.ρ_max, int.w_ramp,
-                                          int.ρ_ramp, int.margin, int.n_L,
-                                          int.h, Val(variant), int.target)
+    ex = variant === :excised ?
+         (int.excision === nothing ? Excision(T) : int.excision) : nothing
+    return FittedInterior{T,variant,NM,X,typeof(ex)}(
+        int.center, int.shape, int.lmax, int.r_in, int.r_out, int.offset,
+        int.thickness, int.ρ_max, int.w_ramp, int.ρ_ramp, int.margin, int.n_L,
+        int.h, Val(variant), int.target, ex)
 end
 
 @inline layer_target(::FittedInterior{T,V,NM,Nothing}, bg) where {T,V,NM} = bg
@@ -1577,6 +1901,9 @@ end
 # The fitted core (step 8e): `F` is not evaluated below the core surface, and
 # the kernel relaxes it toward the target at `ρ_max` instead of freezing it.
 @inline is_frozen(int::FittedInterior{T,:fitted}, g) where {T} = g.r < g.r_0
+# The excised geometry (step X2b): depth `d > 0`, everything below the offset
+# surface — the classes, not this, are what the kernels read.
+@inline is_frozen(int::FittedInterior{T,:excised}, g) where {T} = g.r < g.r_1
 
 @inline is_outside(int::FittedInterior, g) = g.r ≥ g.r_1
 
@@ -1590,6 +1917,8 @@ end
     g = interior_point(int, t, x)
     return (g.r_0 ≤ g.r) & (g.r < g.r_1)
 end
+
+@inline in_layer(::FittedInterior{T,:excised}, t, x) where {T} = false
 
 """
     core_position(int::FittedInterior, t, x) -> x
@@ -1689,6 +2018,155 @@ layer_mask(int::FittedInterior{T,V,NM}, t) where {T,V,NM} =
 shell_mask(int::FittedInterior{T,V,NM}, t, width) where {T,V,NM} =
     ShapeBand{T,NM}(center_at(int.center, t), int.shape, int.lmax, int.r_in,
                     int.r_out, int.offset, zero(T), T(width))
+
+# The excised geometry's two bands (step X2b), as for the sphere: the evolved
+# band `[0, W)` above the offset surface and the `width` beyond it.
+function layer_mask(int::FittedInterior{T,:excised,NM}, t;
+                    band=nothing) where {T,NM}
+    band === nothing && _no_band()
+    return ShapeBand{T,NM}(center_at(int.center, t), int.shape, int.lmax,
+                           int.r_in, int.r_out, int.offset, zero(T), T(band))
+end
+
+function shell_mask(int::FittedInterior{T,:excised,NM}, t, width;
+                    band=nothing) where {T,NM}
+    band === nothing && _no_band()
+    return ShapeBand{T,NM}(center_at(int.center, t), int.shape, int.lmax,
+                           int.r_in, int.r_out, int.offset, T(band),
+                           T(band) + T(width))
+end
+
+excision_monitor_mask(int::FittedInterior{T,:excised,NM}, t, W) where {T,NM} =
+    ShapeMask{T,NM}(center_at(int.center, t), int.shape, int.lmax, int.r_in,
+                    int.r_out, (int.offset - T(W)) - (int.r_out - int.r_in))
+
+# --- the shaved excised set (step X8) -------------------------------------------
+
+"""
+    ShavedMask(base, h)
+
+The excised set with its **lego corners shaved** (added in step X8;
+`CODE.md`, "Excision", "What step X8 built"), as a mask: a point is not
+evolved where `base` — the geometry's own mask, an [`InteriorMask`](@ref) for
+the sphere or a [`ShapeMask`](@ref) for the frozen tracked surface — does not
+evolve it, **or** where its three neighbours one step `h` toward the excision
+center, one along each axis, are all outside `base`'s evolved region. "Toward
+the center" is per axis, from the sign of `x_d − c_d`; a coordinate on the
+center's plane has no inward neighbour along its axis, and such a point is
+not shaved.
+
+**A predicate every mask evaluates, not a lookup of the classes (proposed in
+step X8).** Everything that asks "is it excised" takes a position: the norms'
+and the speed's kernels, the validity and the non-finite counts, and the
+horizon finder's footprint guard, which TreeAMR asks at stencil positions it
+computes itself and which no class array can answer. So the shave is
+expressed where they all are: the classes are built from this predicate at
+every owned point ([`build_excision`](@ref)'s first pass), and the masks, the
+guard and `test/octant_runs.jl`'s noise exclusion evaluate the same function
+at the same positions — one predicate, as X2b built the classes from the
+masks' own.
+
+**One pass, not a fixed point (proposed in step X8).** Iterated, the rule
+does not stop at the corners: a shaved rim point makes its tangent neighbour
+a corner, and the closure of a lattice sphere under the rule grows along the
+rims of its layers toward square cross-sections — on step X7's surfaces 11
+to 51 passes, reaching 3.9 to 17.7 cells outside the sphere at `h = 1/24 …
+1/48`, which would eat the margin to the horizon. One pass excises the corners the geometry made and no
+more; every shaved point lies within `h/√3` of the geometric surface along
+the ray (measured `0.573 h` at most over every radius from 1 to 90 cells).
+
+`h` is the surface's spacing (the one level [`check_excision_mesh`](@ref)
+asserts within `(G + q + 2) h` of it), and the predicate is meant for that
+lattice's points: within `2h` of the surface every point is on it. Farther
+out the neighbours are not evaluated (`base` alone decides), which is exact —
+a shaved point's inward neighbour is excised, so the point lies within `h`
+of the excised set. `isbits` when `base` is.
+"""
+struct ShavedMask{M,T}
+    base::M
+    h::T
+end
+
+_mask_center(m::InteriorMask) = m.center
+_mask_center(m::ShapeMask) = m.center
+
+# Whether `x` is within `2h` of the geometry's excised set — where a shaved
+# point can be — from its radius alone: the sphere's `r < r_1 + 2h`, the
+# tracked surface's outer bounding sphere plus `2h`.
+@inline function _shave_near(m::InteriorMask, x, h)
+    d1 = x[1] - m.center[1]
+    d2 = x[2] - m.center[2]
+    d3 = x[3] - m.center[3]
+    ρ = m.r_1 + 2 * h
+    return d1 * d1 + d2 * d2 + d3 * d3 < ρ * ρ
+end
+
+@inline function _shave_near(m::ShapeMask, x, h)
+    d1 = x[1] - m.center[1]
+    d2 = x[2] - m.center[2]
+    d3 = x[3] - m.center[3]
+    return sqrt(d1 * d1 + d2 * d2 + d3 * d3) < (m.r_out - m.offset) + 2 * h
+end
+
+"""
+    is_shaved(m::ShavedMask, x) -> Bool
+
+Whether the point `x`, evolved by the geometry, is excised by the shave: its
+three neighbours one step toward the center are all excised by the geometry
+(step X8). Not on the center's planes.
+"""
+@inline is_shaved(m::ShavedMask, x) = is_evolved(m.base, x) && _corner(m, x)
+
+# Whether all three inward neighbours of `x` are excised by the geometry.
+@inline function _corner(m::ShavedMask, x)
+    b = m.base
+    c = _mask_center(b)
+    d1 = x[1] - c[1]
+    d2 = x[2] - c[2]
+    d3 = x[3] - c[3]
+    (iszero(d1) | iszero(d2) | iszero(d3)) && return false
+    _shave_near(b, x, m.h) || return false
+    h = m.h
+    n1 = d1 > zero(d1) ? x[1] - h : x[1] + h
+    n2 = d2 > zero(d2) ? x[2] - h : x[2] + h
+    n3 = d3 > zero(d3) ? x[3] - h : x[3] + h
+    return !is_evolved(b, (n1, x[2], x[3])) & !is_evolved(b, (x[1], n2, x[3])) &
+           !is_evolved(b, (x[1], x[2], n3))
+end
+
+@inline is_evolved(m::ShavedMask, x) = is_evolved(m.base, x) && !_corner(m, x)
+
+"""
+    BothMask(a, b)
+
+The points both masks evolve (added in step X8): how a band — the validity
+monitor's evolved band `[r_E, r_E + W)` of an excised hole — is kept off the
+points the shave excised inside it.
+"""
+struct BothMask{A,B}
+    a::A
+    b::B
+end
+
+@inline is_evolved(m::BothMask, x) = is_evolved(m.a, x) & is_evolved(m.b, x)
+
+"""
+    excised_mask(interior, t, h) -> mask
+
+The `:excised` interior's excised set at `t` as the classes hold it (added in
+step X8): its geometry's mask ([`interior_mask`](@ref)), shaved on the
+lattice of spacing `h` ([`ShavedMask`](@ref)) when its [`Excision`](@ref)
+asks for the shave. What [`build_excision`](@ref) builds the classes from,
+and what a run's noise is kept off (`test/octant_runs.jl`); a problem's masks
+are [`evolved_mask`](@ref)'s.
+"""
+excised_mask(int::Interior{T,:excised}, t, h) where {T} = _excised_mask(int, T, t, h)
+excised_mask(int::FittedInterior{T,:excised}, t, h) where {T} =
+    _excised_mask(int, T, t, h)
+
+_excised_mask(int, ::Type{T}, t, h) where {T} =
+    excision_shave(int.excision) ? ShavedMask(interior_mask(int, t), T(h)) :
+    interior_mask(int, t)
 
 # --- where the tracked layer was put, against the mesh ------------------------
 
@@ -1806,5 +2284,54 @@ function check_interior_radii(forest::Forest{3}, int::FittedInterior{T},
         "evolved point reaches the core."))
     return (h=h, nblocks=nb, r_h_min=int.r_in, allowed=int.r_in - allowed,
             thickness=int.thickness, needed=needed, r_core=r_core,
+            singular=r_sing)
+end
+
+"""
+    check_interior_radii(forest, int::FittedInterior{T,:excised}, background, G;
+                         t = 0, center = nothing)
+
+The `:excised` tracked geometry's placement (added in step X2b): the margin
+`m ≥ G + 1`, the offset `≥ m h` at the spacing of the blocks the geometry
+lives in, and the chart's singular set inside the core rule's surface
+`r_in − offset − thickness`, about the analytic center — the step-8d checks
+without the thickness requirement, since `thickness` is only the core rule's
+depth here and there is no layer to resolve.
+"""
+function check_interior_radii(forest::Forest{3}, int::FittedInterior{T,:excised},
+                              background, G::Integer; t=zero(T),
+                              center=nothing) where {T}
+    int.margin ≥ G + 1 || throw(ArgumentError(
+        "the excised geometry's margin is m = $(int.margin) but the ghost " *
+        "width is G = $G, and CODE.md's floor is m ≥ G + 1 = $(G + 1)."))
+    h, nb = geometry_spacing(forest, int, t)
+    nb > 0 || throw(ArgumentError(
+        "no block of this forest meets the excised geometry's annulus around " *
+        "$(center_at(int.center, t)) at t = $t: the surface is outside the " *
+        "domain."))
+    r_core = (int.r_in - int.offset) - int.thickness
+    δ = if center === nothing
+        zero(T)
+    else
+        a = center_at(center, T(t))
+        b = center_at(int.center, T(t))
+        sqrt((a[1] - b[1])^2 + (a[2] - b[2])^2 + (a[3] - b[3])^2)
+    end
+    r_sing = T(singular_radius(background)) + δ
+    r_core > r_sing || throw(ArgumentError(
+        "the core rule's surface does not contain the chart's singular set: " *
+        "its smallest radius is r_in − offset − thickness = $r_core and " *
+        "$(typeof(background)) is singular out to $(r_sing - δ) about the " *
+        "analytic center, $δ away. The excised set is never read, but its " *
+        "initial data are the analytic solution on that surface and must be " *
+        "finite: lower n_L, the core rule's depth."))
+    allowed = int.margin * h
+    int.offset ≥ allowed || throw(ArgumentError(
+        "the excision surface is not far enough inside the found horizon: its " *
+        "offset is $(int.offset), but the blocks it lives in have h = $h and " *
+        "the margin m = $(int.margin) asks for m·h = $allowed — the geometry " *
+        "was built on a finer mesh than this one."))
+    return (h=h, nblocks=nb, r_h_min=int.r_in, allowed=int.r_in - allowed,
+            thickness=int.thickness, needed=zero(T), r_core=r_core,
             singular=r_sing)
 end

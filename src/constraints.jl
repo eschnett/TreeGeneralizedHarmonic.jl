@@ -483,7 +483,7 @@ function _prepare_monitor!(p::GHProblem, u, t)
 end
 
 """
-    gh_constraint!(p::GHProblem, u, t; mask = interior_mask(p.interior, t))
+    gh_constraint!(p::GHProblem, u, t; mask = monitor_mask(p, t))
 
 Evaluate the gauge constraint `C_a` of the state `u` at time `t` into
 `p.diag`, and return `p`.
@@ -495,9 +495,13 @@ a monitor run on unfilled ghosts measures whatever was left there.
 
 [`constraint_norms`](@ref) is what turns the field into the numbers the
 record holds.
+
+The default mask is [`monitor_mask`](@ref): the interior's own, and for an
+`:excised` hole the excised set widened by the stencils' reach, so that no
+stencil reads an excised value (added in step X2b).
 """
 function gh_constraint!(p::GHProblem{T}, u, t;
-                        mask=interior_mask(p.interior, T(t))) where {T}
+                        mask=monitor_mask(p, T(t))) where {T}
     _prepare_monitor!(p, u, t)
     map_blocks!(gh_constraint_kernel!, p.U, p.diag.work, p.U.work,
                 gauge_work(p.Hsrc), p.origins, p.spacings, mask,
@@ -506,17 +510,18 @@ function gh_constraint!(p::GHProblem{T}, u, t;
 end
 
 """
-    adm_constraint!(p::GHProblem, u, t; mask = interior_mask(p.interior, t))
+    adm_constraint!(p::GHProblem, u, t; mask = monitor_mask(p, t))
 
 Evaluate the ADM Hamiltonian and momentum constraints of the state `u` at
 time `t` into `p.diag`, and return `p`.
 
 The expensive monitor — every second derivative of the metric, and the
 four-dimensional Ricci tensor — so `CODE.md` runs it every `k`-th chunk
-where the gauge constraint runs at every one.
+where the gauge constraint runs at every one. Its default mask is
+[`monitor_mask`](@ref), as [`gh_constraint!`](@ref)'s is (step X2b).
 """
 function adm_constraint!(p::GHProblem{T}, u, t;
-                         mask=interior_mask(p.interior, T(t))) where {T}
+                         mask=monitor_mask(p, T(t))) where {T}
     _prepare_monitor!(p, u, t)
     map_blocks!(adm_constraint_kernel!, p.U, p.diag.work, p.U.work,
                 gauge_work(p.Hsrc), p.origins, p.spacings, p.case.γ0,
@@ -525,7 +530,7 @@ function adm_constraint!(p::GHProblem{T}, u, t;
 end
 
 """
-    gh_error!(p::GHProblem, u, t; mask = interior_mask(p.interior, t),
+    gh_error!(p::GHProblem, u, t; mask = evolved_mask(p, t),
               shell = (0, -1))
 
 Evaluate the error against the analytic solution, the interior residual
@@ -540,9 +545,11 @@ driver passes a band around the horizon.
 The mask defaults to the problem's own interior at this `t`, which is
 `CODE.md`'s rule that the modified region is never reported as a numerical
 solution; [`AllPoints`](@ref) is how a test asks for the unmasked number
-and sees how much larger it is.
+and sees how much larger it is. (Amended in step X8: the problem's
+[`evolved_mask`](@ref), which is the interior's own but for an excised hole
+whose lego corners were shaved.)
 """
-function gh_error!(p::GHProblem{T}, u, t; mask=interior_mask(p.interior, T(t)),
+function gh_error!(p::GHProblem{T}, u, t; mask=evolved_mask(p, T(t)),
                    shell=(zero(T), -one(T))) where {T}
     scatter!(p.U, u)
     map_blocks!(gh_error_kernel!, p.U, p.diag.work, p.U.work, p.origins,

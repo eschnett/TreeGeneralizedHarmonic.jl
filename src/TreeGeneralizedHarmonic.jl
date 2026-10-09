@@ -113,6 +113,10 @@ export horizon_min_radius, horizon_max_radius, singular_radius, hole_mass
 export hole_velocity
 export layer_spacing, check_interior_radii, layer_mask, shell_mask
 export geometry_radii, layer_radii
+# The `:excised` variant's parameters (step X2b)
+export Excision, excision_closure, upwind_on, excision_monitor_mask
+export MIXED_NESTINGS, excision_mixed           # the mixed derivative's nesting (step X6)
+export excision_shave, ShavedMask, BothMask, is_shaved, excised_mask  # step X8
 
 # The tracked geometry (step 8d): the real harmonics, the kernel argument, its
 # masks and its checks — and, in `tracking.jl`, the track it is built from
@@ -148,6 +152,14 @@ export dirichlet, has_outer_face, state_parity, even_parity, state_rotation,
 export GHProblem, gh_rhs!, gh_dt, max_speed, convergence_rate
 export default_simd_width
 export gh_step_limiter!, paste_interior!
+
+# Excision (step X2b): the classes, the closures, the zone kernel, the monitors
+export ExcisionData, build_excision, check_excision_mesh, check_excision_case
+export monitor_mask, excision_rows, excision_band_cells, closure_provider
+export evolved_mask                              # step X8: the shaved set's masks
+export ClosureProvider, Lopsided, ExcisionBlend, blend_weight
+# The frame-dragged faces' rule in the zone kernel (step X6)
+export DraggedProvider, dragged_provider, lattice_direction, direction_code
 
 # The time integrator (IMEXRungeKutta's RK4 by block owner, 2026-09-26)
 export state_partition, gh_limiter!, gh_integrator, gh_solve, ProblemRef
@@ -199,6 +211,10 @@ include("boundaries.jl")
 # (added 2026-10-05).
 include("lanes.jl")
 include("evolution.jl")
+# After `evolution.jl` (its providers extend `d1`, `d2`, `dmix`, `ko` and
+# `adv`, and its zone kernel calls `gh_rhs_at_point`), before the monitors
+# that take its `monitor_mask` (added in step X2b).
+include("excision.jl")
 # After `evolution.jl` and `bounds.jl`: the integrator couples `gh_rhs!` to
 # the two limiters (added 2026-09-26, replacing OrdinaryDiffEq's RK4).
 include("stepping.jl")
