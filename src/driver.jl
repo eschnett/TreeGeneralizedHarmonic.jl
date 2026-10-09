@@ -26,10 +26,13 @@
 #     with that call's `t`. All three are here from step 6; forgetting the
 #     second is the bug that arrives one chunk late, and passing a stale
 #     `t` is the bug that arrives as a boundary reflection.
-#   * **Chunks are counted, not accumulated.** `nchunks = ceilint(t_end /
-#     chunk)` and `stop = min(c · chunk, t_end)`, never a
-#     `while t < t_end − tiny` guard: an absolute slack is meaningless at a
-#     type whose ulp is larger than it (TreeHydro's note on precision).
+#   * **Chunks are counted, not accumulated.** `nchunks = chunk_count(t_end,
+#     chunk)` and `chunk_bounds`, never a `while t < t_end − tiny` guard: an
+#     absolute slack is meaningless at a type whose ulp is larger than it
+#     (TreeHydro's note on precision). The count tolerates a quotient an ulp
+#     off an integer, and the last chunk ends at `t_end` itself (amended
+#     2026-10-09; `ceilint(t_end / chunk)` gave a sliver chunk at
+#     `0.33/0.03`).
 #
 # **The mesh (added in step 6).** `adapt = true` runs `CODE.md`'s
 # initial-data cycle with the masked Löhner indicator before the first
@@ -455,7 +458,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     chunk > 0 || throw(ArgumentError(
         "chunk must be positive, got $chunk: it is the cadence the analysis " *
         "record is written at and the regrid cadence from step 6, and the " *
-        "number of chunks is counted as ceilint(t_end / chunk). The case " *
+        "number of chunks is counted as ⌈t_end / chunk⌉. The case " *
         "carries one; pass it here if the case does not."))
     (ρ_max_factor === nothing || ρ_max_fixed === nothing) ||
         throw(ArgumentError(
@@ -1083,7 +1086,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         record!(p0, zero(T), u, zero(T), 0, λ_initial, λ_initial, zero(T))
     end
 
-    nchunks = ceilint(t_end / chunk)
+    nchunks = chunk_count(t_end, chunk)
     # The chunk the checkpoint ended, and the refusals of a restart with
     # nothing left to run or with chunks that would not line up (TreeHydro's).
     c_done = saved === nothing ? 0 : saved.chunk
@@ -1188,8 +1191,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     t_done = t_saved
     for c in (c_done + 1):nchunks
         chunk_start = time()
-        tstart = min((c - 1) * chunk, t_end)
-        stop = min(c * chunk, t_end)
+        tstart, stop = chunk_bounds(c, nchunks, t_end, chunk)
         stop > tstart || break
         # The track this chunk's geometry is built from, which a checkpoint
         # after the row needs to rebuild the chunk's interior (the row's
