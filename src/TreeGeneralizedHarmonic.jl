@@ -49,10 +49,11 @@ why, and every measured number — and `PLAN.md` for the work breakdown.
 module TreeGeneralizedHarmonic
 
 using TreeAMR
-# HDF5 is what loads TreeAMR's checkpoint extension (`TreeAMRHDF5Ext`, M9a):
-# without it `save_checkpoint` and `load_checkpoint` have no methods. A hard
-# dependency (decided 2026-10-01), so that a run can always be checkpointed.
-import HDF5
+# TreeAMR's companion package for checkpoints: `save_checkpoint` and
+# `load_checkpoint` (TreeAMR's M9a, which left TreeAMR for it in 0.2.0). A hard
+# dependency (decided 2026-10-01, for HDF5 then), so that a run can always be
+# checkpointed.
+using TreeIOHDF5
 
 import SpacetimeMetrics
 using AbstractSphericalHarmonics: EquiangularGrid, SphereGrid, ash_grid_size,

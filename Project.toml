@@ -7,7 +7,6 @@ authors = ["Erik Schnetter <schnetter@gmail.com>"]
 AbstractSphericalHarmonics = "ee470b23-2871-4f3a-b920-8523874a9e46"
 ApparentHorizonFinder = "2326d305-03d0-4260-ba27-fc7d1edfc55d"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
-HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 IMEXRungeKutta = "6f46d5f7-e15e-41aa-a098-eed9d1a63ad8"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 KorzynskiSpin = "dddeb715-7fc8-4947-8935-98683755b697"
@@ -17,18 +16,19 @@ SpacetimeMetrics = "77e61b41-605e-43a6-b70f-04b7dcd1f572"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 TreeAMR = "91bc416d-811c-44c1-9bc4-b9c8bbdbbd08"
+TreeIOHDF5 = "49af10b2-b28a-4989-bafa-527ac30d3246"
 
 [sources]
 ApparentHorizonFinder = {rev = "main", url = "https://github.com/eschnett/ApparentHorizonFinder.jl"}
 IMEXRungeKutta = {rev = "main", url = "https://github.com/eschnett/IMEXRungeKutta.jl"}
 KorzynskiSpin = {rev = "main", url = "https://github.com/eschnett/KorzynskiSpin.jl"}
 SpacetimeMetrics = {rev = "main", url = "https://github.com/eschnett/SpacetimeMetrics.jl"}
+TreeIOHDF5 = {rev = "main", url = "https://github.com/eschnett/TreeIOHDF5.jl"}
 
 [compat]
 AbstractSphericalHarmonics = "1.2"
 ApparentHorizonFinder = "2.1"
 Dates = "1.11"
-HDF5 = "0.17"
 IMEXRungeKutta = "1.2"
 KernelAbstractions = "0.9.42, 1"
 KorzynskiSpin = "1.1"
@@ -37,5 +37,6 @@ SIMD = "3"
 SpacetimeMetrics = "1.6"
 StaticArrays = "1"
 TOML = "1"
-TreeAMR = "0.1.7"
+TreeAMR = "0.2"
+TreeIOHDF5 = "0.1.0"
 julia = "1.11"

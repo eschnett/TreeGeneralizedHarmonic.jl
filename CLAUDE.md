@@ -345,7 +345,8 @@ state's own structs, `fit_from_plain`, `run_criterion` and `save_run`/
 `checkpoint_interval_seconds`, `max_walltime_seconds`,
 `num_checkpoints_keep`, `checkpoint_hdf5_filters`,
 `checkpoint_sync_to_disk` and `restart_file`, TreeHydro's names. Two
-differences from TreeHydro, both Erik's: HDF5 is a **hard dependency**, and
+differences from TreeHydro, both Erik's: HDF5 (TreeIOHDF5 from 2026-10-09)
+is a **hard dependency**, and
 the checkpoint is written **before the regrid**, so that a restart may
 change the regridding criterion (the case's `Refinement`, `regrid`,
 `buffer`) and regrids with it first; everything else must match the
@@ -432,6 +433,15 @@ Zen 3 (four lanes) and 2.2–2.8× on Skylake-AVX512 (eight), the gauge wave's R
 1.42× at 64 threads; the hole fixture's step only 1.08×, because on a refined mesh
 TreeAMR's prolongation is 145 of a 200 ms `gh_rhs!` — that, not the kernel, is a
 hole's next lever. Devices run the `W = 1` kernel at PR #4's speed.
+
+From 2026-10-09 the package is on **TreeAMR 0.2.0**, whose one break is that
+the checkpoint functions and TreeAMR's HDF5 extension `TreeAMRHDF5Ext` moved
+into the companion package **TreeIOHDF5** (unregistered, pinned to GitHub
+`main` by `[sources]`, `[compat]` `0.1.0`), with the same names, signatures
+and file format. TreeIOHDF5 replaces HDF5 as the hard dependency (`src/` used
+HDF5 for nothing else), and `prerequisite_tests.jl` asserts that
+`save_checkpoint` and `load_checkpoint` are TreeIOHDF5's and not TreeAMR's.
+No internal this package reaches for changed.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -615,11 +625,14 @@ julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])'
 ```
 
 The clean-checkout check, which is what the `[sources]` pins exist for: a
-tree with no `Manifest.toml` resolves the four pinned packages from
+tree with no `Manifest.toml` resolves the five pinned packages from
 GitHub and TreeAMR from the General registry (from 2026-09-26, at `0.1.3`,
-from 2026-10-01 at `0.1.4` and from 2026-10-04 at `0.1.7`; also between
+from 2026-10-01 at `0.1.4`, from 2026-10-04 at `0.1.7` and from
+2026-10-09 at `0.2.0`; also between
 2026-09-21 and 2026-09-23),
-and HDF5 with its binary library from General too (2026-10-01), and passes. From 2026-09-21 it is a real check —
+and HDF5 with its binary library from General too (2026-10-01; from
+2026-10-09 TreeAMR at `0.2.0`, with TreeIOHDF5 from GitHub and HDF5 through
+it), and passes. From 2026-09-21 it is a real check —
 every source is public, so it works anonymously, which is what CI does:
 
 ```bash
@@ -892,12 +905,14 @@ the cluster mechanics (modules, SLURM, NUMA, precompilation).
 Carried over from TreeAMR, TreeWave and TreeHydro where they apply, plus
 what is specific to a GR code. Each is in `CODE.md` with its reason.
 
-- **Four dependencies are pinned to GitHub `main`, and TreeAMR comes
+- **Five dependencies are pinned to GitHub `main`, and TreeAMR comes
   from the registry** (amended 2026-09-26, when Erik registered TreeAMR
   0.1.3 for its M11 interpolation; from 2026-09-23 to then TreeAMR was
   pinned too). `SpacetimeMetrics`, `ApparentHorizonFinder`,
-  `KorzynskiSpin` and `IMEXRungeKutta` are what `Project.toml`'s `[sources]` entries resolve, and TreeAMR is
-  General's release under `[compat]` `0.1.7` (from 2026-10-04, for M12's
+  `KorzynskiSpin`, `IMEXRungeKutta` and `TreeIOHDF5` (from 2026-10-09) are
+  what `Project.toml`'s `[sources]` entries resolve, and TreeAMR is
+  General's release under `[compat]` `0.2` (from 2026-10-09, when the
+  checkpoints moved to TreeIOHDF5; `0.1.7` from 2026-10-04, for M12's
   rotating seam; `0.1.4` from 2026-10-01, for M9a's checkpoints; `0.1.3`
   before) — so `~/src/jl/…` is *not*
   what the tests see; an unpushed change there is invisible here, a pushed
@@ -1209,9 +1224,9 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `buffer`) may change. **Anything added to the loop's carried state goes
   into the run state too** (`driver.jl`'s `state = (; …)` and the restore
   branch), or restarts silently stop being the run;
-  `test/checkpoint_tests.jl`'s chains are what notice. HDF5 is a hard
-  dependency here (TreeHydro leaves it to the caller), so the extension is
-  always loaded.
+  `test/checkpoint_tests.jl`'s chains are what notice. TreeIOHDF5, which
+  holds the checkpoint functions from TreeAMR 0.2.0, is a hard dependency
+  here (TreeHydro left HDF5 to the caller), so they are always there.
 - **The `diag` slots are a contiguous-range interface.** `block_mapreduce`
   reduces an integer or a *contiguous* range of variables and refuses
   anything else — a device cannot be handed an arbitrary index vector cell

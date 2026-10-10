@@ -340,9 +340,9 @@ still chooses it on the analytic layer, which is its initial data.
 
 ## Checkpoint and restart (added 2026-10-01)
 
-A run writes checkpoints and restarts from one through TreeAMR's
-`save_checkpoint` and `load_checkpoint` (M9a), which live in TreeAMR's HDF5
-extension — loaded by this package, HDF5 being a hard dependency here. The
+A run writes checkpoints and restarts from one through `save_checkpoint` and
+`load_checkpoint` from TreeIOHDF5, TreeAMR's companion package for
+checkpoints and a hard dependency here. The
 keywords, the file names, the rotation and the refusals are **TreeHydro's**,
 so that the applications of TreeAMR checkpoint alike; see "Checkpoint and
 restart" in `CODE.md` and [`latest_checkpoint`](@ref) for the job-chain
@@ -372,7 +372,7 @@ finished run can be continued.
 - `num_checkpoints_keep` — after each successful write, every file of the
   prefix but the one just written and the newest `num_checkpoints_keep − 1`
   others is deleted, **including files an earlier job left behind**.
-- `checkpoint_hdf5_filters`, `checkpoint_sync_to_disk` — TreeAMR's
+- `checkpoint_hdf5_filters`, `checkpoint_sync_to_disk` — TreeIOHDF5's
   `filters` and `sync`. The tests turn the flush off.
 - `restart_file` — continue from this checkpoint rather than from the
   initial data, with no `forest`.

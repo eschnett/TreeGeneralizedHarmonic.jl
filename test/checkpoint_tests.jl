@@ -70,7 +70,7 @@ const TGHc = TreeGeneralizedHarmonic
         end
     end
 
-    # Guards the reals of a `Float32x2` run, which TreeAMR's plain data refuse
+    # Guards the reals of a `Float32x2` run, which TreeIOHDF5's plain data refuse
     # as scalars, and the structs of the run state, which they refuse
     # outright: either read back as anything but the bits they were would make
     # every later number of a restarted run a different one.
@@ -101,7 +101,7 @@ const TGHc = TreeGeneralizedHarmonic
     end
 
     # Guards the file names a job chain relies on: the newest by iteration,
-    # never TreeAMR's partial file or another prefix's, and a rotation that
+    # never TreeIOHDF5's partial file or another prefix's, and a rotation that
     # keeps the file just written.
     @testset "names, rotation and latest_checkpoint are TreeHydro's" begin
         dir = mktempdir()
