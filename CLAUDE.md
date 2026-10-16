@@ -493,25 +493,22 @@ predicts what the 3D runs measure — and a `leakage` section to
 `hole_runs.jl`, which is *not* in its default list (it is a batch job).
 Step 8c's `calibration` section is not in it either: about 150 runs of
 `5 M` and `50 M`, a dozen node-hours on Symmetry.
-`Project.toml` carries the `[sources]` pins and CI is in place — but
-**the CI matrix is temporarily reduced** (2026-09-19): Julia 1.11 is
-dropped, with the removed lines and the reason in a comment at its site in
-`CI.yml`; it fails only `pointwise_tests.jl:480` (176 bytes where zero is
-claimed), and is owed back. Code coverage was dropped then too, and is back
-on **the macOS cell only** (2026-09-26): instrumented runs compute *wrong
-numbers* on GitHub's Linux runners (207 failures on the threaded Linux
-cell at Julia 1.13.1, which the removed gate had left instrumented), while
-the instrumented macOS cell and the instrumented suite on Symmetry pass.
-Probes of 146 GitHub runners found the trigger: `--code-coverage`
+`Project.toml` carries the `[sources]` pins and CI is in place. **Julia
+1.13 is the floor and the only version CI runs** (decided by Erik on
+2026-10-16: supporting earlier versions slows development and is not
+useful at the moment); the 1.11 cells, dropped on 2026-09-19 for
+`pointwise_tests.jl:480`'s 176 bytes, are not owed back. Code coverage
+runs on **the macOS cell only** (2026-09-26): instrumented runs compute
+*wrong numbers* on GitHub's Linux runners (207 failures on the threaded
+Linux cell at Julia 1.13.1, which a removed gate had left instrumented),
+while the instrumented macOS cell and the instrumented suite on Symmetry
+pass. Probes of 146 GitHub runners found the trigger: `--code-coverage`
 together with `--check-bounds=yes` (what `julia-runtest` passes; either
 alone is fine) on AMD Zen 4/Zen 5 **with AVX-512 exposed** (EPYC 9V45
 always, EPYC 9V74 only on the VMs that expose it), on Julia **1.13.0 and
 1.13.1**, deterministically — a miscompilation, not a bad machine. Zen 3,
-Intel with AVX-512, Julia 1.11.9 and nightly (1.14.0-DEV.3386) pass. Keep
-coverage off the Linux cells until 1.13 carries the fix. (Julia 1.12.7
-fails 59 pointwise identity claims of its own on every CPU under the same
-flags, and on some Zen 4/5 VMs plain: not investigated; CI does not run
-1.12.) There is
+Intel with AVX-512 and nightly (1.14.0-DEV.3386) pass. Keep coverage off
+the Linux cells until a 1.13 release is shown to carry the fix. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
@@ -930,13 +927,14 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   clean checkout and a fork's pull request both resolve it — the
   clean-checkout check below finally proves what it claims. Do not vendor
   a package and do not add a local-path source.
-- **`[sources]` is why the Julia floor is 1.11**, and it cannot be lowered
-  yet. The section was introduced in 1.11, so the floor drops only when
-  every entry goes: that needs `KorzynskiSpin` registered in General (it
-  is not registered at all) and `ApparentHorizonFinder` **2.1** released
-  (General carries `2.0.0`, and `[compat]` here asks for `2.1`).
-  `SpacetimeMetrics` is registered at the bound this package asks for, so
-  its pin is a choice rather than a necessity.
+- **Most `[sources]` pins are necessary, not chosen.** (The section needs
+  Julia 1.11, which no longer constrains anything: the floor is 1.13.) A
+  pin goes only when its package is in General at the bound asked for:
+  `KorzynskiSpin` and `TreeIOHDF5` are not registered at all, and
+  `ApparentHorizonFinder` **2.1** is not released (General carries
+  `2.0.0`, and `[compat]` here asks for `2.1`). `SpacetimeMetrics` is
+  registered at the bound this package asks for, so its pin is a choice
+  rather than a necessity.
 - **`notes/` is read-only.** The copies carry their provenance; when
   `CODE.md` departs from them, `CODE.md` says so. Do not "fix" a copy.
 - **Two derivative index conventions.** `SpacetimeMetrics.dmetric`

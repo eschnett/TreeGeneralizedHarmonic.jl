@@ -3966,8 +3966,8 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
-pinned to GitHub `main` by `[sources]`, which puts the Julia floor at
-1.11 as in the siblings), `KernelAbstractions`, `StaticArrays`
+pinned to GitHub `main` by `[sources]`, which needs Julia 1.11),
+`KernelAbstractions`, `StaticArrays`
 (kernel-safe, and what `SpacetimeMetrics` speaks),
 `IMEXRungeKutta` (unregistered, pinned to GitHub `main` by `[sources]`; it
 replaced `OrdinaryDiffEqLowOrderRK` and `SciMLBase` on 2026-09-26, and
@@ -3992,12 +3992,18 @@ The pin is the plain `https` URL of the others, the deploy key, the
 an anonymous clean checkout and a fork's pull request both resolve it, so
 the clean-checkout check proves what it claims for the first time.)**
 `TreeAMR` left `[sources]` the same day: it is registered, and `[compat]`
-selects **0.1.1**. The remaining entries (three until TreeIOHDF5 joined them
-on 2026-10-09) are what keeps the Julia floor at 1.11, and three of them are
-necessary rather than chosen — `KorzynskiSpin` and `TreeIOHDF5` are not in
+selects **0.1.1**. The remaining entries (three until TreeIOHDF5 joined
+them on 2026-10-09) would by themselves put the Julia floor at 1.11, and
+three of them are necessary rather than chosen — `KorzynskiSpin` and `TreeIOHDF5` are not in
 General at all, and `ApparentHorizonFinder` `2.1` is not released there
 (General has `2.0.0`). Vendoring a package or
 adding a local-path source would hide that instead of stating it.
+**The Julia floor is 1.13** (`julia = "1.13"`), and CI runs 1.13 only:
+decided by Erik on 2026-10-16, because supporting earlier versions slows
+development and is not useful at the moment. Until then the floor was
+1.11, set by `[sources]`, and CI had run 1.11 beside the release until
+2026-09-19 (the failure that ended it is under
+[Measured results](#measured-results)).
 **`AbstractSphericalHarmonics` is a direct dependency from step 8d** (`1.2`,
 registered; it was already in the manifest through `ApparentHorizonFinder`):
 the tracked geometry converts the finder's coefficients with its
@@ -4024,8 +4030,8 @@ test is three-dimensional and therefore small: `N = 8`, a few roots, one
 refinement level, short times.
 
 - **G0 — Scaffolding.** *(Done.)* `Project.toml` with the pins, CI on
-  1.11 and release at one and four threads, `CLAUDE.md`, this document,
-  `notes/`; `precision.jl`, `device.jl`; a prerequisite test that the
+  1.11 and release at one and four threads (1.13 only from 2026-10-16),
+  `CLAUDE.md`, this document, `notes/`; `precision.jl`, `device.jl`; a prerequisite test that the
   pinned TreeAMR exports what this package calls, and that a
   `SpacetimeMetrics` metric with its `dmetric` pass runs as a kernel
   argument on `CPU()`. *Accept:* a clean archive instantiates and passes.
@@ -4766,7 +4772,9 @@ are unfixed as of this writing:
   (`pointwise_tests.jl:480`), and **48** bytes for the weights
   (`stencils_tests.jl:347`). Both are zero on 1.13. So the claim holds on
   the version the suite usually runs and not on the version `[sources]`
-  makes the floor; one of the two is wrong.
+  makes the floor; one of the two is wrong. **(Moot from 2026-10-16:
+  the floor is 1.13 and nothing runs 1.11 any more; see
+  [File layout](#file-layout).)**
 
   **It does not reproduce in isolation.** On 1.11.9 here, `@allocated` of
   `derivative_weights` and `dissipation_weights` is **0** — measured
