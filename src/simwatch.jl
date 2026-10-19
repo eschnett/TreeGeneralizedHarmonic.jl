@@ -109,6 +109,13 @@ first call (from which SimWatch computes the average speed). `interval` is
 the least number of seconds between two writes by [`simwatch_update!`](@ref);
 `startup_interval` is the `update_interval` reported before the second call,
 which has to cover loading and compilation.
+
+`comm` (added 2026-10-19) makes the writer one run's over MPI: every rank
+makes it and calls [`simwatch_update!`](@ref) at the same points, which is
+then collective — whether to write is agreed from every rank's clock, the
+memory is summed over the ranks (the peak too: the job's, not one
+process's), and rank 0 alone writes the file. `nothing`, the default, is one
+process.
 """
 mutable struct SimWatchWriter
     dir::String
@@ -123,18 +130,21 @@ mutable struct SimWatchWriter
     gap::Float64                # the spacing of the last two calls
     time_start::Union{Nothing,Float64}
     warned::Bool
+    comm::TreeAMR.Communicator
 end
 
 function SimWatchWriter(dir::AbstractString; name::AbstractString=basename(abspath(dir)),
-                        code=nothing, interval::Real=60, startup_interval::Real=900)
+                        code=nothing, interval::Real=60, startup_interval::Real=900,
+                        comm=nothing)
     t = time()
     job = _sw_envfloat("SLURM_JOB_START_TIME")
-    t0 = job === nothing ? t : job
+    # Rank 0's start, so that every rank reports the same wall time.
+    t0 = rank_bcast(communicator(comm), job === nothing ? t : job)
     started = Dates.unix2datetime(t0)
     return SimWatchWriter(String(dir), String(name),
                           code === nothing ? nothing : String(code), Float64(interval),
                           Float64(startup_interval), started, t0, -Inf, -Inf, NaN,
-                          nothing, false)
+                          nothing, false, communicator(comm))
 end
 
 """
@@ -164,8 +174,17 @@ function simwatch_update!(sw::SimWatchWriter; force::Bool=false,
     if sw.time_start === nothing && time !== nothing
         sw.time_start = Float64(time)
     end
-    force || t - sw.last_write ≥ sw.interval || return false
+    due = force || t - sw.last_write ≥ sw.interval
+    (due,) = agree_any(sw.comm, (due,))
+    due || return false
     sw.last_write = t
+    # Every rank's memory, summed (Linux only, where the resident set is
+    # read; a rank that cannot read it contributes nothing).
+    rss = _sw_current_rss()
+    rss = rank_reduce(+, sw.comm, something(rss, 0); present=rss !== nothing)
+    rss = rss == 0 ? _sw_current_rss() : rss
+    peak = rank_reduce(+, sw.comm, Int(Sys.maxrss()))
+    isroot(sw.comm) || return true
     expected = isnan(sw.gap) ? max(sw.interval, sw.startup_interval) :
                max(sw.interval, 3 * sw.gap / 2)
     limit = walltime_limit !== nothing ? walltime_limit :
@@ -183,8 +202,8 @@ function simwatch_update!(sw::SimWatchWriter; force::Bool=false,
     for (k, v) in (("nodes", _sw_envint("SLURM_JOB_NUM_NODES")),
                    ("tasks", _sw_envint("SLURM_NTASKS")),
                    ("threads", Threads.nthreads()), ("gpus", _sw_gpus()),
-                   ("memory_bytes", _sw_current_rss()),
-                   ("memory_peak_bytes", Sys.maxrss()))
+                   ("memory_bytes", rss),
+                   ("memory_peak_bytes", peak))
         _sw_setkey!(res, k, v)
     end
     resources === nothing || merge!(res, _sw_todict(resources))

@@ -728,34 +728,54 @@ function refine_flags(τfs::FieldSet{T,3}, lb::LevelBounds{T},
         work[idx..., s, b] > ctol
     end
 
-    flags = map(1:nblocks(τfs)) do b
-        k = blockkey(τfs, b)
-        ℓ = level(k)
-        flo, cap = block_level_bounds(lb, k)
-        nrefine, _ = refires[b]
-        nbox, box = boxfires[b]
-        request = if nrefine > 0 && ℓ < cap
-            ℓ + 1
-        elseif nbox > 0
-            ℓ
-        else
-            max(ℓ - 1, 0)
-        end
-        target = clamp(request, flo, cap)
-        if target > ℓ
-            nbox > 0 ? (Refine, box) : Refine
-        elseif target < ℓ
-            Coarsen
-        else
-            nbox > 0 ? (Keep, box) : Keep
+    # The bounds' refusal is each rank's own blocks', so it is agreed before
+    # the collectives below (added 2026-10-19).
+    flags = agree_refusal(forest) do
+        map(1:nblocks(τfs)) do b
+            k = blockkey(τfs, b)
+            ℓ = level(k)
+            flo, cap = block_level_bounds(lb, k)
+            nrefine, _ = refires[b]
+            nbox, box = boxfires[b]
+            request = if nrefine > 0 && ℓ < cap
+                ℓ + 1
+            elseif nbox > 0
+                ℓ
+            else
+                max(ℓ - 1, 0)
+            end
+            target = clamp(request, flo, cap)
+            if target > ℓ
+                nbox > 0 ? (Refine, box) : Refine
+            elseif target < ℓ
+                Coarsen
+            else
+                nbox > 0 ? (Keep, box) : Keep
+            end
         end
     end
 
-    marks = buffer > 0 ? clamp_marks(lb, buffered_flags(forest, flags, buffer)) :
-            flags
+    marks = buffer > 0 ? buffered_marks(lb, flags, buffer) : flags
     return (flags=marks, τ_max=tau_max(τfs; slot=slot),
-            centroid=refinement_centroid(forest, boxfires),
-            nfiring=sum(first, boxfires))
+            centroid=refinement_centroid(τfs, boxfires),
+            nfiring=rank_reduce(+, forest, sum(first, boxfires; init=0)))
+end
+
+# The travelling margin and the second application of the bounds, for this
+# rank's blocks. `buffered_flags` takes one flag per leaf of the whole forest,
+# since the margin recruits neighbours that may be another rank's, so over
+# MPI the flags are gathered first — as TreeAMR's `RegridMark`s, its `isbits`
+# form of either kind of flag, in curve order, which is rank order — the
+# margin and the bounds are applied to the whole vector alike on every rank,
+# and this rank's slice is returned, which is what `regrid!` takes (added
+# 2026-10-19). Serially the flags go in as they are.
+function buffered_marks(lb::LevelBounds, flags::AbstractVector, buffer::Integer)
+    forest = lb.forest
+    isdistributed_over(forest) ||
+        return clamp_marks(lb, buffered_flags(forest, flags, buffer))
+    local_marks = [TreeAMR.RegridMark{3}(f, forest.N) for f in flags]
+    all_marks = TreeAMR.allgatherv(forest.comm, local_marks)
+    return clamp_marks(lb, buffered_flags(forest, all_marks, buffer))[blockrange(forest)]
 end
 
 """
@@ -785,7 +805,7 @@ function clamp_marks(lb::LevelBounds{T}, marks::AbstractVector) where {T}
 end
 
 """
-    refinement_centroid(forest, fires) -> SVector{3} or nothing
+    refinement_centroid(fs, fires) -> SVector{3} or nothing
 
 The volume-weighted centroid of the region the indicator flagged, from the
 `(count, box)` pairs of a [`firing_boxes`](@ref) sweep: each block
@@ -820,15 +840,21 @@ indexing rather than of the indicator, it scales with the coarse spacing,
 and it is what "within a few finest spacings" in G5 has to be read against.
 
 Host-side, over the per-block results in block order, so it does not move
-with the thread count.
+with the thread count. `fires` is one entry per block of the field set `fs`
+the sweep ran over — this rank's blocks, over MPI — and the two sums are
+combined over the ranks in rank order (amended 2026-10-19: they were read
+with the forest's leaf index, which over MPI is not this rank's block index),
+so the centroid is the same on every rank and agrees with the serial one to
+roundoff.
 """
-function refinement_centroid(forest::Forest{3,T}, fires) where {T}
+function refinement_centroid(fs::FieldSet{T,3}, fires) where {T}
+    forest = fs.forest
     num = SVector{3,T}(zero(T), zero(T), zero(T))
     den = zero(T)
     for b in 1:length(fires)
         n, box = fires[b]
         n == 0 && continue
-        k = forest.leaves[b]
+        k = blockkey(fs, b)
         h = spacing(T, forest, k)
         o = block_origin(T, forest, k)
         # A vertex-centered owned index `i` sits at `origin + (i − 1)h`,
@@ -839,6 +865,9 @@ function refinement_centroid(forest::Forest{3,T}, fires) where {T}
         w = T(n) * h^3
         num += w * x
         den += w
+    end
+    num, den = rank_reduce(forest, (num, den)) do (n1, d1), (n2, d2)
+        (n1 + n2, d1 + d2)
     end
     return iszero(den) ? nothing : num / den
 end

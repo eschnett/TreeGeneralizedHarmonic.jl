@@ -277,9 +277,17 @@ end
 # backend first: TreeAMR interpolates where the data is and wants the points
 # there too, and a device without `Float64` could not hold the finder's
 # `Float64` points. `T(x[d])` is the conversion TreeAMR would make itself.
+#
+# **Over MPI it is collective, and inside an analysis served on rank 0 it is
+# announced** (added 2026-10-19): rank 0 broadcasts the call's arguments
+# first, and the other ranks make the same call with no points
+# ([`served_request!`](@ref), `src/distributed.jl`). This is the one place the
+# state is interpolated, which is what lets the finder and the fit run on
+# rank 0 alone.
 function interpolate_state(fs::FieldSet{T,3}, xs::AbstractArray, q::Integer,
                            mask, derivs; vars=1:fs.nvars) where {T}
     check_interpolation_order(q)
+    served_request!(fs, (:interp, Int(q), derivs, collect(Int, vars), mask))
     n = Int(q) + 2
     xv = vec(xs)
     pts = to_backend(get_backend(fs.work),
@@ -477,6 +485,31 @@ end
 # --- the find ---------------------------------------------------------------
 
 """
+    fill_state!(p::GHProblem, u, t)
+
+Scatter the state `u` into `p.U` and fill its ghosts with this `t`'s
+Dirichlet hook: what every interpolation of the state needs first, because
+its window reaches `G` points into the neighbouring blocks. The state itself
+is not modified.
+
+The find and the fit's state sampler call it, and nothing else in an
+analysis served on rank 0 does a collective step but `interpolate_state`:
+inside one it is announced to the other ranks, which fill their own blocks'
+ghosts with it (`src/distributed.jl`; added 2026-10-19).
+"""
+function fill_state!(p::GHProblem{T}, u, t) where {T}
+    served_request!(p.U, (:fill, T(t)))
+    scatter!(p.U, u)
+    boundary = dirichlet(p.case, T(t))
+    if boundary === nothing
+        fill_ghosts!(p.U, p.schedule)
+    else
+        fill_ghosts!(p.U, p.schedule; boundary=boundary)
+    end
+    return nothing
+end
+
+"""
     horizon_radii(points, center) -> (r_min, r_mean, r_max)
 
 The coordinate radii of a found surface, measured from `center`.
@@ -567,13 +600,7 @@ function find_gh_horizon(p::GHProblem{T,G,q}, u, t; N::Integer=16,
                          atol=0.0, maxiters::Integer=1000,
                          verbosity::Integer=0) where {T,G,q}
     case = p.case
-    scatter!(p.U, u)
-    boundary = dirichlet(case, T(t))
-    if boundary === nothing
-        fill_ghosts!(p.U, p.schedule)
-    else
-        fill_ghosts!(p.U, p.schedule; boundary=boundary)
-    end
+    fill_state!(p, u, t)
 
     # The point the radii are measured from (step 8d): the analytic center
     # unless the caller names another — the driver of a tracked run passes

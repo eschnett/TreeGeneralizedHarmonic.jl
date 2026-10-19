@@ -20,8 +20,8 @@ citable, so the documents this design rests on are **copied verbatim
 into [`notes/`](notes/README.md)** and cited from there. What is new is
 the mesh: finite differences with ghost zones on an octree of uniform
 blocks, a global time step, regridding driven by an error indicator, and
-— through the mesh — threads, GPUs and (when TreeAMR's M7 lands) MPI,
-without this package writing any of that itself.
+— through the mesh — threads, GPUs and MPI (TreeAMR's M7, in use from
+2026-10-19), without this package writing any of that itself.
 
 *Status: milestones G0–G3 are done and their numbers are in this file —
 the pointwise algebra, the stencils, the fused right-hand side, coarse-fine
@@ -87,6 +87,7 @@ research project; the inherited documents live in `notes/`.
 - [Time integration](#time-integration)
 - [Analysis quantities](#analysis-quantities)
 - [Precision, threads, devices](#precision-threads-devices)
+- [Running distributed](#running-distributed)
 - [I/O and viewers](#io-and-viewers)
 - [Checkpoint and restart](#checkpoint-and-restart)
 - [Upstream prerequisites](#upstream-prerequisites)
@@ -3200,7 +3201,8 @@ inside it; the modified region is not a numerical solution. Norms are
 block order, so they are bit-identical across thread counts. **(Amended
 2026-10-01:** they are TreeAMR's `mesh_mapreduce` — the same partials, the
 weight `h³` applied by TreeAMR, the combination on the host, which is the
-one place TreeAMR's M7 will put the `Allreduce` — and so is every other
+one place TreeAMR's M7 combines the ranks' partials, by an `allgather`
+folded in rank order — and so is every other
 reduction that crosses blocks: the speed, the indicator's scales and
 `τ_max`, the projection's counts and the validity monitor's extremes. They
 are still bit-identical across thread counts. `mesh_mapreduce` combines
@@ -3634,6 +3636,158 @@ break it:
   - **The lean source alone:** 52 % of FP64 peak.
   - **Around the kernel,** TreeAMR's scatter and ghost fill run at 0.65–1 TB/s.
 
+## Running distributed
+
+*(Added 2026-10-19, on TreeAMR's M7, released since TreeAMR 0.1.5.)* A run
+is distributed over MPI by building its forest over a communicator —
+`gh_forest(…; comm)`, `hole_forest(…; comm)`, an `MPI.Comm` with `using MPI`
+and `MPI.Init()` done — and calling `evolve!` on every rank with the same
+arguments; a restart takes `evolve!(…; comm)` and distributes the
+checkpoint's forest over it. TreeAMR keeps the forest whole on every rank
+and gives each rank a contiguous run of the Morton curve's leaves, and does
+everything that crosses ranks itself: the ghost exchange (bit-identical to a
+serial fill), the interface restriction, the regrid with its repartition,
+`mesh_mapreduce` (an `allgather` of one partial per rank, folded in rank
+order), the point interpolation (each point routed to its owner) and, in
+TreeIOHDF5, the checkpoint (an index and one part file per I/O group,
+readable at any rank count). **This package never loads MPI**: the caller
+does, and MPI is a test dependency only — TreeHydro's arrangement.
+
+**Multi-GPU is the same thing.** One rank per GPU, each rank's field sets on
+its own device; device buffers are staged through page-locked host memory by
+default, or handed to MPI directly with `communicator(comm; deviceaware =
+true)` on a CUDA-aware MPI. Choosing a rank's device is the caller's job (the
+rank's place on its node, `MPI.Comm_split_type(…, COMM_TYPE_SHARED)`), and
+`test/octant_runs.jl mpi=true backend=cuda` does it. TreeAMR measured its
+right-hand side at 0.71–0.74 weak-scaling efficiency on four H200s of one
+node, bit-identical to serial apart from sums.
+
+What was left for this package, `src/distributed.jl` and the paths it fixed:
+
+- **Agreements** (TreeHydro's `rank_reduce`, `agree_any`, `agree_refusal`,
+  `isroot`): the initial data's finiteness count, the refinement centroid and
+  its firing count, the wall-clock decisions to checkpoint and to stop, the
+  file-system checks of the checkpoint keywords, the level bounds' refusal
+  (each rank checks its own blocks), the fits' timings that the checkpoint
+  holds. Checkpoint rotation, which also removes part files now, is rank 0's.
+- **The travelling margin's flags are the whole forest's.** `buffered_flags`
+  recruits neighbours that may be another rank's, so `refine_flags` gathers
+  every rank's marks as TreeAMR's `isbits` `RegridMark`s, dilates and clamps
+  the whole vector alike on every rank, and hands `regrid!` this rank's slice.
+- **`add_noise!` draws per block**: a `Xoshiro` seeded from one draw of the
+  caller's generator and the block's Morton key, so the noise is a function
+  of the seed and the mesh alone (the values changed with the scheme).
+- **The host analysis runs on rank 0 alone (decided 2026-10-19).** The
+  horizon find, the track's update and the fitted target's fits are host
+  computations whose iteration counts nobody knows in advance and which read
+  the state through the collective `interpolate`. Rank 0 runs them
+  (`on_root`); every collective step it takes inside — a scatter and ghost
+  fill (`fill_state!`), an interpolation (`interpolate_state`) — is
+  announced by a broadcast request first, and the other ranks take the same
+  step with no points of their own until rank 0 says stop and broadcasts its
+  result, which every rank adopts (a fit's coefficients as its host copy,
+  uploaded on each rank). The track, the geometry, the fits and the record's
+  horizon rows are therefore rank 0's bits everywhere, whatever each node's
+  BLAS would have made of the fit's least squares; an exception in the
+  analysis is rank 0's and is rethrown on every rank. The cost is that the
+  analysis does not shrink as ranks are added — it did not before either —
+  and the Korzyński spin, 16–105 right-hand sides a find, remains the lever.
+
+**The claim, and its test.** A distributed run is the serial run: its state,
+mesh, step, chunk and regrid counts, every speed and every maximum, the
+horizon's numbers, the track and the fits bit for bit at any rank count, and
+its sums — the L2 norms and the refinement centroid — to roundoff, exactly at
+one rank. `test/mpi_workload.jl` runs eight cases under `mpiexec -n 3` over
+three, two and one ranks and serially in one launch (TreeHydro's pattern):
+the gauge wave on one block with noise (ranks with no block), on eight
+blocks, the adaptive hole through the initial-data cycle, the tracked
+`:fitted` hole that regrids, the static hole checkpointed and
+restarted at another rank count from the three-rank checkpoint, a wall-clock
+stop, rotation with part files, and a restart file that exists on one rank
+only. `test/mpi_tests.jl` compares the lines. **(Measured 2026-10-19** on
+the development machine, MPICH from `MPI.jl`: every line agrees — 81 a group,
+12 of them sums that differ in the last bits at three ranks and agree to
+roundoff — in 4m37 for the launch, most of it three ranks compiling; and
+`test/octant_runs.jl mpi=true` at two ranks writes the serial run's CSV
+character for character on the tracked `:fitted` octant hole. The suite with
+the test is 5364 assertions in 16m35 at four threads.**)**
+
+**On Symmetry's H200s (measured 2026-10-19, job 578514, cn113, four of its
+eight H200s; `bench/symmetry_mpi_gpu.sh`, environments by
+`bench/symmetry_mpi_gpu_env.sh`).** `test/octant_runs.jl`'s tracked `:fitted`
+Kerr-Schild hole on the reflecting octant — `L = 32`, `N = 32`, `4³` roots,
+`radii = 16, 8, 4`, 232 blocks and 7.6 M points, `q = 4`, `cfl = 1/2`, the
+finder with the spin and the fit every chunk of `M/2`, 224 steps to `t = 2` —
+on one GPU with no MPI and then one rank a GPU:
+
+| run | chunk 2 | chunks 3, 4 | the whole run |
+|---|---|---|---|
+| serial, 1 GPU | 27.0 s | 18.9, 18.8 s | 267 s |
+| MPICH_jll, 1 rank | 26.4 s | 18.7, 18.8 s | 273 s |
+| MPICH_jll, 2 ranks | 23.3 s | 16.0, 16.0 s | 262 s |
+| MPICH_jll, 4 ranks | 25.8 s | 18.0, 17.9 s | 274 s |
+| HPC-X, 2 ranks, staged / direct | 56.2 / 57.5 s | 48.8, 49.4 / 49.8, 49.9 s | 462 / 462 s |
+| HPC-X, 4 ranks, staged / direct | 54.9 / 58.5 s | 45.7, 46.2 / 49.3, 49.4 s | 444 / 471 s |
+
+- **Every run is the serial H200 run**: `octant.csv` and `records.csv` — the
+  monitors' maxima, the horizon's area, `M_irr`, `J` and radii, the track, the
+  fit — the same text, the L2 sums to `2 · 10⁻¹⁶` (`bench/octant_compare.jl`),
+  through MPICH's host staging and through HPC-X's both ways.
+- **The wall clock of this run does not scale with the GPUs, and that is
+  the run, not the evolution.** A chunk's 224 right-hand sides are a few
+  seconds of it; the rest is the analysis at every chunk boundary — the find
+  with the Korzyński spin and the fit on rank 0, and the script's observer,
+  the ADM monitor and seven shells of masked norms — which no rank count
+  shortens. `bench/mpi_steps.jl` times a step alone, which is what the GPUs
+  divide.
+- **HPC-X is 2.5–3× slower than MPICH_jll here, staged and direct alike**, so
+  the messages are not where (the direct path changes nothing): the module
+  also puts nvhpc's CUDA libraries on the library path, which CUDA.jl warns
+  of, and its UCX progress may compete with the ranks' threads. Not traced;
+  MPICH_jll is the one to use until it is.
+- **The HPC-X environment needs `OpenMPI_jll` pointed at HPC-X's libraries**:
+  HDF5_jll follows MPIPreferences' ABI to the Open MPI build and loads
+  `OpenMPI_jll`, whose own `libopen-pal` does not load beside the module's
+  (`undefined symbol: pmix_framework_names`). `bench/symmetry_mpi_gpu_env.sh`
+  sets the JLL's library paths to the module's.
+
+**The step alone (measured 2026-10-19, job 578572, cn113;
+`bench/symmetry_mpi_steps.sh`).** `bench/mpi_steps.jl` on the same octant mesh
+with the analytic `:damped` layer and the algebraic source — no finder, no
+fit, no observer — the wall clock of a step from two single-chunk runs of 7
+and 56 steps, in ms (and points a nanosecond):
+
+| ranks (GPUs) | 7.6 M points (`N = 32`) | 25.7 M points (`N = 48`, `L = 48`) |
+|---|---|---|
+| no MPI | 159.2 (0.048) | 484.1 (0.053) |
+| MPICH_jll, 1 | 160.3 (0.047) | 485.7 (0.053) |
+| MPICH_jll, 2 | 149.5 (0.051) | 363.8 (0.071) |
+| MPICH_jll, 4 | 179.1 (0.042) | 340.4 (0.075) |
+| HPC-X staged, 2 | 111.2 (0.068) | — |
+
+- **The step does not strong-scale yet: 1.33× and 1.43× on 2 and 4 GPUs at
+  25.7 M points, and none at 7.6 M.** One GPU is throughput-bound — 3.4× the
+  points cost 3.0× the time, about 19 ns a point a step, against the kernel's
+  1.1 ns a right-hand side, so the refined mesh's ghost fill and prolongation
+  are most of a step, as on the CPU ("The right-hand side on a CPU").
+- **The messages are a large part of what is left.** HPC-X's UCX moves the
+  same staged messages in a step 26 % shorter than MPICH_jll's at 2 ranks
+  (111 against 150 ms) — so MPICH_jll's shared-memory path is slow for these
+  sizes — and 4 ranks are slower than 2 at 7.6 M points. TreeAMR's own
+  weak-scaling runs (0.71–0.74) were on a uniform and a two-level mesh; this
+  one has three nested coarse-fine shells, and a split by equal block counts
+  may leave the prolongation-heavy blocks on few ranks (a guess, not traced).
+- **And HPC-X's 2.5–3× in job 578514 is in the analysis, not the step**:
+  rank 0's host work — the find, the spin, the fit — under the module's
+  environment. So: HPC-X, ideally direct, for the steps, once its host-side
+  slowdown is found; and the levers on the step are TreeAMR's — a
+  cost-weighted partition and fewer, larger copies (its `CODE.md`'s
+  "Performance work left for later").
+
+Not yet measured: HPC-X at 4 GPUs and with the direct path on the bare
+step, a profile of the step on one GPU and of rank 0's analysis under HPC-X,
+and `test/hole_runs.jl`, whose workers have no `mpi` option.
+
 ## I/O and viewers
 
 - **The analysis time series**: one HDF5 file per run, one dataset per
@@ -3873,6 +4027,10 @@ What this package needs from TreeAMR. None blocks G0–G3.
    over `block_mapreduce`'s per-block vector, which would have been
    per-rank answers under M7, are gone — and M9's checkpoint half, M9a,
    is in use: [Checkpoint and restart](#checkpoint-and-restart).**)**
+   **(Done upstream and in use, 2026-10-19:** M7 has been released since
+   TreeAMR 0.1.5, and [Running distributed](#running-distributed) is what
+   this package had left to do — four host paths that were not, after all,
+   free of the assumption.**)**
 4. **A launch-configuration knob on `map_blocks!`** (G6): today it
    launches with KernelAbstractions' default workgroup, and GHAccel
    measured the workgroup shape of a 3D stencil kernel as worth about
@@ -3931,6 +4089,28 @@ What this package needs from TreeAMR. None blocks G0–G3.
    3. **Then a state that lives in the working array**, for a native stepper
       that writes the next stage's input straight into it (the stage vectors
       as field sets). That removes the scatter altogether.
+6. **Checkpoint rotation, possibly in TreeIOHDF5** (noted 2026-10-19, Erik's
+   suggestion; **(open)**, nothing to do now). `rotate_checkpoints!`, with
+   `checkpoint_files` and `latest_checkpoint` beside it (`src/checkpoint.jl`),
+   is TreeHydro's code restated: the file names, the newest-by-iteration rule,
+   keeping the file just written, and from the MPI port the removal of an
+   index's part files, which knows TreeIOHDF5's part-file names. Every
+   application of TreeAMR that checkpoints needs the same, and TreeIOHDF5
+   writes the files and the parts, so it may belong there rather than in each
+   application.
+7. **The MPI launchers, consolidated in TreeAMR** (noted 2026-10-19, Erik's
+   suggestion; **(open)**, nothing to do now). Three packages now carry the
+   same launching code, copied from one another: the `mpiexec` job of a test
+   suite (`test/mpi_jobs.jl` here, in TreeHydro and in TreeAMR — `MPI.mpiexec()`
+   with its environment, started beside the suite and collected with a
+   deadline), the choice of a rank's GPU by its rank on the node
+   (`test/octant_runs.jl`, `bench/mpi_steps.jl`, TreeAMR's
+   `test/mpi_device_workload.jl`), the `try … MPI.Abort` around a run, and the
+   Symmetry job and environment scripts (`bench/symmetry_mpi_gpu*.sh` here,
+   TreeAMR's `bench/symmetry_mpi_gpu.sh`, including the HPC-X `OpenMPI_jll`
+   override). They belong in TreeAMR — its MPI extension for the rank and
+   device helpers, a test utility for the job — so that the applications call
+   them rather than copy them.
 
 Two further items are *not* needed for the proof of concept and are
 recorded with the extensions that would need them: an interior-reading

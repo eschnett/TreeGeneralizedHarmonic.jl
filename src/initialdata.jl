@@ -791,7 +791,7 @@ harmonic_kerr_case(::Type{T}=Float64; M=one(T), a=zero(T), kwargs...) where {T} 
     hole_case(T, Harmonic(T(M), T(a)); M=T(M), kwargs...)
 
 """
-    gh_forest(T = Float64, case::GHCase; N, roots, refined = false)
+    gh_forest(T = Float64, case::GHCase; N, roots, refined = false, comm = nothing)
 
 A forest of `roots³` root blocks of `N³` points each, over the case's box
 and with the case's periodicity — the mesh every test in step 3 runs on,
@@ -820,8 +820,16 @@ The leading `T` is the type the whole run is computed in and reaches the
 field set, the schedule and the state vector through the forest, which is
 the only place it has to be said (TreeWave's `wave_forest`, which this
 follows).
+
+`comm` distributes the forest's blocks over a communicator — an `MPI.Comm`
+with `using MPI` and `MPI.Init()` done, or anything TreeAMR's `communicator`
+accepts — and `nothing`, the default, is serial (added 2026-10-19). Every
+rank calls this with the same arguments; the forest itself is then whole on
+every rank, and [`evolve!`](@ref) runs over it. See "Running distributed" in
+`CODE.md`.
 """
-function gh_forest(::Type{T}, case::GHCase; N, roots, refined=false) where {T}
+function gh_forest(::Type{T}, case::GHCase; N, roots, refined=false,
+                   comm=nothing) where {T}
     widths = ntuple(d -> case.box[d][2] - case.box[d][1], Val(3))
     all(w -> w ≈ widths[1], widths) || throw(ArgumentError(
         "TreeAMR's blocks are cubes with a single spacing per level, so a " *
@@ -829,7 +837,7 @@ function gh_forest(::Type{T}, case::GHCase; N, roots, refined=false) where {T}
         "widths are $widths"))
     forest = Forest{T}(ntuple(_ -> roots, Val(3)); N=N, periodic=case.periodic,
                        reflecting=case.reflecting, rotating=seam_dims(case),
-                       extents=case.box)
+                       extents=case.box, comm=comm)
     refined || return forest
     xref = ntuple(d -> case.box[d][1] + 3 * widths[d] / 8, Val(3))
     targets = filter(forest.leaves) do k
@@ -851,7 +859,7 @@ gh_forest(case::GHCase; kwargs...) = gh_forest(Float64, case; kwargs...)
 
 """
     hole_forest(T = Float64, case::GHCase; N, roots, center = case's, radii,
-                levels = length(radii))
+                levels = length(radii), shape = :ball, comm = nothing)
 
 A **fixed** nested hierarchy of `levels` shells around `center`: the
 uniform forest of [`gh_forest`](@ref), then, for each level `ℓ`, every
@@ -885,10 +893,13 @@ is not. With the center on a corner of the box — an octant's origin — the
 shells are the boxes `[0, R]³`, and with `radii` a power of two times the
 block width they are exactly unions of blocks. The ball keeps its closed
 `≤`, which every existing hierarchy was built with.
+
+`comm` is [`gh_forest`](@ref)'s (added 2026-10-19).
 """
 function hole_forest(::Type{T}, case::GHCase; N, roots,
                      center=center_at(case.center, zero(T)), radii,
-                     levels::Integer=length(radii), shape::Symbol=:ball) where {T}
+                     levels::Integer=length(radii), shape::Symbol=:ball,
+                     comm=nothing) where {T}
     shape in (:ball, :cube) || throw(ArgumentError(
         "a shell is a :ball (|x − c| ≤ R) or a :cube (|x − c|_∞ < R), got " *
         ":$shape"))
@@ -904,7 +915,7 @@ function hole_forest(::Type{T}, case::GHCase; N, roots,
         "level, but radii = $radii. A shell wider than its parent's would " *
         "ask for a fine block outside the coarser refined region, and 2:1 " *
         "balance would answer by refining everything between them."))
-    forest = gh_forest(T, case; N=N, roots=roots)
+    forest = gh_forest(T, case; N=N, roots=roots, comm=comm)
     c = ntuple(d -> T(center[d]), Val(3))
     for ℓ in 1:levels
         R = T(radii[ℓ])
@@ -1062,12 +1073,21 @@ fill_exact!(fs::FieldSet, case::GHCase, t; interior=case.interior) =
 
 Add independent uniform noise in `[−amplitude, amplitude]` to every
 variable at every **owned** point of `U` — the robust-stability test's
-perturbation (added 2026-10-02) — drawn from `rng` (any random number
-generator; the caller seeds it, so the package needs none of its own). The
-draws are made on the host in the leaf order, block by block, variable by
-variable and point by point, so the data depend on the seed and the mesh
-and on nothing else: not the thread count, not the backend. On a device the
+perturbation (added 2026-10-02) — from `rng` (any random number generator;
+the caller seeds it, so the package needs none of its own). On a device the
 state is copied to the host and back.
+
+**Each block draws from its own generator (amended 2026-10-19).** One
+`UInt64` is drawn from `rng`, and every block seeds a `Xoshiro` with it and
+its Morton key — root, level and coordinates — and draws its points from
+that, variable by variable and point by point. A block's noise is therefore
+a function of the seed and the block alone: the data depend on the seed and
+the mesh and on nothing else — not the thread count, not the backend, not
+the rank count or which rank holds the block — and a rank draws for its own
+blocks only, in `O(1)` per block. (Until 2026-10-19 one stream ran through
+the leaves in order, which a rank could only reach by drawing every earlier
+rank's numbers; the values changed with the scheme.) Over MPI every rank
+must pass a generator in the same state, which a seeded one is.
 
 **At a reflecting face the noise is projected onto the parity.** The low
 wall plane of a vertex-centered set is owned and evolved, and TreeAMR does
@@ -1098,8 +1118,10 @@ function add_noise!(U::FieldSet{T,3}, rng; amplitude, exclude=nothing) where {T}
     host = hostcopy(U)
     forest = U.forest
     seam = seam_dims(forest)
-    for b in 1:nleaves(forest)
-        k = forest.leaves[b]
+    base = rand(rng, UInt64)
+    for b in 1:nblocks(host)
+        k = blockkey(host, b)
+        block_rng = Xoshiro(UInt64[base, k.root, k.level, k.coords...])
         lo = block_origin(T, forest, k)
         keep = exclude === nothing ? nothing :
                map(I -> !exclude(coordinates(host, b, Tuple(I) .+ host.G)),
@@ -1110,7 +1132,7 @@ function add_noise!(U::FieldSet{T,3}, rng; amplitude, exclude=nothing) where {T}
         for v in 1:U.nvars
             w = interiorview(host, b, v)
             for I in CartesianIndices(w)
-                δ = A * T(2 * rand(rng) - 1)
+                δ = A * T(2 * rand(block_rng) - 1)
                 any(d -> onseam[d] && I[d] == 1, 1:3) && continue
                 (keep === nothing || keep[I]) && (w[I] += δ)
             end

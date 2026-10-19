@@ -7,6 +7,13 @@ using TreeGeneralizedHarmonic
 # so the thread count has to be passed explicitly — see `CLAUDE.md`.
 @info "Running the tests on $(Threads.nthreads()) thread(s)"
 
+# The MPI test's `mpiexec` job, started now where the machine has room for
+# it beside the suite, so that its compilation overlaps the files below
+# rather than following them; `mpi_tests.jl` collects it, or runs it then
+# where it was not started (added 2026-10-19). See `mpi_jobs.jl`.
+include("mpi_jobs.jl")
+start_mpi_job!()
+
 # `verbose = true` so that the per-testset times are printed even when
 # everything passes (added in step 1). The suite's cost is now compilation
 # of `SpacetimeMetrics`' dual passes, and which testset pays it is a thing
@@ -67,4 +74,7 @@ using TreeGeneralizedHarmonic
     include("simwatch_tests.jl")    # 2026-10-02: SimWatch status files
     include("type_tests.jl")
     include("threading_tests.jl")
+    # 2026-10-19: a run over MPI is the serial run at every rank count. Last,
+    # because its job was started at the top and has had the suite to finish.
+    include("mpi_tests.jl")
 end

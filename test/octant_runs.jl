@@ -69,6 +69,10 @@
 #                                   the horizon near the poles
 #   amplitude=1e-8 seed=20261002    the noise (amplitude=0: none)
 #   backend=cpu|cuda                cuda needs CUDA in the active environment
+#   mpi=true deviceaware=false      run over MPI.COMM_WORLD (MPI in the active
+#                                   environment; launch with mpiexec), one GPU per
+#                                   rank by its rank on the node; deviceaware=true
+#                                   hands MPI device buffers (a CUDA-aware MPI)
 #   out=<dir>                       where `octant.csv` and the log go
 #   name=<label>                    the run's name in SimWatch (default: out's name)
 #   checkpoint=<dir> walltime=<s>   a chain of jobs (as hole_runs.jl's rows)
@@ -83,6 +87,13 @@
 # A run that stops at `walltime` exits with status 3, so a job script can
 # resubmit; the same command continues it from the newest checkpoint, and
 # appends to the CSV.
+#
+# Over MPI (`mpi=true`, added 2026-10-19) every rank runs this script with the
+# same options — `mpiexec -n 4 julia --project=<env> test/octant_runs.jl mpi=true
+# backend=cuda …` — the forest's blocks are split between the ranks, each rank
+# drives the GPU its rank on the node names, and rank 0 alone prints, writes
+# the CSV and the records and the status file. An exception on one rank takes
+# the job down (`MPI.Abort`) rather than leave the others waiting.
 
 using Printf
 using Random: Xoshiro
@@ -118,6 +129,22 @@ ckdir = haskey(OPTIONS, "checkpoint") ? mkpath(abspath(OPTIONS["checkpoint"])) :
 walltime = haskey(OPTIONS, "walltime") ? parse(Float64, OPTIONS["walltime"]) : nothing
 ckevery = parse(Int, opt("checkpoint_every", "8"))
 ckkeep = parse(Int, opt("keep", "2"))
+
+# MPI (added 2026-10-19): loaded only when asked for, so that a serial run
+# needs no MPI in its environment.
+use_mpi = opt("mpi", "false") in ("true", "1")
+if use_mpi
+    @eval using MPI
+    MPI.Init()
+end
+isrank0 = !use_mpi || MPI.Comm_rank(MPI.COMM_WORLD) == 0
+# One rank's failure would leave the others waiting in their next collective.
+function abort_all(err)
+    use_mpi || return nothing
+    showerror(stderr, err, catch_backtrace())
+    println(stderr)
+    MPI.Abort(MPI.COMM_WORLD, 1)
+end
 casename = opt("case", "minkowski")
 casename in ("minkowski", "ks") || error("case is minkowski or ks, got $casename")
 hole = casename == "ks"
@@ -135,10 +162,21 @@ M_irr_kerr = sqrt(r_plus / 2)
 
 backend = if opt("backend", "cpu") == "cuda"
     @eval using CUDA
+    if use_mpi
+        # One GPU per rank: the rank's place among the ranks of its node,
+        # TreeAMR's `test/mpi_device_workload.jl`.
+        node = MPI.Comm_split_type(MPI.COMM_WORLD, MPI.COMM_TYPE_SHARED,
+                                   MPI.Comm_rank(MPI.COMM_WORLD))
+        Base.invokelatest(() -> CUDA.device!(MPI.Comm_rank(node) % length(CUDA.devices())))
+        MPI.free(node)
+    end
     Base.invokelatest(() -> CUDA.CUDABackend())
 else
     TreeGeneralizedHarmonic.CPU()
 end
+comm = use_mpi ? communicator(MPI.COMM_WORLD;
+                              deviceaware=opt("deviceaware", "false") in ("true", "1")) :
+       nothing
 
 # One root block of `N` cells of `h = 1` per `N` units by default; `roots=`
 # sets another root brick (a small box for a smoke test).
@@ -180,20 +218,21 @@ else
                           rotating=rotating)
 end
 forest0 = hole_forest(T, case; N=N, roots=roots, center=(0, 0, 0), radii=radii,
-                      shape=:cube)
+                      shape=:cube, comm=comm)
 nlev = length(radii) + 1
-@printf("octant (%s): L = %s, N = %d, %d blocks, %d points, levels %d, h = %s … %s\n",
+isrank0 && @printf("octant (%s): L = %s, N = %d, %d blocks, %d points, levels %d, h = %s … %s\n",
         symmetry, L, N, nleaves(forest0), nleaves(forest0) * N^3, nlev,
         maximum(k -> spacing(T, forest0, k), forest0.leaves), minimum_spacing(T, forest0))
-@printf("        case %s, t_end = %s, chunk = %s, cfl = %s, q = %d, ε_KO = %s, γ0 = %s, γ2 = %s\n",
+isrank0 && @printf("        case %s, t_end = %s, chunk = %s, cfl = %s, q = %d, ε_KO = %s, γ0 = %s, γ2 = %s\n",
         casename, t_end, chunk, cfl, q, ε_KO, hole ? "Gaussian 1/M → 1/(10M)" : γ0, γ2)
-hole && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin,
+hole && isrank0 && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin,
                 case.interior isa FittedSpec ?
                 "fitted target, tracked, margin $(case.interior.margin)" :
                 "damped layer, r_0 = $(case.interior.r_0), r_1 = $(case.interior.r_1)",
                 case.gauge === nothing ? "sampled" : "algebraic")
-@printf("        noise %.3g (seed %d), backend %s, %d threads\n", amplitude, seed,
-        typeof(backend), Threads.nthreads())
+isrank0 && @printf("        noise %.3g (seed %d), backend %s, %d threads, %d rank(s)\n",
+                   amplitude, seed, typeof(backend), Threads.nthreads(),
+                   use_mpi ? MPI.Comm_size(MPI.COMM_WORLD) : 1)
 
 # --- the record: one CSV row per chunk -------------------------------------------
 
@@ -219,7 +258,7 @@ shell_names = hole ? vcat(["in"], [@sprintf("r%g", r) for r in shell_r]) : Strin
 for nm in shell_names, c in ("ham_l2", "ham_linf", "mom_l2", "gauge_l2", "err_l2", "err_linf")
     push!(cols, "$(c)_$nm")
 end
-isfile(csvpath) || open(io -> println(io, join(cols, ',')), csvpath, "w")
+isrank0 && !isfile(csvpath) && open(io -> println(io, join(cols, ',')), csvpath, "w")
 
 # `mom` and `gauge` are reported as the largest component's norm: the
 # components are related by the octant's symmetry, and one number per family
@@ -255,7 +294,7 @@ t_wall0 = time()
 # record's horizon, track, fit and step, and the progress; see
 # `src/simwatch.jl` and SimWatch's `FORMAT.md`.
 sw = SimWatchWriter(outdir; name=opt("name", basename(outdir)),
-                    code="TreeGeneralizedHarmonic")
+                    code="TreeGeneralizedHarmonic", comm=comm)
 time_unit = hole ? "M" : nothing
 setup = Dict{String,Any}(
     "case" => casename, "octant" => symmetry, "L" => Float64(L), "N" => N, "levels" => nlev,
@@ -287,7 +326,8 @@ function observe(p, t, u, rec)
     bk = bndkeep(p)
     bnd = (band_l2(p, DIAG_HAM, bk), band_max(p, DIAG_MOM, 3, bk),
            band_max(p, DIAG_CGH, 4, bk))
-    npts = T(statelength(p.U)) / p.U.nvars
+    # The number of points over every rank's blocks, not this rank's.
+    npts = T(TreeGeneralizedHarmonic.rank_reduce(+, p.U, statelength(p.U))) / p.U.nvars
     s2 = sqrt(mesh_mapreduce(x -> x * x, +, zero(T), p.U, u) / (npts * p.U.nvars))
     s∞ = mesh_mapreduce(abs, max, zero(T), p.U, u)
     row = Any[t, time() - t_wall0, pts.ham_l2, pts.ham_linf, mom2(pts), mom∞(pts),
@@ -360,15 +400,15 @@ function observe(p, t, u, rec)
         end
         extra["shells"] = shells
     end
-    open(csvpath, "a") do io
+    isrank0 && open(csvpath, "a") do io
         println(io, join((x isa Real ? @sprintf("%.10g", x) : string(x) for x in row), ','))
     end
-    @printf("t = %8.3f  wall %8.1f s   ℋ %.3e / %.3e   ℳ %.3e / %.3e   C %.3e / %.3e   |u| %.3e",
+    isrank0 && @printf("t = %8.3f  wall %8.1f s   ℋ %.3e / %.3e   ℳ %.3e / %.3e   C %.3e / %.3e   |u| %.3e",
             t, time() - t_wall0, pts.ham_l2, pts.ham_linf, mom2(pts), mom∞(pts),
             gauge2(pts), gauge∞(pts), s2)
-    err === nothing || @printf("   err %.3e / %.3e  res %.3e  drift %.3e", err[1], err[2],
+    err === nothing || !isrank0 || @printf("   err %.3e / %.3e  res %.3e  drift %.3e", err[1], err[2],
                                err[3], err[4])
-    @printf("   bnd ℋ %.3e C %.3e\n", bnd[1], bnd[3])
+    isrank0 && @printf("   bnd ℋ %.3e C %.3e\n", bnd[1], bnd[3])
     flush(stdout)
 
     # The status file: the record's own numbers beside the ones above.
@@ -421,7 +461,7 @@ ckw = if ckdir === nothing
 else
     pre = joinpath(ckdir, "octant")
     rf = latest_checkpoint(pre)
-    rf === nothing || println("restarting from $rf")
+    rf === nothing || !isrank0 || println("restarting from $rf")
     (checkpoint_path_prefix=pre, checkpoint_every_chunks=ckevery, restart_file=rf,
      max_walltime_seconds=walltime, num_checkpoints_keep=ckkeep)
 end
@@ -451,12 +491,15 @@ out = try
     evolve!(T, case; forest=restarting ? nothing : forest0, q=q,
             ops=Operators(prolongation=q + 2, restriction=q + 2), t_end=t_end,
             chunk=chunk, cfl=cfl, backend=backend, observer=observe,
-            perturb=perturb, fitkw..., ckw...)
+            perturb=perturb, comm=comm, fitkw..., ckw...)
 catch err
-    ls = last_status[]
-    simwatch_finish!(sw; status="failed", message=sprint(showerror, err),
-                     time_end=Float64(t_end), time_unit=time_unit,
-                     black_holes=ls.black_holes, extra=ls.extra)
+    # Over MPI the status file's write is collective, and a failure may be
+    # one rank's: write it serially from this rank, and take the job down.
+    use_mpi || (ls = last_status[];
+                simwatch_finish!(sw; status="failed", message=sprint(showerror, err),
+                                 time_end=Float64(t_end), time_unit=time_unit,
+                                 black_holes=ls.black_holes, extra=ls.extra))
+    abort_all(err)
     rethrow()
 end
 r = out.records[end]
@@ -474,12 +517,12 @@ end
 fields = (:t, :steps, :err_l2, :err_linf, :residual, :drift, :gauge_l2, :horizon_success,
           :r_min, :r_mean, :r_max, :area, :M_irr, :J, :M_ch, :track_offset,
           :track_r_min, :fit_valid, :fit_residual, :bounds_hits, :variant)
-open(joinpath(outdir, "records.csv"), "w") do io
+isrank0 && open(joinpath(outdir, "records.csv"), "w") do io
     println(io, join(fields, ','))
     for rec in out.records
         println(io, join((string(get(rec, f, missing)) for f in fields), ','))
     end
 end
-@printf("done: t = %.4f, %d steps, dt = %.6g, finished = %s, wall %.1f s\n",
+isrank0 && @printf("done: t = %.4f, %d steps, dt = %.6g, finished = %s, wall %.1f s\n",
         out.t, out.nsteps, r.dt, out.finished, time() - t_wall0)
 out.finished || exit(3)

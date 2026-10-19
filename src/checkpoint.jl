@@ -108,12 +108,31 @@ end
 # *name*, since every file listed is in `prefix`'s directory and a path string
 # is not a file's identity (TreeHydro found `run//sedov` listing as
 # `run/sedov`, and a comparison of paths deleting the file just written).
+#
+# A distributed checkpoint is an index and its part files (TreeAMR's M7,
+# TreeIOHDF5's `"<index>.<save id>.<j>.h5"` beside the index, one per I/O
+# group, the save id 32 lowercase hex digits). Removing an index removes its
+# parts with it, and any orphan of that index's name — a part left by a save
+# that failed before its index was renamed into place — since nothing will
+# ever read them once the index is gone. A serial checkpoint has no part
+# files. Over MPI rank 0 alone calls this (amended 2026-10-19, as TreeHydro
+# did on 2026-10-02). It may belong upstream, in TreeIOHDF5 (noted
+# 2026-10-19; `CODE.md`, "Upstream prerequisites").
 function rotate_checkpoints!(prefix::AbstractString, num_keep::Integer;
                              keep::AbstractString)
     others = [path for (_, path) in checkpoint_files(prefix)
               if basename(path) != basename(keep)]
     removed = others[1:max(0, length(others) - (num_keep - 1))]
-    foreach(path -> rm(path; force=true), removed)
+    for path in removed
+        dir, name = splitdir(path)
+        listed = isempty(dir) ? "." : dir
+        part = Regex("^" * regex_quote(name) * raw"\.[0-9a-f]{32}\.[0-9]+\.h5$")
+        rm(path; force=true)
+        for other in readdir(listed)
+            occursin(part, other) || continue
+            rm(isempty(dir) ? other : joinpath(dir, other); force=true)
+        end
+    end
     return removed
 end
 
@@ -462,7 +481,8 @@ end
 # --- writing and reading -------------------------------------------------------------
 
 """
-    save_run(path, forest, U, u; recipe, criterion, run, filters = (), sync = true)
+    save_run(path, forest, U, u; recipe, criterion, run, filters = (), sync = true,
+             io = :node)
 
 One checkpoint: the forest, the state field set `U` with its state vector
 `u`, and this package's plain data `(; recipe, criterion, run)`, through
@@ -471,26 +491,39 @@ previous file alone. `u` and not `U.work`: the checkpoint is taken after the
 analysis row, whose horizon find, fit and indicator have scattered into
 `U.work` and filled its ghosts, and after a chunk without a regrid the
 working array holds the integrator's last stage, not the state.
+
+Over a distributed forest it is collective, and `io` is TreeIOHDF5's grouping
+of the ranks into I/O processes, each writing a part file beside the index
+at `path` (TreeAMR's M7; added 2026-10-19); serially it is one file whatever
+`io` says.
 """
 function save_run(path, forest, U, u; recipe, criterion, run, filters=(),
-                  sync::Bool=true)
+                  sync::Bool=true, io=:node)
     return save_checkpoint(path, forest; fieldsets=("state" => (U, u),),
                            application=CHECKPOINT_APPLICATION => CHECKPOINT_VERSION,
                            data=(; recipe=recipe, criterion=criterion, run=run),
-                           filters=filters, sync=sync)
+                           filters=filters, sync=sync, io=io)
 end
 
 """
-    load_run(path, T; backend = CPU()) -> (; forest, U, u, recipe, criterion, run)
+    load_run(path, T; backend = CPU(), comm = nothing)
+        -> (; forest, U, u, recipe, criterion, run)
 
 Read a checkpoint written by [`save_run`](@ref), refusing one that is not
 this package's — another application's, or a format version other than
 $(CHECKPOINT_VERSION) — with the reason. The field set comes back in the type
 it was saved in; whether that is `T` is the recipe's to say, so that the
 refusal names it with the rest.
+
+`comm` distributes the forest it reads over a communicator, as
+[`evolve!`](@ref)'s keyword does (added 2026-10-19): collective then, and a
+checkpoint written at any rank count loads at any other, or serially
+(TreeAMR's M7, TreeIOHDF5's index and part files). Every refusal below is
+taken from what every rank read alike, so it is every rank's.
 """
-function load_run(path::AbstractString, ::Type{T}; backend=CPU()) where {T}
-    ck = load_checkpoint(path; backend=backend, types=(T,))
+function load_run(path::AbstractString, ::Type{T}; backend=CPU(),
+                  comm=nothing) where {T}
+    ck = load_checkpoint(path; backend=backend, types=(T,), comm=comm)
     name, version = ck.application
     written = "It was written by TreeAMR " *
               "$(something(ck.provenance.treeamr_version, "(unknown version)")) " *

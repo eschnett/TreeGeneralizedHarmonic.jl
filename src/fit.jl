@@ -940,6 +940,36 @@ function build_fit(sampler, int::FittedInterior{T}, spec::FittedSpec;
         residual, conditioning, sweep.valid, sweep)
 end
 
+# An `InteriorFit` with its coefficients on the host only, which is how a fit
+# made on rank 0 is broadcast (a device array does not serialize), and the
+# same fit with them on `backend` again: `build_fit`'s `to_backend` of the
+# same host array, so every rank's copy holds rank 0's bits (added
+# 2026-10-19).
+host_fit(f::InteriorFit{T}) where {T} =
+    InteriorFit{T,typeof(f.host),typeof(f.host)}(
+        f.params, f.host, f.host, f.t, f.c, f.points, f.model, f.residual,
+        f.conditioning, f.valid, f.sweep)
+
+function backend_fit(f::InteriorFit{T}, backend) where {T}
+    coeffs = to_backend(backend, f.host)
+    return InteriorFit{T,typeof(coeffs),typeof(f.host)}(
+        f.params, coeffs, f.host, f.t, f.c, f.points, f.model, f.residual,
+        f.conditioning, f.valid, f.sweep)
+end
+
+"""
+    shared_fit(build, over; backend, serve = nothing) -> InteriorFit
+
+`build()` — a call of [`build_fit`](@ref) — made on rank 0 alone, and its
+fit on every rank, coefficients on `backend` ([`on_root`](@ref); added
+2026-10-19). Serially it is `build()`. `serve` is `on_root`'s: `(p, u)`
+where the sampler interpolates the state, nothing for the analytic sampler.
+"""
+function shared_fit(build, over; backend, serve=nothing)
+    isdistributed_over(over) || return build()
+    return backend_fit(on_root(() -> host_fit(build()), over; serve=serve), backend)
+end
+
 # --- the target's ranges ---------------------------------------------------------
 
 """

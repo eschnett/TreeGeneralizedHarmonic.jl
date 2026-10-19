@@ -578,8 +578,10 @@ end
 
 How many points of each block the mask counted, from the indicator the
 constraint kernels wrote into `DIAG_MASK` — one value per block, the
-per-block half of TreeAMR's reductions. The norms read the volume those
-points cover, [`evolved_volume`](@ref), instead.
+per-block half of TreeAMR's reductions, and so over MPI one per block of
+*this rank*, as `block_mapreduce` is (noted 2026-10-19). The norms read the
+volume those points cover, [`evolved_volume`](@ref), which is global,
+instead.
 """
 masked_counts(p::GHProblem{T}) where {T} =
     block_mapreduce(identity, +, zero(T), p.diag; vars=DIAG_MASK)
@@ -626,9 +628,9 @@ The volume-weighted L2 and L∞ norms of `diag` variable `v` over the
 
 `CODE.md`, "Analysis quantities": the norms are TreeAMR's `mesh_mapreduce`
 — per-block partials weighted by each block's `h³` and combined on the
-host, which is where TreeAMR's M7 will put the `Allreduce` — so they do not
-depend on the thread count, and are promised to roundoff across ranks and
-backends **(amended 2026-10-01**: until then this package combined the
+host, and over MPI gathered from every rank and folded in rank order
+(TreeAMR's M7) — so they do not depend on the thread count, and are
+promised to roundoff across rank counts and backends **(amended 2026-10-01**: until then this package combined the
 per-block partials itself, left to right, which `mesh_mapreduce`'s pairwise
 sum moves in the last place**)**. The L2 is normalized by the evolved
 volume rather than by the domain's, so that masking a region out does not
