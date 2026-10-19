@@ -45,7 +45,8 @@ steps() {
             using MPI
             env, p, t, script, args... = ARGS
             m = MPI.mpiexec()
-            run(setenv(`$m -n $p $(Base.julia_cmd()) --threads=$t --project=$env $script $args`,
+            x = split(get(ENV, "TREEGH_MPIEXEC_FLAGS", ""))
+            run(setenv(`$m $x -n $p $(Base.julia_cmd()) --threads=$t --project=$env $script $args`,
                        m.env))' \
             "$env" "$p" "$THREADS" "$REPO/bench/mpi_steps.jl" "${STEPS[@]}" mpi=true "$@"
     fi 2>&1 | grep -E '^ranks=|ERROR|Error' || echo "FAILED: $env $p $*"
@@ -63,6 +64,10 @@ done
 unset HYDRA_LAUNCHER
 (
     module load "$HPCX_MODULE"
+    # Open MPI binds a rank to one core unless told not to, and a rank's eight
+    # Julia threads — rank 0's horizon find, spin and fit above all — then
+    # share it (measured 2026-10-19, job 578648: 3.8× on the analysis).
+    export TREEGH_MPIEXEC_FLAGS="--bind-to none"
     echo "=== L=32 N=32, HPC-X staged, 2 ranks $(date -Iseconds) ==="
     steps "$ENVH" 2 L=32 N=32
 )

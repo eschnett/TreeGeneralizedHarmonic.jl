@@ -77,7 +77,8 @@ mpirun_octant() {
         using MPI
         env, p, t, script, args... = ARGS
         m = MPI.mpiexec()
-        cmd = `$m -n $p $(Base.julia_cmd()) --threads=$t --project=$env $script $args`
+        x = split(get(ENV, "TREEGH_MPIEXEC_FLAGS", ""))
+        cmd = `$m $x -n $p $(Base.julia_cmd()) --threads=$t --project=$env $script $args`
         run(setenv(cmd, m.env))' \
         "$env" "$p" "$THREADS" "$REPO/test/octant_runs.jl" "${RUN[@]}" mpi=true "$@" \
         out="$OUT/$name" > "$OUT/$name.log" 2>&1 || echo "$name FAILED"
@@ -95,6 +96,10 @@ unset HYDRA_LAUNCHER
 # HPC-X, CUDA-aware: staged and direct.
 (
     module load "$HPCX_MODULE"
+    # Open MPI binds a rank to one core unless told not to, and a rank's eight
+    # Julia threads — rank 0's horizon find, spin and fit above all — then
+    # share it (measured 2026-10-19, job 578648: 3.8× on the analysis).
+    export TREEGH_MPIEXEC_FLAGS="--bind-to none"
     for p in "${RANKS[@]}"; do
         mpirun_octant "$ENVH" $p "hpcx-n$p-staged" deviceaware=false
         mpirun_octant "$ENVH" $p "hpcx-n$p-direct" deviceaware=true

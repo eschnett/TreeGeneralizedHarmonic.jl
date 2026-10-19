@@ -72,7 +72,11 @@
 #   mpi=true deviceaware=false      run over MPI.COMM_WORLD (MPI in the active
 #                                   environment; launch with mpiexec), one GPU per
 #                                   rank by its rank on the node; deviceaware=true
-#                                   hands MPI device buffers (a CUDA-aware MPI)
+#                                   hands MPI device buffers (a CUDA-aware MPI).
+#                                   Under Open MPI launch with `--bind-to none`:
+#                                   it binds a rank to one core otherwise, and
+#                                   rank 0's find, spin and fit run 3.8× slower
+#                                   (CODE.md, "Running distributed")
 #   out=<dir>                       where `octant.csv` and the log go
 #   name=<label>                    the run's name in SimWatch (default: out's name)
 #   checkpoint=<dir> walltime=<s>   a chain of jobs (as hole_runs.jl's rows)

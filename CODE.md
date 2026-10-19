@@ -3767,9 +3767,9 @@ and 56 steps, in ms (and points a nanosecond):
 
 - **The step does not strong-scale yet: 1.33× and 1.43× on 2 and 4 GPUs at
   25.7 M points, and none at 7.6 M.** One GPU is throughput-bound — 3.4× the
-  points cost 3.0× the time, about 19 ns a point a step, against the kernel's
-  1.1 ns a right-hand side, so the refined mesh's ghost fill and prolongation
-  are most of a step, as on the CPU ("The right-hand side on a CPU").
+  points cost 3.0× the time, about 19 ns a point a step. **(Corrected
+  2026-10-19:** this said the ghost fill and prolongation were most of a
+  step, as on the CPU; on a GPU the kernel is — the breakdown below.**)**
 - **The messages are a large part of what is left.** HPC-X's UCX moves the
   same staged messages in a step 26 % shorter than MPICH_jll's at 2 ranks
   (111 against 150 ms) — so MPICH_jll's shared-memory path is slow for these
@@ -3778,15 +3778,107 @@ and 56 steps, in ms (and points a nanosecond):
   one has three nested coarse-fine shells, and a split by equal block counts
   may leave the prolongation-heavy blocks on few ranks (a guess, not traced).
 - **And HPC-X's 2.5–3× in job 578514 is in the analysis, not the step**:
-  rank 0's host work — the find, the spin, the fit — under the module's
-  environment. So: HPC-X, ideally direct, for the steps, once its host-side
-  slowdown is found; and the levers on the step are TreeAMR's — a
-  cost-weighted partition and fewer, larger copies (its `CODE.md`'s
-  "Performance work left for later").
+  rank 0's host work — the find, the spin, the fit. **(Found 2026-10-19: it
+  is Open MPI's core binding, below.)**
 
-Not yet measured: HPC-X at 4 GPUs and with the direct path on the bare
-step, a profile of the step on one GPU and of rank 0's analysis under HPC-X,
-and `test/hole_runs.jl`, whose workers have no `mpi` option.
+**Where a step goes, rank by rank (measured 2026-10-19; job 578648 on cn113's
+H200s, and the same mesh at `N = 16` on the development machine's CPU, one
+thread a rank).** `bench/mpi_breakdown.jl` times, on every rank by itself,
+the scatter, a whole ghost fill, each fill stage's local groups, packs and
+unpacks (TreeAMR's internals, as its `bench/mpi.jl` does — TreeAMR has no
+timers of its own), the fused kernel, one right-hand side and one RK4 step,
+and prints each rank's load: its blocks by level and the transfers, target
+points and stencil taps its groups compute, by kind. A fill is one stage of
+copies and restrictions and then **one stage per prolongation level,
+coarsest first, run in sequence**, each with its own messages. On the GPU,
+7.6 M points, in ms (the slowest rank):
+
+| run | fill | kernel | rhs | step | ×1 GPU |
+|---|---|---|---|---|---|
+| 1 GPU, no MPI | 9.5 | 28.5 | 38.0 | 156.8 | 1 |
+| MPICH_jll, 2 | 22.4 | 14.3 | 36.7 | 149.0 | 1.05 |
+| MPICH_jll, 4 | 42.0 | 7.2 | 49.7 | 181.4 | 0.86 |
+| HPC-X staged, 2 | 11.6 | 14.3 | 26.0 | 104.3 | 1.50 |
+| HPC-X direct, 2 | 12.8 | 14.2 | 27.2 | 111.1 | 1.41 |
+| HPC-X staged, 4 | 15.1 | 7.3 | 22.5 | 82.8 | 1.89 |
+| HPC-X direct, 4 | 16.3 | 7.2 | 23.6 | 88.4 | 1.77 |
+
+- **The kernel divides exactly**: 28.5, 14.3, 7.2 ms, every rank within 1 %
+  of the others — equal block counts balance it, layer and core included. On
+  one GPU it is three quarters of a right-hand side (3.75 ns a point with the
+  `:damped` layer and the algebraic source), the fill a quarter: phase 1
+  2.3 ms and each of the three prolongation stages 1.8 ms.
+- **The fill does not divide, for two reasons.**
+  - *Each prolongation level is one rank's work.* A level's coarse-fine
+    shell is a contiguous stretch of the Morton curve, so the equal-count
+    split puts it on one rank, and the sender — the owner of the coarse
+    source blocks — computes the prolonged ghosts it sends. At 4 ranks rank 2
+    prolongs level 2 (1.7 ms of packs) and rank 1 level 3 (1.7 ms), in
+    sequence, while rank 0, which holds all 58 level-3 blocks, computes no
+    prolongation at all and waits. The stages' critical path is about 10 ms
+    at every rank count: the serial fill's.
+  - *The messages are big.* A prolongation stage sends 35–38 MB of prolonged
+    fine ghosts, phase 1 7–27 MB a peer (20 variables of `Float64`). Through
+    MPICH_jll's shared memory with host staging that is 7–10 ms a stage —
+    the fill's 22 and 42 ms. HPC-X's UCX moves them in about 2–4 ms of a
+    fill, and handing it the device buffers directly (`deviceaware`) is no
+    faster: the stage chain, not the transport, is what is left.
+- **The CPU shows the first reason alone and larger** (`N = 16`, 0.95 M
+  points, ms): a right-hand side is 1266 on one rank — fill 850, of which the
+  three prolongation stages 600, the kernel 450 — and 998 and 834 on two and
+  four, the kernel dividing (231, 121) and the fill not (774, 727), each
+  prolongation level's ~200 ms on one rank. A step is about four times
+  (fill + kernel/P): 5245, 3942, 3083 ms measured. The prolongation is
+  expensive there because TreeAMR's transfer kernel sums the full tensor
+  product, `6³ = 216` coarse points per prolonged point and variable: 63 M
+  taps a fill against 1.4 M for all the copies, though the prolonged points
+  (292 k) are a third of the owned ones.
+- **Open MPI binds each rank to one core (two hardware threads) by
+  default**, while a rank runs eight Julia threads: `/proc/self/status`'s
+  `Cpus_allowed_list` reads 2 under HPC-X's `mpiexec` and 32 under MPICH's.
+  The step does not notice — it is the GPU's — but rank 0's host analysis
+  does: with `mpiexec --bind-to none`, the chunk of job 578514's octant
+  `:fitted` run on 2 GPUs that took 48.8 s bound and 16.0 s under MPICH takes
+  **12.8 s**. That was the 2.5–3×.
+
+**What to run with, then (decided by the measurement, 2026-10-19):**
+HPC-X's Open MPI, through `bench/symmetry_mpi_gpu_env.sh`'s environment
+(`OpenMPI_jll` pointed at its libraries), launched with **`--bind-to none`**
+— 1.89× on 4 GPUs against MPICH_jll's 0.86×, and the analysis 3.8× faster
+than bound — with host staging, which is as fast as the direct path here.
+`bench/symmetry_mpi_*.sh` pass the flag. MPICH_jll stays for the CPU and
+the test suite.
+
+**What TreeAMR needs for the step to scale further** (the fill is 9.5 of a
+38 ms right-hand side on one GPU and 15 of 22.5 on four; on the CPU it is
+two thirds of one), in the order of what it buys here:
+
+1. **Spread each prolongation stage over the ranks.** The stages are
+   sequential, so the fill's critical path is the sum over levels of each
+   level's prolongation on the one rank that owns it — balancing the total
+   cost, the cost-weighted contiguous split TreeAMR's `CODE.md` anticipates,
+   does not help, because a level's shell would still be one stretch of the
+   curve. What would: a partition balanced *per level* (each level's leaves
+   split evenly over the ranks — non-contiguous ranges, which touches the
+   state vector's order and the checkpoint layout), or prolongation computed
+   where its sources' *neighbourhood* is spread, or overlapping a rank's
+   kernel on blocks whose ghosts are complete with the stages it only waits
+   in (rank 0 at 4 ranks waits through all three).
+2. **Sum-factorized prolongation**, as M11's point interpolation already is
+   (its `CODE.md`, "Sum factorization along dimension 1"): `6 + 6 + 6`
+   rather than `6³` multiplications per prolonged point and variable along a
+   row, and half the fine points of a vertex-centered refinement coincide
+   with coarse ones per dimension. On the CPU that is most of the 600 ms of a
+   1266 ms right-hand side; on the GPU 5.4 of 9.5 ms of a fill.
+3. **Smaller prolongation messages**: the receiver prolonging from the coarse
+   source data instead of the sender sending prolonged fine ghosts, whose
+   35–38 MB a stage are what made MPICH_jll's fill 42 ms.
+
+Nothing in this package's own code is on the fill's path: the kernel and the
+integrator (a step is four right-hand sides plus 2–3 %) divide by the ranks.
+
+Not yet measured: `test/hole_runs.jl`, whose workers have no `mpi` option,
+and GPUs across nodes.
 
 ## I/O and viewers
 

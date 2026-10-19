@@ -675,6 +675,16 @@ writes `OUTDIR/n0.txt` … `n3.txt`, the serial run and the three rank counts:
 mpiexec -n 3 julia --threads=1 --project=<env> test/mpi_workload.jl OUTDIR
 ```
 
+Where a step goes over MPI, rank by rank — the scatter, the fill and each of
+its stages' local groups, packs and unpacks, the kernel, a right-hand side, an
+RK4 step, and each rank's load (added 2026-10-19; `CODE.md`, "Running
+distributed"). On the CPU from the MPI environment, on H200s through
+`bench/symmetry_mpi_breakdown.sh`:
+
+```bash
+mpiexec -n 2 julia --threads=1 --project=<env> bench/mpi_breakdown.jl mpi=true L=16 N=16 radii=8,4,2 reps=2
+```
+
 The thread workload runs on its own, which is how a digest mismatch is
 bisected — `test/threading_tests.jl` starts exactly this in a subprocess:
 
@@ -1458,6 +1468,17 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `locate_point` are global. `forest.leaves[b]` with a local `b` is right on
   one rank and wrong on every other — the refinement centroid had it until
   2026-10-19. A flag vector `buffered_flags` takes is the whole forest's.
+- **Multi-GPU runs go through HPC-X with `--bind-to none`, not MPICH_jll**
+  (measured 2026-10-19, `CODE.md`, "Running distributed"). Open MPI's
+  `mpiexec` binds each rank to one core by default, and the rank's Julia
+  threads — rank 0's find, spin and fit above all — share it: 3.8× slower
+  analysis, invisible in the step. MPICH_jll's shared-memory transport moves
+  a fill's 35–38 MB prolongation messages so slowly that 4 H200s step slower
+  than one (0.86×, against HPC-X's 1.89×). `bench/symmetry_mpi_gpu_env.sh`
+  builds the HPC-X environment (with `OpenMPI_jll` pointed at its libraries)
+  and the `bench/symmetry_mpi_*.sh` jobs pass the flag. What is left of the
+  fill's poor scaling is TreeAMR's: each prolongation level is one rank's
+  work, and the levels run in sequence.
 - **A decision from a rank's own clock or file system must be agreed**
   (`agree_any`, `agree_refusal`), and a number combined on the host from
   per-block values must be reduced over the ranks (`rank_reduce`), or the
