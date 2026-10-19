@@ -1926,6 +1926,8 @@ run at `h = 1/48` on one more cube (`32, 16, 8, 4`, the finest level
   finder at this resolution) and drifts at `7.8·10⁻⁸/M`; all 25 finds succeed.
   The layer next to the ring is under-resolved at `1/48`: on the equator it
   spans `0.95–1.25`, where Kerr-Schild's `H` falls from `3.3` to `1.3`.
+  (Amended 2026-10-16: moving `r_0` to `1`, away from the ring, makes `1/48`
+  worse, not convergent — "`a = 9/10` to `128 M`", below.)
 - **Nothing at `1/48` rescues `:fitted`** (2026-10-05, half-`M` screens on
   `[0, 4]³` and jobs 570123, 570124): the band's `ℋ` scales with `ρ_max`
   (`2/M`: `0.55×`, `8/M`: `2×`) and a thicker ramp at the same depth
@@ -2060,6 +2062,106 @@ depth and polar angle) are what see it.
   works at `m = 16–20` — `18` is the deepest margin whose geometry is clean —
   at a price outside the horizon that no margin here removes: `ℋ` `600–2100×`
   B's and the error `50–90×`.
+
+**`a = 9/10` to `128 M`, and the ring rule tested (measured 2026-10-14/16**,
+jobs 574817, 574819 → 575441 and 575609 → 575990, `a09-L128-T128` — `main` at
+`fbfd416` with CUDA added; run from the TreeExcision session, checked here
+against its CSVs, which are in `.claude/data/a09-L128-T128`**)**. Three rows on
+the rotating octant grown to `L = 128` (one more coarse level, `h = 2/3`), to
+`128 M`, everything else the rows above: `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`,
+`ρ_max = 4/M`, the algebraic source, the finder every `M`, one H200 each,
+checkpointed every `2 M` and resubmitted at the wall-time limit.
+
+- `d48r1`: `:damped` at `h = 1/48`, `r_0 = 1`, `r_1 = 5/4` — the
+  recommended-settings row, which the ring rule predicted convergent. The
+  ring's length `L = (R² − a²)/R` at `R = 1` is `9.1` cells, against `4.7` at
+  `a09d48`'s `r_0 = 19/20`; the ramp is `12` cells, against `14.4`. `roots = 2`,
+  `N = 96`, cubes `64, 32, 16, 8, 4`, 43 blocks, 38.0 M points, `220 s/M`.
+- `d96r1`: the same layer at `h = 1/96`, A's and B's mesh one level wider:
+  `roots = 4`, `N = 48`, cubes `64, 32, 16, 8, 4, 3`, 533 blocks, 58.9 M
+  points, `458 s/M`. Its first attempt (575014), with `N = 96`, ran out of
+  GPU memory at 304 M points. At `N = 96` the `1/48` level's blocks are two
+  units wide, so the cube `3` refined all of `[0, 4]³`, and 2:1 balance
+  carried a level out to the root. **The finest cube must be a whole number
+  of its parent level's blocks.**
+- `f96m16L`: `:fitted` at `m = 16`, `n_L = 36`, `lmax_fit = 12`,
+  `fit_cont = 1` (570817's row, continued past `32 M`), on `d96r1`'s mesh,
+  `457 s/M`.
+
+At `128 M`, point-weighted L2 in `test/octant_runs.jl`'s shells (the first from
+the equatorial radius `1.695`):
+
+| | `ℋ` in | `ℋ [1.69, 2.25)` | `ℋ [2.25, 3)` | `ℋ [3, 5)` | error `[1.69, 2.25)` | `J` | `M_irr` |
+|---|---|---|---|---|---|---|---|
+| `d48r1` | `1.48·10⁻²` | `8.94·10⁻⁵` | `2.53·10⁻⁷` | `1.86·10⁻⁸` | `2.20·10⁻⁵` | `0.9000036` | `0.8473145` |
+| `d96r1` | `1.02·10⁻⁴` | `4.63·10⁻⁸` | `5.04·10⁻⁹` | `3.02·10⁻⁹` | `4.39·10⁻⁷` | `0.9000072` | `0.8473164` |
+| `f96m16L` | `2.11·10⁻³` | `8.83·10⁻⁵` | `7.75·10⁻⁸` | `7.23·10⁻⁹` | `1.01·10⁻⁵` | `0.9000092` | `0.8473168` |
+| `a09d48` (`24 M`) | `3.70·10⁻³` | `2.38·10⁻⁵` | `8.77·10⁻⁸` | `8.29·10⁻⁹` | `5.44·10⁻⁶` | `0.9000093` | `0.8473164` |
+| B, `a09d96` (`24 M`) | `8.11·10⁻⁶` | `4.16·10⁻⁸` | `4.28·10⁻⁹` | `2.82·10⁻⁹` | `1.06·10⁻⁷` | `0.9000069` | `0.8473165` |
+
+- **The ring rule is refuted at `a = 9/10`.** `r_0 = 1` at `1/48` is not
+  convergent. Against `a09d48`'s `r_0 = 19/20` it is worse: `3.7×` just outside
+  the horizon and `4×` in the band inside it, at `8 M` and still at `24 M`.
+  The deeper `L = 128` box does not explain that, since `f96m16L` is 570817
+  to three digits in every shell. What did change is the ramp, `12` cells
+  against `14.4`, and a thinner ramp costs `:damped` about as much at `a = 0`
+  (12 → 18 cells lowered `ℋ` `3×` there).
+  - `1/48 → 1/96` at fixed radii is `1935×` in `ℋ` just outside the horizon,
+    and `50×` in `[2.25, 3)` and in the error just outside. Fourth order
+    would be `16×`.
+  - Outside `r = 3` the two meshes have the same spacing, so their ratios
+    there (`6.2`, `2.4`, `0.9`) measure only what reaches them from inside.
+  - So the coarsest `:damped` resolution at `a = 9/10` is `1/96`, and the
+    ring's 8 cells are not enough.
+- **At `1/96` the layer's position does not matter outside the horizon.**
+  `d96r1` and B agree:
+  - to `7 %` just outside the horizon at `24 M` (`4.45` against
+    `4.16·10⁻⁸`);
+  - to three digits from `2.25` out;
+  - to `0.5 %` in the error just outside the horizon.
+
+  Inside the horizon `r_0 = 1` is worse: the evolved band's `ℋ` is `13×` B's
+  (`1.02·10⁻⁴` against `8.1·10⁻⁶`), and the layer residual is `0.87`
+  against `1.50`. Whether `1/96` itself is in the convergent regime needs a
+  finer partner, which neither study has run.
+- **All three rows are stationary to `128 M`**, and none of them grows. All 387
+  finds succeed, `:fitted`'s fits are valid at every row (residual
+  `0.0023`), and the projection never fires.
+  - `d48r1`: `ℋ` just outside the horizon is `8.94·10⁻⁵` at `8 M` and at
+    `128 M`.
+  - `d96r1`: it saturates at `4.6·10⁻⁸` from `32 M`, and the shells from `3`
+    out are flat to two digits.
+  - `f96m16L`: `ℋ` just outside the horizon is flat at `8.83·10⁻⁵` from
+    `16 M`. The leak 570817 showed spreading outward between `16` and `32 M`
+    settles: `[2.25, 3)` is `7.2–7.7·10⁻⁸` and `[3, 5)` is `4–7·10⁻⁹` from
+    `24 M` to `128 M`.
+  - The far field `r ≥ 8` is `1.3·10⁻¹⁰` in every row at every time.
+- **`:damped`'s error grows linearly at `1/96`, as at `a = 3/5`.**
+  - Just outside the horizon it goes `5.2·10⁻⁸` (`8 M`) → `2.3·10⁻⁷`
+    (`64 M`) → `4.4·10⁻⁷` (`128 M`), `3.3·10⁻⁹/M`.
+  - `J` drifts at a constant `+2.5·10⁻⁹/M`, B's rate, and `M_irr` falls with
+    it at `−9·10⁻¹⁰/M`. This is the slightly different hole spreading outward.
+  - `d48r1`'s `J` wanders: `−7·10⁻⁶` below B's to `24 M`, then rising at
+    `4·10⁻⁸/M`.
+  - `f96m16L`'s `J` sits `+2·10⁻⁶` above B's and from `32 M` falls at
+    `−1·10⁻⁸/M`, while its `M_irr` rises at `+4.5·10⁻⁹/M` from `64 M`.
+- **`:fitted` against `:damped` at `1/96`, at `128 M`.**
+  - `ℋ` just outside the horizon is `1900×`, the same at every time.
+  - The error just outside it is `23×`, against `95×` at `24 M`: `:damped`'s
+    error grows and `:fitted`'s stays at `1.0·10⁻⁵` from `16 M`. A comparison
+    by the error must name its time, as at `a = 3/5`.
+- **What it costs with `main`'s kernel**:
+  - `220 s/M` at `1/48` (38.0 M points) and `457–460 s/M` at `1/96`
+    (58.9 M), for both variants.
+  - Per point that is `1.6×` and `2.2×` faster than the same rows before the
+    rewrite (`5` and `15 min/M` on 31.9 and 52.8 M points).
+  - That is not the gauge wave's `8×`: a hole's step is the layer's kernel,
+    which was not rewritten, and the prolongation on a refined mesh.
+
+For scale, the same session's Z4c puncture in TreeBSSN (job 574812) holds `ℋ`
+at `5–8·10⁻⁶` in every shell by `128 M`, with `J = 0.89998`. That is a
+different chart, slice and normalisation, at `h = 1/256`, so it is not a
+like-for-like comparison. Its horizon sits at coordinate radius `0.41–0.54`.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 
