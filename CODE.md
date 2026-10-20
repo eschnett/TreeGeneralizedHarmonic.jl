@@ -1303,7 +1303,7 @@ profiles:
 |---|---|---|---|---|
 | evolved | `r ≥ r_1` | 1 | 0 | the Einstein equations, untouched |
 | damping layer | `r_0 ≤ r < r_1` | 1, ramping to 0 at its inner edge | 0 at `r_1`, rising smoothly to `ρ_max` | the equations plus a relaxation toward the analytic solution |
-| frozen core | `r < r_0` | 0 | 0 | nothing: `du = 0`, `F` not evaluated |
+| frozen core | `r < r_0` | 0 | 0 (`ρ_max` for a moving `:damped` hole, amended 2026-10-20) | nothing: `du = 0`, `F` not evaluated; a moving `:damped` core relaxes toward `u_exact` at the core rule's point |
 
 The layer's outer radius sits inside the horizon with a margin: with
 `r_h,min(t)` the smallest coordinate distance from `c(t)` to the
@@ -1688,7 +1688,37 @@ because the core holds finite but arbitrary data on which `F` may be
 initial-data callback fills it with the analytic solution evaluated on
 the sphere `r_0` along the ray (continuous at `r_0`, finite everywhere),
 `du = 0` there, nothing else writes it, and the regrid transfer
-interpolates it like any other data. Every norm, monitor and error
+interpolates it like any other data. **(Amended 2026-10-20: a moving hole's
+`:damped` core follows its target.)** A core with `du = 0` keeps its `t = 0`
+data, the solution about `c(0)`, and when the hole moves its trailing side
+releases them into the layer, off the current solution by an amount that
+grows with the distance travelled. A boosted Kerr-Schild hole on the
+quadrant (`a = 0`, `v = 1/5`, `r_0 = 5/8`, `r_1 = 23/16`, `h = 1/16`, `4/M`)
+had a layer residual growing linearly — 6.3, 10.9, 14.8, 19.1, 30, 38 at
+`t = 1/2 … 3`, against `0.1` at rest, the trailing side 20× the leading —
+and died at `3.2 M`, when the points that were at the center at `t = 0`
+left the core (`r_0/v = 3.1 M`); step 8's moving harmonic sphere died the
+same way. So for `:damped` with `v ≠ 0` the core relaxes at the full rate,
+toward the layer's own target `u_exact(t, core_position(x, t))` at the core
+rule's point `c(t) + r_0 n̂` — the layer's `u_exact` at `r_0`, so the two
+agree there — and `F` is still not evaluated. **The metric relaxes in the
+ADM variables** `(α², β^i, γ_ij)`, `∂_t(α², β, γ) = −ρ_max ((α², β, γ) −
+(…)_exact)` mapped to `∂_t h` by the chain rule (`core_relaxation_rate`),
+and `Π` linearly. The plain `−ρ_max (u − u_exact)` was tried first and
+ended the run in its first chunk: on the center's path the target jumps from
+one side of the sphere `r_0` to the other as the center passes, and the
+straight line in `g` between Kerr-Schild at `±r_0 x̂` passes through
+`η + (2M/r_0) diag(1, n n)`, which is Euclidean (`g_tt = 2.2` at
+`r_0 = 5/8 M`) — the constraint monitor's `sqrt` threw there. Positive `α²`
+and positive-definite `γ` are convex, so the ADM path is a metric
+throughout, and near the target the two rates agree to first order. It carries
+no `∂_t u_exact`: `n̂` turns at `v/r`, unbounded at the center, so the core
+lags its target by `|∂_t u|/ρ_max` instead. A hole at rest keeps `du = 0`
+bit for bit (the kernel branches on `v` first, `core_follows`); `:frozen`
+keeps it too, being the variant that is measured to fail, and `:pasted`
+overwrites its core anyway. The tracked geometry is not changed: its
+`:fitted` core already relaxes, and its center's `v_est` is never exactly
+zero. Every norm, monitor and error
 kernel — and the refinement indicator — masks the whole interior
 `r < r_1`; the modified region is not a numerical solution and must not
 be reported as one or refined for its own sake. The apparent horizon

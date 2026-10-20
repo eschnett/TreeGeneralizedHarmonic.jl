@@ -15,6 +15,7 @@ using Test
 using TreeAMR
 using TreeGeneralizedHarmonic
 using StaticArrays: SVector, SMatrix
+using LinearAlgebra: det
 import SpacetimeMetrics as SM
 
 const TGHb = TreeGeneralizedHarmonic
@@ -195,6 +196,151 @@ const TGHb = TreeGeneralizedHarmonic
             @test is_evolved(m, c + SVector{3,T}(3 // 2, 0, 0))
             @test !is_evolved(m, c - SVector{3,T}(7 // 5, 0, 0))
         end
+    end
+
+    @testset "a moving :damped core relaxes toward the analytic solution at its current core position, and a resting one does not move" begin
+        # Guards the core of a moving analytic sphere (amended 2026-10-20). A
+        # core with `du = 0` keeps the solution about `c(0)` and releases it
+        # into the layer on the trailing side — the boosted hole's residual grew
+        # linearly and the run died at `r_0/v`; a core relaxing toward the
+        # solution at `x` rather than at the core rule's point `c(t) + r_0 n̂`
+        # evaluates it at the singularity; a core relaxing linearly in `g`
+        # crosses Euclidean metrics where the center's path flips `n̂` — the
+        # first version, which ended the run in its first chunk; and a hole at
+        # rest whose core moved at all would no longer be the static run bit for
+        # bit.
+        #
+        # First the rate on its own: zero at the target, the ADM variables
+        # relaxing at `ρ`, and the path from Kerr-Schild at `+r_0 x̂` to `−r_0 x̂`
+        # a metric throughout, where the straight line in `g` is not.
+        bgs = SM.KerrSchild(one(T), zero(T))
+        r0 = T(5 // 8)
+        hp, _, _ = background_state(bgs, zero(T), SVector{3,T}(r0, 0, 0))
+        hm, _, _ = background_state(bgs, zero(T), SVector{3,T}(-r0, 0, 0))
+        ρ = T(4)
+        @test iszero(TGHb.core_relaxation_rate(hm, hm, ρ))
+        lorentzian(h) = (g = TGHb._sym4(h) + SMatrix{4,4,T}(-1, 0, 0, 0, 0, 1, 0, 0,
+                                                            0, 0, 1, 0, 0, 0, 0, 1);
+                         det(g) < 0 && det(g[2:4, 2:4]) > 0 && g[2, 2] > 0 &&
+                             det(g[2:3, 2:3]) > 0)
+        @test lorentzian(hp) && lorentzian(hm) && !lorentzian((hp + hm) / 2)
+        let h = hp, dτ = T(1 // 400), ok = true, A0 = TGHb._adm_split(hp)
+            for _ in 1:800                  # to `ρ τ = 8`, RK2
+                k1 = TGHb.core_relaxation_rate(h, hm, ρ)
+                k2 = TGHb.core_relaxation_rate(h + dτ / 2 * k1, hm, ρ)
+                h += dτ * k2
+                ok &= lorentzian(h)
+            end
+            @test ok && maximum(abs, h - hm) ≤ 1e-3 * maximum(abs, hp - hm)
+            # Along the rate, `α²` and `β^i` move at `−ρ (· − ·_t)`.
+            ε = T(1 // 2^20)
+            d = TGHb.core_relaxation_rate(hp, hm, ρ)
+            Ap, βp, _, _ = TGHb._adm_split(hp + ε * d)
+            Am, βm, _, _ = TGHb._adm_split(hp - ε * d)
+            At, βt, _, _ = TGHb._adm_split(hm)
+            # (`α²` is the same on both sides of the sphere, so its rate is
+            # zero, to the difference's roundoff.)
+            @test abs((Ap - Am) / 2ε + ρ * (A0[1] - At)) ≤ 1e-8 * ρ * abs(A0[1])
+            @test (βp - βm) / 2ε ≈ -ρ * (A0[2] - βt) rtol = 1e-8
+        end
+
+        # Then one right-hand side on the next testset's quadrant at `t = 1` —
+        # the hole two cells from where the data were made — on a state
+        # perturbed in the core, for the moving sphere and for the same sphere
+        # at rest (the same `Interior` type, so the same kernel); then sixteen
+        # RK4 steps of the moving one.
+        q = 2
+        G = q ÷ 2 + 1
+        ops = Operators(prolongation=q + 2, restriction=q + 2)
+        case = kerr_schild_case(T; halfwidth=T(5 // 2), r_0=T(2 // 5),
+                                r_1=T(11 // 10), chunk=T(1 // 10), v=v, x0=-1 // 4,
+                                gauge_source=:algebraic, octant=:quadrant)
+        f = gh_forest(T, case; N=12, roots=(4, 2, 2))
+        U = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
+                        parity=state_parity(f))
+        fill_exact!(U, case, zero(T))
+        u0 = statevector(U)
+        gather!(u0, U)
+        moving = with_ρ_max(case.interior, ρ)
+        resting = Interior(T; center=HoleCenter(T, moving.center.c0), r_0=moving.r_0,
+                           r_1=moving.r_1, ρ_max=ρ, w_ramp=moving.w_ramp,
+                           ρ_ramp=moving.ρ_ramp, margin=moving.margin)
+        @test typeof(resting) === typeof(moving)
+        @test TGHb.core_follows(moving) && !TGHb.core_follows(resting)
+        @test !TGHb.core_follows(Interior(T; center=moving.center, r_0=moving.r_0,
+                                          r_1=moving.r_1, variant=:frozen))
+        sched = GhostSchedule(U, ops)
+        p_mov = GHProblem(U, sched, case; q=q, interior=moving)
+        p_rest = GHProblem(U, sched, case; q=q, interior=resting)
+        # The core's points at `t`, as (block, stored index, position).
+        function core_points(int, t)
+            pts = Tuple{Int,NTuple{3,Int},SVector{3,T}}[]
+            c = center_at(int.center, t)
+            for k in 1:nleaves(f), I in CartesianIndices(interiorview(U, k, 1))
+                J = Tuple(I) .+ U.G
+                x = SVector{3,T}(coordinates(U, k, J)...)
+                sum(abs2, x - c) < int.r_0^2 && push!(pts, (k, J, x))
+            end
+            return pts
+        end
+        t = one(T)
+        # The state perturbed in both cores, by a pattern that is not the
+        # solution anywhere.
+        scatter!(U, u0)
+        for int in (moving, resting), (k, J, x) in core_points(int, t)
+            for var in 1:20
+                U.work[J..., var, k] += T(1 // 100) * sin(7 * x[1] + 3 * x[2] + var)
+            end
+        end
+        u = similar(u0)
+        gather!(u, U)
+        D = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
+                        parity=state_parity(f))
+        du = similar(u)
+        gh_rhs!(du, u, p_mov, t)
+        scatter!(D, du)
+        pts = core_points(moving, t)
+        worst, off, spatial = zero(T), zero(T), true
+        for (k, J, x) in pts
+            ht, Πt, _ = background_state(case.background, t,
+                                         SVector{3,T}(core_position(moving, t, x)...))
+            hu = SVector{10,T}(U.work[J..., 1:10, k])
+            want = vcat(TGHb.core_relaxation_rate(hu, ht, ρ),
+                        -ρ * (SVector{10,T}(U.work[J..., 11:20, k]) - Πt))
+            # The spatial metric's rate is `−ρ (γ − γ_t)` itself.
+            spatial &= want[5:10] == -ρ * (hu[5:10] - ht[5:10])
+            worst = max(worst, maximum(abs, D.work[J..., :, k] - want))
+            off = max(off, maximum(abs, want))
+        end
+        @info "moving :damped core: $(length(pts)) points, max|du − want| = " *
+              "$worst, max|want| = $off"
+        @test length(pts) > 50 && spatial
+        @test off > 1e-2                        # the core is off its target …
+        @test worst ≤ 16 * eps(T) * off         # … and relaxes toward it
+        gh_rhs!(du, u, p_rest, t)
+        scatter!(D, du)
+        rest_pts = core_points(resting, t)
+        @test length(rest_pts) > 50
+        @test all(((k, J, _),) -> all(iszero, D.work[J..., :, k]), rest_pts)
+        # Sixteen steps of the moving one from the exact data: the core is
+        # closer to its target at the end than the data it started from — what
+        # a frozen core keeps — are.
+        dt = T(5 // 48) / 8
+        t1 = 16 * dt
+        u1 = gh_solve(p_mov, u0, (zero(T), t1); dt=dt)
+        scatter!(D, u1)
+        scatter!(U, u0)
+        now, stale = zero(T), zero(T)
+        for (k, J, x) in core_points(moving, t1)
+            ut = case_state_tuple(case.background, moving, t1, x)
+            for var in 1:20
+                now = max(now, abs(D.work[J..., var, k] - ut[var]))
+                stale = max(stale, abs(U.work[J..., var, k] - ut[var]))
+            end
+        end
+        @info "moving :damped core after 16 steps: max|u − u_target| = $now, " *
+              "the frozen core's $stale"
+        @test isfinite(now) && stale > 1e-3 && now ≤ 4 // 5 * stale
     end
 
     @testset "the moving hole on the quadrant is the hole in the box, to roundoff" begin

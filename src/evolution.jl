@@ -475,9 +475,10 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
         g = interior_point(interior, t, x)
         if is_frozen(interior, g)
             # `F` is not evaluated: this is the branch `CLAUDE.md` says must
-            # come before the stencils. `du = 0` for the analytic variants;
-            # the fitted core (step 8e) relaxes toward the cached target at
-            # the full rate, `du = −ρ_max (u − u_fit)`.
+            # come before the stencils. `du = 0` for the analytic variants
+            # of a hole at rest; the `:damped` core of a *moving* analytic
+            # sphere (amended 2026-10-20) and the fitted core (step 8e) relax
+            # toward their target at the full rate, `du = −ρ_max (u − u_t)`.
             if INT === :fitted && (fitp !== nothing || !iszero(trail))
                 # Step 8′'s levers (the side-dependent ramp does not touch
                 # the core, where `ρ = ρ_max` already; the exact target does).
@@ -509,6 +510,30 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                                                                    t, t_f))
                         nothing
                     end
+                end
+            elseif INT === :damped && core_follows(interior)
+                # A moving hole's analytic core (amended 2026-10-20): frozen,
+                # it would keep its `t = 0` data — the solution about `c(0)` —
+                # and release them into the layer on its trailing side, a
+                # mismatch growing with the distance travelled (`CODE.md`, "The
+                # frozen core"). It relaxes instead toward the layer's own
+                # target at the core rule's point, `c(t) + r_0 n̂`, which is
+                # the layer's `u_exact` at `r_0`: the metric in the ADM
+                # variables, where the jump of `n̂` across the center's path
+                # stays a metric ([`core_relaxation_rate`](@ref)), `Π`
+                # linearly. No rate: `n̂` turns at `v/r`, unbounded at the
+                # center, so the core lags by `|∂_t u|/ρ_max`.
+                # (Its own names: `ρc` is the fitted core's, captured above.)
+                ρd = interior.ρ_max
+                hd, Πd, _ = background_state(layer_target(interior, bg), t,
+                                             core_position(interior, t, x))
+                hud = SVector{NC,T}(@ntuple 10 v -> work[var + (v - 1) * sv])
+                dhd = core_relaxation_rate(hud, SVector{NC,T}(hd), ρd)
+                ntuple(Val(NC)) do v
+                    du[inner..., v, b] = dhd[v]
+                    du[inner..., NC + v, b] =
+                        -ρd * (work[var + (NC + v - 1) * sv] - Πd[v])
+                    nothing
                 end
             else
                 ntuple(Val(2 * NC)) do v
@@ -721,7 +746,11 @@ itself unless the interior names another metric (step 8c).
 **The three branches, in the order they must be in.** The core predicate
 is asked *before* any stencil is touched, because the frozen core holds
 finite but stale data on which `F` may be `NaN` and `0 · NaN = NaN`
-(`CLAUDE.md`). Outside `r_1` the answer is `F` itself and not `1·F − 0·(…)`,
+(`CLAUDE.md`). In the core `du = 0`, except where the core relaxes: the fitted
+core toward its cached target and — amended 2026-10-20 — the `:damped` core of
+a moving analytic sphere toward the layer's target at [`core_position`](@ref)
+([`core_follows`](@ref)), so that it does not release stale data on its
+trailing side. Outside `r_1` the answer is `F` itself and not `1·F − 0·(…)`,
 which also saves the analytic solution's dual pass at every point of the
 evolved region — `u_exact` is evaluated in the layer and nowhere else.
 """
