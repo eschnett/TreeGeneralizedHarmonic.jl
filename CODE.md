@@ -5575,8 +5575,8 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 | 0.7 | `:fitted` | `1/48` | `m = 18`, `n_L = 24`, `fit_cont = 1`, `lmax_fit = 12` | a guess: screen the depth first |
 | 0.8 | `:damped` | `1/32` (`1/32`, `1/48`) | `r_0 = 0.95`, `r_1 = 1.35` | the rules |
 | 0.8 | `:fitted` | `1/64` | `m = 16`, `n_L = 30`, `fit_cont = 1`, `lmax_fit = 12` | a guess: screen the depth first |
-| 0.9 | `:damped` | `1/48` (`1/48`, `1/72`) | `r_0 = 1`, `r_1 = 5/4` | predicted: `r_0 = 19/20` is outside the convergent regime at `1/48` and clean at `1/96` |
-| 0.9 | `:fitted` | `1/96`, no pair in reach of one H200 | `m = 16–18`, `n_L = 36`, `fit_cont = 1`, `lmax_fit = 12` | measured: stable to `32 M`, but `ℋ` outside `1000–2000×` `:damped`'s |
+| 0.9 | `:damped` | `1/96` (`1/96`, `1/128`) | `r_0 = 19/20`, `r_1 = 5/4` | measured: order `4.0` outside the horizon from `1/96` (from `1/72` except `ℋ` just outside it), to `32 M`; stationary to `128 M`; `1/48` is not convergent at `r_0 = 19/20` or `1` (`1/48 → 1/96` is `1935×` just outside); `r_0 = 1` equals `19/20` outside the horizon at `1/96` and is `13×` worse inside |
+| 0.9 | `:fitted` | `1/96`, no pair in reach of one H200 | `m = 16–18`, `n_L = 36`, `fit_cont = 1`, `lmax_fit = 12` | measured: stable to `128 M` at `m = 16`, but `ℋ` outside `1900×` `:damped`'s (the error `23×` at `128 M`) |
 
 - **The ring rule, for both variants.** On the equator Kerr-Schild's `H`
   varies on the length `L = (R² − a²)/R` at the core surface's radius `R`;
@@ -5587,7 +5587,10 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   margin's 4.8 cells; at `a = 0` a margin of 4 cost only `2×`, which favours
   the ring.) For `:damped` the rule sets `r_0` and the coarsest `h`; for
   `:fitted`, whose initial data are analytic down to the core surface, it
-  bounds `m + n_L` on the equator.
+  bounds `m + n_L` on the equator. **(Amended 2026-10-16: necessary, not
+  sufficient.** At `a = 9/10` and `1/48`, `r_0 = 1` gives the ring 9.1 cells
+  and is `3.7×` *worse* than `19/20`'s 4.7, with a ramp of 12 cells against
+  14.4. `1/96` is needed whichever `r_0` is used.)
 - **`:damped`**: a ramp `r_1 − r_0` of at least 12 cells (18 lowers `ℋ`
   outside about `3×` at `a = 0`), and `r_1` at least 8 cells inside the
   horizon at the poles, `r₊`; more depth than 8–12 cells did not help.
@@ -5605,16 +5608,31 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   `test/octant_runs.jl` needs its `variant=` option, and the singular-set
   check, which tests the core's least radius against `a` and so refuses a
   polar radius below the equatorial ring, needs to know the ring's plane.
-- **What would firm this up**, in order: `a = 9/10` `:damped` at `1/48` and
-  `1/72` with `r_0 = 1` — the ring rule's prediction, about two hours for
-  the coarser row on one H200 (the `1/48` row that was outside the convergent
-  regime had `r_0 = 19/20`, `L = 4.7` cells; `r_0 = 1` doubles that and still
-  leaves a 12-cell ramp and an 8.9-cell margin); depth screens at
-  `a = 0.7` and `0.8`; `fit_cont = 2` with spin, at `3/5`.
-- **What it costs** on one H200 with this branch's kernel: `26 s/M` at
+- **What would firm this up**, in order:
+  - depth screens at `a = 0.7` and `0.8`;
+  - `fit_cont = 2` with spin, at `3/5`.
+- **What it costs** on one H200 with the pre-rewrite kernel: `26 s/M` at
   `a = 0`, `1/16` (9.4 M points); `6.5 min/M` at `3/5`, `1/32` (60.8 M);
   `5 min/M` at `9/10`, `1/48` (31.9 M); `15 min/M` at `9/10`, `1/96`
-  (52.8 M). `main`'s rewritten kernel is about `8×` faster per point.
+  (52.8 M). On a hole, `main`'s rewritten kernel is `1.6–2.2×` faster per
+  point, not the gauge wave's `8×` (measured 2026-10-14): `220 s/M` at `1/48`
+  (38.0 M points on `L = 128`) and `460 s/M` at `1/96` (58.9 M). The layer's
+  kernel and the refined mesh's prolongation are what is left.
+- **A convergence family fits one H200 only with thin outer levels**
+  (measured 2026-10-19, `SINGULARITY_HANDLING.md`, "`a = 9/10` `:damped`
+  converges at `1/96`"). Each coarse level of a nested-cube mesh is at least
+  the 56-block band 2:1 balance allows, `6.2 M` points at `N = 48`; with
+  `N = 24` and `radii = 32,16,8,4,4,3` on `L = 64` it is `0.77 M`, and the
+  `a = 9/10` mesh is `32.9 M` points at `1/96` (`322 s/M`) and `78.0 M` at
+  `1/128` (`803 s/M`, `123 GB`). The finest cube `[0, 3]³` is what is left,
+  and `1/192` would not fit. The thin levels cost the exterior's error
+  (`2–17×` B's outside the horizon at `1/96`), not the interior's.
+- **The finest cube must be a whole number of its parent level's blocks**
+  (found 2026-10-14). With `N = 96` the `1/48` level's blocks are two units
+  wide, so a `1/96` cube of radius `3` refined all of `[0, 4]³`, and 2:1
+  balance cascaded a level out to the root: 304 M points, out of an H200's
+  memory. `roots = 4`, `N = 48` gives the same spacings with half-unit blocks
+  at `1/96`.
 
 ### The right-hand side on an H200 (measured 2026-10-05)
 
