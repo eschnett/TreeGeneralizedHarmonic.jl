@@ -16,6 +16,19 @@ using MPI: MPI
 
 const MPI_WORKLOAD = joinpath(@__DIR__, "mpi_workload.jl")
 
+# Whether the job may run at all: three ranks of about 3 GB each, the
+# package compiled in every one, beside the suite's own process. A machine
+# with less than 24 GB skips it — GitHub's macOS runners have 7 GB and the
+# job ran past its hour there swapping, and a 16 GB Linux runner went down
+# under it at one thread (2026-10-19). `TREEGH_TEST_MPI=1` or `0` decides it
+# by hand; CI forces it on for its threaded Linux cell.
+function mpi_runnable()
+    choice = get(ENV, "TREEGH_TEST_MPI", "")
+    choice == "1" && return true
+    choice == "0" && return false
+    return Sys.total_memory() >= 24 * 2^30
+end
+
 # Whether the job may run beside the suite: three single-threaded ranks,
 # each compiling the workload. `TREEGH_TEST_MPI_CONCURRENT=0` or `1`
 # decides it by hand.
@@ -60,15 +73,17 @@ end
 const MPI_JOB = Ref{Any}(nothing)
 
 function start_mpi_job!()
-    mpi_concurrent() || return nothing
+    (mpi_runnable() && mpi_concurrent()) || return nothing
     job = launch_mpi_workload()
     MPI_JOB[] = job
     atexit(() -> process_running(job.proc) && kill(job.proc))
     return nothing
 end
 
+# The job, started now if it was not, or `nothing` where it may not run.
 function take_mpi_job!()
     job = MPI_JOB[]
     MPI_JOB[] = nothing
-    return job === nothing ? launch_mpi_workload() : job
+    job === nothing || return job
+    return mpi_runnable() ? launch_mpi_workload() : nothing
 end

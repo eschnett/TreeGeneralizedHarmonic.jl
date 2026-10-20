@@ -46,8 +46,8 @@ mpi_numbers(line) = [parse(Float64, m.match) for m in eachmatch(MPI_NUMBER, line
 # coordinate whose exact value is zero.
 mpi_agree(a, b) = isapprox(a, b; rtol=1e-12, atol=1e-13)
 
-@testset "A distributed run is the serial run, at every rank count" begin
-    files = finish_mpi_workload(take_mpi_job!())
+# The comparison itself, on the four files' lines.
+function mpi_compare(files)
     serial = files[0]
     # Every case ran, the serial run included, and is what it claims to be:
     # the adaptive hole went through the initial-data cycle, the tracked hole
@@ -91,4 +91,14 @@ mpi_agree(a, b) = isapprox(a, b; rtol=1e-12, atol=1e-13)
             ok || @info "a line differs at $n rank(s)" serial = a distributed = b
         end
     end
+    return nothing
+end
+
+@testset "A distributed run is the serial run, at every rank count" begin
+    job = take_mpi_job!()
+    job === nothing && @info "the MPI workload is skipped: this machine has " *
+                             "less than 24 GB for its three ranks " *
+                             "(TREEGH_TEST_MPI=1 runs it anyway)"
+    job === nothing && @test_skip "a distributed run is the serial run"
+    job === nothing || mpi_compare(finish_mpi_workload(job))
 end
