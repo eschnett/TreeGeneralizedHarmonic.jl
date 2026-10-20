@@ -26,6 +26,11 @@
 # them; `missing`, like `nothing`, is omitted rather than written as a
 # placeholder; and the job's start, its wall-time limit and its GPUs are read
 # from Slurm's environment when it sets them.
+#
+# `summary` and `[history]` (the headline keys, and the short windows SimWatch
+# draws as sparklines) were ported from the same writer at commit 94c0efe on
+# 2026-10-19, with one addition: `simwatch_history!` records a point without
+# writing, so that a restarted run can refill its window from its own record.
 
 """
     simwatch_document(; name, status, kw...) -> Dict{String,Any}
@@ -41,6 +46,10 @@ keywords — every one optional, and `nothing` or `missing` omitted:
   `FORMAT.md`'s keys for those tables (`iteration`, `time`, `time_end`,
   `time_unit`, `walltime`, …; `nodes`, `threads`, `gpus`, …; `job_id`, …);
 - `black_holes`, `images`: vectors of `NamedTuple`s or `Dict`s;
+- `summary`: the keys of the headline values, dotted (`"shells.r2.ham_l2"`), at
+  most six, or tables `(key = …, label = …)`;
+- `history`: a `Dict` of equally long vectors, `"time"` and one per series,
+  oldest first, each named like the key it tracks;
 - `extra`: any further keys and tables, merged in — a table named like a
   known one extends it.
 """
@@ -48,7 +57,8 @@ function simwatch_document(; name=nothing, status=nothing, message=nothing,
                            updated=nothing, started=nothing, update_interval=nothing,
                            code=nothing, host=nothing, pid=nothing, progress=nothing,
                            resources=nothing, slurm=nothing, black_holes=nothing,
-                           images=nothing, extra=nothing)
+                           images=nothing, summary=nothing, history=nothing,
+                           extra=nothing)
     doc = Dict{String,Any}()
     extra === nothing || merge!(doc, _sw_todict(extra))
     _sw_setkey!(doc, "name", name)
@@ -69,6 +79,9 @@ function simwatch_document(; name=nothing, status=nothing, message=nothing,
     end
     black_holes === nothing || (doc["black_holes"] = [_sw_todict(b) for b in black_holes])
     images === nothing || (doc["images"] = [_sw_todict(i) for i in images])
+    summary === nothing ||
+        (doc["summary"] = [s isa AbstractString ? String(s) : _sw_todict(s) for s in summary])
+    history === nothing || isempty(history) || (doc["history"] = _sw_todict(history))
     return doc
 end
 
@@ -99,8 +112,8 @@ function write_simwatch(dir::AbstractString, doc::AbstractDict)
 end
 
 """
-    SimWatchWriter(dir; name = basename(dir), code = nothing, interval = 60,
-                   startup_interval = 900)
+    SimWatchWriter(dir; name = basename(dir), code = nothing, summary = nothing,
+                   interval = 60, startup_interval = 900, history_length = 100)
 
 The status file of one run in `dir`, and the state its writes need: when the
 run started (the Slurm job's start if Slurm says, else now), when it last
@@ -108,14 +121,16 @@ wrote, how far apart its calls have been, and its simulation time at the
 first call (from which SimWatch computes the average speed). `interval` is
 the least number of seconds between two writes by [`simwatch_update!`](@ref);
 `startup_interval` is the `update_interval` reported before the second call,
-which has to cover loading and compilation.
+which has to cover loading and compilation. `summary` is written into every
+document ([`simwatch_document`](@ref)); `history_length` is how many points of
+each `history` series are kept.
 
 `comm` (added 2026-10-19) makes the writer one run's over MPI: every rank
 makes it and calls [`simwatch_update!`](@ref) at the same points, which is
 then collective — whether to write is agreed from every rank's clock, the
 memory is summed over the ranks (the peak too: the job's, not one
 process's), and rank 0 alone writes the file. `nothing`, the default, is one
-process.
+process. Every rank keeps the history window; rank 0's is the one written.
 """
 mutable struct SimWatchWriter
     dir::String
@@ -129,12 +144,17 @@ mutable struct SimWatchWriter
     last_call::Float64          # `time()` of the last call
     gap::Float64                # the spacing of the last two calls
     time_start::Union{Nothing,Float64}
+    summary::Any
+    history_length::Int
+    history_time::Vector{Float64}
+    history::Dict{String,Vector{Float64}}
     warned::Bool
     comm::TreeAMR.Communicator
 end
 
 function SimWatchWriter(dir::AbstractString; name::AbstractString=basename(abspath(dir)),
-                        code=nothing, interval::Real=60, startup_interval::Real=900,
+                        code=nothing, summary=nothing, interval::Real=60,
+                        startup_interval::Real=900, history_length::Integer=100,
                         comm=nothing)
     t = time()
     job = _sw_envfloat("SLURM_JOB_START_TIME")
@@ -144,14 +164,15 @@ function SimWatchWriter(dir::AbstractString; name::AbstractString=basename(abspa
     return SimWatchWriter(String(dir), String(name),
                           code === nothing ? nothing : String(code), Float64(interval),
                           Float64(startup_interval), started, t0, -Inf, -Inf, NaN,
-                          nothing, false, communicator(comm))
+                          nothing, summary, Int(history_length), Float64[],
+                          Dict{String,Vector{Float64}}(), false, communicator(comm))
 end
 
 """
     simwatch_update!(sw::SimWatchWriter; force = false, status = "running",
                      message, iteration, time, time_end, time_unit, speed,
                      walltime_limit, checkpoint, progress, resources,
-                     black_holes, images, extra) -> Bool
+                     black_holes, images, history, extra) -> Bool
 
 Write the status file if `sw.interval` seconds have passed since the last
 write, or if `force`; return whether it was written. Cheap to call after
@@ -160,14 +181,18 @@ is `max(interval, 1.5 × the last spacing of calls)` — or `startup_interval`
 before there is one — so that a run that calls every seven minutes is not
 shown as stale after three. The keywords are [`simwatch_document`](@ref)'s;
 `progress` and `resources` add keys to those tables. `walltime_limit` is the
-Slurm job's own unless given.
+Slurm job's own unless given. `history = Dict("constraints.ham_l2" => x, …)`
+adds one point per *written* update at the current `time` (none without a
+`time`), as [`simwatch_history!`](@ref) does; SimWatch shows the window as
+sparklines with their growth rates.
 """
 function simwatch_update!(sw::SimWatchWriter; force::Bool=false,
                           status::AbstractString="running", message=nothing,
                           iteration=nothing, time=nothing, time_end=nothing,
                           time_unit=nothing, speed=nothing, walltime_limit=nothing,
                           checkpoint=nothing, progress=nothing, resources=nothing,
-                          black_holes=nothing, images=nothing, extra=nothing)
+                          black_holes=nothing, images=nothing, history=nothing,
+                          extra=nothing)
     t = Base.time()
     isfinite(sw.last_call) && (sw.gap = t - sw.last_call)
     sw.last_call = t
@@ -178,6 +203,7 @@ function simwatch_update!(sw::SimWatchWriter; force::Bool=false,
     (due,) = agree_any(sw.comm, (due,))
     due || return false
     sw.last_write = t
+    time === nothing || history === nothing || simwatch_history!(sw, time, history)
     # Every rank's memory, summed (Linux only, where the resident set is
     # read; a rank that cannot read it contributes nothing).
     rss = _sw_current_rss()
@@ -218,7 +244,9 @@ function simwatch_update!(sw::SimWatchWriter; force::Bool=false,
                             update_interval=round(expected), code=sw.code,
                             host=gethostname(), pid=getpid(), progress=prog,
                             resources=res, slurm=isempty(slurm) ? nothing : slurm,
-                            black_holes=black_holes, images=images, extra=extra)
+                            black_holes=black_holes, images=images,
+                            summary=sw.summary, history=_sw_history_document(sw),
+                            extra=extra)
     ok = write_simwatch(sw.dir, doc)
     if !ok && !sw.warned
         sw.warned = true
@@ -236,6 +264,47 @@ to be continued) or `"failed"` with the error's first line as `message`.
 """
 simwatch_finish!(sw::SimWatchWriter; status::AbstractString="finished", kw...) =
     simwatch_update!(sw; force=true, status=status, kw...)
+
+# --- history --------------------------------------------------------------------
+
+"""
+    simwatch_history!(sw::SimWatchWriter, time, vals) -> sw
+
+Add one point at simulation time `time` to the writer's `[history]` window,
+without writing: `vals` maps series names to numbers (six significant
+digits are kept; anything else is `NaN`). A series missing from `vals` is
+padded with `NaN`, the window keeps the last `history_length` points, and a
+series with no finite value left in it is dropped. [`simwatch_update!`](@ref)
+calls it for its own `history`; call it directly to refill the window after a
+restart.
+"""
+function simwatch_history!(sw::SimWatchWriter, time::Real, vals)
+    n = length(sw.history_time)
+    push!(sw.history_time, Float64(time))
+    for (k, v) in pairs(vals)
+        x = v isa Real && !(v isa Bool) ? round(Float64(v); sigdigits=6) : NaN
+        push!(get!(() -> fill(NaN, n), sw.history, string(k)), x)
+    end
+    for series in values(sw.history)
+        length(series) == n && push!(series, NaN)
+    end
+    drop = length(sw.history_time) - sw.history_length
+    if drop > 0
+        deleteat!(sw.history_time, 1:drop)
+        foreach(s -> deleteat!(s, 1:drop), values(sw.history))
+    end
+    filter!(((_, s),) -> any(isfinite, s), sw.history)
+    return sw
+end
+
+function _sw_history_document(sw::SimWatchWriter)
+    isempty(sw.history) && return nothing
+    doc = Dict{String,Any}("time" => copy(sw.history_time))
+    for (k, s) in sw.history
+        doc[k] = copy(s)
+    end
+    return doc
+end
 
 # --- TOML values ----------------------------------------------------------------
 

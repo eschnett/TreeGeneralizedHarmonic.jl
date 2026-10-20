@@ -368,7 +368,9 @@ lifts the refusal of a moving Kerr-Schild hole; `hole_case(; gauge_source =
 `evolve!(; perturb)`, point-weighted and per-level norms (`weighting =
 :points`, `at_level`, `level_constraint_norms`), an observer that takes a
 fourth argument gets the chunk's record row, and `src/simwatch.jl` writes
-SimWatch status files (`SimWatchWriter`; https://github.com/eschnett/simwatch).
+SimWatch status files (`SimWatchWriter`; https://github.com/eschnett/simwatch;
+from 2026-10-19 with a `summary` and the `[history]` window SimWatch draws as
+sparklines, `simwatch_history!` refilling it after a restart).
 **`FittedSpec(; fit_cont = 2)`** fits curvatures too (the state sampler's
 `order = 2` differences the interpolated gradient: TreeAMR 0.1.4 has no
 second-derivative interpolation; TreeAMR's `main` has it, unreleased).
@@ -925,7 +927,10 @@ call, `key=value` options listed in its header — the case (`case=minkowski`
 or `ks`, `interior=damped|fitted`, margins, `fit_cont`; from 2026-10-04
 `octant=reflecting|rotating` and the spin `a=`, which needs `rotating`), the mesh (`L`, `N`,
 `roots`, `radii`), the run (`t_end`, `cfl`, `chunk`), noise, `backend=cuda`,
-`out=<dir>` (CSV, `records.csv`, `simwatch.toml`) and `checkpoint=<dir>`.
+`out=<dir>` (CSV, `records.csv`, `simwatch.toml` — from 2026-10-19 with
+sparklines of the constraints, the error and the horizon, and two PNG
+thumbnails in `out/plots/` drawn by `test/simwatch_plots.jl`, plain Julia) and
+`checkpoint=<dir>`.
 On Symmetry they ran one H200 each from a copy with `CUDA` added to its
 `Project.toml` (`ks-octant`, `ks-study2`); `cfl = 1/2` is as accurate as
 `1/4` there and half the cost:

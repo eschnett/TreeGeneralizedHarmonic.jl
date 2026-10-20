@@ -5575,7 +5575,7 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 | 0.7 | `:fitted` | `1/48` | `m = 18`, `n_L = 24`, `fit_cont = 1`, `lmax_fit = 12` | a guess: screen the depth first |
 | 0.8 | `:damped` | `1/32` (`1/32`, `1/48`) | `r_0 = 0.95`, `r_1 = 1.35` | the rules |
 | 0.8 | `:fitted` | `1/64` | `m = 16`, `n_L = 30`, `fit_cont = 1`, `lmax_fit = 12` | a guess: screen the depth first |
-| 0.9 | `:damped` | `1/96` (no pair run) | `r_0 = 19/20`, `r_1 = 5/4` | measured: stationary to `128 M`; `1/48` is not convergent at `r_0 = 19/20` or `1` (`1/48 → 1/96` is `1935×` just outside); `r_0 = 1` equals `19/20` outside the horizon at `1/96` and is `13×` worse inside |
+| 0.9 | `:damped` | `1/96` (`1/96`, `1/128`) | `r_0 = 19/20`, `r_1 = 5/4` | measured: order `4.0` outside the horizon from `1/96` (from `1/72` except `ℋ` just outside it), to `32 M`; stationary to `128 M`; `1/48` is not convergent at `r_0 = 19/20` or `1` (`1/48 → 1/96` is `1935×` just outside); `r_0 = 1` equals `19/20` outside the horizon at `1/96` and is `13×` worse inside |
 | 0.9 | `:fitted` | `1/96`, no pair in reach of one H200 | `m = 16–18`, `n_L = 36`, `fit_cont = 1`, `lmax_fit = 12` | measured: stable to `128 M` at `m = 16`, but `ℋ` outside `1900×` `:damped`'s (the error `23×` at `128 M`) |
 
 - **The ring rule, for both variants.** On the equator Kerr-Schild's `H`
@@ -5609,10 +5609,6 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   check, which tests the core's least radius against `a` and so refuses a
   polar radius below the equatorial ring, needs to know the ring's plane.
 - **What would firm this up**, in order:
-  - a finer partner for `a = 9/10` `:damped` at `1/96`, to show that `1/96` is
-    convergent. `1/48` with `r_0 = 1`, the ring rule's prediction, was run to
-    `128 M` on 2026-10-14 and is not convergent (`SINGULARITY_HANDLING.md`,
-    "`a = 9/10` to `128 M`");
   - depth screens at `a = 0.7` and `0.8`;
   - `fit_cont = 2` with spin, at `3/5`.
 - **What it costs** on one H200 with the pre-rewrite kernel: `26 s/M` at
@@ -5622,6 +5618,15 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   point, not the gauge wave's `8×` (measured 2026-10-14): `220 s/M` at `1/48`
   (38.0 M points on `L = 128`) and `460 s/M` at `1/96` (58.9 M). The layer's
   kernel and the refined mesh's prolongation are what is left.
+- **A convergence family fits one H200 only with thin outer levels**
+  (measured 2026-10-19, `SINGULARITY_HANDLING.md`, "`a = 9/10` `:damped`
+  converges at `1/96`"). Each coarse level of a nested-cube mesh is at least
+  the 56-block band 2:1 balance allows, `6.2 M` points at `N = 48`; with
+  `N = 24` and `radii = 32,16,8,4,4,3` on `L = 64` it is `0.77 M`, and the
+  `a = 9/10` mesh is `32.9 M` points at `1/96` (`322 s/M`) and `78.0 M` at
+  `1/128` (`803 s/M`, `123 GB`). The finest cube `[0, 3]³` is what is left,
+  and `1/192` would not fit. The thin levels cost the exterior's error
+  (`2–17×` B's outside the horizon at `1/96`), not the interior's.
 - **The finest cube must be a whole number of its parent level's blocks**
   (found 2026-10-14). With `N = 96` the `1/48` level's blocks are two units
   wide, so a `1/96` cube of radius `3` refined all of `[0, 4]³`, and 2:1

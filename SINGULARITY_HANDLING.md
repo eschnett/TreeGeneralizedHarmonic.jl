@@ -2123,7 +2123,9 @@ the equatorial radius `1.695`):
   Inside the horizon `r_0 = 1` is worse: the evolved band's `ℋ` is `13×` B's
   (`1.02·10⁻⁴` against `8.1·10⁻⁶`), and the layer residual is `0.87`
   against `1.50`. Whether `1/96` itself is in the convergent regime needs a
-  finer partner, which neither study has run.
+  finer partner, which neither study has run. (Amended 2026-10-19: it is,
+  at fourth order outside the horizon — "`a = 9/10` `:damped` converges at
+  `1/96`", below.)
 - **All three rows are stationary to `128 M`**, and none of them grows. All 387
   finds succeed, `:fitted`'s fits are valid at every row (residual
   `0.0023`), and the projection never fires.
@@ -2162,6 +2164,85 @@ For scale, the same session's Z4c puncture in TreeBSSN (job 574812) holds `ℋ`
 at `5–8·10⁻⁶` in every shell by `128 M`, with `J = 0.89998`. That is a
 different chart, slice and normalisation, at `h = 1/256`, so it is not a
 like-for-like comparison. Its horizon sits at coordinate radius `0.41–0.54`.
+
+**`a = 9/10` `:damped` converges at `1/96` (measured 2026-10-19**, jobs
+578411–578413, `a09-conv` — `main` at `59d4c6f` with CUDA added and the
+SimWatch thumbnails; the CSVs are in `.claude/data/a09-conv`**)**. Three
+resolutions of one mesh, everything scaled together, B's layer and settings
+otherwise: `r_0 = 19/20`, `r_1 = 5/4`, `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`,
+`ρ_max = 4/M`, the algebraic source, the finder every `M`, no noise, the
+rotating octant `L = 64`, to `32 M`, one H200 each.
+
+- **The mesh is B's near the hole and thinner outside it.** `roots = 4`,
+  `radii = 32,16,8,4,4,3`, 2381 blocks: `h_fine` in `[0, 3]³`, `2 h_fine` in
+  `[0, 4]³`, and every coarser level the thinnest band TreeAMR's 2:1 balance
+  allows — four blocks a side less the two of the next level, 56 blocks. B's
+  `N = 48` makes each such band `6.2 M` points, `31` of its `52.8 M`. With
+  `N = 24` the bands are `0.77 M`, each level ends at half B's radius outside
+  `r ≈ 5.5` (`h/r ≈ 1/96` against `1/192`), and the mesh is `32.9 M` points at
+  `1/96`, `0.62×` B's. The resolutions differ only in `N`, so the blocks, and
+  the regions each level covers, are the same in all three.
+- **Why these three.** The finest cube alone is `24 M` points at `1/96` and
+  would be `191 M` at `1/192`; one H200 holds about `100 M` here (`c128`
+  used `123 GB` of `141`), and the package has no MPI. `1/72 → 1/96 → 1/128`
+  are two steps of `4/3`, `3.16×` each at fourth order.
+
+| | `h` | `N` | points | GPU memory | `s/M` | ns per point and step |
+|---|---|---|---|---|---|---|
+| `c72` | `1/72` | 18 | `13.9 M` | `37 GB` | `137` | `39` |
+| `c96` | `1/96` | 24 | `32.9 M` | `64 GB` | `322` | `29` |
+| `c128` | `1/128` | 32 | `78.0 M` | `123 GB` | `803` | `23` |
+
+Smaller blocks cost more per point (the ghost fill and the prolongation),
+but `c96` is still `1.43×` faster than `d96r1` (`460 s/M`) at the same
+spacing near the hole. All 99 finds succeed and all three runs are
+stationary.
+
+The convergence orders, `1/72 → 1/96` and `1/96 → 1/128`, of the
+point-weighted L2 in `test/octant_runs.jl`'s shells (the first from the
+equatorial radius `1.695`):
+
+| | error, `8 M` | error, `32 M` | `ℋ`, `8 M` | `ℋ`, `32 M` |
+|---|---|---|---|---|
+| band inside the horizon | `5.65`, `4.15` | `5.29`, `4.13` | `10.3`, `8.3` | `10.2`, `8.3` |
+| `[1.69, 2.25)` | `4.07`, `4.03` | `4.03`, `4.03` | `6.90`, `4.02` | `6.86`, `4.02` |
+| `[2.25, 3)` | `4.00`, `4.02` | `4.03`, `4.03` | `4.03`, `4.00` | `4.03`, `4.01` |
+| `[3, 5)` | `4.01`, `4.02` | `4.03`, `4.03` | `3.93`, `3.87` | `3.85`, `3.79` |
+| `[5, 8)` | `4.02`, `4.02` | `4.04`, `4.04` | `4.05`, `4.03` | `4.05`, `4.03` |
+| `r ≥ 8` | `4.01`, `4.01` | `4.05`, `4.04` | `4.10`, `4.08` | `4.10`, `4.08` |
+
+- **`1/96` is in the convergent regime.** From `1/96` to `1/128` every shell
+  outside the horizon converges at order `4.0` (`3.8–4.1`) at every time
+  from `1 M` to `32 M`, in the error against Kerr-Schild and in `ℋ`. So does
+  the drift of the horizon: `M_irr(32 M) − M_irr(1 M)` is `4.80`, `1.50` and
+  `0.47·10⁻⁷` (orders `4.03`, `4.02`), and `J`'s is `12.8`, `4.09` and
+  `1.26·10⁻⁸` (`3.96`, `4.09`). `J − a = +6.83·10⁻⁶` at `1 M` in all three
+  runs: that offset is the finder's (`N_ah = 12`), not the evolution's.
+- **`1/72` is in it too, except just outside the horizon.** There `ℋ` at
+  `1/72` is too large from about `4 M` on (`2.3·10⁻⁷` against the
+  `1.0·10⁻⁷` fourth order would give), while the error there converges at
+  `4.0`. The excess comes from inside, where `ℋ` converges faster than fourth
+  order (below): `1/48` (`d48r1`, `a09d48`) is outside the regime, and
+  `1/72` is at its edge.
+- **Inside the horizon the evolved band is not yet asymptotic in `ℋ`.** It
+  falls `19×` and then `11×` a step (orders `10` and `8.3`), from
+  `1.5·10⁻⁴` at `1/72` to `7.5·10⁻⁷` at `1/128`. The band's error settles
+  toward fourth order (`5.3–5.7`, then `4.13–4.15`). The layer residual —
+  the layer's distance from the truth, large by construction — falls at
+  order `1.8` (`2.51`, `1.50`, `0.88` at `32 M`).
+- **The error grows linearly at every resolution**, `3.7·10⁻⁹/M` just
+  outside the horizon at `1/128` (`2.0·10⁻⁸` at `8 M`, `1.1·10⁻⁷` at
+  `32 M`), and converges at fourth order at every time: it is accumulated
+  truncation error, not a resolution-independent drift.
+- **`c96` against B** (same spacing near the hole, B's outer levels twice as
+  wide, `L = 64`): the band inside the horizon is the same to `2 %` and the
+  layer residual to three digits; `ℋ` just outside the horizon is `0.76–0.92×`
+  B's. The error is not: B's coarser outer levels in `c96` raise it `1.25×`
+  just outside the horizon at `8 M` and `2.4×` at `24 M`, `2.9–8.7×` in
+  `[2.25, 8)` and `12–17×` beyond `r = 8`, where the factor `16` is the
+  halved levels' `2⁴`. The error at a given radius is set by the mesh
+  outside it as the run goes on; for the interior's question the mesh can be
+  thin outside, for the exterior's accuracy it cannot.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 

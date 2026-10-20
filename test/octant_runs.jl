@@ -87,6 +87,9 @@
 # directory (https://github.com/eschnett/simwatch): the progress, everything
 # the CSV row carries, and the record's horizon, track and fit, rewritten at
 # every chunk, with `finished`, `stopped` or `failed` at the end.
+# From 2026-10-19 it also carries a summary, the last 100 chunks of the
+# constraints, the error and the horizon as `[history]` (SimWatch draws them as
+# sparklines), and two thumbnails in `out/plots/` (`test/simwatch_plots.jl`).
 #
 # A run that stops at `walltime` exits with status 3, so a job script can
 # resubmit; the same command continues it from the newest checkpoint, and
@@ -105,6 +108,8 @@ using TreeAMR
 using TreeGeneralizedHarmonic
 using TreeGeneralizedHarmonic: DIAG_CGH, DIAG_HAM, DIAG_MOM
 using StaticArrays: SVector
+
+include(joinpath(@__DIR__, "simwatch_plots.jl"))
 
 const OPTIONS = Dict{String,String}()
 for arg in ARGS
@@ -297,8 +302,39 @@ t_wall0 = time()
 # directory, rewritten at every chunk with everything the CSV row carries, the
 # record's horizon, track, fit and step, and the progress; see
 # `src/simwatch.jl` and SimWatch's `FORMAT.md`.
+# The sparklines (added 2026-10-19): SimWatch's `[history]`, the last 100 chunks
+# of the constraints, of `ℋ` and the error just outside the horizon, of the
+# overall error and of the horizon's `M_irr` and `J`, each named like the key
+# it tracks. A restart refills the window from the CSV, which lacks the
+# horizon's numbers (`records.csv` is written at the end).
+eq_shell = hole ? shell_names[2] : ""
+history_csv = vcat(["constraints.ham_l2" => "ham_l2", "constraints.mom_l2" => "mom_l2",
+                    "constraints.gauge_l2" => "gauge_l2"],
+                   hole ? ["shells.$eq_shell.ham_l2" => "ham_l2_$eq_shell",
+                           "shells.$eq_shell.err_l2" => "err_l2_$eq_shell",
+                           "error.l2" => "err_l2"] : Pair{String,String}[])
 sw = SimWatchWriter(outdir; name=opt("name", basename(outdir)),
-                    code="TreeGeneralizedHarmonic", comm=comm)
+                    code="TreeGeneralizedHarmonic", comm=comm,
+                    summary=hole ? [(key="shells.$eq_shell.ham_l2", label="ℋ@horizon"),
+                                    (key="constraints.ham_l2", label="ℋ"),
+                                    (key="constraints.mom_l2", label="ℳ"),
+                                    (key="error.l2", label="err"), "horizon.M_irr",
+                                    "horizon.J"] :
+                            [(key="constraints.ham_l2", label="ℋ"),
+                             (key="constraints.mom_l2", label="ℳ"),
+                             (key="constraints.gauge_l2", label="C")])
+# Rank 0 alone writes the status file, so it alone refills the window.
+if isrank0 && isfile(csvpath)
+    try
+        ts, ys = simwatch_csv_columns(csvpath, last.(history_csv))
+        for i in max(1, length(ts) - 99):length(ts)
+            simwatch_history!(sw, ts[i], Dict(k => y[i] for (k, y) in
+                                                  zip(first.(history_csv), ys)))
+        end
+    catch err
+        @warn "SimWatch: could not refill the history from $csvpath" exception = err
+    end
+end
 time_unit = hole ? "M" : nothing
 setup = Dict{String,Any}(
     "case" => casename, "octant" => symmetry, "L" => Float64(L), "N" => N, "levels" => nlev,
@@ -319,7 +355,37 @@ simwatch_update!(sw; force=true, status="starting", time_end=Float64(t_end),
                  message="compiling and building the initial data",
                  extra=Dict("setup" => setup))
 steps_seen = Ref(0)
-last_status = Ref{Any}((; extra=Dict{String,Any}("setup" => setup), black_holes=nothing))
+last_status = Ref{Any}((; extra=Dict{String,Any}("setup" => setup), black_holes=nothing,
+                          images=nothing))
+
+# The thumbnails (added 2026-10-19): `ℋ` and, for a hole, the error against the
+# exact solution in each shell over the whole CSV (so across restarts), redrawn
+# every chunk into `out/plots/`; for flat space the three constraints overall.
+function draw_images()
+    plotdir = joinpath(outdir, "plots")
+    colours = join(("$(SW_PALETTE_NAMES[mod1(i, length(SW_PALETTE))]) $nm"
+                    for (i, nm) in enumerate(shell_names)), ", ")
+    specs = hole ?
+            [("ham.png", "ℋ by shell", ["ham_l2_$nm" for nm in shell_names],
+              "Point-weighted L2 of ℋ against t/M, log10: $colours."),
+             ("err.png", "error by shell", ["err_l2_$nm" for nm in shell_names],
+              "Point-weighted L2 of the error against Kerr-Schild, log10: $colours.")] :
+            [("constraints.png", "constraints", ["ham_l2", "mom_l2", "gauge_l2"],
+              "Point-weighted L2 against t, log10: orange ℋ, blue ℳ, green C_a.")]
+    images = Dict{String,Any}[]
+    for (file, title, cols, desc) in specs
+        ok = try
+            ts, ys = simwatch_csv_columns(csvpath, cols)
+            simwatch_plot(joinpath(plotdir, file), ts, ys)
+        catch err
+            @warn "SimWatch: could not read $csvpath" exception = err maxlog = 1
+            false
+        end
+        ok && push!(images, Dict{String,Any}("file" => "plots/$file", "title" => title,
+                                             "description" => desc))
+    end
+    return isempty(images) ? nothing : images
+end
 
 function observe(p, t, u, rec)
     gh_constraint!(p, u, t)
@@ -448,8 +514,20 @@ function observe(p, t, u, rec)
         @sprintf("t = %.1f: ℋ %.2e, ℳ %.2e, C %.2e", t, pts.ham_l2, mom2(pts), gauge2(pts))
     end
     rec.finite || (msg = "non-finite values in the evolved region; " * msg)
-    last_status[] = (; extra=extra, black_holes=bhs, message=msg)
-    simwatch_update!(sw; force=true, iteration=steps_seen[], time=Float64(t),
+    # Rank 0 alone writes the CSV the thumbnails are drawn from.
+    imgs = isrank0 ? draw_images() : nothing
+    hist = Dict{String,Any}("constraints.ham_l2" => pts.ham_l2,
+                            "constraints.mom_l2" => mom2(pts),
+                            "constraints.gauge_l2" => gauge2(pts))
+    if hole
+        hist["shells.$eq_shell.ham_l2"] = extra["shells"][eq_shell]["ham_l2"]
+        hist["shells.$eq_shell.err_l2"] = extra["shells"][eq_shell]["err_l2"]
+        hist["error.l2"] = extra["error"]["l2"]
+        hist["horizon.M_irr"] = something(rec.M_irr, NaN)
+        hist["horizon.J"] = something(rec.J, NaN)
+    end
+    last_status[] = (; extra=extra, black_holes=bhs, message=msg, images=imgs)
+    simwatch_update!(sw; force=true, images=imgs, history=hist, iteration=steps_seen[], time=Float64(t),
                      time_end=Float64(t_end), time_unit=time_unit,
                      walltime_limit=walltime === nothing ? nothing : walltime,
                      checkpoint=ckdir === nothing ? nothing :
@@ -501,14 +579,15 @@ catch err
     # one rank's: write it serially from this rank, and take the job down.
     use_mpi || (ls = last_status[];
                 simwatch_finish!(sw; status="failed", message=sprint(showerror, err),
-                                 time_end=Float64(t_end), time_unit=time_unit,
-                                 black_holes=ls.black_holes, extra=ls.extra))
+                                 images=ls.images, time_end=Float64(t_end),
+                                 time_unit=time_unit, black_holes=ls.black_holes,
+                                 extra=ls.extra))
     abort_all(err)
     rethrow()
 end
 r = out.records[end]
 let ls = last_status[]
-    simwatch_finish!(sw; status=out.finished ? "finished" : "stopped",
+    simwatch_finish!(sw; status=out.finished ? "finished" : "stopped", images=ls.images,
                      iteration=steps_seen[], time=Float64(out.t),
                      time_end=Float64(t_end), time_unit=time_unit,
                      message=(out.finished ? "finished: " : "stopped at the wall-time " *

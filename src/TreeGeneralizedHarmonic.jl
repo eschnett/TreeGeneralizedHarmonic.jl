@@ -181,7 +181,8 @@ export discrete_gradient_momentum!
 export latest_checkpoint
 
 # SimWatch status files (2026-10-02)
-export SimWatchWriter, simwatch_update!, simwatch_finish!, simwatch_document
+export SimWatchWriter, simwatch_update!, simwatch_finish!, simwatch_document,
+    simwatch_history!
 export write_simwatch
 
 include("precision.jl")
