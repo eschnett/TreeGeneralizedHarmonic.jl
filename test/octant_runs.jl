@@ -19,6 +19,15 @@
 # the same weight) and volume-weighted, over the mesh and per level, and the
 # state's own point-weighted norms.
 #
+# From 2026-10-20 the hole may move (`octant=quadrant v=1/5 x0=-4`): a boosted
+# Kerr-Schild hole on the x axis, on the quadrant `[−L, L] × [0, L]²` with
+# mirrors at `y = 0` and `z = 0`, on shells swept along its path. Everything
+# measured about the hole — the shells, the noise's excluded core, the finder —
+# is about `c(t) = (x0 + v t, 0, 0)`, and the CSV adds each shell's trailing and
+# leading halves and the horizon's extents (`split`, on for the quadrant).
+#
+#     julia --project=. --threads=4 test/octant_runs.jl case=ks octant=quadrant v=1/5 x0=-1 L=8 N=16 roots=1 radii=4,3,2 r_0=5/8 r_1=23/16 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/quad
+#
 #     julia --project=. --threads=4 test/octant_runs.jl L=16 radii=8,4 t_end=1 out=out/oct
 #
 # Options (`key=value`; the defaults are the production run's):
@@ -36,8 +45,23 @@
 #   t_end=128 chunk=1 cfl=1/4 q=4   the run
 #   eps=1/2 gamma0=1 gamma2=0       ε_KO, γ0, γ2
 #   case=minkowski|ks               flat space, or the Kerr-Schild hole
-#   octant=reflecting|rotating      three mirrors (a = 0 only), or the quarter turn
-#                                   about z and the mirror at z = 0 (any a)
+#   octant=reflecting|rotating|quadrant   three mirrors (a = 0 only), or the
+#                                   quarter turn about z and the mirror at z = 0
+#                                   (any a), or (added 2026-10-20) the quadrant
+#                                   [−L, L] × [0, L]² with mirrors at y = 0 and
+#                                   z = 0, for a hole on the x axis moving along
+#                                   it (ks, a = 0 only): a (2r, r, r) root brick
+#                                   and the shells swept along the path
+#   v=0 x0=0                        quadrant only: the hole's speed along +x and
+#                                   its position (x0, 0, 0) at t = 0; it is at
+#                                   (x0 + v t, 0, 0)
+#   path=v·t_end                    quadrant only: the length along x of the
+#                                   segment from (x0, 0, 0) the shells are swept
+#                                   along (the capsule mesh, frozen; in M)
+#   split=0|1                       also each shell's trailing ((x − c(t))·v̂ < 0)
+#                                   and leading (> 0) half, and the horizon's
+#                                   extents and their ratio x/y against √(1 − v²)
+#                                   (default: on for the quadrant, v̂ = +x at v = 0)
 #   a=0                             the hole's spin along z, in M (ks only; a ≠ 0
 #                                   needs octant=rotating, and r_0 > a for :damped,
 #                                   which the ring of radius a must be inside)
@@ -56,6 +80,13 @@
 #   fit_depth=n_L h                 :fitted only: the analytic initial data down to
 #                                   this depth below the offset surface (the core
 #                                   surface, step 8f's ks0 row), the fit below
+#   variant=fitted                  interior=fitted only (added 2026-10-20): the
+#                                   tracked geometry's variant — damped is the
+#                                   same geometry with the exact target, the
+#                                   screen CODE.md asks for before a new depth
+#   trail_ramp=0 target_rate=1      interior=fitted only (added 2026-10-20):
+#                                   evolve!'s levers for a moving :fitted layer
+#                                   (step 8′ ran trail_ramp=9/10)
 #   rho=                            a fixed ρ_max in 1/M (default: 4/M)
 #   finder=1                        find the horizon every chunk (0: never; :fitted
 #                                   always does)
@@ -158,16 +189,38 @@ casename = opt("case", "minkowski")
 casename in ("minkowski", "ks") || error("case is minkowski or ks, got $casename")
 hole = casename == "ks"
 symmetry = opt("octant", "reflecting")
-symmetry in ("reflecting", "rotating") ||
-    error("octant is reflecting or rotating, got $symmetry")
+symmetry in ("reflecting", "rotating", "quadrant") ||
+    error("octant is reflecting, rotating or quadrant, got $symmetry")
 rotating = symmetry == "rotating"
+quadrant = symmetry == "quadrant"
 a_spin = rat(opt("a", "0"))
 hole || iszero(a_spin) || error("a = $a_spin is the hole's spin, and case = minkowski has none")
+# The moving hole (added 2026-10-20): on the quadrant only, which is the one
+# domain a hole off the origin and moving along x is its own mirror image on.
+v_hole = rat(opt("v", "0"))
+x0_hole = rat(opt("x0", "0"))
+path_x = haskey(OPTIONS, "path") ? rat(OPTIONS["path"]) : v_hole * t_end
+quadrant && !hole &&
+    error("octant = quadrant is the moving hole's domain, and needs case = ks")
+quadrant || (iszero(v_hole) && iszero(x0_hole) && !haskey(OPTIONS, "path")) ||
+    error("v = $v_hole, x0 = $x0_hole and path = are a hole on the x axis, which " *
+          "only octant = quadrant mirrors onto itself (the $symmetry octant " *
+          "needs the hole at the origin, at rest)")
+abs(v_hole) < 1 || error("v = $v_hole is the hole's speed in units of c, and must be below 1")
+# The trailing/leading split and the horizon's extents (added 2026-10-20): new
+# CSV columns, so on by default only for the quadrant, which has no older CSVs
+# to match. `v̂` is `+x` for a hole at rest.
+split_on = hole && opt("split", quadrant ? "1" : "0") in ("1", "true")
+v_dir = v_hole < 0 ? -one(T) : one(T)
+contraction_expected = sqrt(1 - T(v_hole)^2)
 # The Kerr-Schild horizon (`M = 1`): `r₊` at the poles and `√(r₊² + a²) = √(2 r₊)`
 # at the equator.
 r_plus = 1 + sqrt(1 - T(a_spin)^2)
 r_equator = sqrt(2 * r_plus)
 M_irr_kerr = sqrt(r_plus / 2)
+# The least radius of a hole moving at `v` (`a = 0`): `r₊` contracted along the
+# boost, exactly `r₊` at rest.
+r_hmin = r_plus * contraction_expected
 
 backend = if opt("backend", "cpu") == "cuda"
     @eval using CUDA
@@ -199,41 +252,64 @@ case = if hole
     # `ρ_ramp = 1`, `r_1 − r_0 ≥ n_L h`; GHSO2's `ε_KO`, the Gaussian `γ0`.
     gs = src == "algebraic" ? :algebraic : nothing
     finder = opt("finder", "1") != "0" ? Horizon(T; every=1, N=12, spin=true) : nothing
+    # The hole's motion, exact (the case converts it into `T` once), passed
+    # only on the quadrant so that the octants' cases are built as before.
+    motion = quadrant ? (v=v_hole, x0=x0_hole) : (;)
     if opt("interior", "damped") == "fitted"
         m = parse(Int, opt("margin", "8"))
-        spec = FittedSpec(T; variant=:fitted, margin=m,
+        spec = FittedSpec(T; variant=Symbol(opt("variant", "fitted")), margin=m,
                           n_L=parse(Int, opt("n_L", "0")), lmax_shape=4,
                           lmax_fit=parse(Int, opt("lmax_fit", "8")),
                           fit_cont=parse(Int, opt("fit_cont", "1")))
         # The range projection's gate: step 8f's `9/10`, or `default_gate`'s
         # rule — the offset surface less `2G` spacings — where that is deeper
         # (a margin of 12 cells or more at `h = 1/16`).
-        # Against the horizon's least radius, `r₊` at the poles.
+        # Against the horizon's least radius, `r₊` at the poles — contracted
+        # along the boost to `r₊ √(1 − v²)` for a moving hole (`a = 0`).
         hfine = T(L) / (roots * N) / 2^length(radii)    # the finest spacing
-        r_gate = min(T(9 // 10), r_plus - (m + 2 * (q ÷ 2 + 1)) * hfine)
+        r_gate = min(T(9 // 10), r_hmin - (m + 2 * (q ÷ 2 + 1)) * hfine)
         kerr_schild_case(T; a=a_spin, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
-                         octant=Symbol(symmetry),
+                         octant=Symbol(symmetry), motion...,
                          gauge_source=gs, interior=spec,
                          horizon=Horizon(T; every=1, N=12, spin=true),
                          bounds=default_bounds(T; M=1, r_gate=r_gate))
     else
+        haskey(OPTIONS, "variant") &&
+            error("variant= is the tracked geometry's (interior = fitted); the " *
+                  "sphere here is :damped")
         kerr_schild_case(T; a=a_spin, halfwidth=L, r_0=rat(opt("r_0", "3/4")),
                          r_1=rat(opt("r_1", "3/2")), ρ_ramp=1, chunk=chunk, ε_KO=ε_KO,
-                         γ2=γ2, octant=Symbol(symmetry), gauge_source=gs,
+                         γ2=γ2, octant=Symbol(symmetry), motion..., gauge_source=gs,
                          margin=parse(Int, opt("margin", "8")), horizon=finder)
     end
 else
     minkowski_octant_case(T; L=L, ε_KO=ε_KO, γ0=γ0, γ2=γ2, chunk=chunk,
                           rotating=rotating)
 end
-forest0 = hole_forest(T, case; N=N, roots=roots, center=(0, 0, 0), radii=radii,
+# The quadrant's box is twice as long in x, and its shells are swept along the
+# hole's path from `(x0, 0, 0)` (added 2026-10-20); the octants' forest is the
+# one it was.
+forest0 = quadrant ?
+          hole_forest(T, case; N=N, roots=(2 * roots, roots, roots),
+                      center=(x0_hole, 0, 0), radii=radii, shape=:cube,
+                      path=iszero(path_x) ? nothing : (path_x, 0, 0), comm=comm) :
+          hole_forest(T, case; N=N, roots=roots, center=(0, 0, 0), radii=radii,
                       shape=:cube, comm=comm)
 nlev = length(radii) + 1
 isrank0 && @printf("octant (%s): L = %s, N = %d, %d blocks, %d points, levels %d, h = %s … %s\n",
         symmetry, L, N, nleaves(forest0), nleaves(forest0) * N^3, nlev,
         maximum(k -> spacing(T, forest0, k), forest0.leaves), minimum_spacing(T, forest0))
+# The exact point count by level (added 2026-10-20), `N³` owned points a block.
+levels0 = level.(forest0.leaves)
+points_by_level = [(ℓ, count(==(ℓ), levels0) * N^3) for ℓ in sort!(unique(levels0))]
+isrank0 && println("        points by level: ",
+                   join(("L$ℓ $(n) ($(n ÷ N^3) blocks)" for (ℓ, n) in points_by_level), ", "),
+                   "; total ", sum(last, points_by_level))
 isrank0 && @printf("        case %s, t_end = %s, chunk = %s, cfl = %s, q = %d, ε_KO = %s, γ0 = %s, γ2 = %s\n",
         casename, t_end, chunk, cfl, q, ε_KO, hole ? "Gaussian 1/M → 1/(10M)" : γ0, γ2)
+quadrant && isrank0 && @printf("        moving: v = %s along x from x0 = %s (at x = %s at t_end), shells swept along %s; x/y contraction √(1 − v²) = %.6f\n",
+                                v_hole, x0_hole, x0_hole + v_hole * t_end, path_x,
+                                contraction_expected)
 hole && isrank0 && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin,
                 case.interior isa FittedSpec ?
                 "fitted target, tracked, margin $(case.interior.margin)" :
@@ -267,6 +343,17 @@ shell_names = hole ? vcat(["in"], [@sprintf("r%g", r) for r in shell_r]) : Strin
 for nm in shell_names, c in ("ham_l2", "ham_linf", "mom_l2", "gauge_l2", "err_l2", "err_linf")
     push!(cols, "$(c)_$nm")
 end
+# With `split` (added 2026-10-20): each shell's trailing and leading half, then
+# the analytic center, the found horizon's origin and its coordinate extents
+# along x, y and z (each the diameter through the origin), and x/y.
+const SPLIT_COLS = ("ham_l2", "ham_linf", "err_l2", "err_linf")
+if split_on
+    for nm in shell_names, side in ("trail", "lead"), c in SPLIT_COLS
+        push!(cols, "$(c)_$(side)_$nm")
+    end
+    append!(cols, ["c_x", "hz_found", "hz_x", "hz_M_irr", "hz_J", "hz_dx", "hz_dy",
+                   "hz_dz", "hz_ratio"])
+end
 isrank0 && !isfile(csvpath) && open(io -> println(io, join(cols, ',')), csvpath, "w")
 
 # `mom` and `gauge` are reported as the largest component's norm: the
@@ -277,10 +364,17 @@ mom∞(n) = maximum(n.mom_linf)
 gauge2(n) = maximum(n.gauge_l2)
 gauge∞(n) = maximum(n.gauge_linf)
 
-# The outermost blocks: those whose extent reaches an outer face.
+# The outermost blocks: those whose extent reaches an outer face — a face
+# that is neither periodic, nor reflecting, nor a rotating seam's (amended
+# 2026-10-20: it read the high faces alone, which are all an octant's outer
+# faces; the quadrant's low x face is one too).
+const OUTER_LO = ntuple(d -> !case.periodic[d] && !case.reflecting[d][1] &&
+                             d ∉ case.rotating, 3)
+const OUTER_HI = ntuple(d -> !case.periodic[d] && !case.reflecting[d][2], 3)
 function nearboundary(forest, k)
     ext = block_extent(T, forest, k)
-    return any(d -> ext[d][2] ≥ forest.extents[d][2], 1:3)
+    return any(d -> (OUTER_HI[d] && ext[d][2] ≥ forest.extents[d][2]) ||
+                    (OUTER_LO[d] && ext[d][1] ≤ forest.extents[d][1]), 1:3)
 end
 # Point-weighted L2 of `diag` slot `v` over the blocks `keep(k)` selects.
 function band_l2(p, v, keep)
@@ -295,6 +389,50 @@ const DIAG_ERR = TreeGeneralizedHarmonic.DIAG_ERR
 bndkeep(p) = k -> nearboundary(p.U.forest, k)
 # The largest component's band norm, as for the whole mesh.
 band_max(p, first, n, keep) = maximum(band_l2(p, first + i - 1, keep) for i in 1:n)
+
+# One half of a shell about the moving center (added 2026-10-20): the points
+# of `lo ≤ |x − c| < hi` with `(x − c)·dir > 0` — `dir = −v̂` the trailing
+# half, where the moving layer releases grid points, `+v̂` the leading one.
+# Points on the plane through `c` are in neither. A `ShellMask` with a
+# half-space: a snapshot of the center at the call's `t`, and `isbits`, so the
+# monitors take it as a kernel argument on a device as they take theirs
+# (CLAUDE.md, "The mask plumbing").
+struct HalfShellMask{T}
+    center::SVector{3,T}
+    lo::T
+    hi::T
+    dir::SVector{3,T}
+end
+@inline function TreeGeneralizedHarmonic.is_evolved(m::HalfShellMask, x)
+    d1 = x[1] - m.center[1]
+    d2 = x[2] - m.center[2]
+    d3 = x[3] - m.center[3]
+    r² = d1 * d1 + d2 * d2 + d3 * d3
+    s = d1 * m.dir[1] + d2 * m.dir[2] + d3 * m.dir[3]
+    return (m.lo * m.lo ≤ r²) & (r² < m.hi * m.hi) & (s > 0)
+end
+
+# The found horizon's coordinate extents (added 2026-10-20), as
+# `test/hole_runs.jl`'s moving rows measure them: the finder's shape about its
+# own origin, made real to degree 12, summed over `±n̂` for the three axes —
+# the diameters through the origin. The finder sees the whole sphere, the
+# quadrant's mirrors included (TreeAMR's `interpolate` mirrors its queries), so
+# the shape is the full surface. `find` runs on rank 0 alone over MPI, so the
+# table is rank 0's, which alone writes.
+hz_extents = Dict{Float64,NTuple{3,Float64}}()
+function find_with_extents(p, u, t; kw...)
+    o = find_gh_horizon(p, u, t; kw...)
+    try
+        sh = SVector{169,Float64}(real_shape(o.hlm, o.grid, 12))
+        hz_extents[Float64(t)] = ntuple(3) do d
+            n = SVector{3,Float64}(d == 1, d == 2, d == 3)
+            shape_series(sh, 12, n) + shape_series(sh, 12, -n)
+        end
+    catch err
+        @warn "the horizon's extents" exception = err maxlog = 1
+    end
+    return o
+end
 
 t_wall0 = time()
 
@@ -312,14 +450,21 @@ history_csv = vcat(["constraints.ham_l2" => "ham_l2", "constraints.mom_l2" => "m
                     "constraints.gauge_l2" => "gauge_l2"],
                    hole ? ["shells.$eq_shell.ham_l2" => "ham_l2_$eq_shell",
                            "shells.$eq_shell.err_l2" => "err_l2_$eq_shell",
-                           "error.l2" => "err_l2"] : Pair{String,String}[])
+                           "error.l2" => "err_l2"] : Pair{String,String}[],
+                   # With `split` the CSV has the horizon's numbers too.
+                   split_on ? ["horizon.M_irr" => "hz_M_irr", "horizon.J" => "hz_J",
+                               "horizon.ratio" => "hz_ratio",
+                               "shells.$eq_shell.trail.err_l2" => "err_l2_trail_$eq_shell",
+                               "shells.$eq_shell.lead.err_l2" => "err_l2_lead_$eq_shell"] :
+                              Pair{String,String}[])
 sw = SimWatchWriter(outdir; name=opt("name", basename(outdir)),
                     code="TreeGeneralizedHarmonic", comm=comm,
                     summary=hole ? [(key="shells.$eq_shell.ham_l2", label="ℋ@horizon"),
                                     (key="constraints.ham_l2", label="ℋ"),
                                     (key="constraints.mom_l2", label="ℳ"),
                                     (key="error.l2", label="err"), "horizon.M_irr",
-                                    "horizon.J"] :
+                                    "horizon.J",
+                                    (split_on ? [(key="horizon.ratio", label="x/y")] : [])...] :
                             [(key="constraints.ham_l2", label="ℋ"),
                              (key="constraints.mom_l2", label="ℳ"),
                              (key="constraints.gauge_l2", label="C")])
@@ -348,6 +493,15 @@ if hole
     case.interior isa FittedSpec ? (setup["margin_cells"] = case.interior.margin) :
                                    (setup["r_0"] = Float64(case.interior.r_0);
                                     setup["r_1"] = Float64(case.interior.r_1))
+    case.interior isa FittedSpec &&
+        (setup["variant"] = string(TreeGeneralizedHarmonic.interior_variant(case.interior)))
+    setup["points"] = sum(last, points_by_level)
+    if quadrant
+        setup["v"] = Float64(v_hole)
+        setup["x0"] = Float64(x0_hole)
+        setup["path"] = Float64(path_x)
+        setup["contraction_expected"] = contraction_expected
+    end
 end
 simwatch_update!(sw; force=true, status="starting", time_end=Float64(t_end),
                  time_unit=time_unit,
@@ -369,7 +523,15 @@ function draw_images()
             [("ham.png", "ℋ by shell", ["ham_l2_$nm" for nm in shell_names],
               "Point-weighted L2 of ℋ against t/M, log10: $colours."),
              ("err.png", "error by shell", ["err_l2_$nm" for nm in shell_names],
-              "Point-weighted L2 of the error against Kerr-Schild, log10: $colours.")] :
+              "Point-weighted L2 of the error against Kerr-Schild, log10: $colours."),
+             # The two halves of the shell just outside the horizon (2026-10-20).
+             (split_on ? [("split.png", "trailing and leading",
+                           ["err_l2_trail_$eq_shell", "err_l2_lead_$eq_shell",
+                            "ham_l2_trail_$eq_shell", "ham_l2_lead_$eq_shell"],
+                           "Point-weighted L2 in the shell $eq_shell about c(t), " *
+                           "log10: orange the error on the trailing half, blue on " *
+                           "the leading half, green ℋ trailing, purple ℋ leading.")] :
+                         [])...] :
             [("constraints.png", "constraints", ["ham_l2", "mom_l2", "gauge_l2"],
               "Point-weighted L2 against t, log10: orange ℋ, blue ℳ, green C_a.")]
     images = Dict{String,Any}[]
@@ -423,15 +585,24 @@ function observe(p, t, u, rec)
         extra["error"] = Dict("l2" => ep.l2, "linf" => ep.linf, "l2_volume" => e.err_l2,
                               "layer_residual" => e.residual, "drift_htt" => e.drift)
     end
+    # One set of columns per level `0:nlev-1` whether or not the mesh has
+    # blocks there (amended 2026-10-20): a level the shells refine away
+    # entirely — level 0 when the first radius reaches every root — is `NaN`,
+    # where it shifted every later column by one.
     levels = Dict{String,Any}()
-    for n in lev
+    bylevel = [findfirst(n -> n.level == ℓ, lev) for ℓ in 0:(nlev - 1)]
+    for i in bylevel
+        i === nothing && (append!(row, fill(NaN, 6)); continue)
+        n = lev[i]
         append!(row, (n.ham_l2, n.ham_linf, mom2(n), mom∞(n), gauge2(n), gauge∞(n)))
         levels["L$(n.level)"] = Dict{String,Any}(
             "points" => n.points, "ham_l2" => n.ham_l2, "ham_linf" => n.ham_linf,
             "mom_l2" => mom2(n), "gauge_l2" => gauge2(n))
     end
     if hole
-        for n in lev
+        for i in bylevel
+            i === nothing && (push!(row, NaN); continue)
+            n = lev[i]
             el = masked_norms(p, DIAG_ERR; weighting=:points, at_level=n.level).l2
             push!(row, el)
             levels["L$(n.level)"]["err_l2"] = el
@@ -448,15 +619,18 @@ function observe(p, t, u, rec)
         boundary["err_l2"] = eb
     end
     extra["boundary"] = boundary
-    # The shells: each monitor once per shell, masked to it.
+    # The shells: each monitor once per shell, masked to it — about the hole's
+    # analytic center `c(t)`, the origin for a hole at rest there (amended
+    # 2026-10-20: the origin always).
     if hole
         r_in = case.interior isa FittedSpec ?
                shell_r[1] - case.interior.margin * minimum_spacing(T, p.U.forest) :
                case.interior.r_1
         edges = vcat([r_in], shell_r, [T(Inf)])
         shells = Dict{String,Any}()
+        c_t = center_at(case.center, T(t))
         for i in 1:(length(edges) - 1)
-            m = ShellMask(SVector{3,T}(0, 0, 0), edges[i], edges[i + 1])
+            m = ShellMask(c_t, edges[i], edges[i + 1])
             gh_constraint!(p, u, t; mask=m)
             adm_constraint!(p, u, t; mask=m)
             n = constraint_norms(p; weighting=:points)
@@ -468,7 +642,37 @@ function observe(p, t, u, rec)
                 "ham_l2" => n.ham_l2, "ham_linf" => n.ham_linf, "mom_l2" => mom2(n),
                 "gauge_l2" => gauge2(n), "err_l2" => e.l2, "err_linf" => e.linf)
         end
+        # Each shell's two halves (added 2026-10-20), into the CSV after all
+        # the shells: `ℋ` and the error, so the ADM monitor and the error
+        # kernel once per half. Each kernel writes `DIAG_MASK`, so the norm
+        # read after it is over that half's points.
+        if split_on
+            for i in 1:(length(edges) - 1), (side, sgn) in (("trail", -1), ("lead", 1))
+                dir = SVector{3,T}(sgn * v_dir, 0, 0)
+                m = HalfShellMask{T}(c_t, edges[i], edges[i + 1], dir)
+                adm_constraint!(p, u, t; mask=m)
+                n = masked_norms(p, DIAG_HAM; weighting=:points)
+                gh_error!(p, u, t; mask=m)
+                e = masked_norms(p, DIAG_ERR; weighting=:points)
+                append!(row, (n.l2, n.linf, e.l2, e.linf))
+                shells[shell_names[i]][side] = Dict{String,Any}(
+                    "ham_l2" => n.l2, "ham_linf" => n.linf, "err_l2" => e.l2,
+                    "err_linf" => e.linf)
+            end
+        end
         extra["shells"] = shells
+    end
+    # The horizon's position and extents (added 2026-10-20): `NaN` where no
+    # find ran or this rank did not run it.
+    if split_on
+        ext = get(hz_extents, Float64(t), (NaN, NaN, NaN))
+        found = rec.horizon_success === true
+        found || (ext = (NaN, NaN, NaN))
+        hz_ratio = ext[1] / ext[2]
+        append!(row, (Float64(center_at(case.center, T(t))[1]),
+                      rec.horizon_success === nothing ? NaN : Float64(found),
+                      rec.origin === nothing ? NaN : Float64(rec.origin[1]),
+                      something(rec.M_irr, NaN), something(rec.J, NaN), ext..., hz_ratio))
     end
     isrank0 && open(csvpath, "a") do io
         println(io, join((x isa Real ? @sprintf("%.10g", x) : string(x) for x in row), ','))
@@ -478,7 +682,14 @@ function observe(p, t, u, rec)
             gauge2(pts), gauge∞(pts), s2)
     err === nothing || !isrank0 || @printf("   err %.3e / %.3e  res %.3e  drift %.3e", err[1], err[2],
                                err[3], err[4])
-    isrank0 && @printf("   bnd ℋ %.3e C %.3e\n", bnd[1], bnd[3])
+    isrank0 && @printf("   bnd ℋ %.3e C %.3e", bnd[1], bnd[3])
+    split_on && isrank0 &&
+        @printf("   c_x %.4f  hz x %.4f  x/y %.5f (%.5f)  trail|lead err %.3e|%.3e",
+                center_at(case.center, T(t))[1],
+                rec.origin === nothing ? NaN : rec.origin[1], hz_ratio,
+                contraction_expected, extra["shells"][eq_shell]["trail"]["err_l2"],
+                extra["shells"][eq_shell]["lead"]["err_l2"])
+    isrank0 && println()
     flush(stdout)
 
     # The status file: the record's own numbers beside the ones above.
@@ -492,6 +703,11 @@ function observe(p, t, u, rec)
                               "M_ch" => rec.M_ch, "J" => rec.J, "area" => rec.area,
                               "r_min" => rec.r_min, "r_mean" => rec.r_mean,
                               "r_max" => rec.r_max, "note" => rec.horizon_note)
+        if split_on
+            hz["extent"] = collect(ext)
+            hz["ratio"] = hz_ratio
+            hz["ratio_expected"] = contraction_expected
+        end
         extra["horizon"] = hz
         spin = rec.J === nothing || rec.M_ch === nothing || rec.spin_axis === nothing ?
                nothing : collect(rec.J / rec.M_ch^2 .* rec.spin_axis)
@@ -509,7 +725,9 @@ function observe(p, t, u, rec)
         @sprintf("t = %.1f M: ℋ %.2e just outside the horizon, %.2e overall; M_irr − Kerr's = %s, J − a = %s",
                  t, extra["shells"][shell_names[2]]["ham_l2"], pts.ham_l2,
                  rec.M_irr === nothing ? "—" : @sprintf("%+.2e", rec.M_irr - M_irr_kerr),
-                 rec.J === nothing ? "—" : @sprintf("%+.2e", rec.J - a_spin))
+                 rec.J === nothing ? "—" : @sprintf("%+.2e", rec.J - a_spin)) *
+        (split_on ? @sprintf("; x/y = %.5f (√(1 − v²) = %.5f)", hz_ratio,
+                             contraction_expected) : "")
     else
         @sprintf("t = %.1f: ℋ %.2e, ℳ %.2e, C %.2e", t, pts.ham_l2, mom2(pts), gauge2(pts))
     end
@@ -525,6 +743,11 @@ function observe(p, t, u, rec)
         hist["error.l2"] = extra["error"]["l2"]
         hist["horizon.M_irr"] = something(rec.M_irr, NaN)
         hist["horizon.J"] = something(rec.J, NaN)
+    end
+    if split_on
+        hist["horizon.ratio"] = hz_ratio
+        hist["shells.$eq_shell.trail.err_l2"] = extra["shells"][eq_shell]["trail"]["err_l2"]
+        hist["shells.$eq_shell.lead.err_l2"] = extra["shells"][eq_shell]["lead"]["err_l2"]
     end
     last_status[] = (; extra=extra, black_holes=bhs, message=msg, images=imgs)
     simwatch_update!(sw; force=true, images=imgs, history=hist, iteration=steps_seen[], time=Float64(t),
@@ -555,25 +778,40 @@ restarting = get(ckw, :restart_file, nothing) !== nothing
 # at `a = 0`, as before).
 core² = !hole ? zero(T) : case.interior isa FittedSpec ?
         (haskey(OPTIONS, "r_core") ? T(rat(OPTIONS["r_core"])) :
-         r_plus - 5 // 4)^2 : case.interior.r_0^2
+         r_hmin - 5 // 4)^2 : case.interior.r_0^2
 fitkw = if hole && case.interior isa FittedSpec
     nL = case.interior.n_L > 0 ? case.interior.n_L :
          TreeGeneralizedHarmonic.layer_cells(q ÷ 2 + 1, T(4), one(T))
     depth = haskey(OPTIONS, "fit_depth") ? T(rat(OPTIONS["fit_depth"])) :
             nL * minimum_spacing(T, forest0)
-    (fit_initial_depth=depth, fit_initial_cont=case.interior.fit_cont)
+    # Step 8′'s levers for a moving `:fitted` layer (added 2026-10-20), passed
+    # only when asked for, as `test/hole_runs.jl`'s moving rows pass them;
+    # `evolve!` applies them to the `:fitted` variant alone.
+    levers = (; (haskey(OPTIONS, "trail_ramp") ?
+                 (trail_ramp=T(rat(OPTIONS["trail_ramp"])),) : ())...,
+              (haskey(OPTIONS, "target_rate") ?
+               (target_rate=OPTIONS["target_rate"] in ("1", "true"),) : ())...)
+    (fit_initial_depth=depth, fit_initial_cont=case.interior.fit_cont, levers...)
 else
+    any(k -> haskey(OPTIONS, k), ("trail_ramp", "target_rate")) &&
+        error("trail_ramp= and target_rate= are levers of the tracked geometry " *
+              "(interior = fitted)")
     (;)
 end
 haskey(OPTIONS, "rho") && (fitkw = (; fitkw..., ρ_max_fixed=T(rat(OPTIONS["rho"]))))
+# The core about the hole's position at `t = 0`, the origin on an octant.
+c_noise = hole ? Tuple(center_at(case.center, zero(T))) : (zero(T), zero(T), zero(T))
 perturb = iszero(amplitude) ? nothing :
           U -> add_noise!(U, Xoshiro(seed); amplitude=amplitude,
-                          exclude=hole ? (x -> sum(abs2, x) < core²) : nothing)
+                          exclude=hole ? (x -> sum(abs2, x .- c_noise) < core²) :
+                                  nothing)
+# The finder with the horizon's extents, where the CSV carries them.
+findkw = split_on ? (find=find_with_extents,) : (;)
 out = try
     evolve!(T, case; forest=restarting ? nothing : forest0, q=q,
             ops=Operators(prolongation=q + 2, restriction=q + 2), t_end=t_end,
             chunk=chunk, cfl=cfl, backend=backend, observer=observe,
-            perturb=perturb, comm=comm, fitkw..., ckw...)
+            perturb=perturb, comm=comm, fitkw..., findkw..., ckw...)
 catch err
     # Over MPI the status file's write is collective, and a failure may be
     # one rank's: write it serially from this rank, and take the job down.

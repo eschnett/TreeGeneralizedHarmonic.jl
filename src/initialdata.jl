@@ -659,12 +659,22 @@ about `z`: the same box, reflecting at `z = 0` only, with TreeAMR's rotating
 seam `(1, 2)` gluing the face `x = 0` to the face `y = 0` by a quarter turn
 about the `z` axis. It needs a hole at the origin and at rest, with any spin
 along `z` — the axisymmetric hole — and refuses any other; `true` is the
-same as `:reflecting`.
+same as `:reflecting`. `octant = :quadrant` (added 2026-10-20) is the
+quarter `(−halfwidth, halfwidth) × (0, halfwidth)²` of the box, reflecting at
+`y = 0` and `z = 0` and Dirichlet at the other four faces: the domain of a
+non-spinning hole on the `x` axis moving along it, which is its own mirror
+image in both planes at every time. It needs that hole — center `(x₀, 0, 0)`,
+velocity `(v, 0, 0)` with any `v`, `a = 0` — and refuses any other; its
+forest takes the root brick `(2r, r, r)` ([`gh_forest`](@ref)).
 
 `gauge_source` (added 2026-10-02) is `nothing` — the sampled `H_a(x)`, or no
 source on a harmonic background — a [`KerrSchildSource`](@ref), or
-`:algebraic`, which builds the source of an unrotated, unboosted `KerrSchild`
-background at any position from its own mass and spin (`spin = (0, 0, a)`).
+`:algebraic`, which builds the source of an unrotated `KerrSchild` background
+from its own mass and spin (`spin = (0, 0, a)`), at any position and — from
+2026-10-20 — under any `boost`, with the hole's lab velocity
+[`hole_velocity`](@ref) (`−u` for `boost(m, u)`). That is what lets a moving
+Kerr-Schild hole run at all: its prescribed source depends on time, which the
+sampled one cannot represent.
 """
 function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                    chunk,
@@ -696,9 +706,9 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
     # the keyword's default zero, which a boosted hole does not have).
     v = case_velocity(T, background, velocity)
     kind = octant === false ? :none : octant === true ? :reflecting : octant
-    kind in (:none, :reflecting, :rotating) || throw(ArgumentError(
-        "octant is false, true (the same as :reflecting) or :rotating, got " *
-        "$(repr(octant))."))
+    kind in (:none, :reflecting, :rotating, :quadrant) || throw(ArgumentError(
+        "octant is false, true (the same as :reflecting), :rotating or " *
+        ":quadrant, got $(repr(octant))."))
     spin = hasproperty(background, :spin) ? background.spin : nothing
     if kind === :rotating
         (all(iszero, center) && all(iszero, v) && spin !== nothing) ||
@@ -719,29 +729,35 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
             ":rotating. Got center = $center, velocity = $v and " *
             (spin === nothing ? "a background with no spin parameter" :
              "a = $spin") * "."))
+    elseif kind === :quadrant
+        # The hole may be translated and boosted: its spin is the bare one's.
+        qspin = hole_spin(background)
+        (iszero(center[2]) && iszero(center[3]) && iszero(v[2]) &&
+         iszero(v[3]) && qspin !== nothing && iszero(qspin)) ||
+            throw(ArgumentError(
+            "a quadrant case mirrors the solution across y = 0 and z = 0, so the " *
+            "hole must be its own mirror image in both planes at every time: on " *
+            "the x axis, moving along it (or at rest), and without spin " *
+            "(Kerr-Schild or Harmonic with a = 0, translated or boosted along x) " *
+            "— a spin along z would keep only the z mirror, and one along x " *
+            "neither. Got center = $center, velocity = $v and " *
+            (qspin === nothing ? "a background with no spin parameter" :
+             "a = $qspin") * "."))
     end
-    src = if gauge_source === :algebraic
-        bare = background isa KerrSchild ? background :
-               background isa SpacetimeMetrics.TranslatedMetric &&
-               background.metric isa KerrSchild ? background.metric : nothing
-        bare === nothing && throw(ArgumentError(
-            "gauge_source = :algebraic reads the mass and spin of a Kerr-Schild " *
-            "hole at rest, unrotated; for any other hole pass " *
-            "KerrSchildSource(T; M, spin, velocity) itself. Got a " *
-            "$(typeof(background))."))
-        KerrSchildSource(T; M=bare.mass, spin=(0, 0, bare.spin))
-    else
-        gauge_source
-    end
+    src = gauge_source === :algebraic ?
+          algebraic_source(T, background) : gauge_source
     damping = γ0 !== nothing ? γ0 :
               GaussianDamping(T; near=1 / T(M), far=1 / (10 * T(M)),
                               width=3 * T(M), center=HoleCenter(T, center, v))
+    L = T(halfwidth)
     return GHCase(T, background;
-                  box=ntuple(_ -> (kind === :none ? -T(halfwidth) : zero(T),
-                                   T(halfwidth)), Val(3)),
+                  box=ntuple(d -> (kind === :none ||
+                                   (kind === :quadrant && d == 1) ? -L : zero(T),
+                                   L), Val(3)),
                   periodic=(false, false, false),
                   reflecting=ntuple(d -> (kind === :reflecting ||
-                                          (kind === :rotating && d == 3), false),
+                                          (kind === :rotating && d == 3) ||
+                                          (kind === :quadrant && d ≥ 2), false),
                                     Val(3)),
                   rotating=kind === :rotating ? (1, 2) : nothing, ε_KO=ε_KO,
                   γ0=damping,
@@ -755,8 +771,43 @@ end
 
 hole_case(background; kwargs...) = hole_case(Float64, background; kwargs...)
 
+# The spin parameter of the hole under `translate` and `boost`, which do not
+# change it, or `nothing` for a background with none (added 2026-10-20). A
+# rotation turns the spin's axis, so it is read only where the spin is zero
+# and the turn is the identity on the hole.
+hole_spin(bg) = hasproperty(bg, :spin) ? bg.spin : nothing
+hole_spin(m::Union{SpacetimeMetrics.TranslatedMetric,SpacetimeMetrics.BoostedMetric}) =
+    hole_spin(m.metric)
+function hole_spin(m::SpacetimeMetrics.RotatedMetric)
+    a = hole_spin(m.metric)
+    return a !== nothing && iszero(a) ? a : nothing
+end
+
+# The `KerrSchildSource` of `gauge_source = :algebraic`: the mass and spin of
+# the bare `KerrSchild` under any number of `translate`s and `boost`s, and the
+# hole's lab velocity, `hole_velocity`'s — which is `−u` for `boost(m, u)`
+# (amended 2026-10-20: it read a hole at rest only). A rotation is refused,
+# since it turns the spin the source is given in the rest frame; a boost of a
+# spinning hole is the source's own case, and a nested boost, whose rest-frame
+# spin is Thomas-rotated, is what `check_gauge_source` refuses at construction.
+function algebraic_source(::Type{T}, background) where {T}
+    bare = background
+    while bare isa Union{SpacetimeMetrics.TranslatedMetric,SpacetimeMetrics.BoostedMetric}
+        bare = bare.metric
+    end
+    bare isa KerrSchild || throw(ArgumentError(
+        "gauge_source = :algebraic reads the mass and spin of a Kerr-Schild hole " *
+        "at rest or translated and boosted, unrotated, and its velocity from " *
+        "hole_velocity; for any other hole pass KerrSchildSource(T; M, spin, " *
+        "velocity) itself. Got a $(typeof(background))."))
+    v = hole_velocity(background)
+    return KerrSchildSource(T; M=bare.mass, spin=(0, 0, bare.spin),
+                            velocity=(v[1], v[2], v[3]))
+end
+
 """
-    kerr_schild_case(T = Float64; M = 1, a = 0, halfwidth, r_0, r_1, chunk, …)
+    kerr_schild_case(T = Float64; M = 1, a = 0, v = 0, x0 = 0, halfwidth, r_0,
+                     r_1, chunk, …)
 
 `CODE.md`'s fourth row: a hole in **Kerr-Schild** Cartesian coordinates,
 which is horizon-penetrating and *not* harmonic — so it carries a
@@ -767,10 +818,30 @@ Its horizon's smallest coordinate radius is `r₊ = M + √(M² − a²)`, twice
 the harmonic chart's at `a = 0`, which makes it the cheaper of the two
 holes to resolve and the one a first test should use.
 
+`v` and `x0` (added 2026-10-20) move the hole: it is at `(x0 + v t, 0, 0)`,
+the background `translate(boost(KerrSchild(M, a), (−v, 0, 0)), (0, x0, 0, 0))`
+— `boost(m, u)` moves the hole at `−u` ([`hole_velocity`](@ref)) — and the
+case's center `(x0, 0, 0)`, its velocity derived from the background. A moving
+hole needs `gauge_source = :algebraic` (or a [`KerrSchildSource`](@ref)): its
+source depends on time, which the sampled one cannot represent. Pass them
+exactly (`v = 1//5`), since they are converted once into `T`; `x0` replaces
+`center`, which is refused beside it. With both zero the case is the one
+above, the static hole at `center`.
+
 Every other keyword is [`hole_case`](@ref)'s.
 """
-kerr_schild_case(::Type{T}=Float64; M=one(T), a=zero(T), kwargs...) where {T} =
-    hole_case(T, KerrSchild(T(M), T(a)); M=T(M), kwargs...)
+function kerr_schild_case(::Type{T}=Float64; M=one(T), a=zero(T), v=zero(T),
+                          x0=zero(T), kwargs...) where {T}
+    bg = KerrSchild(T(M), T(a))
+    iszero(v) && iszero(x0) && return hole_case(T, bg; M=T(M), kwargs...)
+    haskey(kwargs, :center) && throw(ArgumentError(
+        "a moving or translated Kerr-Schild case is placed by x0, the hole's x " *
+        "at t = 0 on the x axis, and its center is (x0, 0, 0); got center = " *
+        "$(kwargs[:center]) beside v = $v and x0 = $x0. Leave center unset."))
+    iszero(v) || (bg = SpacetimeMetrics.boost(bg, SVector{3,T}(-T(v), 0, 0)))
+    bg = SpacetimeMetrics.translate(bg, SVector{4,T}(0, T(x0), 0, 0))
+    return hole_case(T, bg; M=T(M), center=(T(x0), zero(T), zero(T)), kwargs...)
+end
 
 """
     harmonic_kerr_case(T = Float64; M = 1, a = 0, halfwidth, r_0, r_1, chunk, …)
@@ -799,8 +870,11 @@ and, with `refined = true`, the **two-level** mesh that step 4 measures the
 interface-order rule on.
 
 `N` and `roots` have no defaults: they are the two numbers a convergence
-study varies. TreeAMR's blocks are cubes with one isotropic spacing, so
-the box has to be one too; `h = (box width)/(roots·N)`.
+study varies. `roots` is one count for every dimension or a brick of three,
+`(r₁, r₂, r₃)` (added 2026-10-20, for the quadrant's `2 × 1 × 1`; see
+[`hole_case`](@ref)). TreeAMR's blocks are cubes with one isotropic spacing,
+so the box's widths must be in the brick's proportions — the *cells* are
+cubes, `widths[d]/roots[d]` one number — and `h = width[d]/(roots[d]·N)`.
 
 `refined = true` refines the one root block that contains the point three
 eighths of the way along each axis, and balances — TreeWave's
@@ -831,11 +905,15 @@ every rank, and [`evolve!`](@ref) runs over it. See "Running distributed" in
 function gh_forest(::Type{T}, case::GHCase; N, roots, refined=false,
                    comm=nothing) where {T}
     widths = ntuple(d -> case.box[d][2] - case.box[d][1], Val(3))
-    all(w -> w ≈ widths[1], widths) || throw(ArgumentError(
+    brick = root_brick(roots)
+    cell = ntuple(d -> widths[d] / brick[d], Val(3))
+    all(c -> c ≈ cell[1], cell) || throw(ArgumentError(
         "TreeAMR's blocks are cubes with a single spacing per level, so a " *
-        "uniform forest over this box would have anisotropic cells: the " *
-        "widths are $widths"))
-    forest = Forest{T}(ntuple(_ -> roots, Val(3)); N=N, periodic=case.periodic,
+        "brick whose root blocks are not would have anisotropic cells: the " *
+        "box's widths $widths over the brick of roots $brick give root blocks " *
+        "of widths $cell. The root blocks must be cubes: choose a brick in the " *
+        "proportions of the box."))
+    forest = Forest{T}(brick; N=N, periodic=case.periodic,
                        reflecting=case.reflecting, rotating=seam_dims(case),
                        extents=case.box, comm=comm)
     refined || return forest
@@ -857,9 +935,24 @@ end
 
 gh_forest(case::GHCase; kwargs...) = gh_forest(Float64, case; kwargs...)
 
+# The brick of root blocks from `gh_forest`'s `roots`: one count for every
+# dimension, or three (added 2026-10-20).
+function root_brick(roots)
+    brick = roots isa Integer ? (roots, roots, roots) :
+            length(roots) == 3 && all(r -> r isa Integer, roots) ?
+            (roots[1], roots[2], roots[3]) :
+            throw(ArgumentError(
+                "roots is one count of root blocks for every dimension or a " *
+                "brick of three counts, (r₁, r₂, r₃), got $(repr(roots))."))
+    all(>(0), brick) || throw(ArgumentError(
+        "every dimension needs at least one root block, got roots = $(repr(roots))."))
+    return map(Int, brick)
+end
+
 """
     hole_forest(T = Float64, case::GHCase; N, roots, center = case's, radii,
-                levels = length(radii), shape = :ball, comm = nothing)
+                levels = length(radii), shape = :ball, path = nothing,
+                comm = nothing)
 
 A **fixed** nested hierarchy of `levels` shells around `center`: the
 uniform forest of [`gh_forest`](@ref), then, for each level `ℓ`, every
@@ -894,15 +987,30 @@ shells are the boxes `[0, R]³`, and with `radii` a power of two times the
 block width they are exactly unions of blocks. The ball keeps its closed
 `≤`, which every existing hierarchy was built with.
 
+`path` (added 2026-10-20) is `nothing` or a displacement `Δc`, and then
+each shell is swept along the segment `[center, center + Δc]`: the set of
+points within `radii[ℓ]` of the segment — the **capsule** for `:ball`
+(Euclidean distance `≤ R`, closed as the ball is) and, for `:cube`, the
+union of the open cubes centred on the segment, which for a `Δc` along an
+axis is the open box `(min − R, max + R)` along it and `(c − R, c + R)`
+across. It is the frozen hierarchy of a hole that crosses the mesh: built
+once around the whole trajectory `c(t)`, `0 ≤ t ≤ t_end`, with
+`Δc = v t_end`, so that the hole never leaves its finest level and no
+regrid is needed. With `path = nothing` the shells are the ones above, bit
+for bit. `roots` is [`gh_forest`](@ref)'s, a count or a brick of three.
+
 `comm` is [`gh_forest`](@ref)'s (added 2026-10-19).
 """
 function hole_forest(::Type{T}, case::GHCase; N, roots,
                      center=center_at(case.center, zero(T)), radii,
                      levels::Integer=length(radii), shape::Symbol=:ball,
-                     comm=nothing) where {T}
+                     path=nothing, comm=nothing) where {T}
     shape in (:ball, :cube) || throw(ArgumentError(
         "a shell is a :ball (|x − c| ≤ R) or a :cube (|x − c|_∞ < R), got " *
         ":$shape"))
+    path === nothing || length(path) == 3 || throw(ArgumentError(
+        "path is nothing or the displacement Δc of the segment [c, c + Δc] the " *
+        "shells are swept along, three numbers, got $(repr(path))."))
     length(radii) == levels || throw(ArgumentError(
         "hole_forest takes one radius per refinement level, but levels = " *
         "$levels and radii has $(length(radii)) entries: the shells are the " *
@@ -917,17 +1025,22 @@ function hole_forest(::Type{T}, case::GHCase; N, roots,
         "balance would answer by refining everything between them."))
     forest = gh_forest(T, case; N=N, roots=roots, comm=comm)
     c = ntuple(d -> T(center[d]), Val(3))
+    Δc = path === nothing ? nothing : ntuple(d -> T(path[d]), Val(3))
     for ℓ in 1:levels
         R = T(radii[ℓ])
         targets = filter(forest.leaves) do k
-            level(k) == ℓ - 1 &&
-                (shape === :ball ?
-                 _box_meets_ball(block_extent(T, forest, k), c, R) :
-                 _box_meets_cube(block_extent(T, forest, k), c, R))
+            level(k) == ℓ - 1 || return false
+            ext = block_extent(T, forest, k)
+            return Δc === nothing ?
+                   (shape === :ball ? _box_meets_ball(ext, c, R) :
+                    _box_meets_cube(ext, c, R)) :
+                   (shape === :ball ? _box_meets_capsule(ext, c, Δc, R) :
+                    _box_meets_swept_cube(ext, c, Δc, R))
         end
         isempty(targets) && throw(ArgumentError(
             "no leaf of level $(ℓ - 1) comes within radii[$ℓ] = $R of " *
-            "$c, so shell $ℓ would refine nothing: either the center is " *
+            (Δc === nothing ? "$c" : "the segment from $c by $Δc") *
+            ", so shell $ℓ would refine nothing: either the center is " *
             "outside the box, or the radii fall faster than the block size " *
             "does and the hierarchy stops before the level it was asked for."))
         refine!(forest, targets)
@@ -942,6 +1055,67 @@ hole_forest(case::GHCase; kwargs...) = hole_forest(Float64, case; kwargs...)
 # so that a block sharing only a face with the cube is outside it.
 _box_meets_cube(ext, c, R) =
     all(d -> ext[d][1] < c[d] + R && ext[d][2] > c[d] - R, 1:3)
+
+# Whether the extent `ext` overlaps the union of the open cubes
+# `|x − (c + sΔc)|_∞ < R`, `0 ≤ s ≤ 1` (added 2026-10-20) — `_box_meets_cube`
+# swept along the segment, with the same strict overlap. Per dimension the
+# cube at `s` overlaps the extent for `s` in an open interval (or for every `s`
+# or none, where `Δc[d] = 0`), and the union meets the extent when those
+# intervals and `[0, 1]` have a common point.
+function _box_meets_swept_cube(ext, c, Δc, R)
+    lo, lo_open = zero(R), false     # the common interval's ends, and whether
+    hi, hi_open = one(R), false      # each is open
+    for d in 1:3
+        a = ext[d][1] - c[d] - R     # the overlap is a < s Δc[d] < b
+        b = ext[d][2] - c[d] + R
+        if iszero(Δc[d])
+            (a < 0 && b > 0) || return false
+            continue
+        end
+        sa, sb = a / Δc[d], b / Δc[d]
+        Δc[d] < 0 && ((sa, sb) = (sb, sa))
+        (sa > lo || (sa == lo && !lo_open)) && ((lo, lo_open) = (sa, true))
+        (sb < hi || (sb == hi && !hi_open)) && ((hi, hi_open) = (sb, true))
+    end
+    return lo < hi || (lo == hi && !lo_open && !hi_open)
+end
+
+# Whether the extent `ext` comes within `R` of the segment `[c, c + Δc]`
+# (added 2026-10-20): the capsule, closed as `_box_meets_ball` is. The squared
+# distance from `c + sΔc` to the box is convex and piecewise quadratic in `s`,
+# with breaks where a coordinate crosses a face; on each piece it is minimised
+# in closed form.
+function _box_meets_capsule(ext, c, Δc, R)
+    p(s) = ntuple(d -> c[d] + s * Δc[d], Val(3))
+    dist(s) = first(_box_radii(ext, p(s)))
+    breaks = [zero(R), one(R)]
+    for d in 1:3, face in (ext[d][1], ext[d][2])
+        iszero(Δc[d]) && continue
+        s = (face - c[d]) / Δc[d]
+        zero(R) < s < one(R) && push!(breaks, s)
+    end
+    sort!(breaks)
+    best = min(dist(zero(R)), dist(one(R)))
+    for i in 1:(length(breaks) - 1)
+        s0, s1 = breaks[i], breaks[i + 1]
+        s1 > s0 || continue
+        # On this piece each coordinate is below, inside or above its slab
+        # throughout; the gaps of those outside are linear in `s`, `α + β s`.
+        sm = (s0 + s1) / 2
+        num, den = zero(R), zero(R)
+        for d in 1:3
+            x = c[d] + sm * Δc[d]
+            face = x < ext[d][1] ? ext[d][1] : x > ext[d][2] ? ext[d][2] : nothing
+            face === nothing && continue
+            α, β = c[d] - face, Δc[d]
+            num -= α * β
+            den += β * β
+        end
+        s = den > 0 ? clamp(num / den, s0, s1) : sm
+        best = min(best, dist(s))
+    end
+    return best ≤ R
+end
 
 """
     background_state(background, t, x) -> (h, Π, ∂h)

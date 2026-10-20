@@ -1,0 +1,270 @@
+# A boosted Kerr-Schild hole on the quadrant (added 2026-10-20): the pieces a
+# non-spinning hole crossing the mesh along `x` at binary speed needs — the
+# case (`kerr_schild_case(; v, x0)` with the algebraic source, which moves with
+# the hole), the quadrant `[−L, L] × [0, L]²` it is its own mirror image on, the
+# `2 × 1 × 1` root brick that domain takes, and the frozen capsule of shells
+# swept along its path. The run itself is a study (`test/octant_runs.jl`);
+# what is claimed here is that each piece is what it says, and that a few steps
+# of the moving hole on the quadrant are the same steps on the whole box.
+#
+# Priced on what the suite already compiles: the run is the `q = 2`, `:damped`,
+# `Val(:algebraic)` kernel `gauge_source_tests.jl` builds, on the reflection
+# tests' fixture radii and `h = 5/48`.
+
+using Test
+using TreeAMR
+using TreeGeneralizedHarmonic
+using StaticArrays: SVector, SMatrix
+import SpacetimeMetrics as SM
+
+const TGHb = TreeGeneralizedHarmonic
+
+@testset verbose = true "A boosted Kerr-Schild hole on the quadrant" begin
+    T = Float64
+    v, x0 = 1 // 5, -4
+    kw = (; halfwidth=T(8), r_0=T(5 // 8), r_1=T(23 // 16), chunk=T(1 // 2),
+          gauge_source=:algebraic)
+    quad = kerr_schild_case(T; v=v, x0=x0, kw..., octant=:quadrant)
+
+    @testset "the boosted, translated hole is a case, and its source is its −Γ" begin
+        # Guards the sign of the boost (`boost(m, u)` moves the hole at `−u`),
+        # the order of the translation and the boost (the hole at `x0` at
+        # `t = 0`), and the source's velocity — a source built with `+u`, or
+        # one that does not move with the hole, makes the exact solution a
+        # gauge transient, which only a comparison away from `t = 0` shows:
+        # `check_gauge_source` itself looks at `t = 0`.
+        full = kerr_schild_case(T; v=v, x0=x0, kw...)
+        for case in (full, quad)
+            bg = case.background
+            @test hole_velocity(bg) == SVector{3,T}(1 // 5, 0, 0)
+            @test case.center.v == SVector{3,T}(1 // 5, 0, 0)
+            @test center_at(case.center, zero(T)) == SVector{3,T}(-4, 0, 0)
+            @test center_at(case.center, T(10)) ≈ SVector{3,T}(-2, 0, 0) atol = 8eps(T)
+            γ = 1 / sqrt(1 - T(1 // 25))
+            @test case.gauge.M == 1 && case.gauge.u ≈ SVector{4,T}(γ, γ / 5, 0, 0)
+            @test iszero(case.gauge.S)
+            @test check_gauge_source(bg, case.gauge, T; center=(T(x0), 0, 0),
+                                     scale=1) ≤ 1e-13
+        end
+        # Directly, at `t = 10`, two to five M from where the hole is then:
+        # the closed form on the state against SpacetimeMetrics' `−Γ_a`.
+        bg = quad.background
+        worst = zero(T)
+        for x in (SVector{3,T}(0, 2, 1), SVector{3,T}(-6, -3, 2), SVector{3,T}(-2, 1, -4))
+            p = SVector{4,T}(10, x...)
+            Hs, dHs = SM.gauge_source_grad(bg, p)
+            g, dg = SM.dmetric(bg, p)
+            h = TGHb.pack_g(g)
+            ∂ₜh = TGHb.pack_sym(SMatrix{4,4,T}(dg[a, b, 1] for a in 1:4, b in 1:4))
+            ∂h = ntuple(i -> TGHb.pack_sym(SMatrix{4,4,T}(dg[a, b, i + 1]
+                                                         for a in 1:4, b in 1:4)), 3)
+            Ha, dHa = algebraic_gauge_source(quad.gauge, h, ∂ₜh, ∂h)
+            mag = max(maximum(abs, Hs), maximum(abs, dHs))
+            worst = max(worst, maximum(abs, Ha - Hs) / mag, maximum(abs, dHa - dHs) / mag)
+        end
+        @test worst ≤ 1e-13                     # measured 2e−16
+        # The metric is singular where the center says the hole is, and regular
+        # where the opposite sign would have put it — read beside the singular
+        # point, never on it.
+        δ = T(1 // 1000)
+        gtt(t, x) = SM.metric(bg, SVector{4,T}(t, x...))[1, 1]
+        @test abs(gtt(10, center_at(quad.center, T(10)) + SVector{3,T}(0, δ, 0))) > 1 / δ
+        @test abs(gtt(10, SVector{3,T}(-6, δ, 0))) < 10
+        # With no motion and no translation the case is today's static hole,
+        # and a center beside `x0` is refused rather than silently overridden.
+        @test kerr_schild_case(T; kw...).background === SM.KerrSchild(one(T), zero(T))
+        @test_throws "Leave center unset" kerr_schild_case(T; v=v, kw...,
+                                                             center=(T(1), 0, 0))
+        # The sampled source still refuses the moving hole, and names the way out.
+        @test_throws "gauge_source = KerrSchildSource" kerr_schild_case(
+            T; v=v, x0=x0, kw..., gauge_source=nothing)
+    end
+
+    @testset "the quadrant is refused for a hole that is not its own mirror image" begin
+        # Guards the three ways a hole breaks the `y = 0` and `z = 0` mirrors —
+        # a spin, a center off the axis, a velocity across it — each of which
+        # would run on the quadrant as a different, wrong problem.
+        msg = "its own mirror image in both planes"
+        @test quad.box == ((T(-8), T(8)), (zero(T), T(8)), (zero(T), T(8)))
+        @test quad.reflecting == ((false, false), (true, false), (true, false))
+        @test quad.rotating == (0, 0) && has_outer_face(quad)
+        @test_throws msg kerr_schild_case(T; a=T(1 // 2), kw..., octant=:quadrant)
+        @test_throws msg kerr_schild_case(T; kw..., center=(T(1), T(1 // 4), 0),
+                                          octant=:quadrant)
+        @test_throws msg hole_case(T, SM.boost(SM.KerrSchild(one(T), zero(T)),
+                                               SVector{3,T}(0, 1 // 5, 0));
+                                   kw..., octant=:quadrant)
+        # A spin hidden under the boost is read from the bare hole.
+        @test_throws msg hole_case(T, SM.boost(SM.KerrSchild(one(T), T(1 // 2)),
+                                               SVector{3,T}(-1 // 5, 0, 0));
+                                   kw..., octant=:quadrant)
+        @test_throws ":quadrant, got :half" kerr_schild_case(T; kw..., octant=:half)
+        # A hole at rest anywhere on the axis is one.
+        @test kerr_schild_case(T; kw..., center=(T(1), 0, 0),
+                               octant=:quadrant).center.v == zero(SVector{3,T})
+    end
+
+    @testset "the (2, 1, 1) brick has cubic cells and covers the quadrant" begin
+        # Guards the brick `gh_forest` now takes: blocks of two sizes, or a
+        # forest that misses part of the box, are both a mesh that is wrong
+        # everywhere it is used; and a box whose cells would not be cubes is
+        # refused, since TreeAMR's blocks are.
+        f = gh_forest(T, quad; N=8, roots=(2, 1, 1))
+        @test f.roots == (2, 1, 1) && nleaves(f) == 2
+        exts = [block_extent(T, f, k) for k in f.leaves]
+        @test all(e -> all(d -> e[d][2] - e[d][1] == 8, 1:3), exts)
+        @test sum(e -> prod(d -> e[d][2] - e[d][1], 1:3), exts) == 16 * 8 * 8
+        @test all(d -> minimum(e -> e[d][1], exts) == quad.box[d][1] &&
+                       maximum(e -> e[d][2], exts) == quad.box[d][2], 1:3)
+        @test gh_forest(T, quad; N=8, roots=[4, 2, 2]).roots == (4, 2, 2)
+        @test_throws "root blocks must be cubes" gh_forest(T, quad; N=8, roots=2)
+        @test_throws "root blocks must be cubes" gh_forest(T, quad; N=8,
+                                                           roots=(2, 2, 1))
+        @test_throws "brick of three" gh_forest(T, quad; N=8, roots=(2, 1))
+        # The cubic box takes one count, as before.
+        cube = kerr_schild_case(T; kw..., gauge_source=nothing)
+        @test gh_forest(T, cube; N=8, roots=2).roots == (2, 2, 2)
+    end
+
+    @testset "the swept shells hold the path, and doubling N keeps the layout" begin
+        # Guards the frozen capsule a crossing runs on: a point of the path
+        # outside the finest level is a hole that leaves its resolution; a
+        # layout that changes with `N` is a convergence study on different
+        # meshes; and the two overlap tests against a brute-force sweep of the
+        # segment — a diagonal one, where the swept cube is not a box.
+        path = (T(8), zero(T), zero(T))
+        for shape in (:cube, :ball)
+            f = hole_forest(T, quad; N=8, roots=(4, 2, 2), radii=[3, 3 // 2],
+                            shape=shape, path=path)
+            @test forest_levels(f)[end] > 0 && length(forest_levels(f)) == 3
+            for s in range(zero(T), one(T); length=33)
+                x = (T(x0) + 8s, zero(T), zero(T))
+                owners = filter(f.leaves) do k
+                    e = block_extent(T, f, k)
+                    all(d -> e[d][1] ≤ x[d] ≤ e[d][2], 1:3)
+                end
+                @test !isempty(owners) && all(k -> level(k) == 2, owners)
+            end
+            g = hole_forest(T, quad; N=16, roots=(4, 2, 2), radii=[3, 3 // 2],
+                            shape=shape, path=path)
+            @test g.leaves == f.leaves
+            # A path of length zero is the shell it starts from, and no path is
+            # the shell of before, bit for bit.
+            c = (T(3 // 2), T(1 // 3), T(1 // 4))
+            zero_path = hole_forest(T, quad; N=8, roots=(4, 2, 2), center=c,
+                                    radii=[3, 3 // 2], shape=shape, path=(0, 0, 0))
+            plain = hole_forest(T, quad; N=8, roots=(4, 2, 2), center=c,
+                                radii=[3, 3 // 2], shape=shape)
+            @test zero_path.leaves == plain.leaves
+        end
+        # The overlap tests on random boxes against the segment sampled finely,
+        # where the sample decides clearly.
+        c, Δc, R = (T(-1), T(1 // 2), T(0)), (T(3), T(2), T(-1)), T(1)
+        ss = range(zero(T), one(T); length=2001)
+        agree_ball = agree_cube = decided = 0
+        for i in 1:250
+            lo = ntuple(d -> T(-4) + 8 * T(mod(i * (0.618 + 0.13d), 1)), 3)
+            w = ntuple(d -> T(1 // 4) + 2 * T(mod(i * (0.414 + 0.07d), 1)), 3)
+            ext = ntuple(d -> (lo[d], lo[d] + w[d]), 3)
+            gap(s, d) = max(ext[d][1] - c[d] - s * Δc[d], c[d] + s * Δc[d] - ext[d][2], 0)
+            d2 = minimum(s -> sqrt(sum(d -> gap(s, d)^2, 1:3)), ss)
+            d∞ = minimum(s -> maximum(d -> gap(s, d), 1:3), ss)
+            abs(d2 - R) > 1e-2 && abs(d∞ - R) > 1e-2 || continue
+            decided += 1
+            agree_ball += TGHb._box_meets_capsule(ext, c, Δc, R) == (d2 ≤ R)
+            agree_cube += TGHb._box_meets_swept_cube(ext, c, Δc, R) == (d∞ < R)
+        end
+        @test decided > 180 && agree_ball == decided && agree_cube == decided
+    end
+
+    @testset "the moving sphere's core and mask follow c(t)" begin
+        # Guards the `:damped` layer of a moving hole: a core rule or a mask
+        # left at `c(0)` freezes evolved points and evolves frozen ones once
+        # the hole has moved by a cell.
+        int = quad.interior
+        for t in (zero(T), T(5))
+            c = center_at(quad.center, t)
+            @test c ≈ SVector{3,T}(-4 + t / 5, 0, 0)
+            # A point inside the core maps onto its sphere about `c(t)`.
+            x = c + SVector{3,T}(1 // 4, 1 // 8, 0)
+            y = SVector{3,T}(core_position(int, t, x)...)
+            @test sqrt(sum(abs2, y - c)) ≈ 5 // 8
+            @test (y - c) ≈ (5 // 8) * (x - c) / sqrt(sum(abs2, x - c))
+            m = interior_mask(int, t)
+            @test !is_evolved(m, c + SVector{3,T}(7 // 5, 0, 0))
+            @test is_evolved(m, c + SVector{3,T}(3 // 2, 0, 0))
+            @test !is_evolved(m, c - SVector{3,T}(7 // 5, 0, 0))
+        end
+    end
+
+    @testset "the moving hole on the quadrant is the hole in the box, to roundoff" begin
+        # Guards the whole chain under the mirrors with a hole that moves: the
+        # parities, the moving core and layer straddling `y = 0` and `z = 0`,
+        # the algebraic source at a velocity, the Gaussian `γ0` following
+        # `c(t)`, the Dirichlet data of a moving hole, the non-cubic brick. The
+        # reflection tests' fixture (`q = 2`, half-width `5/2`, uniform
+        # `h = 5/48`), its layer narrowed to fit the contracted horizon
+        # (`r_h,min = 2√(1 − v²) = 1.96`, so `r_1 ≤ 1.13` at `m = 8`) and
+        # relaxing at `4/M`, the hole starting at `x = −1/4` and moving at
+        # `1/5`, as the quadrant and as the full box, compared point by point
+        # outside the core after sixteen RK4 steps. Through `gh_solve` rather
+        # than `evolve!`: a translated, boosted background is a new type, so
+        # everything a run touches compiles anew, and the driver's analysis is
+        # most of that and is not what is claimed. Uniform meshes only: a
+        # refined quadrant is a different discretization (`CLAUDE.md`, "A
+        # refined octant is not the refined full box").
+        q = 2
+        G = q ÷ 2 + 1
+        ops = Operators(prolongation=q + 2, restriction=q + 2)
+        hk = (; halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=T(11 // 10), chunk=T(1 // 10),
+              v=v, x0=-1 // 4, gauge_source=:algebraic)
+        h = T(5 // 48)
+        dt = h / 8
+        nsteps = 16
+        runs = map((:quadrant, false)) do octant
+            case = kerr_schild_case(T; hk..., octant=octant)
+            f = gh_forest(T, case; N=12, roots=octant === false ? 4 : (4, 2, 2))
+            U = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
+                            parity=state_parity(f))
+            fill_exact!(U, case, zero(T))
+            u = statevector(U)
+            gather!(u, U)
+            p = GHProblem(U, GhostSchedule(U, ops), case; q=q,
+                          interior=with_ρ_max(case.interior, 4))
+            u1 = gh_solve(p, u, (zero(T), nsteps * dt); dt=dt)
+            change = maximum(abs, u1 - u)
+            scatter!(U, u1)
+            (; case, U, change)
+        end
+        o, b = runs
+        @test o.U.forest.roots == (4, 2, 2) && minimum_spacing(T, o.U.forest) == h
+        @test o.case.gauge === b.case.gauge
+        # The box's owned point at position `x`.
+        function point(U, x)
+            f = U.forest
+            for k in 1:nleaves(f)
+                org = block_origin(T, f, f.leaves[k])
+                i = ntuple(d -> round(Int, (x[d] - org[d]) / spacing(T, f, f.leaves[k])), 3)
+                all(d -> 0 ≤ i[d] < f.N, 1:3) && return k, i .+ (1 .+ U.G)
+            end
+            return nothing
+        end
+        c1 = center_at(o.case.center, nsteps * dt)
+        diff, scale, npts = zero(T), zero(T), 0
+        for k in 1:nleaves(o.U.forest), I in CartesianIndices(interiorview(o.U, k, 1))
+            J = Tuple(I) .+ o.U.G
+            x = SVector{3,T}(coordinates(o.U, k, J)...)
+            sum(abs2, x - c1) < (2 // 5)^2 && continue      # the core: stale by design
+            kb, Jb = point(b.U, x)
+            diff = max(diff, maximum(abs, o.U.work[J..., :, k] .- b.U.work[Jb..., :, kb]))
+            scale = max(scale, maximum(abs, o.U.work[J..., :, k]))
+            npts += 1
+        end
+        @info "moving Kerr-Schild hole, quadrant against the box after $nsteps steps: " *
+              "max|Δ| = $diff, max|u| = $scale over $npts points, " *
+              "max|u(t) − u(0)| = $(o.change)"
+        @test npts > 27_000
+        @test o.change > 1e-6                   # the state moved
+        @test diff ≤ 64 * eps(T) * scale
+    end
+end

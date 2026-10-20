@@ -981,12 +981,15 @@ Two consequences shape the case list:
   all. A **boost preserves the harmonic condition** (`□x^a = 0` is
   Lorentz covariant), so a *boosted* Kerr in harmonic coordinates is
   harmonic too. That is what makes it the proof-of-concept case.
-- **A time-dependent gauge source is not supported.** Boosted
+- **A time-dependent *sampled* gauge source is not supported.** Boosted
   Kerr-Schild has `H_a(x − vt)`, which a per-chunk sample cannot
   represent and an in-kernel evaluation (nested duals per point per
   evaluation) would price at about one RHS. The driver refuses a
-  non-harmonic background that is not static, and says why; in-kernel
-  sources are an extension.
+  non-harmonic background that is not static when it is given no source,
+  and says why. **(Amended 2026-10-20.)** A boosted Kerr-Schild hole runs
+  with the algebraic source below, `KerrSchildSource` with the hole's lab
+  velocity, which moves with the hole: `kerr_schild_case(; v, x0,
+  gauge_source = :algebraic)` builds it (`test/boosted_tests.jl`).
 
 **How the two questions are answered** (step 3, `src/gauge.jl`), because
 they are not the same kind of question. **Harmonicity is a table** over
@@ -2580,7 +2583,8 @@ that is `GHCase`, which lives here with the backgrounds it is made of
 rather than in `driver.jl` **(amended in step 3**: the right-hand side
 needs a case two steps before there is a driver, and a struct cannot be
 defined twice**)**. Its constructor is where a moving non-harmonic
-background is refused.
+background with a sampled source is refused; with the algebraic Kerr-Schild
+source the boosted Kerr-Schild hole is a case (amended 2026-10-20).
 
 A background gives the initial state through one callback,
 `x ↦ (h_ab, Π_ab)` at time `t`, with `Π` from `∂_t g` (the `dmetric`

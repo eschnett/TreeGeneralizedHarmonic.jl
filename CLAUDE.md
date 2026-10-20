@@ -1499,11 +1499,15 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `adapt_to_initial_data!`, each with that call's `t`. Forgetting the
   second is the bug that arrives one chunk late; passing a stale `t` is
   the bug that arrives as a boundary reflection.
-- **A moving non-harmonic background is refused.** A boosted
-  Kerr-Schild has a time-dependent gauge source that a per-chunk sample
-  cannot represent. Use `boost(Harmonic(M, a), v)`, which is harmonic
-  (`H ≡ 0`) — a boost preserves the harmonic condition. The refusal's
-  message says this; do not weaken it.
+- **A moving non-harmonic background with a sampled source is refused.**
+  A boosted Kerr-Schild has a time-dependent gauge source that a per-chunk
+  sample cannot represent. Give it the algebraic source instead,
+  `gauge_source = :algebraic` — `KerrSchildSource` with the hole's lab
+  velocity `hole_velocity(bg)`, which moves with the hole, and which
+  `kerr_schild_case(; v, x0)` builds (amended 2026-10-20) — or use
+  `boost(Harmonic(M, a), v)`, which is harmonic (`H ≡ 0`) — a boost
+  preserves the harmonic condition. The refusal's message says this; do
+  not weaken it.
 - **`boost(m, v)` moves the hole at `−v`** (found in step 8d, fixed in step
   8e). `SpacetimeMetrics` evaluates the boosted metric at `Λᵀx`, so
   `boost(KerrSchild(1, 0), (0.3, 0, 0))` is singular at `x = −0.3 t`.
