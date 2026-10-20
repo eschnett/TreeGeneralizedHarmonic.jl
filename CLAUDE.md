@@ -443,6 +443,25 @@ HDF5 for nothing else), and `prerequisite_tests.jl` asserts that
 `save_checkpoint` and `load_checkpoint` are TreeIOHDF5's and not TreeAMR's.
 No internal this package reaches for changed.
 
+From 2026-10-19 a run is **distributed over MPI**, and so runs on several
+GPUs, one per rank (TreeAMR's M7, released since 0.1.5, which already did
+the exchange, the regrid, the reductions, the interpolation and, in
+TreeIOHDF5, the checkpoints). `gh_forest`/`hole_forest` take `comm`,
+`evolve!` takes it for a restart (and refuses a forest over another one),
+`load_run` passes it, and `src/distributed.jl` has TreeHydro's agreements
+(`rank_reduce`, `agree_any`, `agree_refusal`, `isroot`) plus `rank_bcast`
+and `on_root`: **the find, the track and the fits run on rank 0 alone**, the
+other ranks serving its ghost fills (`fill_state!`) and interpolations
+(`interpolate_state`) by broadcast request, and every rank adopts rank 0's
+result. Fixed on the way: the travelling margin's flags are gathered as
+`RegridMark`s before `buffered_flags`, the refinement centroid read leaves by
+a local index, `add_noise!` draws from a `Xoshiro` per block (its values
+changed), checkpoint rotation removes part files on rank 0, the wall-clock
+decisions and the fits' timings are agreed, and `SimWatchWriter(; comm)` is
+collective. `evolve!` grew `checkpoint_io`. MPI is a test dependency only;
+`test/mpi_workload.jl` under `mpiexec -n 3` is the claim (`CODE.md`,
+"Running distributed"), and `test/octant_runs.jl mpi=true` the multi-GPU run.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -513,7 +532,12 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **4907 assertions in 15m32** at four threads after the lean
+The suite is **5364 assertions in 16m35** at four threads after the MPI port
+(2026-10-19; HEAD before it, on TreeAMR 0.2.3 from a clean checkout, was 5101
+in 14m55): its 263 new claims are `mpi_tests.jl`'s comparison of the
+workload's lines at one, two and three ranks with the serial run's, whose
+`mpiexec` job compiles and runs beside the suite (4m37 on its own), so the
+file itself is `0.3 s` at the end. It was **4907 assertions in 15m32** at four threads after the lean
 right-hand side (2026-10-05, development machine loaded 9–12; the one-thread
 suite was not rerun). It also passes on an EPYC node, x86-64, where the
 contraction differences live (Symmetry cn079, 26m21 at four threads). Its 112 new claims are the two kernel spellings:
@@ -640,6 +664,30 @@ d=$(mktemp -d) && git archive HEAD | tar -x -C "$d" && \
 It runs from a git worktree as happily as from the checkout, which is how
 the per-step agents work; the `[sources]` pins mean every worktree
 resolves the same branches.
+
+The MPI workload runs on its own too (added 2026-10-19), from an
+environment that has MPI and the package — `test/mpi_tests.jl` starts
+exactly this from the suite's sandbox, beside the suite where the machine
+has room (`TREEGH_TEST_MPI_CONCURRENT=0` or `1` decides it by hand). It is
+skipped on a machine with less than 24 GB — three ranks of about 3 GB
+beside the suite, which a macOS runner (7 GB) and the serial Linux runner
+could not hold (2026-10-19) — unless `TREEGH_TEST_MPI=1`, which CI sets for
+its threaded Linux cell only. It
+writes `OUTDIR/n0.txt` … `n3.txt`, the serial run and the three rank counts:
+
+```bash
+mpiexec -n 3 julia --threads=1 --project=<env> test/mpi_workload.jl OUTDIR
+```
+
+Where a step goes over MPI, rank by rank — the scatter, the fill and each of
+its stages' local groups, packs and unpacks, the kernel, a right-hand side, an
+RK4 step, and each rank's load (added 2026-10-19; `CODE.md`, "Running
+distributed"). On the CPU from the MPI environment, on H200s through
+`bench/symmetry_mpi_breakdown.sh`:
+
+```bash
+mpiexec -n 2 julia --threads=1 --project=<env> bench/mpi_breakdown.jl mpi=true L=16 N=16 radii=8,4,2 reps=2
+```
 
 The thread workload runs on its own, which is how a digest mismatch is
 bisected — `test/threading_tests.jl` starts exactly this in a subprocess:
@@ -1204,7 +1252,7 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   horizon.
 - **A reduction that crosses blocks is TreeAMR's `mesh_mapreduce`, never a
   host fold of ours** (from 2026-10-01). TreeAMR combines the per-block
-  partials on the host, and that is where its M7 will put the `Allreduce`;
+  partials on the host, and over MPI (its M7) gathers one partial per rank;
   a `sum`, `maximum` or weighted loop over `block_mapreduce`'s vector here
   would be a per-rank answer under MPI. `mesh_mapreduce` combines pairwise,
   so an L2 compared with a stored number is compared to roundoff;
@@ -1407,6 +1455,40 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   - **The symptom** is a `CALL` to `julia_…` in the SASS
     (`bench/rhs_lab.jl mode=baseline` writes it, `bench/sass_stats.jl` counts it).
     On the CPU the same closures cost 7× (`bench/rhs_lab_cpu.jl`).
+- **Over MPI the host analysis is rank 0's, and the other ranks serve it**
+  (added 2026-10-19). Inside `on_root(…; serve = (p, u))` — the find, the
+  track's update, the fits — rank 0 announces each collective step by a
+  broadcast request and the other ranks take it with no points of their own.
+  The only two steps are `fill_state!` and `interpolate_state`. **A new
+  collective inside the analysis must go through one of them, or a new
+  request kind in `serve_requests`**: a `fill_ghosts!`, a `mesh_mapreduce`
+  or an `interpolate` called directly there runs on rank 0 alone and hangs
+  the job. And never assign a captured variable inside the analysis: what
+  it returns is adopted on every rank after it, which is how the track, the
+  geometry and the fits stay the same bits everywhere.
+- **A block index is this rank's, a leaf index is the forest's** (TreeAMR's
+  M7). `nblocks(fs)`, `blockkey(fs, b)`, `block_origins`, `block_mapreduce`
+  and `firing_boxes` are per local block; `forest.leaves`, `nleaves` and
+  `locate_point` are global. `forest.leaves[b]` with a local `b` is right on
+  one rank and wrong on every other — the refinement centroid had it until
+  2026-10-19. A flag vector `buffered_flags` takes is the whole forest's.
+- **Multi-GPU runs go through HPC-X with `--bind-to none`, not MPICH_jll**
+  (measured 2026-10-19, `CODE.md`, "Running distributed"). Open MPI's
+  `mpiexec` binds each rank to one core by default, and the rank's Julia
+  threads — rank 0's find, spin and fit above all — share it: 3.8× slower
+  analysis, invisible in the step. MPICH_jll's shared-memory transport moves
+  a fill's 35–38 MB prolongation messages so slowly that 4 H200s step slower
+  than one (0.86×, against HPC-X's 1.89×). `bench/symmetry_mpi_gpu_env.sh`
+  builds the HPC-X environment (with `OpenMPI_jll` pointed at its libraries)
+  and the `bench/symmetry_mpi_*.sh` jobs pass the flag. What is left of the
+  fill's poor scaling is TreeAMR's: each prolongation level is one rank's
+  work, and the levels run in sequence.
+- **A decision from a rank's own clock or file system must be agreed**
+  (`agree_any`, `agree_refusal`), and a number combined on the host from
+  per-block values must be reduced over the ranks (`rank_reduce`), or the
+  ranks part ways at the next collective and the job hangs. What the
+  checkpoint's `data` holds must be the same on every rank, or TreeIOHDF5
+  refuses the save.
 - **Hooks depend on time.** `dirichlet(case, t)` is built at each call.
   It goes to `fill_ghosts!` inside the RHS, to `regrid!`, and to
   `adapt_to_initial_data!`, each with that call's `t`. Forgetting the

@@ -95,6 +95,13 @@ jobs:
           # 4; the entry is here from the start so that the threaded path
           # is exercised while it is being written.)
           JULIA_NUM_THREADS: ${{ matrix.threads || 1 }}
+          # The MPI test (added 2026-10-19) runs `mpiexec -n 3` beside the
+          # suite's own process, three ranks of about 3 GB each: more than
+          # a macOS runner has (7 GB, where it ran past its hour), and on
+          # the serial Linux cell the runner went down mid-test. It needs a
+          # machine with room (`mpi_jobs.jl`), and is forced on here for the
+          # threaded Linux cell, where it passed in 17 minutes.
+          TREEGH_TEST_MPI: ${{ matrix.threads == 4 && '1' || '' }}
       - uses: julia-actions/julia-processcoverage@v1
         if: ${{ matrix.coverage == true && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}
       - uses: codecov/codecov-action@v7

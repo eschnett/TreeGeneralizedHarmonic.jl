@@ -65,6 +65,7 @@ using KernelAbstractions: Backend, CPU, allocate, get_backend
 using KorzynskiSpin: horizon_spin
 using LinearAlgebra: UpperTriangular, cond, det, dot, qr, tr
 using Dates: Dates, DateTime
+using Random: Xoshiro
 using TOML: TOML
 import IMEXRungeKutta as IRK
 using SpacetimeMetrics: AbstractMetric, GaugeWave, Harmonic, KerrSchild,
@@ -185,6 +186,9 @@ export write_simwatch
 
 include("precision.jl")
 include("device.jl")
+# Running over MPI (2026-10-19): the cross-rank agreements and the analysis
+# on rank 0. Generic; what it calls of the files below is resolved at run time.
+include("distributed.jl")
 include("pointwise.jl")
 include("stencils.jl")
 include("interior.jl")

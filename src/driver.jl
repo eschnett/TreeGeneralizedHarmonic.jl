@@ -147,7 +147,7 @@ call_observer(f, p, t, u, row) =
             observer = nothing, perturb = nothing, ρ_max_factor = nothing,
             ρ_max_fixed = nothing, find = find_gh_horizon,
             fit_initial_cont = 1, fit_initial_depth = 0, handover = 0,
-            target_source = :fit)
+            target_source = :fit, comm = the forest's)
 
 **The** time-stepping loop: fill the initial data on `forest`, then evolve
 in chunks of `chunk`, writing `CODE.md`'s analysis record at every chunk
@@ -275,6 +275,33 @@ perturbation, [`add_noise!`](@ref)'s robust-stability noise above all, is the
 initial data from the run's point of view. It is not part of the recipe: a
 restart takes its state from the checkpoint and never calls it.
 
+## Running distributed (added 2026-10-19)
+
+`comm` is the communicator the run is distributed over, and the forest's own
+by default: build the forest with `gh_forest(…; comm)` or `hole_forest(…;
+comm)` — `MPI.COMM_WORLD` with `using MPI` and `MPI.Init()` done, or anything
+TreeAMR's `communicator` accepts — and the run is distributed over it; a
+restart, which has no forest, takes `comm` to distribute the checkpoint's. A
+forest over another communicator is refused. TreeAMR holds the forest whole
+on every rank and splits its blocks between them, and **every rank calls
+`evolve!` with the same arguments**: it is collective from start to finish.
+This package never loads MPI: the caller does. See "Running distributed" in
+`CODE.md`.
+
+The state, the mesh, the step and chunk counts, the speeds and every maximum
+come out the serial run's at any rank count; the norms are sums, and agree
+with it to roundoff. **The horizon finder, the track and the fitted target's
+fits run on rank 0 alone**, the other ranks serving its ghost fills and
+interpolations, and every rank adopts rank 0's answer — so the record, the
+track, the geometry and the fits are the same bits on every rank, and are
+the serial run's wherever the state is. What comes back is the same on every
+rank except `U`, `u` and `problem`, which hold this rank's blocks.
+
+An `observer` is called on every rank, with each rank's own `U` and `u`; a
+diagnostic it computes must be one of the collective ones (the norms, an
+interpolation every rank makes alike), or it reads one rank's blocks. A
+checkpoint written at one rank count restarts at any other, or serially.
+
 ## The range projection (added in step 8b)
 
 A case with [`StateBounds`](@ref) gets `CODE.md`'s third state writer:
@@ -374,6 +401,10 @@ finished run can be continued.
   others is deleted, **including files an earlier job left behind**.
 - `checkpoint_hdf5_filters`, `checkpoint_sync_to_disk` — TreeIOHDF5's
   `filters` and `sync`. The tests turn the flush off.
+- `checkpoint_io` — TreeIOHDF5's `io`, over MPI the grouping of the ranks
+  into I/O processes that each write a part file beside the index: `:node`
+  (the default), `:all`, or a number of groups (added 2026-10-19). Serially
+  a checkpoint is one file whatever it says.
 - `restart_file` — continue from this checkpoint rather than from the
   initial data, with no `forest`.
 
@@ -424,12 +455,22 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  checkpoint_path_prefix=nothing, checkpoint_every_chunks=nothing,
                  checkpoint_interval_seconds=nothing, max_walltime_seconds=nothing,
                  num_checkpoints_keep=2, checkpoint_hdf5_filters=(),
-                 checkpoint_sync_to_disk::Bool=true,
-                 restart_file=nothing, simd_width=nothing) where {T}
+                 checkpoint_sync_to_disk::Bool=true, checkpoint_io=:node,
+                 restart_file=nothing, simd_width=nothing, comm=nothing) where {T}
     # The job's wall clock starts here: whatever ran before the call —
     # startup, compilation, the queue — is the caller's margin to leave
     # (TreeHydro's rule for `max_walltime_seconds`).
     t0_wall = time()
+    # The communicator (added 2026-10-19), as TreeAMR sees it: the forest's
+    # own unless one is named, and a forest built over another is refused,
+    # since every agreement below goes over this one and the exchange over
+    # the forest's. A restart distributes the checkpoint's forest over it.
+    comm = communicator(comm === nothing && forest !== nothing ? forest.comm : comm)
+    forest === nothing || forest.comm === comm || throw(ArgumentError(
+        "evolve! was given comm = $comm and a forest distributed over " *
+        "$(forest.comm): the forest is the mesh the run is distributed by, so " *
+        "build it over the run's communicator — gh_forest(…; comm) or " *
+        "hole_forest(…; comm) — and pass the same one here, or leave comm out."))
     # The tracked geometry (step 8d) is built from the horizon that was found,
     # so a case that asks for it must carry the finder's parameters.
     fitted = case.interior isa FittedSpec
@@ -497,9 +538,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # forest is the file's, and every parameter that decides a number must be
     # the one it was written with — all but `t_end` and the regridding
     # criterion, which a restart may change.
-    check_checkpoint_keywords(; checkpoint_path_prefix, checkpoint_every_chunks,
-                              checkpoint_interval_seconds, max_walltime_seconds,
-                              num_checkpoints_keep, restart_file)
+    # Agreed over the ranks, since whether a directory or a file exists is
+    # each rank's own view of the file system (TreeHydro's).
+    agree_refusal(comm) do
+        check_checkpoint_keywords(; checkpoint_path_prefix, checkpoint_every_chunks,
+                                  checkpoint_interval_seconds, max_walltime_seconds,
+                                  num_checkpoints_keep, restart_file)
+    end
     (forest === nothing) == (restart_file !== nothing) || throw(ArgumentError(
         forest === nothing ?
         "evolve! needs a forest: the mesh is the study's, built by gh_forest or " *
@@ -520,7 +565,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     else
         (nothing, nothing)
     end
-    ck = restart_file === nothing ? nothing : load_run(restart_file, T; backend=backend)
+    ck = restart_file === nothing ? nothing :
+         load_run(restart_file, T; backend=backend, comm=comm)
     criterion_changed = nothing
     if ck !== nothing
         check_recipe(ck.recipe, recipe, restart_file)
@@ -530,7 +576,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             "recipe names $(ck.recipe.float_type): the file is damaged."))
         changes = plain_differences(ck.criterion, criterion)
         criterion_changed = first.(changes)
-        isempty(changes) || @info "restarting $(repr(restart_file)) with a " *
+        isempty(changes) || !isroot(comm) || @info "restarting $(repr(restart_file)) with a " *
                                   "changed regridding criterion, which the " *
                                   "first regrid uses: " * join(last.(changes), "; ")
         forest = ck.forest
@@ -750,10 +796,12 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                       _bounds_in(T, spec.target_bounds) :
                       derive_target_bounds(T, case.background, geom; t=0,
                                            L=spec.lmax_fit)
-            fit_initial = build_fit(analytic_sampler(case.background, 0.0;
-                                                     δ=tofloat64(geom.h) / 8),
-                                    geom, spec; cont=fit_initial_cont,
-                                    bounds=tbounds, backend=backend)
+            fit_initial = shared_fit(U; backend=backend) do
+                build_fit(analytic_sampler(case.background, 0.0;
+                                           δ=tofloat64(geom.h) / 8),
+                          geom, spec; cont=fit_initial_cont,
+                          bounds=tbounds, backend=backend)
+            end
             fits = (fit_initial, nothing)
             target0 = target_cache(U)
         end
@@ -765,10 +813,12 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # analytic solution is singular somewhere the mesh reaches — a
         # configuration error, not something for the range projection to repair
         # (kept unmasked in step 8b, where the per-chunk check became the
-        # evolved region's).
-        all(isfinite, u) || throw(ArgumentError(
-            "the initial data is not finite: $(count(!isfinite, u)) of " *
-            "$(length(u)) values are NaN or Inf. The core rule fills every point " *
+        # evolved region's). Counted over every rank's blocks, so that every
+        # rank refuses together (amended 2026-10-19).
+        nbad = rank_reduce(+, comm, count(!isfinite, u))
+        nbad == 0 || throw(ArgumentError(
+            "the initial data is not finite: $nbad of " *
+            "$(rank_reduce(+, comm, length(u))) values are NaN or Inf. The core rule fills every point " *
             "inside r_0 from the sphere r_0, so this is a case whose analytic " *
             "solution is singular somewhere the mesh reaches — check r_0 against " *
             "the chart's singular set and against where |h| is still moderate."))
@@ -900,18 +950,23 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # does not become the target: the previous fits are kept, the row says
     # `fit_valid = false`, and the run goes on (proposed in step 8e — the
     # find's coasting, applied to the fit).
-    function refit!(p, u, t)
-        scatter!(p.U, u)
-        bnd = dirichlet(case, T(t))
-        if bnd === nothing
-            fill_ghosts!(p.U, p.schedule)
-        else
-            fill_ghosts!(p.U, p.schedule; boundary=bnd)
-        end
+    #
+    # **It is two halves over MPI (amended 2026-10-19)**: `refit!` builds the
+    # fit, on rank 0 inside the row's analysis (`on_root`), and returns it with
+    # its cost; `adopt_fit!` makes it the run's, on every rank, from rank 0's
+    # bits. Neither assigns what the other reads.
+    function refit!(p, u, t, g)
+        fill_state!(p, u, t)
         t0 = time_ns()
-        f = build_fit(state_sampler(p.U, q; t=T(t), order=spec.fit_cont), geom, spec;
+        f = build_fit(state_sampler(p.U, q; t=T(t), order=spec.fit_cont), g, spec;
                       cont=spec.fit_cont, bounds=tbounds, backend=backend, check=false)
-        fitcost.build_ns[] += time_ns() - t0
+        ns = time_ns() - t0
+        return (fit=isdistributed_over(comm) ? host_fit(f) : f, ns=ns)
+    end
+
+    function adopt_fit!(r)
+        f = isdistributed_over(comm) ? backend_fit(r.fit, backend) : r.fit
+        fitcost.build_ns[] += r.ns
         fitcost.nbuild[] += 1
         if f.valid
             fits = (f, fits[1])
@@ -942,10 +997,21 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         return p′
     end
 
+    # The fits' costs as one rank's numbers for every rank (added
+    # 2026-10-19): the build is rank 0's alone, and each rank times its own
+    # cache fills, so the largest is taken — what the checkpoint holds must be
+    # the same on every rank, and what `evolve!` returns is.
+    agreed_fit_cost() = rank_reduce((a, b) -> map(max, a, b), comm,
+                                    map(r -> r[], fitcost))
+
     # The closures below read the mesh as `U.forest` — the same object, which
     # `regrid!` changes in place — and not as `forest`, which a restart rebinds
     # to the checkpoint's: a closure that captures a name assigned twice boxes
     # it ("Things that will bite").
+    #
+    # It returns the updated track and geometry rather than assigning them
+    # (amended 2026-10-19): over MPI it runs on rank 0 inside the row's
+    # analysis, and every rank adopts what it returns.
     function track!(t, hz, c_pred, forced)
         mesh = U.forest
         h_fine = minimum_spacing(T, mesh)
@@ -953,36 +1019,37 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                      R(sqrt(sum(abs2, SVector{3,T}(Tuple(hz.origin)) - c_pred)) /
                        h_fine) : nothing
         lost = nothing
+        tr′, geom′ = tr, geom
         try
-            tr = update_track(tr, hz, t; max_misses=spec.max_misses, G=G,
-                              h=geom.h)
+            tr′ = update_track(tr, hz, t; max_misses=spec.max_misses, G=G,
+                               h=geom.h)
         catch e
             e isa TrackLostError || rethrow()
             lost = e
-            tr = e.track
+            tr′ = e.track
         end
         if lost === nothing
-            geom = geometry(mesh, t, tr)
-            check_interior_radii(mesh, kgeom(geom, T(t)), case.background, G;
+            geom′ = geometry(mesh, t, tr′)
+            check_interior_radii(mesh, kgeom(geom′, T(t)), case.background, G;
                                  t=T(t), center=case.center)
-            check_bounds_gate(mesh, geom, case.bounds, q; t=T(t))
+            check_bounds_gate(mesh, geom′, case.bounds, q; t=T(t))
         end
-        ct = center_at(track_center(tr), T(t))
+        ct = center_at(track_center(tr′), T(t))
         ca = center_at(case.center, T(t))
         leaf_h(x) = (b = locate_point(mesh, x);
                      b === nothing ? h_fine : spacing(T, mesh, mesh.leaves[b]))
-        efolds = margin_efolds(case.background, geom, q; t=T(t),
+        efolds = margin_efolds(case.background, geom′, q; t=T(t),
                                ε_KO=case.ε_KO, spacing=leaf_h).min
-        rows = (track_source=tr.source, track_center=ntuple(d -> R(ct[d]), 3),
-                track_velocity=ntuple(d -> R(tr.v_est[d]), 3),
-                track_r_min=R(tr.r_min), track_r_max=R(tr.r_max),
+        rows = (track_source=tr′.source, track_center=ntuple(d -> R(ct[d]), 3),
+                track_velocity=ntuple(d -> R(tr′.v_est[d]), 3),
+                track_r_min=R(tr′.r_min), track_r_max=R(tr′.r_max),
                 track_offset=R(sqrt(sum(abs2, ct - ca)) / h_fine),
-                track_misses=tr.misses, track_prediction=prediction,
+                track_misses=tr′.misses, track_prediction=prediction,
                 track_trigger=forced, margin_efolds=efolds,
-                layer_h=R(geom.h), layer_offset=R(geom.offset),
-                layer_thickness=R(geom.thickness), layer_r_in=R(geom.r_in),
-                layer_r_out=R(geom.r_out))
-        return rows, lost
+                layer_h=R(geom′.h), layer_offset=R(geom′.offset),
+                layer_thickness=R(geom′.thickness), layer_r_in=R(geom′.r_in),
+                layer_r_out=R(geom′.r_out))
+        return (rows=rows, lost=lost, tr=tr′, geom=geom′)
     end
 
     function record!(p, t, u, dt, steps, λ, λ_end, cflnum)
@@ -1013,11 +1080,27 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         forced = fitted && trigger_pending
         trigger_pending = false
         c_pred = fitted ? center_at(track_center(tr), T(t)) : nothing
-        hz = horizon_row(p, u, t, hlm_seed, length(records); force=forced,
-                         origin=c_pred, center=c_pred, find=find)
+        # **The find, the track and the fit run on rank 0 (decided
+        # 2026-10-19)**, the other ranks serving its ghost fills and
+        # interpolations, and every rank adopts what it returns — so the
+        # track, the geometry and the fits are rank 0's bits everywhere
+        # (`on_root`, `src/distributed.jl`). Serially this is the three calls.
+        an = on_root(comm; serve=(p, u)) do
+            found = horizon_row(p, u, t, hlm_seed, length(records); force=forced,
+                                origin=c_pred, center=c_pred, find=find)
+            tk = fitted ? track!(t, found, c_pred, forced) : nothing
+            fs = fitmode && tk.lost === nothing ? refit!(p, u, t, tk.geom) : nothing
+            (hz=found, tk=tk, fs=fs)
+        end
+        hz = an.hz
         hz.hlm === nothing || (hlm_seed = hz.hlm)
-        trk, lost = fitted ? track!(t, hz, c_pred, forced) : (no_track, nothing)
-        fr = fitmode && lost === nothing ? refit!(p, u, t) : no_fit
+        trk, lost = if fitted
+            tr, geom = an.tk.tr, an.tk.geom
+            an.tk.rows, an.tk.lost
+        else
+            no_track, nothing
+        end
+        fr = an.fs === nothing ? no_fit : adopt_fit!(an.fs)
         # The indicator last, and only where the case refines: it writes
         # `DIAG_TAU` and reads nothing the norms above left behind, and the
         # flags it produces are what the regrid below uses — one evaluation
@@ -1321,6 +1404,10 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             stopping = c < nchunks && max_walltime_seconds !== nothing &&
                        (now - t0_wall) + chunk_cost + write_max >
                        max_walltime_seconds
+            # Each rank's own clock, agreed (added 2026-10-19): a rank that
+            # entered the collective save while another went on to its regrid
+            # would wait forever.
+            due, stopping = agree_any(comm, (due, stopping))
             if due || stopping
                 path = checkpoint_filename(checkpoint_path_prefix, nsteps)
                 state = (; chunk=c, t=plain_reals(stop), t_chunk=plain_reals(tstart),
@@ -1339,13 +1426,14 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                          fit_initial=to_plain(fit_initial; path="run.fit_initial"),
                          hlm_seed, trigger_pending,
                          bounds=to_plain(acc; path="run.bounds"),
-                         fit_cost=map(r -> r[], fitcost), records=Tuple(records))
+                         fit_cost=agreed_fit_cost(), records=Tuple(records))
                 save_run(path, U.forest, U, u; recipe=recipe, criterion=criterion,
                          run=state, filters=checkpoint_hdf5_filters,
-                         sync=checkpoint_sync_to_disk)
+                         sync=checkpoint_sync_to_disk, io=checkpoint_io)
                 push!(written, path)
-                rotate_checkpoints!(checkpoint_path_prefix, num_checkpoints_keep;
-                                    keep=path)
+                isroot(comm) &&
+                    rotate_checkpoints!(checkpoint_path_prefix, num_checkpoints_keep;
+                                        keep=path)
                 last_write = time()
                 write_max = max(write_max, last_write - now)
             end
@@ -1371,6 +1459,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         chunk_max = max(chunk_max, time() - chunk_start)
     end
 
+    cost = fitmode ? agreed_fit_cost() : nothing
     return (records=records, nsteps=nsteps, nchunks=length(records) - 1,
             nregrids=nregrids, passes=passes, converged=converged,
             buffer=bufferwidth, bounds=acc,
@@ -1384,9 +1473,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             checkpoints_written=written, restart_file=restart_file,
             criterion_changed=criterion_changed,
             fit_cost=fitmode ?
-                     (build_ms=fitcost.build_ns[] / 1e6, nbuild=fitcost.nbuild[],
-                      fill_ms=fitcost.fill_ns[] / 1e6, nfill=fitcost.nfill[],
-                      nrefills=fitcost.nrefills[], nfailed=fitcost.nfailed[]) :
+                     (build_ms=cost.build_ns / 1e6, nbuild=cost.nbuild,
+                      fill_ms=cost.fill_ns / 1e6, nfill=cost.nfill,
+                      nrefills=cost.nrefills, nfailed=cost.nfailed) :
                      nothing)
 end
 
@@ -1417,9 +1506,11 @@ function fill_fitted_initial!(U::FieldSet{T,3}, case::GHCase{T},
     bounds = spec.target_bounds !== nothing ? _bounds_in(T, spec.target_bounds) :
              derive_target_bounds(T, case.background, geom; t=0,
                                   L=spec.lmax_fit)
-    fit = build_fit(analytic_sampler(case.background, 0.0;
-                                     δ=tofloat64(geom.h) / 8),
-                    geom, spec; cont=cont, bounds=bounds, backend=backend)
+    # On rank 0, and its bits on every rank (added 2026-10-19).
+    fit = shared_fit(U; backend=backend) do
+        build_fit(analytic_sampler(case.background, 0.0; δ=tofloat64(geom.h) / 8),
+                  geom, spec; cont=cont, bounds=bounds, backend=backend)
+    end
     target = target_cache(U)
     origins = to_backend(backend, block_origins(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))

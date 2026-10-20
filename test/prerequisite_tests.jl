@@ -214,6 +214,8 @@ const TREEAMR_NAMES = (
     # Regridding
     :Refine, :Coarsen, :Keep, :flag_blocks, :buffered_flags, :complete_marks,
     :regrid!, :adapt_to_initial_data!,
+    # Running distributed (2026-10-19)
+    :communicator, :blockrange,
     # Device-side flagging
     :firing_boxes,
     # Point interpolation (M11): the horizon finder and the fit's sampler
@@ -239,8 +241,15 @@ const TREEIOHDF5_NAMES = (:save_checkpoint, :load_checkpoint)
 # four as internals, so a rename on a release is possible and would surface
 # in the middle of a run, or as a silently unguarded interpolation — named
 # here instead (amended 2026-09-26: `threaded_foreach`, the stopgap
-# interpolator's batch loop, left with the stopgap).
-const TREEAMR_INTERNAL = (:threadchunks, :inside, :stencil_hits, :stencil_position)
+# interpolator's batch loop, left with the stopgap). And, from 2026-10-19,
+# the verbs of the communicator `src/distributed.jl` combines and agrees over
+# (`commrank`, `commsize`, `allgather`, `allgatherv`, `bcast`) and
+# `RegridMark`, the `isbits` flag the travelling margin's marks are gathered
+# as: TreeHydro reaches for the same verbs, and a rename would surface only
+# in a distributed run, which most of the suite is not.
+const TREEAMR_INTERNAL = (:threadchunks, :inside, :stencil_hits, :stencil_position,
+                          :commrank, :commsize, :allgather, :allgatherv, :bcast,
+                          :RegridMark)
 
 # The backgrounds of `CODE.md`'s "Initial data and backgrounds" table, the
 # two derivative passes the pointwise algebra is tested against, the ADM
