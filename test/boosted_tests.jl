@@ -10,6 +10,12 @@
 # Priced on what the suite already compiles: the run is the `q = 2`, `:damped`,
 # `Val(:algebraic)` kernel `gauge_source_tests.jl` builds, on the reflection
 # tests' fixture radii and `h = 5/48`.
+#
+# From 2026-10-21 the same for a spinning hole moving along its spin axis `z`,
+# on the rotating quadrant `[0, L]² × [−L, L]` (`octant = :rotating_quadrant`):
+# the seam of `rotation_tests.jl` and no mirror. Its background is the same
+# type as the quadrant's (a translated, boosted `KerrSchild`), so its run is the
+# quadrant's kernel.
 
 using Test
 using TreeAMR
@@ -100,7 +106,7 @@ const TGHb = TreeGeneralizedHarmonic
         @test_throws msg hole_case(T, SM.boost(SM.KerrSchild(one(T), T(1 // 2)),
                                                SVector{3,T}(-1 // 5, 0, 0));
                                    kw..., octant=:quadrant)
-        @test_throws ":quadrant, got :half" kerr_schild_case(T; kw..., octant=:half)
+        @test_throws ":rotating_quadrant, got :half" kerr_schild_case(T; kw..., octant=:half)
         # A hole at rest anywhere on the axis is one.
         @test kerr_schild_case(T; kw..., center=(T(1), 0, 0),
                                octant=:quadrant).center.v == zero(SVector{3,T})
@@ -554,5 +560,203 @@ const TGHb = TreeGeneralizedHarmonic
         # and its mirror image, and the quadrant's ghosts are the mirror image.
         # `64 eps` before the rate; measured `3.8e−11` (`0.01 ε^{2/3}`) with it.
         @test diff ≤ eps(T)^(2 // 3) * scale
+    end
+    @testset "the rotating quadrant takes the spinning hole moving along its spin, and refuses any other" begin
+        # Guards the domain of a hole spinning about `z` and moving along it:
+        # the seam's quarter turn is its symmetry and no mirror is. A spin
+        # across `z`, a center off the axis or a velocity across it would turn
+        # with the quadrant and run there as a different, wrong problem; and a
+        # forest whose seam or brick is not the case's is a different mesh.
+        msg = "its own image under them at every time"
+        a = T(1 // 2)
+        sq = kerr_schild_case(T; a=a, v=v, x0=-1, axis=3, kw...,
+                              octant=:rotating_quadrant)
+        @test sq.box == ((zero(T), T(8)), (zero(T), T(8)), (T(-8), T(8)))
+        @test sq.reflecting == ntuple(_ -> (false, false), 3)
+        @test sq.rotating == (1, 2) && has_outer_face(sq)
+        @test center_at(sq.center, T(10)) ≈ SVector{3,T}(0, 0, 1) atol = 8eps(T)
+        # The x axis is the quadrant's, bit for bit.
+        @test kerr_schild_case(T; v=v, x0=x0, axis=1, kw..., octant=:quadrant).background ===
+              quad.background
+        @test_throws "axis is the coordinate" kerr_schild_case(T; v=v, axis=4, kw...)
+        # At rest anywhere on the axis, and without spin, it is one too.
+        @test kerr_schild_case(T; x0=2, axis=3, kw...,
+                               octant=:rotating_quadrant).center.c0 == SVector{3,T}(0, 0, 2)
+        @test kerr_schild_case(T; kw..., octant=:rotating_quadrant).rotating == (1, 2)
+        # A spin turned off the axis, a center off it, a velocity across it.
+        @test_throws msg hole_case(T, SM.rotate(SM.KerrSchild(one(T), a), 0, T(π) / 2, 0);
+                                   kw..., octant=:rotating_quadrant)
+        @test_throws msg kerr_schild_case(T; a=a, kw..., center=(T(1 // 4), 0, 0),
+                                          octant=:rotating_quadrant)
+        @test_throws msg kerr_schild_case(T; a=a, v=v, x0=-1, kw...,
+                                          octant=:rotating_quadrant)
+        @test_throws msg hole_case(T, SM.boost(SM.KerrSchild(one(T), a),
+                                               SVector{3,T}(0, -1 // 5, -1 // 5));
+                                   kw..., octant=:rotating_quadrant)
+        # Its forest: the (1, 1, 2) brick with the seam, which TreeAMR takes on
+        # a non-cubic brick whose seam dimensions have one count.
+        f = gh_forest(T, sq; N=8, roots=(1, 1, 2))
+        @test f.roots == (1, 1, 2) && f.rotating == (1, 2) && nleaves(f) == 2
+        @test all(k -> all(e -> e[2] - e[1] == 8, block_extent(T, f, k)), f.leaves)
+        @test_throws "root blocks must be cubes" gh_forest(T, sq; N=8, roots=(1, 2, 2))
+    end
+
+    @testset "the boosted spinning hole's algebraic source is its −Γ" begin
+        # Guards the spin and the boost together: the source's spin 4-vector is
+        # the rest frame's `(0, 0, 0, a)` boosted along it, `γ a (v, 0, 0, 1)`,
+        # and a source with the rest-frame spin, the wrong sign of `v`, or one
+        # that does not move with the hole is a gauge transient — away from
+        # `t = 0` too, where `check_gauge_source` does not look.
+        a = T(1 // 2)
+        sq = kerr_schild_case(T; a=a, v=v, x0=-1, axis=3, kw...,
+                              octant=:rotating_quadrant)
+        bg = sq.background
+        γ = 1 / sqrt(1 - T(1 // 25))
+        @test hole_velocity(bg) == SVector{3,T}(0, 0, 1 // 5)
+        @test sq.gauge.u ≈ SVector{4,T}(γ, 0, 0, γ / 5)
+        @test sq.gauge.S ≈ SVector{4,T}(γ * a / 5, 0, 0, γ * a)
+        @test check_gauge_source(bg, sq.gauge, T; center=(0, 0, T(-1)), scale=1) ≤ 1e-13
+        worst = zero(T)
+        for x in (SVector{3,T}(2, 1, 0), SVector{3,T}(-3, 2, 4), SVector{3,T}(1, -2, -3))
+            p = SVector{4,T}(10, x...)
+            Hs, dHs = SM.gauge_source_grad(bg, p)
+            g, dg = SM.dmetric(bg, p)
+            h = TGHb.pack_g(g)
+            ∂ₜh = TGHb.pack_sym(SMatrix{4,4,T}(dg[a, b, 1] for a in 1:4, b in 1:4))
+            ∂h = ntuple(i -> TGHb.pack_sym(SMatrix{4,4,T}(dg[a, b, i + 1]
+                                                         for a in 1:4, b in 1:4)), 3)
+            Ha, dHa = algebraic_gauge_source(sq.gauge, h, ∂ₜh, ∂h)
+            mag = max(maximum(abs, Hs), maximum(abs, dHs))
+            worst = max(worst, maximum(abs, Ha - Hs) / mag, maximum(abs, dHa - dHs) / mag)
+        end
+        @test worst ≤ 1e-13
+        # The rest frame's spin, unboosted, is not the source.
+        wrong = KerrSchildSource{T}(one(T), SVector{4,T}(0, 0, 0, a), sq.gauge.u)
+        @test_throws "does not make the background exact" check_gauge_source(
+            bg, wrong, T; center=(0, 0, T(-1)), scale=1)
+    end
+
+    @testset "the spinning hole moving along z on the rotating quadrant is the hole in the box" begin
+        # Guards the seam under a hole that moves: the quarter turn of a state
+        # whose `h_tz`, `h_xz` and `h_yz` are all nonzero, the seam's two owned
+        # planes evolved side by side, the moving core and layer about the
+        # axis, the algebraic source of a spinning hole at a velocity, the
+        # Gaussian `γ0` following `c(t)`, the Dirichlet data at `z = ±L`, and
+        # the (2, 2, 4) brick. The previous testset's fixture with `a = 1/5`:
+        # its ring `r = a` inside `r_0 = 2/5`, and `r_1 = 11/10` 8 cells inside
+        # the contracted pole `r₊ √(1 − v²) = 1.94`, which `a = 1/2` would not
+        # leave room for at `h = 5/48`. Through `gh_solve`, sixteen RK4 steps,
+        # compared point by point outside the core; uniform meshes only.
+        #
+        # The same hole at rest (a boost by zero, so the same kernel) first: the
+        # quadrant is the box to roundoff. The moving hole is not, and the box
+        # is why (measured 2026-10-21): its layer and core add the target's
+        # rate, a centered difference in time over `δ = ε^{1/3} r_0`, of an
+        # analytic background that is 4-fold symmetric only to its own
+        # roundoff, `56 ε` here — so the box's rate at `Rp` and the
+        # quarter turn of its rate at `p` differ by up to that over `δ`,
+        # `4.4e−7` (`1.1e−12` over `2δ = 4.8e−6`), while the quadrant's ghosts across
+        # the seam are the turn exactly. The difference is zero in the data, is
+        # on the seam planes and the axis in the core and the inner layer, does
+        # not depend on the spin (`a = 0` moving along z: `1.9e−10`), and grows
+        # linearly with the steps (`2.5e−12` after one, `1.3e−10` after
+        # sixteen) — the box's own asymmetry injected step by step, and so it is
+        # bounded by `nsteps · dt` times the rate's asymmetry. The x-quadrant's
+        # mirror claim above is the same mechanism (`3.8e−11`).
+        q = 2
+        G = q ÷ 2 + 1
+        ops = Operators(prolongation=q + 2, restriction=q + 2)
+        a = T(1 // 5)
+        hk = (; halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=T(11 // 10), chunk=T(1 // 10),
+              gauge_source=:algebraic)
+        h = T(5 // 48)
+        dt = h / 8
+        nsteps = 16
+        function point(U, x)
+            f = U.forest
+            for k in 1:nleaves(f)
+                org = block_origin(T, f, f.leaves[k])
+                i = ntuple(d -> round(Int, (x[d] - org[d]) / spacing(T, f, f.leaves[k])), 3)
+                all(d -> 0 ≤ i[d] < f.N, 1:3) && return k, i .+ (1 .+ U.G)
+            end
+            return nothing
+        end
+        # Sixteen steps of the hole as the rotating quadrant and as the box, and
+        # the largest difference outside the core.
+        function quadrant_against_box(mk)
+            o, b = map((:rotating_quadrant, false)) do octant
+                case = mk(octant)
+                f = gh_forest(T, case; N=12, roots=octant === false ? 4 : (2, 2, 4))
+                U = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
+                                parity=state_parity(f), rotation=state_rotation(f))
+                fill_exact!(U, case, zero(T))
+                u = statevector(U)
+                gather!(u, U)
+                p = GHProblem(U, GhostSchedule(U, ops), case; q=q,
+                              interior=with_ρ_max(case.interior, 4))
+                u1 = gh_solve(p, u, (zero(T), nsteps * dt); dt=dt)
+                change = maximum(abs, u1 - u)
+                scatter!(U, u1)
+                (; case, U, change)
+            end
+            c1 = center_at(o.case.center, nsteps * dt)
+            diff, scale, npts, seam = zero(T), zero(T), 0, zero(T)
+            for k in 1:nleaves(o.U.forest), I in CartesianIndices(interiorview(o.U, k, 1))
+                J = Tuple(I) .+ o.U.G
+                x = SVector{3,T}(coordinates(o.U, k, J)...)
+                sum(abs2, x - c1) < (2 // 5)^2 && continue      # the core: stale by design
+                kb, Jb = point(b.U, x)
+                diff = max(diff, maximum(abs, o.U.work[J..., :, k] .- b.U.work[Jb..., :, kb]))
+                scale = max(scale, maximum(abs, o.U.work[J..., :, k]))
+                # The seam's own components: `h_xz` and `h_yz` (slots 7 and 9).
+                iszero(x[1]) && (seam = max(seam, abs(o.U.work[J..., 7, k]),
+                                            abs(o.U.work[J..., 9, k])))
+                npts += 1
+            end
+            return (; o, b, diff, scale, npts, seam)
+        end
+        rest = quadrant_against_box() do octant
+            bg = SM.translate(SM.boost(SM.KerrSchild(one(T), a), zero(SVector{3,T})),
+                              SVector{4,T}(0, 0, 0, -1 // 4))
+            hole_case(T, bg; hk..., center=(0, 0, T(-1 // 4)), octant=octant)
+        end
+        mov = quadrant_against_box() do octant
+            kerr_schild_case(T; hk..., a=a, v=v, x0=-1 // 4, axis=3, octant=octant)
+        end
+        @test !TGHb.core_follows(rest.o.case.interior) &&
+              TGHb.core_follows(mov.o.case.interior)
+        o = mov.o
+        @test o.U.forest.roots == (2, 2, 4) && o.U.forest.rotating == (1, 2)
+        @test minimum_spacing(T, o.U.forest) == h
+        @test o.case.gauge === mov.b.case.gauge
+        # The background and its rate at a point and at its quarter-turn image,
+        # mapped by `state_rotation`, over the layer at the first and the last
+        # step.
+        rot = state_rotation(o.U.forest)
+        turn(u) = SVector{20,T}(ntuple(k -> sign(rot[k]) * u[abs(rot[k])], 20))
+        int = with_ρ_max(o.case.interior, 4)
+        δ = TGHb.layer_rate_step(int)
+        asym_u, asym_rate, uscale = zero(T), zero(T), zero(T)
+        for t in (zero(T), nsteps * dt), i in -11:11, j in -11:11, k in -14:11
+            x = SVector{3,T}(i * h, j * h, k * h)
+            int.r_0 ≤ sqrt(sum(abs2, x - center_at(int.center, t))) < int.r_1 || continue
+            Rx = SVector{3,T}(-x[2], x[1], x[3])
+            st, sR = (TGHb.background_state_rate(o.case.background, t, y, δ) for y in (x, Rx))
+            asym_u = max(asym_u, maximum(abs, vcat(sR[1], sR[2]) - turn(vcat(st[1], st[2]))))
+            asym_rate = max(asym_rate,
+                            maximum(abs, vcat(sR[3], sR[4]) - turn(vcat(st[3], st[4]))))
+            uscale = max(uscale, maximum(abs, vcat(st[1], st[2])))
+        end
+        @info "spinning hole on the rotating quadrant against the box after $nsteps " *
+              "steps: at rest max|Δ| = $(rest.diff), moving $(mov.diff) of max|u| = " *
+              "$(mov.scale) over $(mov.npts) points, max|u(t) − u(0)| = $(o.change); " *
+              "the background's quarter-turn asymmetry $asym_u of $uscale, its " *
+              "rate's $asym_rate (δ = $δ)"
+        @test mov.npts > 27_000 && rest.npts > 27_000
+        @test o.change > 1e-6 && mov.seam > 1e-3        # moved, and turns at the seam
+        @test rest.diff ≤ 64 * eps(T) * rest.scale     # measured 3.6e−14 (0.4 ε)
+        @test asym_u ≤ 256 * eps(T) * uscale            # measured 56 ε
+        @test asym_rate ≤ 2 * asym_u / δ                 # the difference's 1/δ
+        @test mov.diff ≤ nsteps * dt * asym_rate         # measured 1.3e−10 of 9.1e−8
     end
 end

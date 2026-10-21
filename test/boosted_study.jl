@@ -31,14 +31,40 @@
 #
 #     julia test/boosted_study.jl dir=.claude/data/boosted-ks-rate \
 #         baseline=.claude/data/boosted-ks rate=4,8
+#
+# The spinning family (added 2026-10-21): a Kerr-Schild hole of spin `a` moving
+# along its spin axis `z` on the rotating quadrant (`octant=rotating_quadrant`)
+# is the same table with `prefix=s`: its rows are named `sk<N>`, `sk<N>s`,
+# `sk<N>r8`, `sk<N>s8`, `sf<N>`, `sf<N>s` and `sf<N>n`, the letters after the
+# `s` as after the `b` above, and `a=` (default `1/2` for `prefix=s`, `0` for
+# `b`) and `v=` (default `1/5`) give the expected horizon: `M_irr = √(r₊/2)`,
+# `J = a` (the CSV's `hz_J` is the component along `z` there) and the extent
+# along the motion over the extent across it, `√(1 − v²)` times the rest frame's
+# `r₊/√(r₊² + a²)` along the spin (`z/x`; `1` along `x`):
+#
+#     julia test/boosted_study.jl dir=.claude/data/spinning-ks prefix=s a=1/2
 
 using Printf
 
-const V = 1 / 5
-const CONTRACTION = sqrt(1 - V^2)       # the horizon's x/y extent when moving
-
+rat(s) = (p = split(s, '/'); length(p) == 2 ? parse(Int, p[1]) / parse(Int, p[2]) :
+                            parse(Float64, s))
 opts = Dict(String(k) => String(v)
             for (k, v) in (split(a, '='; limit=2) for a in ARGS if occursin('=', a)))
+# The family: `b`, the hole without spin moving along x, or `s`, the spinning
+# hole moving along z (added 2026-10-21).
+const PREFIX = get(opts, "prefix", "b")
+PREFIX in ("b", "s") || error("prefix is b (a = 0, along x) or s (spinning, along z), got $PREFIX")
+const V = rat(get(opts, "v", "1/5"))
+const A = rat(get(opts, "a", PREFIX == "s" ? "1/2" : "0"))
+const CONTRACTION = sqrt(1 - V^2)       # the horizon's extent along the motion
+# Kerr-Schild (`M = 1`): `r₊`, the irreducible mass, and the horizon's extent
+# along the motion over the extent across it at rest — polar over equatorial
+# along the spin axis z, and 1 for `a = 0` along x.
+const R_PLUS = 1 + sqrt(1 - A^2)
+const M_IRR = sqrt(R_PLUS / 2)
+const REST_RATIO = PREFIX == "s" ? R_PLUS / sqrt(R_PLUS^2 + A^2) : 1.0
+const AX = PREFIX == "s" ? "z" : "x"
+
 default_dir = first(filter(isdir, [joinpath(@__DIR__, "..", ".claude", "data", "boosted-ks"),
                                    joinpath(@__DIR__, "..", "..", "..", "data", "boosted-ks"),
                                    "."]))
@@ -71,9 +97,9 @@ function table(header, rows)
 end
 
 # `bk16` → (N = 16, moving, "d4"); `bk16r8`, `bk16s`, `bk16s8`, `bf24`,
-# `bf24s`, `bf24n` likewise.
+# `bf24s`, `bf24n` likewise, and `sk16` … for `prefix=s`.
 function parse_name(nm)
-    m = match(r"^b([kf])(\d+)(s?)(r?8|n)?$", nm)
+    m = match(Regex("^" * PREFIX * raw"([kf])(\d+)(s?)(r?8|n)?$"), nm)
     m === nothing && return nothing
     fam = m[1] == "f" ? (m[4] == "n" ? "fn" : "f") : (m[4] === nothing ? "d4" : "d8")
     return (N=parse(Int, m[2]), moving=isempty(m[3]), fam=fam)
@@ -186,7 +212,8 @@ function main()
     used = sort!(collect(values(chosen)); by=r -> (famrank(r.fam), !r.moving, r.N))
     Ns = sort!(unique([r.N for r in all_runs]))
 
-    println("# Boosted Kerr-Schild study\n\ndata: `$DIR`\n")
+    println(PREFIX == "b" ? "# Boosted Kerr-Schild study\n\ndata: `$DIR`\n" :
+            "# Boosted spinning Kerr-Schild study (a = $A, along z)\n\ndata: `$DIR`\n")
     println("## Runs\n")
     table(["run", "kind", "h", "t reached", "finished", "status", "wall [h]", "used"],
           [[r.label, desc(r.moving, r.fam), "1/$(r.N)",
@@ -238,13 +265,13 @@ function main()
         f, d4, d8 = pick(true, "f", N), pick(true, "d4", N), pick(true, "d8", N)
         f === nothing || (d4 === nothing && d8 === nothing) ||
             (println("### `$q`, h = 1/$N ($(labelof(f)), $(labelof(d4)), $(labelof(d8)))\n");
-             compare([("bf", f), ("bk", d4), ("bkr8", d8)], [(1, 2), (1, 3)], q))
+             compare([(PREFIX * "f", f), (PREFIX * "k", d4), (PREFIX * "kr8", d8)], [(1, 2), (1, 3)], q))
     end
     for N in Ns, q in ("err_l2", "ham_l2")
         f, fn = pick(true, "f", N), pick(true, "fn", N)
         (f === nothing || fn === nothing) && continue
         println("### `$q`, trailing ramp, h = 1/$N ($(f.label) / $(fn.label))\n")
-        compare([("bf", f), ("bfn", fn)], [(1, 2)], q)
+        compare([(PREFIX * "f", f), (PREFIX * "fn", fn)], [(1, 2)], q)
     end
 
     println("## Convergence orders\n")
@@ -282,17 +309,28 @@ function main()
     end
 
     println("## Horizon\n")
-    println("`x/y − e` is the found horizon's x/y extent against `e = √(1 − v²) = ",
-            @sprintf("%.7f", CONTRACTION), "` (moving) or 1 (rest); `x − c_x` the found ",
-            "origin against the analytic center.\n")
+    if PREFIX == "b"
+        println("`x/y − e` is the found horizon's x/y extent against `e = √(1 − v²) = ",
+                @sprintf("%.7f", CONTRACTION), "` (moving) or 1 (rest); `x − c_x` the found ",
+                "origin against the analytic center.\n")
+    else
+        println("`z/x − e` is the found horizon's z/x extent against `e = √(1 − v²) ",
+                "r₊/√(r₊² + a²) = ", @sprintf("%.7f", CONTRACTION * REST_RATIO),
+                "` (moving) or `", @sprintf("%.7f", REST_RATIO), "` (rest), at `a = $A`; ",
+                "`M_irr` against `√(r₊/2) = ", @sprintf("%.7f", M_IRR), "`, `J` (along z) ",
+                "against `a`; `z − c_z` the found origin against the analytic center.\n")
+    end
+    hdr = PREFIX == "b" ? ["t", "M_irr − 1", "J", "x/y − e", "x − c_x"] :
+          ["t", "M_irr − √(r₊/2)", "J − a", "z/x − e", "z − c_z"]
     for r in used
         haskey(r.idx, "hz_M_irr") || continue
-        e = r.moving ? CONTRACTION : 1.0
+        e = (r.moving ? CONTRACTION : 1.0) * REST_RATIO
         println("### $(r.label), $(desc(r.moving, r.fam)), h = 1/$(r.N)\n")
-        rows = [[@sprintf("%g", τ), fmts(at(r, "hz_M_irr", τ) - 1), fmts(at(r, "hz_J", τ)),
-                 fmts(at(r, "hz_ratio", τ) - e), fmts(at(r, "hz_x", τ) - at(r, "c_x", τ))]
+        rows = [[@sprintf("%g", τ), fmts(at(r, "hz_M_irr", τ) - M_IRR),
+                 fmts(at(r, "hz_J", τ) - A), fmts(at(r, "hz_ratio", τ) - e),
+                 fmts(at(r, "hz_$AX", τ) - at(r, "c_$AX", τ))]
                 for τ in TIMES if has(r, τ)]
-        table(["t", "M_irr − 1", "J", "x/y − e", "x − c_x"], rows)
+        table(hdr, rows)
     end
     println("### Drift of `M_irr`\n")
     println("Least-squares `dM_irr/dt` (per M) over each run's last half, and over ",
