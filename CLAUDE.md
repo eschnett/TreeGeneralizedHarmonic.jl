@@ -489,6 +489,21 @@ hole is then at the resting hole's level from `1/24` on and converges at order
 four, better than `8/M` without the rates (`SINGULARITY_HANDLING.md`, "The
 moving `:damped` layer's target rate").
 
+From 2026-10-21 a **spinning hole moves along its spin axis** on the rotating
+quadrant: `hole_case(; octant = :rotating_quadrant)` is `[0, L]² × [−L, L]`
+with the seam `(1, 2)` and no mirror, for a hole on the `z` axis moving along
+it and spinning about it; `kerr_schild_case(; axis = 3)` puts the hole on `z`;
+`gh_forest` takes the brick `(r, r, 2r)` (`CODE.md`, "The rotating quadrant").
+Kerr-Schild `a = 1/2` at `v = 1/5` from `z = −4` to `4`, on one H200 a run to
+`40 M` at `h = 1/24`, `1/32`, `1/40` (`1.45`, `2.8`, `6.0 h`): `:damped` at
+`4/M` with the target's rate is the resting hole's level in `ℋ` and converges
+at order four, and the horizon's `J − a` drifts linearly at the resting
+hole's rate and converges at order four — so G5's `J` drift is not the motion
+of a spinning hole as such (an elimination, not a test of G5's case).
+`:fitted` (`m = 20`, `n_L = 18`, from `1/32`) holds it but does not converge
+to `1/40` (`SINGULARITY_HANDLING.md`, "A spinning hole along its axis"; the
+moving `a = 1/2` rows of `CODE.md`'s table).
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -559,10 +574,14 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5530 assertions in 14m00** at four threads after the moving
-`:damped` layer's target rate (2026-10-20): its 16 new claims are
-`boosted_tests.jl`'s steady-state testset, `9.3 s` inside the suite. It was
-**5514 assertions in 15m49** at four threads after the moving
+The suite is **5596 assertions in 15m42** at four threads after the SimWatch
+1.3.0 change (2026-10-21, `1921d46`): its 66 new claims are the rotating
+quadrant's in `boosted_tests.jl` (`8efc5fe`: the refusals, the spinning moving
+hole's source, the quadrant against the box) and SimWatch 1.3.0's writer and
+SVG thumbnails in `simwatch_tests.jl`. It was **5530 assertions in 14m00** at
+four threads after the moving `:damped` layer's target rate (2026-10-20): its
+16 new claims are `boosted_tests.jl`'s steady-state testset, `9.3 s` inside
+the suite. It was **5514 assertions in 15m49** at four threads after the moving
 hole on the quadrant (2026-10-20; 5500 in 20m31 before the moving core, on a
 machine loaded 15–22): 142 of its 150 new claims are `boosted_tests.jl`'s,
 `14.6 s` inside the suite, most of it the quadrant-against-box run, and the
@@ -1011,6 +1030,21 @@ holds the new batch `ks3/` and links to the resting controls in `rest/`):
 
 ```bash
 julia --project=. test/boosted_study.jl dir=.claude/data/boosted-ks-rate baseline=.claude/data/boosted-ks rate=4,8
+```
+
+From 2026-10-21 `octant=rotating_quadrant` (with `a=`) moves a spinning hole
+along its spin, `z`, on the root brick `(r, r, 2r)` and a capsule along `z`;
+`x0` and `path` are along `z` there. The production `:damped` row at `1/32`
+(job 580105 in `boosted-ks-4`, about `2.8 h` on one H200), and `prefix=s`,
+which reads the spinning family's rows (`sk<N>`, `sk<N>s`, `sf<N>`, `sf<N>s`;
+`a=` sets the expected horizon, default `1/2`) and prints
+`SINGULARITY_HANDLING.md`'s "A spinning hole along its axis" from
+`.claude/data/boosted-ks/ks4` (the shell `r1.93185` is the equatorial horizon
+radius `√(r₊² + a²)`):
+
+```bash
+julia --project=. test/octant_runs.jl backend=cuda case=ks octant=rotating_quadrant a=1/2 L=64 roots=4 radii=32,16,8,4 N=32 t_end=40 chunk=1/2 cfl=1/2 amplitude=0 r_0=3/4 r_1=23/16 v=1/5 x0=-4 path=8 out=out/sk32 checkpoint=out/sk32/ck walltime=40000
+julia --project=. test/boosted_study.jl prefix=s shells=r1.93185,r3,r5 times=1,4,8,16,24,32,40
 ```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
@@ -1630,6 +1664,42 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   root brick is `(2r, r, r)` and its cells must be cubes. As with the octant,
   a refined quadrant is not the refined box's restriction; compare the two on
   uniform meshes only.
+- **The rotating quadrant needs a hole on the `z` axis, moving along it and
+  spinning about it** (2026-10-21). Its symmetry is the quarter turn about
+  `z`, and a spin or a velocity across `z` would turn with it; `hole_case`
+  refuses any other hole, including a rotated spinning one. Its root brick is
+  `(r, r, 2r)`, and `kerr_schild_case(; axis = 3)` puts the hole on `z`.
+- **A moving hole's symmetric domain is the box only to the target rate's
+  amplified roundoff** (2026-10-21). The moving layer's and core's rate is a
+  centered difference over `δ = ε^{1/3} r_0` of the analytic background, which
+  is four-fold symmetric (or mirror-symmetric) only to its own roundoff, `56 ε`
+  under a quarter turn — so the box's rate is asymmetric by about that over
+  `δ`, while the quadrant's ghosts are the exact image. The difference grows
+  linearly with the steps (`2.5·10⁻¹²` after one, `1.3·10⁻¹⁰` after sixteen in
+  `boosted_tests.jl`), and the claim bounds it by `nsteps · dt` times the
+  rate's measured asymmetry. A hole at rest takes the old branches and agrees
+  to `0.4 ε`. Bound any new symmetry test of a moving hole the same way, and do
+  not read a growing difference there as a seam bug before checking the box's
+  own asymmetry.
+- **The ring rule limits `:fitted` to `h ≤ 1/32` at `a = 1/2`** (2026-10-21).
+  The `:fitted` core surface is `m + n_L` cells below the horizon, and on the
+  equator (`√(r₊² + a²) = 1.932`) it must clear the ring `r = a`: at `m = 20`,
+  `n_L = 18` it is at `0.74` at `1/32` and `0.35 < a` at `1/24`; the rules'
+  least `16 + 18` cells would put it at `0.52`, on the ring. Spin raises the
+  coarsest spacing `:fitted` can run before it raises `:damped`'s, whose `r_0`
+  is in `M`.
+- **`hz_J` is a component on the rotating quadrant and a magnitude elsewhere**
+  (2026-10-21). `test/octant_runs.jl` writes `J n̂_z` there (`n̂` the finder's
+  spin axis) and the Korzyński `|J|` on every other domain, which cannot go
+  negative or show a flipped axis; `records.csv`'s `J` is the magnitude
+  everywhere. On the `a = 1/2` runs the two agree to the CSV's ten digits.
+  Say which one a comparison reads.
+- **`1/48` on the moving hole's capsule does not fit one H200** (2026-10-21).
+  The capsule of radii `32, 16, 8, 4` along `8 M` of travel is 856 blocks,
+  `94.7 M` points at `N = 48`; linear in the points from `1/32` and `1/40`
+  that is about `141 GB` for `:damped` and `171 GB` for `:fitted`, against
+  `144 GB`. A finer or longer run needs several GPUs (`mpi=true`) or a mesh
+  that follows the hole.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
   dissipation", — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in
