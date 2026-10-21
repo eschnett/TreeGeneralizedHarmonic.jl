@@ -2321,8 +2321,7 @@ at rest is unchanged bit for bit (`core_follows`), and the fixed run reached
 `40 M`.
 
 **Every run after the fix reached `40 M`, and every find succeeded**
-(81 a run; the resting `:fitted` run at `1/32`, `bf32s`, had reached `24 M`
-when this was written, and its rows below are partial). What a run costs on
+(81 a run). What a run costs on
 one H200 (the wall time from the CSV, `:damped` at either rate and `:fitted`
 alike to within 10 %):
 
@@ -2492,7 +2491,8 @@ outside the horizon, at `t = 4`, `16` and `40 M`:
   at `8/M`.
 - **At `1/32` `ℋ` just outside the horizon does not converge, even at rest**:
   `2.29e−6` at `1/24` and `1.94e−6` at `1/32` at rest at `16 M` (order
-  `0.6`; partial, `bf32s`), while the error there converges at `4.3–4.6`;
+  `0.6`, and `0.59` to `40 M`), while the error there converges at
+  `4.3–4.6`;
   moving, `ℋ`'s order is `−0.2–0.4` and the error's `0.95–3.1`. That is the
   fit's leak with the margin fixed in cells: `m = 16` puts the offset surface
   `0.67 M` below the horizon at `1/24` and `0.5 M` at `1/32`, while the octant's
