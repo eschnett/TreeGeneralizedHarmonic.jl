@@ -1335,13 +1335,20 @@ case.**)** The right-hand side at every point is
 
 with `F` the GH right-hand side `(EXPANDED)` including the dissipation,
 `u_exact` the background's `(h, Π)` at `(x, t)`, and two smooth
-profiles:
+profiles. **(Amended 2026-10-20:** for a moving hole the `:damped` layer
+adds the target's rate where `F` is switched off,
+
+    ∂_t u = w F(u)  +  (1 − w) ∂_t u_exact  −  ρ (u − u_exact)
+
+— the `:fitted` layer's `target_rate` (step 8) for the analytic target —
+because without it the moving solution is not a solution of `(INTERIOR)`;
+"Why touch the interior" below.**)**
 
 | region | radii | `w` | `ρ` | what happens |
 |---|---|---|---|---|
 | evolved | `r ≥ r_1` | 1 | 0 | the Einstein equations, untouched |
-| damping layer | `r_0 ≤ r < r_1` | 1, ramping to 0 at its inner edge | 0 at `r_1`, rising smoothly to `ρ_max` | the equations plus a relaxation toward the analytic solution |
-| frozen core | `r < r_0` | 0 | 0 (`ρ_max` for a moving `:damped` hole, amended 2026-10-20) | nothing: `du = 0`, `F` not evaluated; a moving `:damped` core relaxes toward `u_exact` at the core rule's point |
+| damping layer | `r_0 ≤ r < r_1` | 1, ramping to 0 at its inner edge | 0 at `r_1`, rising smoothly to `ρ_max` | the equations plus a relaxation toward the analytic solution (and, for a moving `:damped` hole, `(1 − w) ∂_t u_exact`, amended 2026-10-20) |
+| frozen core | `r < r_0` | 0 | 0 (`ρ_max` for a moving `:damped` hole, amended 2026-10-20) | nothing: `du = 0`, `F` not evaluated; a moving `:damped` core relaxes toward `u_exact` at the core rule's point, following its rate in the outer half `r > r_0/4` |
 
 The layer's outer radius sits inside the horizon with a margin: with
 `r_h,min(t)` the smallest coordinate distance from `c(t)` to the
@@ -1527,6 +1534,21 @@ The analytic solution is an **exact solution of `(INTERIOR)`** wherever
 it is regular: `F(u_exact) = ∂_t u_exact` and the relaxation term
 vanishes on it, so a static hole is an equilibrium and a boosted hole is
 an exact time-dependent solution, in the layer as much as outside.
+**(Amended 2026-10-20: not for the boosted hole.** Where `w < 1`,
+`w F(u_exact) = w ∂_t u_exact` falls short of `∂_t u_exact` by `(1 − w)
+∂_t u_exact`, and the layer trails a moving target by about `|∂_t
+u_exact|/ρ`: the boosted Kerr-Schild hole at `v = 1/5` had a layer residual
+of `6.5` at `4/M` at every `h`, and an error just outside the horizon
+`28–44×` the resting hole's at `1/16` (`SINGULARITY_HANDLING.md`, "The
+boosted Kerr-Schild hole at binary speed"). The moving `:damped` layer
+therefore carries `(1 − w) ∂_t u_exact`, and the static hole, for which it is
+zero, takes the branch without it bit for bit. `∂_t h` is `dmetric`'s time
+column from the pass the layer already makes; `∂_t Π` is a centered
+difference of that pass at `t ± δ`, `δ = ε^{1/3} r_0`
+(`background_state_rate`) — `10⁻¹⁰` of `|∂_t Π|`, and generic in the target,
+where `ddmetric` would put a second nested dual pass in every interior
+kernel. Its roundoff, `ε^{2/3}`, is what a moving hole's quadrant and box
+now agree to.**)**
 
 **Why a relaxation and not a slowed evolution alone** (decided in
 review; the pure mask `ρ = 0` was the first proposal and stays as a
@@ -1749,9 +1771,18 @@ straight line in `g` between Kerr-Schild at `±r_0 x̂` passes through
 `η + (2M/r_0) diag(1, n n)`, which is Euclidean (`g_tt = 2.2` at
 `r_0 = 5/8 M`) — the constraint monitor's `sqrt` threw there. Positive `α²`
 and positive-definite `γ` are convex, so the ADM path is a metric
-throughout, and near the target the two rates agree to first order. It carries
-no `∂_t u_exact`: `n̂` turns at `v/r`, unbounded at the center, so the core
-lags its target by `|∂_t u|/ρ_max` instead. A hole at rest keeps `du = 0`
+throughout, and near the target the two rates agree to first order. **(Amended
+2026-10-20:** in its outer half the core carries its target's rate too,
+`s(r) ∂_t u_exact(t, c(t) + r_0 n̂)` with `s` rising `C²` from 0 at `r_0/4`
+to 1 at `r_0/2` (`core_target_rate`, `core_rate_weight`), a centered
+difference along the core rule's moving point. Without it the core lags its
+target by `|∂_t u|/ρ_max`, and the points it releases on its trailing side
+carry that lag into the layer: on the suite's quadrant (`q = 2`, `h = 5/48`)
+the layer's rate alone took the residual after 32 steps from `34.6` to
+`12.3`, with the core's `3.3` against the resting hole's `2.6`. Not near the
+center: `n̂` turns at `v/r` and jumps where the center's path crosses a grid
+point; a point spends `(r_0/2)/v` in the outer half, many `1/ρ_max`, before
+it leaves.**)** A hole at rest keeps `du = 0`
 bit for bit (the kernel branches on `v` first, `core_follows`); `:frozen`
 keeps it too, being the variant that is measured to fail, and `:pasted`
 overwrites its core anyway. The tracked geometry is not changed: its

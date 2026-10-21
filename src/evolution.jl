@@ -521,18 +521,23 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                 # the layer's `u_exact` at `r_0`: the metric in the ADM
                 # variables, where the jump of `n̂` across the center's path
                 # stays a metric ([`core_relaxation_rate`](@ref)), `Π`
-                # linearly. No rate: `n̂` turns at `v/r`, unbounded at the
-                # center, so the core lags by `|∂_t u|/ρ_max`.
+                # linearly. Plus the target's rate in the core's outer half
+                # (amended 2026-10-20, [`core_target_rate`](@ref)): without
+                # it the points the core releases on its trailing side carry
+                # its lag, `|∂_t u|/ρ_max`, into the layer. Not near the
+                # center, where `n̂` turns at `v/r` and jumps on the path.
                 # (Its own names: `ρc` is the fitted core's, captured above.)
                 ρd = interior.ρ_max
-                hd, Πd, _ = background_state(layer_target(interior, bg), t,
-                                             core_position(interior, t, x))
+                tgd = layer_target(interior, bg)
+                hd, Πd, _ = background_state(tgd, t, core_position(interior, t, x))
+                ∂ₜhd, ∂ₜΠd = core_target_rate(interior, tgd, t, x,
+                                              layer_rate_step(interior))
                 hud = SVector{NC,T}(@ntuple 10 v -> work[var + (v - 1) * sv])
                 dhd = core_relaxation_rate(hud, SVector{NC,T}(hd), ρd)
                 ntuple(Val(NC)) do v
-                    du[inner..., v, b] = dhd[v]
+                    du[inner..., v, b] = ∂ₜhd[v] + dhd[v]
                     du[inner..., NC + v, b] =
-                        -ρd * (work[var + (NC + v - 1) * sv] - Πd[v])
+                        ∂ₜΠd[v] - ρd * (work[var + (NC + v - 1) * sv] - Πd[v])
                     nothing
                 end
             else
@@ -604,6 +609,31 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                                                                t, t_f))
                         nothing
                     end
+                end
+            elseif INT === :damped && core_follows(interior)
+                # The layer of a moving analytic sphere (amended 2026-10-20):
+                # the target's rate where `F` is switched off, `(1 − w) ∂_t
+                # u_exact` — the `:fitted` layer's `target_rate` — so that the
+                # moving solution is a steady state of the layer. Without it
+                # the layer trails its target by `|∂_t u_exact|/ρ_max`, a
+                # residual of `6.5` at `4/M` that no `h` reduces
+                # (`SINGULARITY_HANDLING.md`, "The boosted Kerr-Schild hole at
+                # binary speed"). `∂_t Π` is a centered difference in time
+                # ([`background_state_rate`](@ref)). A hole at rest takes the
+                # branch below, bit for bit.
+                # (Its own names: `w`, `ρ`, `he`, `Πe` are the branch below's.)
+                wm, ρm = interior_profiles(interior, g)
+                hm, Πm, ∂ₜhm, ∂ₜΠm = background_state_rate(
+                    layer_target(interior, bg), t, x, layer_rate_step(interior))
+                om = one(T) - wm
+                ntuple(Val(NC)) do v
+                    du[inner..., v, b] =
+                        wm * ∂ₜh[v] + om * ∂ₜhm[v] -
+                        ρm * (work[var + (v - 1) * sv] - hm[v])
+                    du[inner..., NC + v, b] =
+                        wm * ∂ₜΠ[v] + om * ∂ₜΠm[v] -
+                        ρm * (work[var + (NC + v - 1) * sv] - Πm[v])
+                    nothing
                 end
             else
                 w, ρ = interior_profiles(interior, g)
@@ -750,7 +780,11 @@ finite but stale data on which `F` may be `NaN` and `0 · NaN = NaN`
 core toward its cached target and — amended 2026-10-20 — the `:damped` core of
 a moving analytic sphere toward the layer's target at [`core_position`](@ref)
 ([`core_follows`](@ref)), so that it does not release stale data on its
-trailing side. Outside `r_1` the answer is `F` itself and not `1·F − 0·(…)`,
+trailing side. The layer of that sphere adds its target's rate where `F` is
+switched off, `(1 − w) ∂_t u_exact` (amended 2026-10-20,
+[`background_state_rate`](@ref)), so that the moving solution is a steady
+state of the layer, as the `:fitted` layer's `target_rate` makes it of its
+own. Outside `r_1` the answer is `F` itself and not `1·F − 0·(…)`,
 which also saves the analytic solution's dual pass at every point of the
 evolved region — `u_exact` is evaluated in the layer and nowhere else.
 """

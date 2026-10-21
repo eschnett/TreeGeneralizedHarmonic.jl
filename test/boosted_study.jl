@@ -11,7 +11,7 @@
 #
 #     julia test/boosted_study.jl [dir=<data>] [times=1,2,4,8,16,24,32,40]
 #                                 [rate=4|8|fitted|all] [runs=bk16,bf24s,…]
-#                                 [shells=r2,r3,r5]
+#                                 [shells=r2,r3,r5] [baseline=<data>]
 #
 # `dir` holds one subdirectory per batch of jobs (`ks1/`, `ks2/`), each holding
 # one directory per row, `h = 1/N`:
@@ -24,7 +24,13 @@
 # A row may be missing, queued (only `simwatch.toml`) or partial; where the
 # same row is in two batches, the one that got further is used. `runs`
 # selects rows by name (`bk16`) or by path (`ks2/bk16`); `rate=fitted` keeps
-# the two `:fitted` families.
+# the two `:fitted` families. `baseline` (added 2026-10-20) is a second data
+# directory of the same layout, read the same way, whose moving rows each
+# moving row of `dir` is compared with — how the moving `:damped` layer's target
+# rate was measured against the runs without it:
+#
+#     julia test/boosted_study.jl dir=.claude/data/boosted-ks-rate \
+#         baseline=.claude/data/boosted-ks rate=4,8
 
 using Printf
 
@@ -37,10 +43,12 @@ default_dir = first(filter(isdir, [joinpath(@__DIR__, "..", ".claude", "data", "
                                    joinpath(@__DIR__, "..", "..", "..", "data", "boosted-ks"),
                                    "."]))
 const DIR = normpath(abspath(get(opts, "dir", default_dir)))
+const BASE = haskey(opts, "baseline") ? normpath(abspath(opts["baseline"])) : nothing
 const TIMES = parse.(Float64, split(get(opts, "times", "1,2,4,8,16,24,32,40"), ','))
 # The families, in the order they are printed: `:damped` at 4/M and 8/M,
 # `:fitted` with the trailing ramp and without it.
 const FAMILIES = Dict("all" => ["d4", "d8", "f", "fn"], "4" => ["d4"], "8" => ["d8"],
+                      "4,8" => ["d4", "d8"],
                       "fitted" => ["f", "fn"])[get(opts, "rate", "all")]
 const FAMNAME = Dict("d4" => ":damped 4/M", "d8" => ":damped 8/M",
                      "f" => ":fitted", "fn" => ":fitted, no trail ramp")
@@ -78,8 +86,8 @@ simwatch_status(d) = (f = joinpath(d, "simwatch.toml");
 # One row directory: the CSV with short rows padded by `NaN`, a restart's
 # repeated times reduced to the last row of each, and the wall time summed
 # over the chain's jobs (`wall` starts again from zero with every job).
-function readrun(batch, name)
-    d = joinpath(DIR, batch, name)
+function readrun(batch, name; root=DIR)
+    d = joinpath(root, batch, name)
     info = parse_name(name)
     base = (; label="$batch/$name", name, info..., status=simwatch_status(d))
     p = joinpath(d, "octant.csv")
@@ -152,22 +160,28 @@ function compare(runs, ratios, q)
 end
 labelof(r) = r === nothing ? "—" : r.label
 
-function main()
-    isdir(DIR) || error("no data directory $DIR")
-    all_runs = [readrun(b, n) for b in sort(readdir(DIR)) if isdir(joinpath(DIR, b))
-                for n in sort(readdir(joinpath(DIR, b)))
-                if isdir(joinpath(DIR, b, n)) && parse_name(n) !== nothing]
+# Every row of a data directory, and the row of each kind that got furthest,
+# across its batches.
+function readall(root)
+    isdir(root) || error("no data directory $root")
+    all_runs = [readrun(b, n; root) for b in sort(readdir(root)) if isdir(joinpath(root, b))
+                for n in sort(readdir(joinpath(root, b)))
+                if isdir(joinpath(root, b, n)) && parse_name(n) !== nothing]
     PICK === nothing ||
         filter!(r -> r.name in PICK || r.label in PICK, all_runs)
     filter!(r -> r.fam in FAMILIES, all_runs)
     sort!(all_runs; by=r -> (famrank(r.fam), !r.moving, r.N, r.label))
-    # The row of each kind that got furthest, across batches.
     chosen = Dict{Tuple{Bool,String,Int},Any}()
     for r in all_runs
         isempty(r.t) && continue
         k = (r.moving, r.fam, r.N)
         (!haskey(chosen, k) || tlast(r) > tlast(chosen[k])) && (chosen[k] = r)
     end
+    return all_runs, chosen
+end
+
+function main()
+    all_runs, chosen = readall(DIR)
     pick(mv, fam, N) = get(chosen, (mv, fam, N), nothing)
     used = sort!(collect(values(chosen)); by=r -> (famrank(r.fam), !r.moving, r.N))
     Ns = sort!(unique([r.N for r in all_runs]))
@@ -190,6 +204,29 @@ function main()
         for q in ("err_l2", "ham_l2")
             println("### `$q`, $(FAMNAME[fam]), h = 1/$N ($(labelof(mv)) / $(labelof(rs)))\n")
             compare([("mov", mv), ("rest", rs)], [(1, 2)], q)
+        end
+    end
+
+    if BASE !== nothing
+        _, base = readall(BASE)
+        println("## Against the baseline\n")
+        println("Each moving row of `$DIR` (`new`) against the moving row of the same ",
+                "kind in `$BASE` (`base`), and the resting row of `new`'s directory ",
+                "(`rest`).\n")
+        for fam in FAMILIES, N in Ns
+            mv, bs, rs = pick(true, fam, N), get(base, (true, fam, N), nothing),
+                         pick(false, fam, N)
+            (mv === nothing || bs === nothing) && continue
+            for q in ("err_l2", "ham_l2")
+                println("### `$q`, $(FAMNAME[fam]), h = 1/$N ($(labelof(mv)) / ",
+                        "$(labelof(bs)) / $(labelof(rs)))\n")
+                compare([("new", mv), ("base", bs), ("rest", rs)], [(1, 2), (1, 3)], q)
+            end
+            println("### Layer residual, $(FAMNAME[fam]), h = 1/$N\n")
+            table(["t", "new", "base", "rest"],
+                  [[@sprintf("%g", τ), fmt(at(mv, "residual", τ)), fmt(at(bs, "residual", τ)),
+                    fmt(at(rs, "residual", τ))]
+                   for τ in vcat([0.0], TIMES) if has(mv, τ) || has(bs, τ)])
         end
     end
 

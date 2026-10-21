@@ -16,6 +16,7 @@ using TreeAMR
 using TreeGeneralizedHarmonic
 using StaticArrays: SVector, SMatrix
 using LinearAlgebra: det
+import ForwardDiff
 import SpacetimeMetrics as SM
 
 const TGHb = TreeGeneralizedHarmonic
@@ -300,23 +301,28 @@ const TGHb = TreeGeneralizedHarmonic
         gh_rhs!(du, u, p_mov, t)
         scatter!(D, du)
         pts = core_points(moving, t)
-        worst, off, spatial = zero(T), zero(T), true
+        worst, off, spatial, ratescale = zero(T), zero(T), true, zero(T)
         for (k, J, x) in pts
-            ht, Πt, _ = background_state(case.background, t,
-                                         SVector{3,T}(core_position(moving, t, x)...))
+            y = SVector{3,T}(core_position(moving, t, x)...)
+            ht, Πt, _ = background_state(case.background, t, y)
             hu = SVector{10,T}(U.work[J..., 1:10, k])
-            want = vcat(TGHb.core_relaxation_rate(hu, ht, ρ),
-                        -ρ * (SVector{10,T}(U.work[J..., 11:20, k]) - Πt))
+            relax = vcat(TGHb.core_relaxation_rate(hu, ht, ρ),
+                         -ρ * (SVector{10,T}(U.work[J..., 11:20, k]) - Πt))
             # The spatial metric's rate is `−ρ (γ − γ_t)` itself.
-            spatial &= want[5:10] == -ρ * (hu[5:10] - ht[5:10])
-            worst = max(worst, maximum(abs, D.work[J..., :, k] - want))
-            off = max(off, maximum(abs, want))
+            spatial &= relax[5:10] == -ρ * (hu[5:10] - ht[5:10])
+            # Plus the target's own rate in the core's outer half (amended
+            # 2026-10-20): the next testset's claim, here the same spelling.
+            ∂ₜt = vcat(TGHb.core_target_rate(moving, case.background, t, x,
+                                             TGHb.layer_rate_step(moving))...)
+            worst = max(worst, maximum(abs, D.work[J..., :, k] - relax - ∂ₜt))
+            off = max(off, maximum(abs, relax))
+            ratescale = max(ratescale, maximum(abs, ∂ₜt))
         end
         @info "moving :damped core: $(length(pts)) points, max|du − want| = " *
-              "$worst, max|want| = $off"
+              "$worst, max|want| = $off, max|∂ₜ target| = $ratescale"
         @test length(pts) > 50 && spatial
         @test off > 1e-2                        # the core is off its target …
-        @test worst ≤ 16 * eps(T) * off         # … and relaxes toward it
+        @test worst ≤ 16 * eps(T) * (off + ratescale)   # … and relaxes toward it
         gh_rhs!(du, u, p_rest, t)
         scatter!(D, du)
         rest_pts = core_points(resting, t)
@@ -341,6 +347,137 @@ const TGHb = TreeGeneralizedHarmonic
         @info "moving :damped core after 16 steps: max|u − u_target| = $now, " *
               "the frozen core's $stale"
         @test isfinite(now) && stale > 1e-3 && now ≤ 4 // 5 * stale
+    end
+
+    @testset "the moving analytic solution is a steady state of the moving :damped layer" begin
+        # Guards the target's rate of a moving analytic sphere (amended
+        # 2026-10-20). Without `(1 − w) ∂_t u_exact` in the layer it trails
+        # the moving solution by `|∂_t u_exact|/ρ_max`, a residual of `6.5`
+        # at `4/M` that no `h` reduces and an error just outside the horizon
+        # `28–44×` the resting hole's at `h = 1/16`
+        # (`SINGULARITY_HANDLING.md`, "The boosted Kerr-Schild hole at binary
+        # speed"); without the core's rate in its outer half the points the
+        # core releases on its trailing side carry the core's own lag into the
+        # layer. Wrong ways this goes: a rate of the wrong sign or index order
+        # (`dmetric`'s derivative axis is last), a difference step that is all
+        # roundoff, `w` in place of `1 − w`, a rate added to a hole at rest.
+        #
+        # The rates against an independent spelling: a boosted, translated
+        # stationary hole moves rigidly, `u(t, x) = f(x − v t)`, so `∂_t u =
+        # −v · ∇u`, and ForwardDiff takes that through `state_tuple`'s
+        # generic position — no difference, no second pass in time. The core
+        # rule's target `u(t, c(t) + r_0 n̂)` moves with the center and turns
+        # with `n̂`, so its rate is `∇u · (ẏ − v)` at `y`, `ẏ − v = −(r_0/r)(I
+        # − n̂ n̂) v`.
+        bg = quad.background
+        int = quad.interior
+        vv = hole_velocity(bg)
+        ∇along(t, y, e; bg=bg) = ForwardDiff.derivative(
+            s -> SVector{20}(state_tuple(bg, t, y + s * e)), zero(T))
+        δ = TGHb.layer_rate_step(int)
+        @test 0 < δ < 1e-5 * int.r_0
+        t = T(5)
+        c = center_at(quad.center, t)
+        worsth, worstΠ = zero(T), zero(T)
+        for d in (SVector{3,T}(7 // 10, 1 // 5, 1 // 10), SVector{3,T}(-6 // 5, 3 // 10, 0),
+                  SVector{3,T}(0, 13 // 10, 2 // 5), SVector{3,T}(-1, 0, 0))
+            x = c + d
+            h, Π, ∂ₜh, ∂ₜΠ = TGHb.background_state_rate(bg, t, x, δ)
+            h0, Π0, _ = background_state(bg, t, x)
+            @test h == h0 && Π == Π0
+            want = -∇along(t, x, vv)
+            worsth = max(worsth, maximum(abs, ∂ₜh - want[1:10]) / maximum(abs, want[1:10]))
+            worstΠ = max(worstΠ, maximum(abs, ∂ₜΠ - want[11:20]) / maximum(abs, want[11:20]))
+        end
+        @test worsth ≤ 1e-13 && worstΠ ≤ 1e-8           # measured 0, 6e−10
+        let r0 = int.r_0, worst = zero(T), scale = zero(T)
+            for d in (SVector{3,T}(-1 // 2, 1 // 4, 0), SVector{3,T}(1 // 5, 0, 1 // 4),
+                      SVector{3,T}(-1 // 4, 1 // 3, 1 // 10))
+                x = c + d * (r0 / sqrt(sum(abs2, d))) * T(9 // 10)
+                n = d / sqrt(sum(abs2, d))
+                r = sqrt(sum(abs2, x - c))
+                y = SVector{3,T}(core_position(int, t, x)...)
+                want = ∇along(t, y, -(r0 / r) * (vv - n * (n' * vv)))
+                @test TGHb.core_rate_weight(int, r) == 1
+                ∂ₜh, ∂ₜΠ = TGHb.core_target_rate(int, bg, t, x, δ)
+                worst = max(worst, maximum(abs, vcat(∂ₜh, ∂ₜΠ) - want))
+                scale = max(scale, maximum(abs, want))
+            end
+            @test scale > 1e-2 && worst ≤ 1e-8 * scale
+            # No rate near the center, and none without a pass.
+            @test TGHb.core_rate_weight(int, r0 / 4) == 0
+            @test all(iszero, TGHb.core_target_rate(int, bg, t, c + SVector{3,T}(0, 0, r0 / 5),
+                                                    δ)[2])
+        end
+
+        # Then one right-hand side on the exact data at `t = 1` on the previous
+        # testset's quadrant (`q = 2`, `h = 5/48`): in the layer `du = w F +
+        # (1 − w) ∂_t u_exact`, `F` from the same mesh with no hole, and so
+        # `du − ∂_t u_exact = w (F − ∂_t u_exact)`, truncation error, where it
+        # was `(1 − w) ∂_t u_exact` before; and the run: the layer's residual
+        # after 32 RK4 steps at `4/M` is within a factor two of the resting
+        # hole's, where it was `13×` it (measured 2026-10-20: `3.33` against
+        # `2.61`; without the rates `18.2`, `27.3` and `34.6` at 8, 16 and 32
+        # steps against `1.09`, `1.74` and `2.61`, and with the layer's rate
+        # but not the core's `12.3` at 32).
+        q = 2
+        G = q ÷ 2 + 1
+        ops = Operators(prolongation=q + 2, restriction=q + 2)
+        ρ = T(4)
+        hk = (; halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=T(11 // 10), chunk=T(1 // 10),
+              x0=-1 // 4, gauge_source=:algebraic, octant=:quadrant)
+        mov = kerr_schild_case(T; hk..., v=v)
+        function setup(case, t)
+            f = gh_forest(T, case; N=12, roots=(4, 2, 2))
+            U = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
+                            parity=state_parity(f))
+            fill_exact!(U, case, t)
+            u = statevector(U)
+            gather!(u, U)
+            return f, U, u
+        end
+        f, U, u = setup(mov, one(T))
+        mint = with_ρ_max(mov.interior, ρ)
+        sched = GhostSchedule(U, ops)
+        du, dF = similar(u), similar(u)
+        gh_rhs!(du, u, GHProblem(U, sched, mov; q=q, interior=mint), one(T))
+        gh_rhs!(dF, u, GHProblem(U, sched, mov; q=q, interior=nothing), one(T))
+        D = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3), parity=state_parity(f))
+        DF = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3), parity=state_parity(f))
+        scatter!(D, du)
+        scatter!(DF, dF)
+        c1 = center_at(mint.center, one(T))
+        ident, scale, steady, lag, npts = zero(T), zero(T), zero(T), zero(T), 0
+        for k in 1:nleaves(f), I in CartesianIndices(interiorview(U, k, 1))
+            J = Tuple(I) .+ U.G
+            x = SVector{3,T}(coordinates(U, k, J)...)
+            r = sqrt(sum(abs2, x - c1))
+            mint.r_0 ≤ r < mint.r_1 || continue
+            w, _ = TGHb.interior_profiles(mint, r)
+            ∂ₜe = -∇along(one(T), x, vv; bg=mov.background)
+            ident = max(ident, maximum(abs, D.work[J..., :, k] -
+                                            (w * DF.work[J..., :, k] + (1 - w) * ∂ₜe)))
+            scale = max(scale, maximum(abs, ∂ₜe), maximum(abs, DF.work[J..., :, k]))
+            steady = max(steady, maximum(abs, D.work[J..., :, k] - ∂ₜe))
+            lag = max(lag, maximum(abs, (1 - w) * ∂ₜe))
+            npts += 1
+        end
+        @info "moving :damped layer: $npts points, max|du − (w F + (1 − w) ∂ₜu)| = " *
+              "$ident of $scale; max|du − ∂ₜu| = $steady, without the rate $lag"
+        @test npts > 1000
+        @test ident ≤ 1e-7 * scale                      # measured 4.7e−9
+        @test steady ≤ lag / 8                          # measured 0.081
+        dt = T(5 // 48) / 8
+        res = map((mov, kerr_schild_case(T; hk...))) do case
+            _, U0, u0 = setup(case, zero(T))
+            p = GHProblem(U0, GhostSchedule(U0, ops), case; q=q,
+                          interior=with_ρ_max(case.interior, ρ))
+            u1 = gh_solve(p, u0, (zero(T), 32 * dt); dt=dt)
+            gh_error!(p, u1, 32 * dt)
+            error_norms(p).residual
+        end
+        @info "layer residual after 32 steps at 4/M: moving $(res[1]), at rest $(res[2])"
+        @test isfinite(res[1]) && res[1] ≤ 2 * res[2]
     end
 
     @testset "the moving hole on the quadrant is the hole in the box, to roundoff" begin
@@ -411,6 +548,11 @@ const TGHb = TreeGeneralizedHarmonic
               "max|u(t) − u(0)| = $(o.change)"
         @test npts > 27_000
         @test o.change > 1e-6                   # the state moved
-        @test diff ≤ 64 * eps(T) * scale
+        # Roundoff of the target's rate, not of the arithmetic (amended
+        # 2026-10-20): the moving layer's `∂_t Π` is a centered difference in
+        # time, whose roundoff `ε |Π|/δ ≈ ε^{2/3} |Π|` differs between a point
+        # and its mirror image, and the quadrant's ghosts are the mirror image.
+        # `64 eps` before the rate; measured `3.8e−11` (`0.01 ε^{2/3}`) with it.
+        @test diff ≤ eps(T)^(2 // 3) * scale
     end
 end

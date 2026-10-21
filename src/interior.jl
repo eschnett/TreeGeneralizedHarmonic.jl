@@ -12,7 +12,9 @@
 #
 #   * `r ≥ r_1`      — evolved, `w = 1`, `ρ = 0`: the equations, untouched;
 #   * `r_0 ≤ r < r_1` — the layer, `w` ramping to 0 at its inner edge and
-#                       `ρ` rising from 0 at `r_1` to `ρ_max`;
+#                       `ρ` rising from 0 at `r_1` to `ρ_max` (a moving
+#                       `:damped` hole's adds `(1 − w) ∂_t u_exact`,
+#                       amended 2026-10-20);
 #   * `r < r_0`      — the frozen core, `du = 0` and `F` **not evaluated**
 #                       (a moving `:damped` hole's core relaxes toward the
 #                       analytic solution at `core_position` instead —
@@ -380,6 +382,10 @@ died when the points that were at the center at `t = 0` left the core, at
 target at [`core_position`](@ref) — the metric in the ADM variables
 ([`core_relaxation_rate`](@ref)), `Π` linearly — and asks this *before* it
 evaluates that target, so a hole at rest is bit for bit the run it was.
+
+The same predicate gives the *layer* of such a sphere its target's rate,
+`(1 − w) ∂_t u_exact` (amended 2026-10-20, [`background_state_rate`](@ref)):
+without it the layer trails the moving solution by `|∂_t u_exact|/ρ_max`.
 """
 @inline core_follows(::Any) = false
 
@@ -444,6 +450,32 @@ end
     v = int.center.v
     return !(iszero(v[1]) & iszero(v[2]) & iszero(v[3]))
 end
+
+"""
+    layer_rate_step(int::Interior) -> δ
+
+The time step of the centered difference that gives a moving `:damped`
+layer its target's rate `∂_t Π` ([`background_state_rate`](@ref), added
+2026-10-20): `δ = ε^{1/3} r_0`, the step that balances the difference's
+truncation against its roundoff, on the time a hole needs to move by a
+fraction of its core radius — the shortest time on which the target at a
+point of the layer changes, `r/|v| ≥ r_0` for every speed below light.
+`2⁻¹⁷ r_0`-ish at `Float64`, `5·10⁻³ r_0` at `Float32`.
+"""
+@inline layer_rate_step(int::Interior{T}) where {T} = cbrt(eps(T)) * int.r_0
+
+"""
+    core_rate_weight(int::Interior, r) -> s ∈ [0, 1]
+
+Where a moving `:damped` core follows its target's rate
+([`core_target_rate`](@ref), added 2026-10-20): `0` for `r ≤ r_0/4`, rising
+`C²` to `1` at `r_0/2` and beyond — the outer half of the core, through which
+every point the core releases into the layer passes last, and away from the
+center, where the core rule's target turns at `|v|/r` and jumps on the
+center's path.
+"""
+@inline core_rate_weight(int::Interior{T}, r) where {T} =
+    smoothstep(4 * r / int.r_0 - one(T))
 
 """
     interior_profiles(int::Interior, r) -> (w, ρ)

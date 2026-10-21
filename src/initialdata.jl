@@ -1142,6 +1142,14 @@ all. It is also a kernel argument's body: [`state_callback`](@ref) and
 `fill_by_coordinates!` and the boundary hook.
 """
 @inline function background_state(bg, t, x)
+    h, Π, ∂h, _ = _background_state(bg, t, x)
+    return h, Π, ∂h
+end
+
+# The one dual pass, returning `∂_t h` beside the state: `dg[:, :, 1]`, which
+# `background_state` reads for `Π` and drops (the rate of a moving layer's
+# target, [`background_state_rate`](@ref), keeps it).
+@inline function _background_state(bg, t, x)
     D = typeof(x[1])
     p = SVector{4,D}(D(t), x[1], x[2], x[3])
     g, dg = dmetric(bg, p)
@@ -1152,7 +1160,72 @@ all. It is also a kernel argument's body: [`state_callback`](@ref) and
     end
     _, _, α, β, _, sqrtγ = metric_quantities(_sym4(h))
     Π = (sqrtγ / α) * (∂ₜg - β[1] * ∂h[1] - β[2] * ∂h[2] - β[3] * ∂h[3])
-    return h, Π, ∂h
+    return h, Π, ∂h, ∂ₜg
+end
+
+"""
+    background_state_rate(background, t, x, δ) -> (h, Π, ∂ₜh, ∂ₜΠ)
+
+The analytic state at `(t, x)` and its rate at fixed `x`: what the `:damped`
+layer of a moving hole relaxes toward and how fast that target moves (added
+2026-10-20; `CODE.md`, "The interior").
+
+`h`, `Π` and `∂ₜh = ∂_t g_ab` are [`background_state`](@ref)'s one dual pass —
+`dmetric`'s `dg[:, :, 1]`, its derivative axis last, packed as the rest of the
+state is. `∂ₜΠ` needs the metric's second derivatives, which no pass here
+makes; it is the **centered difference** of `Π` at `t ± δ`, two more passes,
+
+    ∂ₜΠ ≈ (Π(t + δ) − Π(t − δ)) / (2δ) ,
+
+divided by the difference of the two times as rounded, not by `2δ`. Why a
+difference and not SpacetimeMetrics' `ddmetric` or `−v · ∇Π`: `ddmetric` is a
+second nested dual pass in every interior kernel (the ADM monitor's, `18 s` to
+compile and register-heavy on a device) plus the chain rule of `√γ/α` in
+time, and `−v · ∇Π` needs the same second derivatives and holds only for a
+background that translates rigidly. The difference holds for any target —
+step 8c's targets included — and costs two passes in the layer only. With
+`δ = ε^{1/3} r_0` ([`layer_rate_step`](@ref)) its truncation is
+`O(δ² |∂³_t Π|)` and its roundoff `O(ε |Π|/δ)`, about `10⁻¹¹ |Π|` at `Float64`
+near a hole — ten orders below the lag `|∂_t u|/ρ_max` the rate removes.
+"""
+@inline function background_state_rate(bg, t, x, δ)
+    h, Π, _, ∂ₜh = _background_state(bg, t, x)
+    tp = t + δ
+    tm = t - δ
+    _, Πp, _, _ = _background_state(bg, tp, x)
+    _, Πm, _, _ = _background_state(bg, tm, x)
+    ∂ₜΠ = (Πp - Πm) / (tp - tm)
+    return h, Π, ∂ₜh, ∂ₜΠ
+end
+
+"""
+    core_target_rate(interior, background, t, x, δ) -> (∂ₜh, ∂ₜΠ)
+
+The rate of a moving `:damped` core's target at the core point `x` (added
+2026-10-20): the time derivative of the analytic state at the core rule's
+point, `t ↦ u_exact(t, c(t) + r_0 n̂(t))` with `n̂ = (x − c(t))/|x − c(t)|`
+([`core_position`](@ref)), by the centered difference of
+[`background_state_rate`](@ref) at `t ± δ` — the target moves with `c(t)` and
+turns with `n̂`, so its rate is neither `∂_t u_exact` nor zero.
+
+Scaled by [`core_rate_weight`](@ref), and zero without a pass where that is
+zero: `n̂` turns at `|v|/r`, so the rate grows as `r_0/r` toward the center
+and jumps where the center's path crosses a grid point, where no difference is
+a rate. The points that matter are those about to leave the core on its
+trailing side: they spend `(r_0/2)/|v|` in the outer half, many relaxation
+times `1/ρ_max`, so what they carry out of the core is the target there.
+"""
+@inline function core_target_rate(int, bg, t, x, δ)
+    T = typeof(δ)
+    s = core_rate_weight(int, interior_radius(int, t, x))
+    z = zero(SVector{10,T})
+    iszero(s) && return z, z
+    tp = t + δ
+    tm = t - δ
+    hp, Πp, _, _ = _background_state(bg, tp, core_position(int, tp, x))
+    hm, Πm, _, _ = _background_state(bg, tm, core_position(int, tm, x))
+    f = s / (tp - tm)
+    return f * (hp - hm), f * (Πp - Πm)
 end
 
 """
