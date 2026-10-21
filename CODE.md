@@ -4019,7 +4019,15 @@ and GPUs across nodes.
   so the horizon's numbers are not recomputed; `test/octant_runs.jl` writes
   everything its CSV carries — constraints overall, by level, in shells and
   at the boundary, the error, the horizon, the track, the fit and the step —
-  and `finished`, `stopped` or `failed` at the end.
+  and `finished`, `stopped` or `failed` at the end. **(Amended 2026-10-21,
+  for SimWatch 1.3.0:** the writer has the reference writer's `group`,
+  `progress.fraction`, `slurm` keys and the chain's `previous_job_ids`, read
+  from the status file an earlier job left; the thumbnails
+  (`test/simwatch_plots.jl`) are SVG written by hand on a transparent
+  background with `currentColor` axes, which SimWatch draws with its own font
+  and adapts to a light or dark terminal as its user configures, instead of
+  dark-on-light PNGs; and `bench/simwatch.sh` is the batch jobs' copy of its
+  shell helper.**)**
 
 ## Checkpoint and restart
 

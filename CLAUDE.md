@@ -370,7 +370,8 @@ lifts the refusal of a moving Kerr-Schild hole; `hole_case(; gauge_source =
 fourth argument gets the chunk's record row, and `src/simwatch.jl` writes
 SimWatch status files (`SimWatchWriter`; https://github.com/eschnett/simwatch;
 from 2026-10-19 with a `summary` and the `[history]` window SimWatch draws as
-sparklines, `simwatch_history!` refilling it after a restart).
+sparklines, `simwatch_history!` refilling it after a restart; from 2026-10-21
+at SimWatch 1.3.0, with `group`, `fraction` and a chain's `previous_job_ids`).
 **`FittedSpec(; fit_cont = 2)`** fits curvatures too (the state sampler's
 `order = 2` differences the interpolated gradient: TreeAMR 0.1.4 has no
 second-derivative interpolation; TreeAMR's `main` has it, unreleased).
@@ -954,14 +955,26 @@ affinity mask and aborts with `Too many threads requested for
 JULIA_EXCLUSIVE option` — the environment, not the code. The `symmetry-hpc`
 skill has the rest of the cluster's mechanics.
 
+**SimWatch in a batch job** (2026-10-21): `bench/simwatch.sh` is a verbatim
+copy of SimWatch 1.3.0's `writers/simwatch.sh` (`simwatch_queued` after
+`sbatch`, `simwatch_mark DIR failed "…"` on a non-zero exit; neither changed
+since SimWatch 1.0.0). A new sbatch script sources the copy inside its own
+rsynced directory, `. "$R/bench/simwatch.sh"` with `R` that directory — not
+`spin-a06/out/simwatch.sh` or `ks-study2/out/simwatch.sh`, the older copies
+the running studies' scripts name and source again at their exit, which stay
+as they are.
+
 The octant runs (added 2026-10-02) are `test/octant_runs.jl`, one run per
 call, `key=value` options listed in its header — the case (`case=minkowski`
 or `ks`, `interior=damped|fitted`, margins, `fit_cont`; from 2026-10-04
 `octant=reflecting|rotating` and the spin `a=`, which needs `rotating`), the mesh (`L`, `N`,
 `roots`, `radii`), the run (`t_end`, `cfl`, `chunk`), noise, `backend=cuda`,
 `out=<dir>` (CSV, `records.csv`, `simwatch.toml` — from 2026-10-19 with
-sparklines of the constraints, the error and the horizon, and two PNG
-thumbnails in `out/plots/` drawn by `test/simwatch_plots.jl`, plain Julia) and
+sparklines of the constraints, the error and the horizon, and thumbnails in
+`out/plots/` drawn by `test/simwatch_plots.jl`, plain Julia: from 2026-10-21
+SVG on a transparent background with `currentColor` axes, which SimWatch 1.3.0
+shows as it is or flips for a dark terminal by its user's `image_theme`, in
+place of the dark-on-light PNGs; `group=` names the SimWatch group) and
 `checkpoint=<dir>`.
 On Symmetry they ran one H200 each from a copy with `CUDA` added to its
 `Project.toml` (`ks-octant`, `ks-study2`); `cfl = 1/2` is as accurate as

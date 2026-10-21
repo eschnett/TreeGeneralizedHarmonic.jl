@@ -136,6 +136,7 @@
 #                                   (CODE.md, "Running distributed")
 #   out=<dir>                       where `octant.csv` and the log go
 #   name=<label>                    the run's name in SimWatch (default: out's name)
+#   group=<label>                   its SimWatch group, e.g. a study's (2026-10-21)
 #   checkpoint=<dir> walltime=<s>   a chain of jobs (as hole_runs.jl's rows)
 #   checkpoint_every=8 keep=2       chunks between checkpoints, and how many to keep
 #                                   (keep them all to difference two runs later)
@@ -146,7 +147,9 @@
 # every chunk, with `finished`, `stopped` or `failed` at the end.
 # From 2026-10-19 it also carries a summary, the last 100 chunks of the
 # constraints, the error and the horizon as `[history]` (SimWatch draws them as
-# sparklines), and two thumbnails in `out/plots/` (`test/simwatch_plots.jl`).
+# sparklines), and two thumbnails in `out/plots/` (`test/simwatch_plots.jl`;
+# SVG from 2026-10-21, on a transparent background that SimWatch 1.3.0 adapts
+# to its user's terminal).
 #
 # A run that stops at `walltime` exits with status 3, so a job script can
 # resubmit; the same command continues it from the newest checkpoint, and
@@ -507,13 +510,19 @@ history_csv = vcat(["constraints.ham_l2" => "ham_l2", "constraints.mom_l2" => "m
                                "shells.$eq_shell.lead.err_l2" => "err_l2_lead_$eq_shell"] :
                               Pair{String,String}[])
 sw = SimWatchWriter(outdir; name=opt("name", basename(outdir)),
-                    code="TreeGeneralizedHarmonic", comm=comm,
+                    code="TreeGeneralizedHarmonic", group=opt("group", nothing),
+                    comm=comm,
+                    # FORMAT.md allows at most 6: a moving hole's extent ratio
+                    # takes ℳ's place.
                     summary=hole ? [(key="shells.$eq_shell.ham_l2", label="ℋ@horizon"),
                                     (key="constraints.ham_l2", label="ℋ"),
-                                    (key="constraints.mom_l2", label="ℳ"),
+                                    (split_on ? [] :
+                                     [(key="constraints.mom_l2", label="ℳ")])...,
                                     (key="error.l2", label="err"), "horizon.M_irr",
                                     "horizon.J",
-                                    (split_on ? [(key="horizon.ratio", label="x/y")] : [])...] :
+                                    (split_on ? [(key="horizon.ratio",
+                                                  label=rquadrant ? "z/x" : "x/y")] :
+                                     [])...] :
                             [(key="constraints.ham_l2", label="ℋ"),
                              (key="constraints.mom_l2", label="ℳ"),
                              (key="constraints.gauge_l2", label="C")])
@@ -573,20 +582,20 @@ function draw_images()
     colours = join(("$(SW_PALETTE_NAMES[mod1(i, length(SW_PALETTE))]) $nm"
                     for (i, nm) in enumerate(shell_names)), ", ")
     specs = hole ?
-            [("ham.png", "ℋ by shell", ["ham_l2_$nm" for nm in shell_names],
-              "Point-weighted L2 of ℋ against t/M, log10: $colours."),
-             ("err.png", "error by shell", ["err_l2_$nm" for nm in shell_names],
-              "Point-weighted L2 of the error against Kerr-Schild, log10: $colours."),
+            [("ham.svg", "ℋ by shell", ["ham_l2_$nm" for nm in shell_names],
+              "Point-weighted L2 of ℋ against t/M, log scale: $colours."),
+             ("err.svg", "error by shell", ["err_l2_$nm" for nm in shell_names],
+              "Point-weighted L2 of the error against Kerr-Schild, log scale: $colours."),
              # The two halves of the shell just outside the horizon (2026-10-20).
-             (split_on ? [("split.png", "trailing and leading",
+             (split_on ? [("split.svg", "trailing and leading",
                            ["err_l2_trail_$eq_shell", "err_l2_lead_$eq_shell",
                             "ham_l2_trail_$eq_shell", "ham_l2_lead_$eq_shell"],
                            "Point-weighted L2 in the shell $eq_shell about c(t), " *
-                           "log10: orange the error on the trailing half, blue on " *
+                           "log scale: orange the error on the trailing half, blue on " *
                            "the leading half, green ℋ trailing, purple ℋ leading.")] :
                          [])...] :
-            [("constraints.png", "constraints", ["ham_l2", "mom_l2", "gauge_l2"],
-              "Point-weighted L2 against t, log10: orange ℋ, blue ℳ, green C_a.")]
+            [("constraints.svg", "constraints", ["ham_l2", "mom_l2", "gauge_l2"],
+              "Point-weighted L2 against t, log scale: orange ℋ, blue ℳ, green C_a.")]
     images = Dict{String,Any}[]
     for (file, title, cols, desc) in specs
         ok = try
