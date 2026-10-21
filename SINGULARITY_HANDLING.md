@@ -15,6 +15,7 @@ here; links have been pointed at the right file.
 - [Step 8a: what crosses the horizon from inside it](#step-8a-what-crosses-the-horizon-from-inside-it)
 - [Steps 8b–8′: the generic interior and the moving hole](#steps-8b8-the-generic-interior-and-the-moving-hole)
 - [Single holes on the octant, `a = 0` to `9/10` (2026-10-02 to 2026-10-07)](#single-holes-on-the-octant-a--0-to-910-2026-10-02-to-2026-10-07)
+- [The boosted Kerr-Schild hole at binary speed (2026-10-20)](#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -2243,6 +2244,305 @@ equatorial radius `1.695`):
   halved levels' `2⁴`. The error at a given radius is set by the mesh
   outside it as the run goes on; for the interior's question the mesh can be
   thin outside, for the exterior's accuracy it cannot.
+
+## The boosted Kerr-Schild hole at binary speed (2026-10-20)
+
+This is `CODE.md`'s proposal of 2026-10-02 — once the algebraic source
+exists, run a boosted Kerr-Schild hole across the mesh with the analytic
+layer — made at the speed of one member of a binary a few orbits before
+merger, with the static hole's settings from the octant above. It is the first boosted Kerr-Schild
+hole this package has evolved: step 8's moving holes were all in the boosted
+harmonic chart (`v = 0.3`, `q = 2`, on CPUs, `13 M` at most).
+
+**The speed, `v = 1/5`.** An equal-mass binary of two `M = 1` holes
+(`M_tot = 2`) at a separation of `d = 8–10 M_tot` is `3.6–6.3` orbits before
+merger by the quadrupole formula. The Newtonian speed of each hole is
+`½√(M_tot/d) = 0.158–0.177`, and quasi-circular puncture data at `D = 10` and
+`8 M_tot` have `p/M_tot ≈ 0.095` and `0.109`, that is `v ≈ 0.19–0.21`. `1/5`
+is exact in `Rational`. The contraction is `√(1 − v²) = 0.97980`, so the
+horizon's coordinate extent along the boost is `1.960`.
+
+**The setup** (commit `1b8a4ea`, `test/octant_runs.jl`):
+
+- Kerr-Schild `a = 0`, translated and boosted, `kerr_schild_case(; v = 1/5,
+  x0 = −4)` — the hole at `(−4 + t/5, 0, 0)` — with the algebraic source at
+  the hole's velocity (`gauge_source = :algebraic`).
+- The quadrant `[−64, 64] × [0, 64]²` (`octant = :quadrant`: mirrors at
+  `y = 0` and `z = 0`, Dirichlet at the other four faces), root brick
+  `(8, 4, 4)`.
+- A frozen capsule mesh, `hole_forest(; shape = :cube, path = (8, 0, 0))`:
+  cubes of radius `32, 16, 8, 4` swept along the segment `x ∈ [−4, 4]`, 856
+  blocks. `N = 16, 24, 32` give `h = 1/16, 1/24, 1/32` at the hole and
+  `3.51`, `11.83` and `28.05 M` points. The hole never leaves its finest
+  level, and nothing regrids.
+- `q = 4`, `cfl = 1/2` (`56`, `84` and `112` steps per `M`: the step is set by
+  the hole's fastest speed, `1.75`), `ε_KO = 1/2`, the Gaussian `γ0` about
+  `c(t)`, chunk `M/2`, the finder every chunk (`N_ah = 12`), no noise. From
+  `t = 0` to `40 M`, `x = −4` to `x = +4`: two horizon diameters.
+- **The control** is the same hole at rest at `x = −4` on the same mesh.
+- **`:damped`**: `r_0 = 5/8`, `r_1 = 23/16`, fixed in `M`. The octant's
+  `r_1 = 3/2` is only `7.4` cells inside the *contracted* horizon at `1/16`;
+  `23/16` is `8.4`, with a ramp of `13` cells (`19.5` and `26` at `1/24` and
+  `1/32`). `ρ_max = 4/M` (the default) or `8/M`.
+- **`:fitted`**: the octant's setup, `m = 16`, `n_L = 20`, `fit_cont = 2`,
+  `lmax_fit = 8`, with `trail_ramp = 9/10` (`bf24`, `bf32`) or without it
+  (`bf24n`).
+- One H200 a run on Symmetry, from a copy with `CUDA` added: `boosted-ks` (the
+  first moving run, job 579652, and the resting controls at `4/M`,
+  579656–579657) and `boosted-ks-2` (everything after the fix below,
+  579664–579698). The CSVs, logs and SimWatch files are in
+  `.claude/data/boosted-ks/{ks1,ks2}`, and `julia --project=.
+  test/boosted_study.jl times=1,4,8,16,24,32,40` prints every table below
+  from them.
+
+The norms are point-weighted L2 in shells about the hole's *current* center
+`c(t)` — `[2, 2.25)`, `[3, 5)` and `[5, 8)` — and in the evolved band inside
+the horizon, each also split into the trailing half (`(x − c(t)) · v̂ < 0`) and
+the leading one. "Error" is the distance from the boosted analytic solution,
+`ℋ` the Hamiltonian constraint, and "global" the whole evolved region.
+
+**The first moving run died, and why (measured 2026-10-20**, job 579652**)**.
+`:damped` at `4/M`, `h = 1/16`. The layer residual grew about linearly —
+`6.3`, `10.9`, `14.8`, `19.1`, `30.0`, `37.8` at `t = 1/2, 1, …, 3`, against
+`0.12` at rest — and the trailing half carried `16×` the leading half's error
+in the band inside the horizon and `21×` in `[2, 2.25)` at `3 M`. At `3.2 M` a
+`DomainError` in a kernel on the GPU ended it. The analytic core had `du = 0`.
+It kept the solution about `c(0)` and released it into the layer on its
+trailing side, off the current solution by an amount that grew with the
+distance travelled, and the run died when the points that were at the center
+at `t = 0` left the core, at `r_0/v = 3.1 M`. That is step 8's `:frozen`
+failure, met by `:damped`. **The fix** (commit `ae3e7e8`; `CODE.md`, the
+frozen core's paragraph under "The interior"): a moving `:damped` core relaxes
+at `ρ_max` toward the layer's target at the core rule's point, the metric in
+the ADM variables (`core_relaxation_rate`) and `Π` linearly. Relaxing `g_ab`
+linearly ended the run in its first chunk: the straight path between the
+targets on the two sides of the sphere `r_0` crosses a Euclidean metric. A hole
+at rest is unchanged bit for bit (`core_follows`), and the fixed run reached
+`40 M`.
+
+**Every run after the fix reached `40 M`, and every find succeeded**
+(81 a run; the resting `:fitted` run at `1/32`, `bf32s`, had reached `24 M`
+when this was written, and its rows below are partial). What a run costs on
+one H200 (the wall time from the CSV, `:damped` at either rate and `:fitted`
+alike to within 10 %):
+
+| `h` | points | GPU memory | steps per `M` | `s/M` | `40 M` |
+|---|---|---|---|---|---|
+| `1/16` | `3.51 M` | `21 GB` | `56` | `34` | `0.37–0.41 h` |
+| `1/24` | `11.83 M` | `33 GB` (`:fitted` `37`) | `84` | `125` | `1.34–1.44 h` |
+| `1/32` | `28.05 M` | `54 GB` (`:fitted` `64`) | `112` | `234–250` | `2.63–2.81 h` |
+
+That is `175`, `126` and `75 ns` per point and step, `2–4×` what the
+`a = 9/10` family above costs per point at a similar size; where the
+difference goes (the finder every `M/2`, the smaller mesh) was not measured.
+
+**`:damped` at `8/M` puts the moving hole at the resting hole's level
+(measured 2026-10-20).** Moving over resting, at `ρ_max = 8/M`:
+
+| `h` | `t` | error `[2, 2.25)` | `[3, 5)` | `[5, 8)` | `ℋ` `[2, 2.25)` | `[3, 5)` | `[5, 8)` |
+|---|---|---|---|---|---|---|---|
+| `1/16` | `4 M` | `2.76` | `1.24` | `1.23` | `4.66` | `1.02` | `0.98` |
+| `1/16` | `16 M` | `2.21` | `1.45` | `1.31` | `5.65` | `1.05` | `0.95` |
+| `1/16` | `40 M` | `3.18` | `3.38` | `2.79` | `5.65` | `1.05` | `1.05` |
+| `1/24` | `4 M` | `1.83` | `1.22` | `1.24` | `3.34` | `0.96` | `0.99` |
+| `1/24` | `16 M` | `1.35` | `1.36` | `1.32` | `3.22` | `1.02` | `0.86` |
+| `1/24` | `40 M` | `2.74` | `3.15` | `2.58` | `3.52` | `1.07` | `1.05` |
+| `1/32` | `4 M` | `1.27` | `1.22` | `1.24` | `1.19` | `0.96` | `0.99` |
+| `1/32` | `16 M` | `1.32` | `1.34` | `1.32` | `1.12` | `1.00` | `0.82` |
+| `1/32` | `40 M` | `2.84` | `3.35` | `2.70` | `1.14` | `1.09` | `1.08` |
+
+The convergence orders, `1/16 → 1/24` and `1/24 → 1/32`, at `8/M`:
+
+| | `t` | error `[2, 2.25)` | `[3, 5)` | `[5, 8)` | `ℋ` `[2, 2.25)` | `[3, 5)` | `[5, 8)` |
+|---|---|---|---|---|---|---|---|
+| moving | `4 M` | `5.06`, `5.31` | `4.05`, `4.03` | `3.98`, `3.99` | `4.99`, `7.60` | `4.16`, `4.01` | `3.98`, `3.97` |
+| moving | `16 M` | `5.29`, `4.12` | `4.20`, `4.10` | `4.03`, `4.03` | `5.44`, `7.69` | `4.09`, `4.09` | `4.26`, `4.17` |
+| moving | `40 M` | `4.43`, `3.92` | `4.22`, `3.81` | `4.24`, `3.87` | `5.23`, `7.93` | `3.99`, `3.93` | `4.02`, `3.90` |
+| at rest | `4 M` | `4.05`, `4.05` | `4.02`, `4.02` | `3.99`, `3.99` | `4.17`, `4.01` | `4.02`, `4.01` | `4.00`, `3.99` |
+| at rest | `16 M` | `4.07`, `4.05` | `4.05`, `4.03` | `4.05`, `4.03` | `4.06`, `4.02` | `4.03`, `4.01` | `4.01`, `4.01` |
+| at rest | `40 M` | `4.07`, `4.04` | `4.04`, `4.03` | `4.05`, `4.03` | `4.06`, `4.02` | `4.03`, `4.01` | `4.02`, `4.01` |
+
+- **At `1/32` the moving hole is the resting one**: the error `1.13–1.34×`
+  the resting hole's in every shell to `16 M`, `ℋ` `0.82–1.19×` at every time
+  to `40 M`.
+- **The constraints converge at order four, and faster just outside the
+  horizon.** From `[3, 5)` out, error and `ℋ` alike, the orders are `3.8–4.3`
+  at every time (one exception, `ℋ` in `[3, 5)` at `8 M` from `1/16`, `4.9`).
+  In `[2, 2.25)` `ℋ` goes at `5.0–5.6`, then `7.5–7.9`: the moving hole's
+  excess there is a layer term that falls much faster than the bulk,
+  `4.7–5.8×` the resting hole's `ℋ` at `1/16`, `3.1–3.5×` at `1/24`,
+  `1.1–1.2×` at `1/32`. So `1/16` is adequate at `8/M` for anything but `ℋ`
+  just outside the horizon, and `1/24`, `1/32` is a convergence pair.
+- **The error's ratio outside `r = 3` is the same at every `h`**: `1.22–1.24`
+  at `4 M` (`1.13–1.17` at `1 M`), `1.31–1.45` at `16 M`, `2.6–3.4` at
+  `40 M`. A ratio that does not depend on `h`, in a norm that converges at
+  order four, is the moving solution's own truncation error, not a layer term
+  — a contracted hole has more structure on the grid. Its growth late in the
+  run is the hole's position (below), and `ℋ`, which does not see a position,
+  stays flat.
+- **`8/M` costs a hole at rest nothing**: from `1/24` on the resting runs at
+  `4/M` and `8/M` agree to about 1 % in every shell, and at `1/16` `8/M`
+  lowers `ℋ` just outside the horizon `1.6–1.8×`. `ρ_max dt = 0.14` at
+  `1/16`, far from RK4's bound.
+
+**At `4/M` the analytic layer lags its moving target (measured 2026-10-20).**
+Moving over resting just outside the horizon, `[2, 2.25)`, at `t = 4`, `16`
+and `40 M`:
+
+| `h` | error, `4/M` | error, `8/M` | `ℋ`, `4/M` | `ℋ`, `8/M` |
+|---|---|---|---|---|
+| `1/16` | `36.9`, `34.2`, `28.4` | `2.76`, `2.21`, `3.18` | `35.1`, `32.6`, `36.7` | `4.66`, `5.65`, `5.65` |
+| `1/24` | `12.5`, `14.0`, `11.7` | `1.83`, `1.35`, `2.74` | `30.1`, `30.7`, `34.9` | `3.34`, `3.22`, `3.52` |
+| `1/32` | `2.62`, `3.67`, `4.10` | `1.27`, `1.32`, `2.84` | `8.43`, `7.57`, `8.83` | `1.19`, `1.12`, `1.14` |
+
+The layer residual, the layer's distance from the analytic solution it relaxes
+to, from `1 M` to `40 M`:
+
+| | `1/16` | `1/24` | `1/32` |
+|---|---|---|---|
+| moving, `4/M` | `6.3–6.6` | `6.4–6.6` | `6.5–6.6` |
+| moving, `8/M` | `3.8–4.0` | `3.8–4.0` | `3.9–4.0` |
+| at rest, `4/M` | `0.121` | `0.067` | `0.040` |
+| at rest, `8/M` | `0.065` | `0.035` | `0.020` |
+
+- **The excess at `4/M` is large at `1/16` and superconvergent.** Just
+  outside the horizon the error is `28–44×` the resting hole's at `1/16`,
+  `11.7–18.5×` at `1/24` and `2.6–4.6×` at `1/32` (orders `6.3–6.7`, then
+  `7.7–9.5`); `ℋ` is `30–37×`, `29–35×` and `7.5–10×` (orders `5.3–5.7`, then
+  `8.4–9.0`). It spreads outward with the start-up pulse — `ℋ` in `[3, 5)` is
+  `17×` the resting hole's at `8 M` at `1/16` — and over the evolved region
+  the error is `46–56×` the resting hole's at `1/16` and `1/32` and `91–107×`
+  at `1/24`.
+- **The moving residual does not depend on `h`, and falls with `ρ_max`**:
+  `6.5` at `4/M` and `3.9` at `8/M` at all three spacings, where the resting
+  hole's falls with `h` (orders `1.5` and `1.8`) and is `50–200×` smaller. A
+  residual set by the rate and not by the grid is the lag of a relaxation
+  behind a moving target, `|∂_t u_exact|/ρ_max`: the analytic layer has no
+  `∂_t u_exact` term (the `:fitted` layer's `target_rate` is that term), so at
+  `v = 1/5` it trails the solution by an amount of order one. Doubling the
+  rate takes it down `1.7×`, not the `2×` a pure lag would. What leaks from it
+  through a ramp whose cell count grows as `1/h` (`13`, `19.5`, `26`) is what
+  falls faster than any power above.
+
+**Trailing against leading (measured 2026-10-20).** The ratio of the trailing
+half's norm to the leading half's, from `4 M` to `40 M` (at `1 M` every moving
+run has `1.7–2.6` in every shell outside the horizon, whatever its layer: the
+start-up transient of a moving hole, not the layer):
+
+| row | band inside the horizon, error | `ℋ` | `[2, 2.25)`, error | `ℋ` |
+|---|---|---|---|---|
+| `:damped` `4/M`, `1/16` | `22–26` | `10–11` | `6.2–35` | `16–22` |
+| `:damped` `4/M`, `1/24` | `84–91` | `31–34` | `12–30` | `31–47` |
+| `:damped` `4/M`, `1/32` | `34–77` | `48–50` | `1.5–7.3` | `9.8–13` |
+| `:damped` `8/M`, `1/16` | `2.8–3.2` | `1.45–1.49` | `1.45–3.6` | `3.1–4.1` |
+| `:damped` `8/M`, `1/24` | `5.2–8.1` | `3.7–3.8` | `1.07–2.8` | `4.1–4.8` |
+| `:damped` `8/M`, `1/32` | `1.7–3.5` | `3.3–3.4` | `0.98–1.78` | `1.15–1.30` |
+| `:fitted`, `1/24` | `38–73` | `48–54` | `5.2–23` | `34–57` |
+| `:fitted`, `1/32` | `40–57` | `36–40` | `2.8–57` | `54–84` |
+| `:fitted` without the ramp, `1/24` | `81–89` | `31–33` | `5.7–15` | `19–43` |
+
+At `8/M` and `1/32` the two sides just outside the horizon are equal in the
+error by `32 M` (within `1.8×` before) and within `1.3×` in `ℋ`; the band
+inside the horizon, which holds the points the layer released last, keeps
+`1.7–3.5×` in the error and `3.3×` in `ℋ`. At `4/M` the trailing side is the whole excess, `10–90×` inside the
+horizon at every `h`.
+
+**The horizon is the contracted Schwarzschild horizon, and its center drifts
+at order four (measured 2026-10-20).** At `40 M`, `:damped` at `8/M`, moving
+against resting (`x/y` is the found horizon's extent along the boost over its
+extent across it; `c_x` is the analytic center):
+
+| `h` | `M_irr − 1` | `J` | `x/y − √(1 − v²)` | `x − c_x` | `dM_irr/dt`, `[20, 40] M` |
+|---|---|---|---|---|---|
+| `1/16` | `2.21e−6` / `2.40e−6` | `1.98e−9` / `1.11e−9` | `−4.6e−7` | `2.52e−5` / `2.06e−6` | `1.51e−8` / `2.16e−8` |
+| `1/24` | `4.15e−7` / `4.80e−7` | `2.65e−10` / `1.49e−10` | `−6.1e−8` | `4.74e−6` / `4.33e−7` | `2.74e−9` / `4.13e−9` |
+| `1/32` | `1.33e−7` / `1.46e−7` | `6.33e−11` / `3.55e−11` | `−2.8e−8` | `1.60e−6` / `1.41e−7` | `5.37e−10` / `1.28e−9` |
+
+- **`M_irr`, `J` and the contraction are Schwarzschild's to the finder's
+  accuracy.** `M_irr − 1` is the resting hole's within 15 %, `J` is constant
+  in time, at rest as moving, and converges at order five: it is the finder's
+  on the initial data, not the evolution's. The
+  extent ratio is `0.97980` to `3·10⁻⁸` at `1/32`. The mass drift converges
+  at order `4.2`, then `5.7` (at rest `4.1`, `4.1`). At `4/M` its sign changes
+  with `h` (`−1.1e−7`, `+1.2e−8`, `−1.2e−10`) and it has no order.
+- **The found center runs ahead of `c(t)` by truncation error.**
+  `x − c_x` at `40 M` falls at order `4.1`, then `3.8`, and grows faster than
+  linearly in time (at `1/32`: `1.5e−7`, `4.6e−7`, `9.5e−7`, `1.6e−6` at `16`,
+  `24`, `32`, `40 M`); at rest the hole drifts too, `11×` less. A hole
+  displaced by `1.6e−6` differs from the analytic one by about that times
+  `∂_r g ≈ 0.45` at `r = 2.1`, `7e−7`, the same order as the moving error's
+  late excess there (`1.25e−6`). That is why the error against the analytic
+  solution grows from `16 M` on in every shell and at every `h` while `ℋ`
+  stays flat: the moving hole is a good solution in a slightly wrong place.
+
+**`:fitted` holds the moving hole, at `:damped`'s `4/M` level and not its
+`8/M` one (measured 2026-10-20).** The moving `:fitted` run over the moving `:damped` runs, just
+outside the horizon, at `t = 4`, `16` and `40 M`:
+
+| `h` | error, over `4/M` | error, over `8/M` | `ℋ`, over `4/M` | `ℋ`, over `8/M` |
+|---|---|---|---|---|
+| `1/24` | `1.19`, `0.87`, `0.99` | `8.1`, `9.0`, `4.2` | `1.64`, `1.36`, `1.35` | `14.7`, `13.1`, `13.5` |
+| `1/32` | `13.8`, `4.9`, `4.0` | `28.4`, `13.7`, `5.8` | `16.4`, `18.7`, `15.6` | `116`, `126`, `120` |
+
+- **At `1/24` it is `:damped` at `4/M` in the error just outside the horizon**
+  (`0.87–0.99×` from `8 M` on) with `1.35–1.64×` its `ℋ`, and `4–15×` worse
+  than `8/M`. Over the evolved region its error is `17–22×` `8/M`'s and `ℋ`
+  `36–41×`. Its layer residual against the truth is `3.1–3.4` moving and
+  `1.94` at rest (`2.7–3.3` and `1.51` at `1/32`), against `:damped`'s `3.9`
+  at `8/M`.
+- **At `1/32` `ℋ` just outside the horizon does not converge, even at rest**:
+  `2.29e−6` at `1/24` and `1.94e−6` at `1/32` at rest at `16 M` (order
+  `0.6`; partial, `bf32s`), while the error there converges at `4.3–4.6`;
+  moving, `ℋ`'s order is `−0.2–0.4` and the error's `0.95–3.1`. That is the
+  fit's leak with the margin fixed in cells: `m = 16` puts the offset surface
+  `0.67 M` below the horizon at `1/24` and `0.5 M` at `1/32`, while the octant's
+  `:fitted` converged faster than fourth order at a fixed physical depth,
+  where its layer gains cells. The resting `1/24` run reproduces the octant's
+  setup row (`ℋ` `2.30e−6` against `2.3·10⁻⁶` at `24 M`, the error `2.08e−6`
+  against `1.8·10⁻⁶`).
+- **The trailing ramp does not help here.** With `trail_ramp = 9/10` the
+  error just outside the horizon is `1.5–2.4×` the run without it and `ℋ`
+  there `1.05–3.0×`; over the evolved region the error is `0.72–0.91×` and `ℋ`
+  `1.5–1.7×`. Inside the horizon it halves the trailing side's excess (`37–40`
+  against `81–88` from `8 M` on) and lowers its residual (`3.1–3.4` against
+  `3.9–5.0`), and what it pastes harder there reaches the horizon. Step 8′'s
+  lever was measured on the harmonic chart at `q = 2`, `5/128`–`5/256`; at
+  `v = 1/5`, `q = 4` and `1/24` it is not one.
+
+**What it says.** A non-spinning hole at binary speed runs on the analytic
+layer at the resting hole's level, provided the layer relaxes at `8/M`, its
+core follows the target, and `r_1` is measured against the contracted
+horizon. The analytic layer at the default `4/M` lags a moving target by an
+amount the grid does not reduce, and the evolved region pays for it — the
+error just outside the horizon `28–44×` the resting hole's at `1/16`, still
+`2.6–4.6×` at `1/32`. What is left at `8/M` is the hole's
+position, which drifts by truncation error at order four, and a layer term in
+`ℋ` just outside the horizon that converges at order `7.5–7.9`. `:fitted`, the
+variant a binary needs, holds the moving hole stably for `40 M` but is
+`:damped` at `4/M` at best, and its `ℋ` just outside does not converge at a
+margin fixed in cells.
+
+**What is open** (2026-10-20):
+
+- **A target rate for `:damped`.** Adding `(1 − w) ∂_t u_exact` in the layer —
+  the analytic counterpart of the `:fitted` layer's `target_rate` — should
+  remove the lag at `4/M`; whether `8/M` is then still better is the
+  measurement.
+- **`:fitted`'s leak at a margin fixed in cells.** A convergence pair at a
+  fixed physical margin (`m = 16` at `1/24`, `21`–`22` at `1/32`), and the
+  margin screen of the octant (`m = 16–20`) for a moving hole.
+- **The trailing ramp** helped step 8′'s harmonic `v = 0.3` hole and hurts
+  here; which of chart, order, resolution or speed decides is unmeasured.
+- **Circular orbits.** A straight line at constant speed is the easy case:
+  an orbit adds an acceleration (`v²/(d/2) ≈ 0.003–0.004/M` at
+  `d = 10 M_tot`), a rotating direction of motion, and of the quadrant's two
+  mirrors only `z = 0`.
+- **The indicator's mesh instead of a capsule.** The capsule costs the whole
+  path at the finest level; a run that regrids around the moving hole is step
+  8's machinery and has not been run in Kerr-Schild.
+- **A moving `a = 9/10` hole.** At rest it needs `1/96`; moving, a spin
+  along `z` keeps only the mirror `z = 0`, so it runs on a half-box, twice
+  the quadrant's points at the spacing the resting hole already needs.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 

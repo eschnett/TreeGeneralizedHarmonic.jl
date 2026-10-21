@@ -464,6 +464,24 @@ collective. `evolve!` grew `checkpoint_io`. MPI is a test dependency only;
 `test/mpi_workload.jl` under `mpiexec -n 3` is the claim (`CODE.md`,
 "Running distributed"), and `test/octant_runs.jl mpi=true` the multi-GPU run.
 
+From 2026-10-20 a hole **moves on a quadrant**: a boosted Kerr-Schild hole
+at `a = 0` and `v = 1/5`, the speed of a binary member a few orbits before
+merger, the first boosted Kerr-Schild hole the package has evolved.
+`hole_case(; octant = :quadrant)` is `[−L, L] × [0, L]²` with mirrors at
+`y = 0` and `z = 0`, for a hole on the `x` axis moving along it without spin;
+`gh_forest` takes a root brick `(2r, r, r)`; `hole_forest(; path)` sweeps the
+shells along the hole's path (the frozen capsule); `kerr_schild_case(; v, x0)`
+and `gauge_source = :algebraic` build the moving hole with its source; and a
+moving `:damped` core relaxes toward its target in ADM variables
+(`core_follows`, `core_relaxation_rate`), where it had `du = 0` and died at
+`r_0/v`. `test/boosted_tests.jl` is its file. On one H200 a run to `40 M`
+took `0.4`, `1.4` and `2.7 h` at `h = 1/16`, `1/24`, `1/32`: with `ρ_max =
+8/M` the moving hole is at the resting hole's level and converges at order
+four, the default `4/M` lags the moving target, and `:fitted` holds it at
+`4/M`'s level and not `8/M`'s (`SINGULARITY_HANDLING.md`, "The boosted
+Kerr-Schild hole at binary speed"; the settings in `CODE.md`'s table). This
+says nothing about G5's chart, which is still open.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -534,7 +552,12 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5364 assertions in 16m35** at four threads after the MPI port
+The suite is **5514 assertions in 15m49** at four threads after the moving
+hole on the quadrant (2026-10-20; 5500 in 20m31 before the moving core, on a
+machine loaded 15–22): 142 of its 150 new claims are `boosted_tests.jl`'s,
+`14.6 s` inside the suite, most of it the quadrant-against-box run, and the
+other 8 the SimWatch history's. It was **5364
+assertions in 16m35** at four threads after the MPI port
 (2026-10-19; HEAD before it, on TreeAMR 0.2.3 from a clean checkout, was 5101
 in 14m55): its 263 new claims are `mpi_tests.jl`'s comparison of the
 workload's lines at one, two and three ranks with the serial run's, whose
@@ -939,6 +962,23 @@ On Symmetry they ran one H200 each from a copy with `CUDA` added to its
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=fitted L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/smoke
 julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
 julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=1/2 L=8 N=16 roots=1 radii=4,2,1 r_0=3/4 r_1=5/4 t_end=1/2 chunk=1/4 out=out/spin
+```
+
+From 2026-10-20 the same script runs a hole moving along `x` on the quadrant
+(`octant=quadrant v= x0= path=`; `variant=` and `trail_ramp=` for a tracked
+layer, `rho=` for the rate), and `test/boosted_study.jl` reads a directory of
+such runs (`dir=`, default `.claude/data/boosted-ks`, one subdirectory per
+batch) and prints the Markdown tables of `SINGULARITY_HANDLING.md`'s "The
+boosted Kerr-Schild hole at binary speed" — moving against resting, the
+orders, trailing against leading, the horizon, the layer residual. The first
+line is a local smoke run; the second is the production `:damped` row at
+`1/32` (on Symmetry, from a copy with `CUDA` added, one H200, about
+`2.7 h`):
+
+```bash
+julia --project=. --threads=4 test/octant_runs.jl case=ks octant=quadrant v=1/5 x0=-1 L=8 N=16 roots=1 radii=4,3,2 r_0=5/8 r_1=23/16 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/quad
+julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=32 t_end=40 chunk=1/2 cfl=1/2 amplitude=0 r_0=5/8 r_1=23/16 v=1/5 x0=-4 path=8 rho=8 out=out/bk32r8 checkpoint=out/bk32r8/ck walltime=40000
+julia --project=. test/boosted_study.jl times=1,4,8,16,24,32,40
 ```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
@@ -1519,6 +1559,39 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   a huge `g_tt` on Apple silicon, `NaN` on the x86 CI runners — is the
   platform's, not the physics'. `interior_tests.jl` asks for
   `g_tt = −1 + 2γ²M/δ` at a transverse offset `δ` instead.
+- **A moving `:damped` core relaxes in ADM variables, never linearly in `g`**
+  (2026-10-20). With `du = 0` the core keeps the solution about `c(0)` and
+  releases it on its trailing side; the moving Kerr-Schild hole died at
+  `r_0/v = 3.1 M`. So it relaxes toward `u_exact` at the core rule's point
+  (`core_follows`), `(α², β, γ)` through `core_relaxation_rate` and `Π`
+  linearly. The straight line in `g_ab` between the targets on the two sides
+  of the sphere `r_0` passes through a Euclidean metric (`g_tt = 2.2` at
+  `r_0 = 5/8`), and that version ended in its first chunk. A hole at rest
+  keeps `du = 0` bit for bit.
+- **A tracked `:damped` core is still frozen** (2026-10-20): `core_follows`
+  is false for a `FittedInterior`, so `variant = :damped` on the tracked
+  geometry — the screen before a new `:fitted` depth — dies at
+  `r_core/v` on a moving hole, as step 8's `:frozen` did. Screen a moving
+  depth for less than that, or with `:fitted`.
+- **The analytic `:damped` layer lags a moving target, so give it `8/M`**
+  (measured 2026-10-20). It has no `∂_t u_exact` term, and its residual on
+  the moving hole is `|∂_t u|/ρ`-sized and independent of `h` (`6.5` at
+  `4/M`, `3.9` at `8/M`, against `0.04–0.12` at rest); at `4/M` the error just
+  outside the horizon is `28–44×` the resting hole's at `1/16`. `8/M` puts the
+  moving hole at the resting one's level, and changes a resting hole by
+  about 1 % from `1/24` on (at `1/16` it lowers `ℋ` just outside `1.6–1.8×`).
+- **Check `r_1` against the contracted horizon** (2026-10-20). A hole moving
+  at `v` has its horizon at `2√(1 − v²)` along the boost (`1.960` at `1/5`),
+  and `check_interior_radii` measures the margin from that
+  (`horizon_min_radius`), so the octant's `r_1 = 3/2`, `7.4` cells inside it
+  at `1/16`, is refused at `m = 8`; `23/16` is `8.4` cells inside. Choose the
+  radii for the contracted horizon before submitting a run.
+- **The quadrant needs a hole on the `x` axis, moving along it, with
+  `a = 0`** (2026-10-20). It mirrors `y = 0` and `z = 0`, and `hole_case`
+  refuses any other hole — a spin along `z` keeps only the `z` mirror. Its
+  root brick is `(2r, r, r)` and its cells must be cubes. As with the octant,
+  a refined quadrant is not the refined box's restriction; compare the two on
+  uniform meshes only.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
   dissipation", — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in
