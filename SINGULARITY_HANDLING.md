@@ -16,6 +16,7 @@ here; links have been pointed at the right file.
 - [Steps 8b–8′: the generic interior and the moving hole](#steps-8b8-the-generic-interior-and-the-moving-hole)
 - [Single holes on the octant, `a = 0` to `9/10` (2026-10-02 to 2026-10-07)](#single-holes-on-the-octant-a--0-to-910-2026-10-02-to-2026-10-07)
 - [The boosted Kerr-Schild hole at binary speed (2026-10-20)](#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)
+- [The moving `:damped` layer's target rate (2026-10-21)](#the-moving-damped-layers-target-rate-2026-10-21)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -2527,7 +2528,9 @@ margin fixed in cells.
 - **A target rate for `:damped`.** Adding `(1 − w) ∂_t u_exact` in the layer —
   the analytic counterpart of the `:fitted` layer's `target_rate` — should
   remove the lag at `4/M`; whether `8/M` is then still better is the
-  measurement.
+  measurement. **(Done 2026-10-21:** it does, with the core's rate besides,
+  and `8/M` is then no better for a moving hole than for a resting one —
+  [the next section](#the-moving-damped-layers-target-rate-2026-10-21).**)**
 - **`:fitted`'s leak at a margin fixed in cells.** A convergence pair at a
   fixed physical margin (`m = 16` at `1/24`, `21`–`22` at `1/32`), and the
   margin screen of the octant (`m = 16–20`) for a moving hole.
@@ -2543,6 +2546,116 @@ margin fixed in cells.
 - **A moving `a = 9/10` hole.** At rest it needs `1/96`; moving, a spin
   along `z` keeps only the mirror `z = 0`, so it runs on a half-box, twice
   the quadrant's points at the spacing the resting hole already needs.
+
+## The moving `:damped` layer's target rate (2026-10-21)
+
+The previous section's first open question. At `4/M` the analytic layer trailed
+the moving hole by `|∂_t u_exact|/ρ_max`, because `(INTERIOR)` is `w F(u) −
+ρ (u − u_exact)` and `w F(u_exact)` falls short of `∂_t u_exact` by `(1 − w)
+∂_t u_exact` wherever `w < 1` (`CODE.md`, "Why touch the interior"). Commit
+`ae19a4a` adds that term to the layer of a moving `:damped` sphere and, as it
+turned out, the corresponding term to its core.
+
+**What was built** (`CODE.md`, "The interior", amended 2026-10-20):
+
+- **The layer**: `∂_t u = w F(u) + (1 − w) ∂_t u_exact − ρ (u − u_exact)`.
+  `∂_t h` is `dmetric`'s time column from the pass the layer already makes;
+  `∂_t Π` is the centered difference of that pass at `t ± δ`, `δ = ε^{1/3} r_0`
+  (`background_state_rate`). It agrees with ForwardDiff's `−v · ∇u` to
+  `2–6·10⁻¹⁰` of `|∂_t Π|`. A difference rather than `ddmetric` (a second
+  nested dual pass compiled into every `:damped` kernel, the resting hole's
+  included) or `−v · ∇u` (the same second derivatives, for a rigidly
+  translating target only).
+- **The core**: in its outer half, `s(r) ∂_t u_exact(t, c(t) + r_0 n̂)` beside
+  the ADM relaxation, `s` rising `C²` from 0 at `r_0/4` to 1 at `r_0/2`
+  (`core_target_rate`, `core_rate_weight`). The layer's rate alone was not
+  enough: on the suite's quadrant (`q = 2`, `h = 5/48`, `4/M`) the layer's
+  residual after 8, 16 and 32 RK4 steps was `18.2`, `27.3`, `34.6` without
+  either rate, `1.31`, `2.36`, `12.3` with the layer's, and `3.33` at 32 with
+  both, against the resting hole's `1.09`, `1.74`, `2.61`. The jump at 32 steps
+  sat at `r = r_0` on the trailing-oblique side, where the core releases its
+  points, and the core itself was `10–92` off its target there: the core lags
+  its own moving target by `|∂_t u|/ρ_max`.
+- A hole at rest takes the old branches and is unchanged bit for bit (its
+  resting runs above are the controls here). The moving quadrant agrees with
+  the moving box to `3.8·10⁻¹¹` instead of roundoff: the difference's roundoff,
+  `ε^{2/3} |Π|`, is not the same at a point and at its mirror image.
+
+**On the CPU first** (`L = 8`, `N = 16`, radii `4, 3, 2`, `h = 1/16`, `4/M`,
+the hole from `x = −1` to `−1/5`, `.claude/data/boosted-ks-rate-cpu`): to `4 M`
+the layer residual was `0.12–0.21` against `6.3–6.6` without the rates and
+`0.121` at rest; the masked error at `4 M` was `6.7·10⁻⁵` against
+`1.58·10⁻³` and `3.8·10⁻⁵`; just outside the horizon the moving hole was
+`1.12×` the resting one in the error and `1.07×` in `ℋ`, where it had been
+`5.3×` and `7.0×`.
+
+**The H200 family** (`boosted-ks-3`, jobs 579817–579821, the previous
+section's setup and resting controls, `.claude/data/boosted-ks-rate`; `julia
+test/boosted_study.jl dir=.claude/data/boosted-ks-rate
+baseline=.claude/data/boosted-ks rate=4,8` prints the tables, `baseline=`
+added for this). Every run reached `40 M` and every find succeeded; a run cost
+what it did without the rate (`0.38`, `1.34`, `2.63 h`). Moving over resting
+just outside the horizon, `[2, 2.25)`, at `t = 4`, `16` and `40 M`:
+
+| `h` | error, `4/M`, with | without | `ℋ`, `4/M`, with | without | error, `8/M`, with | `ℋ`, `8/M`, with |
+|---|---|---|---|---|---|---|
+| `1/16` | `2.09`, `1.47`, `2.79` | `36.9`, `34.2`, `28.4` | `1.62`, `1.36`, `1.41` | `35.1`, `32.6`, `36.7` | `1.35`, `1.32`, `2.85` | `1.03`, `1.08`, `1.09` |
+| `1/24` | `1.26`, `1.35`, `2.86` | `12.5`, `14.0`, `11.7` | `1.03`, `1.02`, `1.03` | `30.1`, `30.7`, `34.9` | `1.27`, `1.36`, `2.86` | `0.995`, `1.00`, `1.01` |
+| `1/32` | `1.27`, `1.36`, `2.86` | `2.62`, `3.67`, `4.10` | `0.996`, `1.01`, `1.01` | `8.43`, `7.57`, `8.83` | — | — |
+
+(`8/M` against the resting hole at `8/M`.) The layer residual from `1 M` to
+`40 M`:
+
+| | `1/16` | `1/24` | `1/32` |
+|---|---|---|---|
+| moving, `4/M`, with the rates | `0.12–0.21` | `0.12–0.15` | `0.091–0.12` |
+| moving, `4/M`, without | `6.3–6.6` | `6.4–6.6` | `6.5–6.6` |
+| moving, `8/M`, with the rates | `0.080–0.16` | `0.11–0.13` | — |
+| at rest, `4/M` | `0.121` | `0.067` | `0.040` |
+
+- **The lag is gone.** `ℋ` just outside the horizon is the resting hole's to
+  `1–3 %` from `1/24` on, at every time to `40 M`, where it was `30–35×` at
+  `1/24` and `7.5–8.8×` at `1/32`; over the evolved region `ℋ` is `1.11–1.13×`
+  the resting hole's at `1/24` and `1.00–1.01×` at `1/32`, where it was
+  `182–187×` and `123–124×`. The residual is `1–3×` the resting hole's and falls,
+  slowly, with `h`.
+- **The moving hole converges at order four at `4/M`**: from `1/24` to `1/32`
+  the error is `4.0–4.1` in every shell and `4.1–4.3` over the evolved
+  region, `ℋ` `4.0–4.1` in the shells and `4.55` over the evolved region, at
+  `4`, `16` and `40 M`. Without the rate the excess just outside the horizon
+  went at `6–9`, which was the layer term falling away.
+- **`1/16` keeps a layer term at `4/M`**: `ℋ` just outside `1.36–1.62×` the
+  resting hole's, the evolved region's `ℋ` `1.41–1.49×`, the trailing half of
+  the shell `2.5–2.9×` the leading one (`0.94–1.03` from `1/24` on); from
+  `1/16` to `1/24` `ℋ` there goes at `6.2–6.4`.
+- **`8/M` now buys a moving hole nothing a resting one does not get.** At
+  `1/24` `8/M` and `4/M` agree to `3 %` in `ℋ` just outside the horizon and to
+  `1 %` in the error; at `1/16` `8/M` is lower (`7.6·10⁻⁶` against `1.75·10⁻⁵`
+  in `ℋ` there at `16 M`), as it is at rest (`7.0·10⁻⁶` against
+  `1.29·10⁻⁵`), so against its own resting hole it is `1.03–1.09×`.
+- **`4/M` with the rates beats `8/M` without them**, the previous section's
+  recommendation, everywhere: `ℋ` just outside the horizon `0.43–0.55×` at
+  `1/16`, `0.30–0.34×` at `1/24`, `0.84–0.90×` at `1/32`; over the evolved
+  region `0.27–0.36×`, `0.078–0.079×` and `0.154–0.158×`; the error just
+  outside `0.62–1.04×`.
+- **The late error is still the hole's position.** Every row's error grows
+  from `16 M` on in every shell, to `2.6–3.4×` the resting hole's at `40 M` at
+  every `h` and either rate, and `ℋ` does not; the found center at `40 M` is
+  `x − c_x = 1.61·10⁻⁶` at `1/32` (`1.60·10⁻⁶` without the rate). `M_irr`, `J`
+  and the contraction are the previous section's to its digits.
+- **The two sides of the layer are equal**: the band inside the horizon has a
+  trailing-to-leading error ratio of `1.0–2.0` at `1/24` and `1/32` (`34–91`
+  without the rate), `3.1–4.2` at `1/16`.
+
+**What it says.** A non-spinning hole at binary speed runs on the analytic
+layer at the default `4/M` at the resting hole's level from `1/24` on, and
+converges at order four; the rate is what was missing, and `ρ_max` goes back to
+being a choice that does not depend on the motion. `CODE.md`'s moving
+`:damped` row now reads `4/M`. What it leaves open is the previous section's
+list without its first item, and one new question: whether `:fitted`'s
+`target_rate`, which is on by default, has the same trouble in its core —
+its core relaxes toward the cached target with the cache's slope, which is
+the target's rate, so it should not.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 

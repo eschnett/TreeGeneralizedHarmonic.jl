@@ -480,7 +480,13 @@ took `0.4`, `1.4` and `2.7 h` at `h = 1/16`, `1/24`, `1/32`: with `ρ_max =
 four, the default `4/M` lags the moving target, and `:fitted` holds it at
 `4/M`'s level and not `8/M`'s (`SINGULARITY_HANDLING.md`, "The boosted
 Kerr-Schild hole at binary speed"; the settings in `CODE.md`'s table). This
-says nothing about G5's chart, which is still open.
+says nothing about G5's chart, which is still open. From 2026-10-21 the moving
+`:damped` layer adds its target's rate, `(1 − w) ∂_t u_exact`
+(`background_state_rate`, a centered difference in time for `∂_t Π`), and its
+core's outer half its own (`core_target_rate`): at the default `4/M` the moving
+hole is then at the resting hole's level from `1/24` on and converges at order
+four, better than `8/M` without the rates (`SINGULARITY_HANDLING.md`, "The
+moving `:damped` layer's target rate").
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -552,7 +558,10 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5514 assertions in 15m49** at four threads after the moving
+The suite is **5530 assertions in 14m00** at four threads after the moving
+`:damped` layer's target rate (2026-10-20): its 16 new claims are
+`boosted_tests.jl`'s steady-state testset, `9.3 s` inside the suite. It was
+**5514 assertions in 15m49** at four threads after the moving
 hole on the quadrant (2026-10-20; 5500 in 20m31 before the moving core, on a
 machine loaded 15–22): 142 of its 150 new claims are `boosted_tests.jl`'s,
 `14.6 s` inside the suite, most of it the quadrant-against-box run, and the
@@ -977,8 +986,18 @@ line is a local smoke run; the second is the production `:damped` row at
 
 ```bash
 julia --project=. --threads=4 test/octant_runs.jl case=ks octant=quadrant v=1/5 x0=-1 L=8 N=16 roots=1 radii=4,3,2 r_0=5/8 r_1=23/16 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/quad
-julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=32 t_end=40 chunk=1/2 cfl=1/2 amplitude=0 r_0=5/8 r_1=23/16 v=1/5 x0=-4 path=8 rho=8 out=out/bk32r8 checkpoint=out/bk32r8/ck walltime=40000
+julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=32 t_end=40 chunk=1/2 cfl=1/2 amplitude=0 r_0=5/8 r_1=23/16 v=1/5 x0=-4 path=8 out=out/bk32 checkpoint=out/bk32/ck walltime=40000
 julia --project=. test/boosted_study.jl times=1,4,8,16,24,32,40
+```
+
+From 2026-10-21 the production row is the default `4/M` (the moving layer's
+target rate; `rho=8` is no longer needed), and `baseline=<dir>` compares each
+moving row of `dir` with the same kind's row in another data directory — how
+the rate was measured against the runs without it (`.claude/data/boosted-ks-rate`
+holds the new batch `ks3/` and links to the resting controls in `rest/`):
+
+```bash
+julia --project=. test/boosted_study.jl dir=.claude/data/boosted-ks-rate baseline=.claude/data/boosted-ks rate=4,8
 ```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
@@ -1573,13 +1592,19 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   geometry — the screen before a new `:fitted` depth — dies at
   `r_core/v` on a moving hole, as step 8's `:frozen` did. Screen a moving
   depth for less than that, or with `:fitted`.
-- **The analytic `:damped` layer lags a moving target, so give it `8/M`**
-  (measured 2026-10-20). It has no `∂_t u_exact` term, and its residual on
-  the moving hole is `|∂_t u|/ρ`-sized and independent of `h` (`6.5` at
-  `4/M`, `3.9` at `8/M`, against `0.04–0.12` at rest); at `4/M` the error just
-  outside the horizon is `28–44×` the resting hole's at `1/16`. `8/M` puts the
-  moving hole at the resting one's level, and changes a resting hole by
-  about 1 % from `1/24` on (at `1/16` it lowers `ℋ` just outside `1.6–1.8×`).
+- **A relaxation toward a moving target needs the target's rate** (measured
+  2026-10-20, built 2026-10-21). Without `(1 − w) ∂_t u_exact` the analytic
+  layer trailed the moving hole by `|∂_t u|/ρ_max` — a residual of `6.5` at
+  `4/M` that no `h` reduced, the error just outside the horizon `28–44×` the
+  resting hole's at `1/16` — and the core, relaxing without a rate, released
+  its own lag into the layer on its trailing side. Both carry their rate now,
+  behind `core_follows`; `4/M` is the moving hole's setting again. Anything
+  else that relaxes toward something that moves — a new variant, a new
+  target — needs the same term in every region it relaxes in, the core
+  included. The rate is a centered difference (`δ = ε^{1/3} r_0`), so a moving
+  hole's quadrant and box agree to `ε^{2/3}`, not to roundoff:
+  `boosted_tests.jl` says so, and so must any new mirror test of a moving
+  hole.
 - **Check `r_1` against the contracted horizon** (2026-10-20). A hole moving
   at `v` has its horizon at `2√(1 − v²)` along the boost (`1.960` at `1/5`),
   and `check_interior_radii` measures the margin from that

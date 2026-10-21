@@ -4669,7 +4669,12 @@ refinement level, short times.
   at binary
   speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)).
   It says the analytic layer can follow a moving hole; it says nothing about
-  G5's chart, spin or `:fitted` layer, and G5 is not done.
+  G5's chart, spin or `:fitted` layer, and G5 is not done. **2026-10-21:**
+  with the target's rate in the moving layer and core the same holds at the
+  default `4/M` — `ℋ` just outside the horizon the resting hole's to `3 %`
+  from `1/24` on, order four in every shell ([the moving `:damped` layer's
+  target
+  rate](SINGULARITY_HANDLING.md#the-moving-damped-layers-target-rate-2026-10-21)).
 - **G6 — Infrastructure and the H200.** `io.jl`, slice output and
   viewers, `bin/gh.jl`, the per-phase benchmark on threads (TreeWave's
   table, on Symmetry) and **on the H200 in `Float64`**, in-kernel metric
@@ -5675,7 +5680,7 @@ rules below the table, and none of it is a guarantee. Common to every row:
 (`1/M → 1/(10M)`), the algebraic source, the rotating octant (the mirrored
 one at `a = 0`), a finest level whose cube contains the whole horizon, and
 `24 M` — the shells about the hole saturate by about `8 M`. The moving rows
-differ in `ρ_max` (`8/M` for `:damped`), the domain (the quadrant, `L = 64`),
+differ in the domain (the quadrant, `L = 64`),
 the mesh (a frozen capsule along the path) and the length (`40 M`, `8 M` of
 travel). `h` is the
 spacing at the hole; a convergence pair keeps the layer's radii fixed in `M`,
@@ -5686,7 +5691,7 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 |---|---|---|---|---|
 | 0 | `:damped` | `1/16` (`1/16`, `1/24`) | `r_0 = 3/4`, `r_1 = 3/2` | measured: order 4 from `1/16` |
 | 0 | `:fitted` | `1/24` (`1/24`, `1/32`) | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured: `ℋ` outside `1.6×` `:damped`'s, the error `1.1×` |
-| 0, *moving* (`v = 1/5` along `x`) | `:damped` at `ρ_max = 8/M` | `1/16` (`1/24`, `1/32`) | `r_0 = 5/8`, `r_1 = 23/16` (`8.4` cells inside the contracted horizon at `1/16`) | measured to `40 M`: at `1/32` the error `1.1–1.3×` the resting hole's to `16 M` and `ℋ` `0.8–1.2×` throughout; order 4 from `r = 3` out, `7.5–7.9` in `ℋ` just outside the horizon; at `4/M` the error there is `28–44×` the resting hole's at `1/16` |
+| 0, *moving* (`v = 1/5` along `x`) | `:damped` (with the target's rate, 2026-10-21) | `1/16` (`1/24`, `1/32`) | `r_0 = 5/8`, `r_1 = 23/16` (`8.4` cells inside the contracted horizon at `1/16`) | measured to `40 M` at `4/M`: from `1/24` on `ℋ` just outside the horizon `1.00–1.03×` the resting hole's and the error there `1.26–1.36×` to `16 M`; order 4 in every shell from `1/24` to `1/32`; at `1/16` `ℋ` there `1.4–1.6×` (`8/M`: `1.03–1.09×` its own resting hole, which `8/M` lowers too) |
 | 0, *moving* (`v = 1/5` along `x`) | `:fitted` | `1/24` | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured to `40 M`: stable, the error just outside the horizon `:damped`'s at `4/M`, `ℋ` there `13–15×` `:damped`'s at `8/M`; `ℋ` there does not converge to `1/32` at `m = 16`, even at rest; `trail_ramp = 9/10` raised the error there `1.5–2.4×` and lowered it over the evolved region to `0.72–0.91×` |
 | 0.3 | `:damped` | `1/16` (`1/16`, `1/24`) | `r_0 = 3/4`, `r_1 = 3/2` | the rules |
 | 0.3 | `:fitted` | `1/24` | `m = 16`, `n_L = 18`, `fit_cont = 2`, `lmax_fit = 12` | the rules (`fit_cont = 2` not yet run with spin) |
@@ -5723,20 +5728,24 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   fine at `3/5`; between the two it is unknown. `fit_cont = 2` won every pair
   at `a = 0`; the spinning runs have used `fit_cont = 1` only.
 - **A moving hole** (added 2026-10-20, measured at `a = 0`, `v = 1/5`):
-  - **`:damped` at `ρ_max = 8/M`.** The analytic layer has no
-    `∂_t u_exact` term, so it lags a moving target by about
-    `|∂_t u|/ρ_max`: its residual is `6.5` at `4/M` and `3.9` at `8/M` at
-    every `h`, against `0.04–0.12` at rest, and at `4/M` the error just
-    outside the horizon is `28–44×` the resting hole's at `1/16` (`2.6–4.6×`
-    at `1/32`). `8/M` costs a resting hole nothing (to 1 % from `1/24`).
+  - **`:damped` at the default `4/M`, with the target's rate** (amended
+    2026-10-21). Without `(1 − w) ∂_t u_exact` in the layer and the core's
+    own rate the layer lagged a moving target by `|∂_t u|/ρ_max` — a
+    residual of `6.5` at `4/M` and `3.9` at `8/M` at every `h`, the error
+    just outside the horizon `28–44×` the resting hole's at `4/M` and `1/16`
+    — and `8/M` was the remedy. With the rates (`core_follows`, built
+    2026-10-20) the residual is `0.09–0.21`, `ℋ` just outside the horizon is
+    the resting hole's from `1/24` on, and `4/M` beats the old `8/M`
+    everywhere (`ℋ` over the evolved region `0.08–0.36×`). `8/M` now helps a
+    moving hole only as much as a resting one: at `1/16`, where it lowers
+    `ℋ` just outside `1.6–1.8×` at rest too, and not from `1/24` on.
   - **Check `r_1` against the contracted horizon**, `2√(1 − v²)` along the
     boost (`1.960` at `1/5`): the octant's `r_1 = 3/2` is `7.4` cells inside
     it at `1/16`, below the rule's 8; `23/16` is `8.4`.
-  - **`1/16` is adequate at `8/M`** — `ℋ` just outside the horizon
-    `4.7–5.8×` the resting hole's and the error there `2.2–2.8×` from `4 M`
-    to `16 M`,
-    every shell from `r = 3` out within `1.45×` — and `1/24`, `1/32` is the
-    convergence pair.
+  - **`1/16` is adequate** — at `4/M` `ℋ` just outside the horizon
+    `1.4–1.6×` the resting hole's and the error there `1.5–2.1×` from `4 M`
+    to `16 M`, every shell from `r = 3` out within `1.4×` — and `1/24`,
+    `1/32` is the convergence pair (order `4.0–4.1` in every shell).
   - **The error against the analytic solution grows late, and `ℋ` does
     not**: the found center runs ahead of the analytic one by truncation
     error (`1.6·10⁻⁶` at `40 M` at `1/32`, order four), and by `40 M` the
@@ -6711,7 +6720,10 @@ of a frozen capsule mesh on [the quadrant](#the-quadrant-a-hole-moving-along-x-a
 to `40 M` with the analytic layer, at the resting hole's level once the layer
 relaxes at `8/M` and its core follows the target — under [the boosted
 Kerr-Schild hole at binary
-speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20).
+speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)
+— and, from 2026-10-21, at the default `4/M` once the layer and the core carry
+their target's rate ([the moving `:damped` layer's target
+rate](SINGULARITY_HANDLING.md#the-moving-damped-layers-target-rate-2026-10-21)).
 It was not compared with G5's rows, which differ in chart, speed (`0.3`),
 order (`q = 2`) and spin. A moving spinning Kerr-Schild hole, `a = 9/10`
 above all, is still open.
