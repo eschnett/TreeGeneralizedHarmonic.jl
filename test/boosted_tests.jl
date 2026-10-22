@@ -314,15 +314,19 @@ const TGHb = TreeGeneralizedHarmonic
             ht, Πt, _ = background_state(case.background, t, y)
             statescale = max(statescale, maximum(abs, ht), maximum(abs, Πt))
             hu = SVector{10,T}(U.work[J..., 1:10, k])
-            relax = vcat(TGHb.core_relaxation_rate(hu, ht, ρ),
-                         -ρ * (SVector{10,T}(U.work[J..., 11:20, k]) - Πt))
+            Πu = SVector{10,T}(U.work[J..., 11:20, k])
+            relax = vcat(TGHb.core_relaxation_rate(hu, ht, ρ), -ρ * (Πu - Πt))
             # The spatial metric's rate is `−ρ (γ − γ_t)` itself.
             spatial &= relax[5:10] == -ρ * (hu[5:10] - ht[5:10])
             # Plus the target's own rate in the core's outer half (amended
-            # 2026-10-20): the next testset's claim, here the same spelling.
-            ∂ₜt = vcat(TGHb.core_target_rate(moving, case.background, t, x,
-                                             TGHb.layer_rate_step(moving))...)
-            worst = max(worst, maximum(abs, D.work[J..., :, k] - relax - ∂ₜt))
+            # 2026-10-20): the next testset's claim, here the same spelling —
+            # the metric's part an ADM rate as the relaxation is (amended
+            # 2026-10-22), `Π`'s added.
+            ∂ₜht, ∂ₜΠt = TGHb.core_target_rate(moving, case.background, t, x,
+                                               TGHb.layer_rate_step(moving))
+            ∂ₜt = vcat(∂ₜht, ∂ₜΠt)
+            want = vcat(TGHb.core_relaxation_rate(hu, ht, ρ, ∂ₜht), ∂ₜΠt - ρ * (Πu - Πt))
+            worst = max(worst, maximum(abs, D.work[J..., :, k] - want))
             off = max(off, maximum(abs, relax))
             ratescale = max(ratescale, maximum(abs, ∂ₜt))
         end
@@ -493,6 +497,71 @@ const TGHb = TreeGeneralizedHarmonic
         end
         @info "layer residual after 32 steps at 4/M: moving $(res[1]), at rest $(res[2])"
         @test isfinite(res[1]) && res[1] ≤ 2 * res[2]
+    end
+
+    @testset "a moving :damped core stays a metric where the center passes close by" begin
+        # Guards the target's rate in the core (amended 2026-10-22): added in
+        # `h` to the relaxation's ADM rate mapped to `h`, it is the target's
+        # ADM rate pushed through the chain rule at the target rather than at
+        # the state, which near the center's path — where the target turns at
+        # `v r_⊥/r²` and the core lags it by a large fraction of itself — drove
+        # `α²` through zero. The campaign's `a = 0`, `v = 1/2` hole on the
+        # rotating quadrant (`r_0 = 1/2`, `r_1 = 19/16`, `h = 1/16`) ended in
+        # its first chunk in the constraint monitor's `sqrt`; here the same
+        # core on a box `[0, 1]² × [−1, 1]` that holds little else, its state
+        # read after each of 32 RK4 steps: before the fix `α² = −1.2·10⁻³` at
+        # `t = 7/8`, at `(2h, h, −3h)` from the center, against its target's
+        # least `0.088`; after it, never below that least.
+        #
+        # First the rate on its own: on its target it is the target's rate.
+        bgs = SM.boost(SM.KerrSchild(one(T), zero(T)), SVector{3,T}(0, 0, -1 // 2))
+        ht, _, _, ∂ₜht = TGHb.background_state_rate(bgs, zero(T),
+                                                    SVector{3,T}(1 // 5, 1 // 10, 2 // 5),
+                                                    T(1 // 2^20))
+        @test TGHb.core_relaxation_rate(ht, ht, T(4), ∂ₜht) ≈ ∂ₜht rtol = 1e-12
+        @test TGHb.core_relaxation_rate(ht, ht, T(4), zero(ht)) ==
+              TGHb.core_relaxation_rate(ht, ht, T(4))
+
+        q = 2
+        G = q ÷ 2 + 1
+        ops = Operators(prolongation=q + 2, restriction=q + 2)
+        case = kerr_schild_case(T; halfwidth=one(T), r_0=T(1 // 2), r_1=T(19 // 16),
+                                chunk=T(1 // 10), v=1 // 2, x0=-1 // 2, axis=3,
+                                gauge_source=:algebraic, octant=:rotating_quadrant)
+        f = gh_forest(T, case; N=16, roots=(1, 1, 2))
+        @test minimum_spacing(T, f) == 1 // 16
+        U = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
+                        parity=state_parity(f), rotation=state_rotation(f))
+        fill_exact!(U, case, zero(T))
+        u = statevector(U)
+        gather!(u, U)
+        int = with_ρ_max(case.interior, 4)
+        p = GHProblem(U, GhostSchedule(U, ops), case; q=q, interior=int)
+        dt = T(1 // 32)
+        integ = TGHb.gh_integrator(p, u, (zero(T), 32 * dt); dt=dt)
+        minA, minAt, positive, npts = T(Inf), T(Inf), true, 0
+        for n in 1:32
+            TGHb.IRK.step!(integ)
+            t = n * dt
+            scatter!(U, integ.u)
+            c = center_at(int.center, t)
+            for k in 1:nleaves(f), I in CartesianIndices(interiorview(U, k, 1))
+                J = Tuple(I) .+ U.G
+                x = SVector{3,T}(coordinates(U, k, J)...)
+                sum(abs2, x - c) < int.r_0^2 || continue
+                A, _, _, γ = TGHb._adm_split(SVector{10,T}(U.work[J..., 1:10, k]))
+                ht, _, _ = background_state(case.background, t,
+                                            SVector{3,T}(core_position(int, t, x)...))
+                minA = min(minA, A)
+                minAt = min(minAt, TGHb._adm_split(ht)[1])
+                positive &= γ[1, 1] > 0 && det(γ[1:2, 1:2]) > 0 && det(γ) > 0
+                npts += 1
+            end
+        end
+        @info "moving :damped core past the center at v = 1/2: least α² $minA, " *
+              "its target's $minAt, over $npts point-steps"
+        @test npts > 10_000 && positive
+        @test minA ≥ minAt / 2                  # measured 0.0878 = the target's
     end
 
     @testset "the moving hole on the quadrant is the hole in the box, to roundoff" begin

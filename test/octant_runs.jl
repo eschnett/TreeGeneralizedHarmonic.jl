@@ -126,6 +126,9 @@
 #                                   the horizon near the poles
 #   amplitude=1e-8 seed=20261002    the noise (amplitude=0: none)
 #   backend=cpu|cuda                cuda needs CUDA in the active environment
+#   simd=                           the CPU kernel's SIMD width (1: the scalar
+#                                   kernel a device runs, which throws where the
+#                                   lanes leave a NaN; default: the host's)
 #   mpi=true deviceaware=false      run over MPI.COMM_WORLD (MPI in the active
 #                                   environment; launch with mpiexec), one GPU per
 #                                   rank by its rank on the node; deviceaware=true
@@ -875,6 +878,10 @@ else
     (;)
 end
 haskey(OPTIONS, "rho") && (fitkw = (; fitkw..., ρ_max_fixed=T(rat(OPTIONS["rho"]))))
+# The kernel's SIMD width (added 2026-10-22): `simd=1` is the scalar kernel a
+# device runs, where a degenerate metric throws a `DomainError` instead of
+# leaving a `NaN` on the lanes.
+haskey(OPTIONS, "simd") && (fitkw = (; fitkw..., simd_width=parse(Int, OPTIONS["simd"])))
 # The core about the hole's position at `t = 0`, the origin on an octant.
 c_noise = hole ? Tuple(center_at(case.center, zero(T))) : (zero(T), zero(T), zero(T))
 perturb = iszero(amplitude) ? nothing :

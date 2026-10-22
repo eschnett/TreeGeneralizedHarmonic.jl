@@ -1822,7 +1822,17 @@ the layer's rate alone took the residual after 32 steps from `34.6` to
 `12.3`, with the core's `3.3` against the resting hole's `2.6`. Not near the
 center: `n̂` turns at `v/r` and jumps where the center's path crosses a grid
 point; a point spends `(r_0/2)/v` in the outer half, many `1/ρ_max`, before
-it leaves.**)** A hole at rest keeps `du = 0`
+it leaves.**)** **(Amended 2026-10-22:** the metric's part of that rate is
+an ADM rate too — the target's `∂_t h` read as `∂_t (α², β, γ)` at the target
+and added to the relaxation's before the one chain rule at the state
+(`core_relaxation_rate(h, h_t, ρ, ∂ₜh_t)`). Added in `h`, it is the target's
+ADM rate mapped at the target instead of at the state, and near the center's
+path, where the target turns at `v r_⊥/r²` and the core lags it by a large
+fraction of itself, that drove `α²` through zero: the campaign's `a = 0`,
+`v = 1/2` hole (`r_0 = 1/2`, `h = 1/16` and `1/32`, rotating quadrant) ended
+in its first chunk in the constraint monitor's `sqrt` at a core point
+`(2h, h, −3h)` from the center, `α² = −1.2·10⁻³` against its target's least
+`0.088`. With the fix the core's `α²` never falls below that least.**)** A hole at rest keeps `du = 0`
 bit for bit (the kernel branches on `v` first, `core_follows`); `:frozen`
 keeps it too, being the variant that is measured to fail, and `:pasted`
 overwrites its core anyway. The tracked geometry is not changed: its

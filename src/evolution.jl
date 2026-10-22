@@ -526,6 +526,9 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                 # it the points the core releases on its trailing side carry
                 # its lag, `|∂_t u|/ρ_max`, into the layer. Not near the
                 # center, where `n̂` turns at `v/r` and jumps on the path.
+                # The metric's part of that rate is an ADM rate as well
+                # (amended 2026-10-22): added in `h` it drove `α²` through
+                # zero near the path at `v = 1/2` ([`core_relaxation_rate`](@ref)).
                 # (Its own names: `ρc` is the fitted core's, captured above.)
                 ρd = interior.ρ_max
                 tgd = layer_target(interior, bg)
@@ -533,9 +536,9 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                 ∂ₜhd, ∂ₜΠd = core_target_rate(interior, tgd, t, x,
                                               layer_rate_step(interior))
                 hud = SVector{NC,T}(@ntuple 10 v -> work[var + (v - 1) * sv])
-                dhd = core_relaxation_rate(hud, SVector{NC,T}(hd), ρd)
+                dhd = core_relaxation_rate(hud, SVector{NC,T}(hd), ρd, ∂ₜhd)
                 ntuple(Val(NC)) do v
-                    du[inner..., v, b] = ∂ₜhd[v] + dhd[v]
+                    du[inner..., v, b] = dhd[v]
                     du[inner..., NC + v, b] =
                         ∂ₜΠd[v] - ρd * (work[var + (NC + v - 1) * sv] - Πd[v])
                     nothing
