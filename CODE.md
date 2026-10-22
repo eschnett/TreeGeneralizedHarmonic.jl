@@ -1832,7 +1832,37 @@ fraction of itself, that drove `α²` through zero: the campaign's `a = 0`,
 `v = 1/2` hole (`r_0 = 1/2`, `h = 1/16` and `1/32`, rotating quadrant) ended
 in its first chunk in the constraint monitor's `sqrt` at a core point
 `(2h, h, −3h)` from the center, `α² = −1.2·10⁻³` against its target's least
-`0.088`. With the fix the core's `α²` never falls below that least.**)** A hole at rest keeps `du = 0`
+`0.088`. With the fix the core's `α²` never falls below that least.**)**
+**(Amended 2026-10-22, the core's rate:** a moving core relaxes at
+`max(ρ_max, κ |v|/r_0)`, `κ = 12` (`core_rate`); the layer keeps `ρ_max`. The
+core rule's target jumps where the center's path crosses a point, from the
+leading side of the sphere `r_0` to the trailing side — `Π_tt` from `5.2` to
+`97.6` at `a = 0`, `v = 1/2`, `r_0 = 1/2` — and no rate follows a jump, so
+the core relaxes it, with `r_0/|v|` left before it releases the point on the
+trailing side. At `4/M` and `v = 1/2` that is `e^{−4}`: the campaign's layer
+residual of `4.7` (rotating quadrant, `r_0 = 1/2`, `r_1 = 19/16`; `|Π| 4.6`,
+`|h| 0.9`) is that point, at depth zero on the trailing axis, flat in time and
+the same at `h = 1/16`, `1/24`, `1/32`, and a pointwise model of the core
+branch gives it (`3.2–4.2` in `Π` near the path, `0.7` at `v = 0.35`, `0.14`
+at `1/5`). What the layer did not absorb crossed `r_1`: on `L = 8`, `h = 1/16`,
+moving over resting, the error in `[2, 2.25)` grew from `2.6` to `19` by `6 M`
+and in `[3, 5)` from `2.9` to `7.6`, and the evolved region's L∞ error was
+`0.36` against `0.0047`. At `12/M` the same run stays at `2.8–3.3` and
+`2.7–3.2` — the ratio both runs share to `t = 2`, where nothing from the core
+has reached the shells yet, and the campaign's ratio at every `h` at `1–2 M`:
+the moving hole's own truncation error — with an L∞ error of `0.036`. `κ = 12`
+leaves `e^{−12}` of the jump, about `10⁻³`, and keeps the `v = 1/5` families of
+`SINGULARITY_HANDLING.md` (`κ |v|/r_0 = 3.8` and `3.2` at `r_0 = 5/8` and
+`3/4`) at `ρ_max`, bit for bit; `chunk_interior` refuses a core rate above
+`1/dt` (`12/M · dt = 0.21` at `h = 1/16`, `cfl = 1/2`). **What is left of the
+residual at `v = 1/2`** (`2.56`, `1.15` and `0.66` at `cfl = 1/2`, `1/4`,
+`1/8`, independent of `ρ_max` from `4` to `16/M`) is first order in `dt`: the
+point that has just crossed `r_0` on the trailing side. The core's target is
+constant along rays, so its rate there is the tangential part of `−v · ∇u`, and
+the layer's is all of it; the rate jumps by `(v · n̂) ∂_r u_exact` across `r_0`,
+and RK4 integrates a step that holds the crossing to first order. It converges,
+and a core target that matches `∂_r u_exact` at `r_0` would remove it — a
+change to the core rule, not made.**)** A hole at rest keeps `du = 0`
 bit for bit (the kernel branches on `v` first, `core_follows`); `:frozen`
 keeps it too, being the variant that is measured to fail, and `:pasted`
 overwrites its core anyway. The tracked geometry is not changed: its

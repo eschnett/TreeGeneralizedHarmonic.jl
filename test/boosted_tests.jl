@@ -307,6 +307,10 @@ const TGHb = TreeGeneralizedHarmonic
         gh_rhs!(du, u, p_mov, t)
         scatter!(D, du)
         pts = core_points(moving, t)
+        # The core relaxes at `core_rate`, `max(ρ_max, 12 |v|/r_0)` (amended
+        # 2026-10-22): `6/M` here, above the layer's `ρ`.
+        ρc = TGHb.core_rate(moving)
+        @test ρc ≈ 12 * T(v) / moving.r_0 && ρc > ρ && TGHb.core_rate(resting) == ρ
         worst, off, spatial, ratescale = zero(T), zero(T), true, zero(T)
         statescale = zero(T)
         for (k, J, x) in pts
@@ -315,9 +319,9 @@ const TGHb = TreeGeneralizedHarmonic
             statescale = max(statescale, maximum(abs, ht), maximum(abs, Πt))
             hu = SVector{10,T}(U.work[J..., 1:10, k])
             Πu = SVector{10,T}(U.work[J..., 11:20, k])
-            relax = vcat(TGHb.core_relaxation_rate(hu, ht, ρ), -ρ * (Πu - Πt))
+            relax = vcat(TGHb.core_relaxation_rate(hu, ht, ρc), -ρc * (Πu - Πt))
             # The spatial metric's rate is `−ρ (γ − γ_t)` itself.
-            spatial &= relax[5:10] == -ρ * (hu[5:10] - ht[5:10])
+            spatial &= relax[5:10] == -ρc * (hu[5:10] - ht[5:10])
             # Plus the target's own rate in the core's outer half (amended
             # 2026-10-20): the next testset's claim, here the same spelling —
             # the metric's part an ADM rate as the relaxation is (amended
@@ -325,7 +329,7 @@ const TGHb = TreeGeneralizedHarmonic
             ∂ₜht, ∂ₜΠt = TGHb.core_target_rate(moving, case.background, t, x,
                                                TGHb.layer_rate_step(moving))
             ∂ₜt = vcat(∂ₜht, ∂ₜΠt)
-            want = vcat(TGHb.core_relaxation_rate(hu, ht, ρ, ∂ₜht), ∂ₜΠt - ρ * (Πu - Πt))
+            want = vcat(TGHb.core_relaxation_rate(hu, ht, ρc, ∂ₜht), ∂ₜΠt - ρc * (Πu - Πt))
             worst = max(worst, maximum(abs, D.work[J..., :, k] - want))
             off = max(off, maximum(abs, relax))
             ratescale = max(ratescale, maximum(abs, ∂ₜt))
@@ -540,6 +544,7 @@ const TGHb = TreeGeneralizedHarmonic
         dt = T(1 // 32)
         integ = TGHb.gh_integrator(p, u, (zero(T), 32 * dt); dt=dt)
         minA, minAt, positive, npts = T(Inf), T(Inf), true, 0
+        release, jump = zero(T), zero(T)
         for n in 1:32
             TGHb.IRK.step!(integ)
             t = n * dt
@@ -549,6 +554,15 @@ const TGHb = TreeGeneralizedHarmonic
                 J = Tuple(I) .+ U.G
                 x = SVector{3,T}(coordinates(U, k, J)...)
                 sum(abs2, x - c) < int.r_0^2 || continue
+                if n == 32 && x[3] < c[3] && sum(abs2, x - c) ≥ (int.r_0 - 2 / 16)^2
+                    # The outer two cells of the trailing side, which the core
+                    # releases next — among them the points on the center's
+                    # path, which it crossed after `t = 0` (amended 2026-10-22).
+                    ut = case_state_tuple(case.background, int, t, x)
+                    release = max(release, maximum(abs, U.work[J..., :, k] - SVector{20,T}(ut)))
+                    lead = case_state_tuple(case.background, int, t, 2c - x)
+                    jump = max(jump, maximum(abs, SVector{20,T}(ut) - SVector{20,T}(lead)))
+                end
                 A, _, _, γ = TGHb._adm_split(SVector{10,T}(U.work[J..., 1:10, k]))
                 ht, _, _ = background_state(case.background, t,
                                             SVector{3,T}(core_position(int, t, x)...))
@@ -562,6 +576,17 @@ const TGHb = TreeGeneralizedHarmonic
               "its target's $minAt, over $npts point-steps"
         @test npts > 10_000 && positive
         @test minA ≥ minAt / 2                  # measured 0.0878 = the target's
+        # The core's rate (amended 2026-10-22): the target of a point on the
+        # center's path jumps from the leading side of the sphere `r_0` to the
+        # trailing one as the center passes, and the core must relax that jump
+        # before it releases the point, `r_0/v` later. At `ρ_max = 4/M` it was
+        # `e^{−4}` of it: the campaign's layer residual of `4.7` at `v = 1/2`,
+        # at depth zero on the trailing side, at every `h`. At `core_rate`,
+        # `κ v/r_0 = 12/M` here, it is `e^{−12}`.
+        @info "moving :damped core at v = 1/2: the points it releases next are " *
+              "$release off their target, whose jump across the path is $jump"
+        @test TGHb.core_rate(int) == 12 && jump > 50
+        @test release ≤ jump / 200              # measured 0.050 of 103; 6.4 before
     end
 
     @testset "the moving hole on the quadrant is the hole in the box, to roundoff" begin

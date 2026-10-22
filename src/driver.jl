@@ -1747,7 +1747,8 @@ function chunk_interior(case::GHCase, dt, factor, fixed; default::Bool=false,
     # `interior` is the geometry this chunk runs on: the case's own sphere, or
     # a tracked case's geometry built from the track (step 8d).
     interior === nothing && return nothing
-    fixed === nothing && return with_ρ_max(interior, factor / dt)
+    fixed === nothing &&
+        return _check_core_rate(with_ρ_max(interior, factor / dt), dt)
     fixed * dt ≤ 1 || throw(ArgumentError(default ?
         "the default relaxation rate ρ_max = 4/M = $fixed is above this " *
         "chunk's grid rate 1/dt = $(1 / dt): the step is longer than a " *
@@ -1760,7 +1761,23 @@ function chunk_interior(case::GHCase, dt, factor, fixed; default::Bool=false,
         "a paste, up to RK4's real-axis limit of 2.79/dt — which a run then " *
         "finds as a blow-up in the layer. Lower ρ_max_fixed, or pass " *
         "ρ_max_factor for a grid rate."))
-    return with_ρ_max(interior, fixed)
+    return _check_core_rate(with_ρ_max(interior, fixed), dt)
+end
+
+# A moving `:damped` core relaxes at `core_rate`, `max(ρ_max, κ |v|/r_0)`
+# (amended 2026-10-22), and where the second term is the larger the same
+# guard holds for it: `ρ dt ≤ 1`.
+function _check_core_rate(int, dt)
+    (int isa Interior && core_follows(int)) || return int
+    ρc = core_rate(int)
+    (ρc == int.ρ_max || ρc * dt ≤ 1) || throw(ArgumentError(
+        "the moving :damped core relaxes at $CORE_TRANSIT_EFOLDS |v|/r_0 = $ρc, " *
+        "above this chunk's grid rate 1/dt = $(1 / dt): the hole crosses its " *
+        "core radius r_0 = $(int.r_0) in fewer than $CORE_TRANSIT_EFOLDS steps, " *
+        "so the core cannot relax the jump of its target where the center's " *
+        "path crosses a point before it releases that point into the layer " *
+        "(core_rate). Refine the mesh around the hole, or widen the core."))
+    return int
 end
 
 # What the record reports as this chunk's relaxation rate.

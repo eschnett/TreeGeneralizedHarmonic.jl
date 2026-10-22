@@ -479,6 +479,50 @@ end
 end
 
 """
+    CORE_TRANSIT_EFOLDS = 12
+
+How many `e`-folds a moving `:damped` core relaxes over the time its center
+takes to cross the core radius, `r_0/|v|` ([`core_rate`](@ref), added
+2026-10-22).
+"""
+const CORE_TRANSIT_EFOLDS = 12
+
+"""
+    core_rate(int::Interior) -> ρ
+
+The relaxation rate of a moving `:damped` core (added 2026-10-22):
+`max(ρ_max, κ |v|/r_0)`, `κ` = [`CORE_TRANSIT_EFOLDS`](@ref) — `ρ_max` itself
+unless the hole crosses its core radius in less than `κ/ρ_max`. The layer keeps
+`ρ_max`.
+
+**Why.** The core rule's target `u_exact(c(t) + r_0 n̂)` jumps where the
+center's path crosses a point: `n̂` turns over, and the point's target goes
+from the sphere's leading side to its trailing side. A boosted Kerr-Schild
+hole is far from symmetric there: at `a = 0`, `v = 1/2`, `r_0 = 1/2` the
+target's `Π_tt` is `5.2` on the leading pole and `97.6` on the trailing one.
+No rate follows a jump ([`core_target_rate`](@ref) is zero there by design),
+so the core relaxes it, and has until the point leaves the core on the
+trailing side, at most `r_0/|v|` later. At `ρ_max = 4/M` that is `e^{−4}`: the
+point is released into the layer `4.7` off its target (`|Π|` `4.6`, `|h|`
+`0.9`), at depth zero on the trailing side of the path — the whole of the
+campaign's `v = 1/2` layer residual, the same at `h = 1/16`, `1/24`, `1/32`
+because it is the transit of one point, not a truncation error — and what the
+layer does not absorb leaves through `r_1`. At `κ |v|/r_0` the core keeps
+`e^{−κ}` of the jump. `κ = 12` leaves `e^{−12} · 130 ≈ 10⁻³` there, a
+hundredth of the resting hole's residual at `h = 1/32`, and keeps the
+`v = 1/5` families of `SINGULARITY_HANDLING.md` (`r_0 = 5/8` and `3/4`,
+`κ |v|/r_0 = 3.8` and `3.2`) at `ρ_max = 4/M`, bit for bit. A step that
+resolves the hole holds the rate (`chunk_interior` refuses `ρ dt > 1`):
+`12/M` at `v = 1/2`, `r_0 = 1/2` is `ρ dt = 0.21` at `h = 1/16`,
+`cfl = 1/2` (`dt = 1/56`).
+"""
+@inline function core_rate(int::Interior{T}) where {T}
+    v = int.center.v
+    s = sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
+    return max(int.ρ_max, T(CORE_TRANSIT_EFOLDS) * s / int.r_0)
+end
+
+"""
     layer_rate_step(int::Interior) -> δ
 
 The time step of the centered difference that gives a moving `:damped`
