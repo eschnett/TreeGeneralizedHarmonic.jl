@@ -308,9 +308,11 @@ const TGHb = TreeGeneralizedHarmonic
         scatter!(D, du)
         pts = core_points(moving, t)
         worst, off, spatial, ratescale = zero(T), zero(T), true, zero(T)
+        statescale = zero(T)
         for (k, J, x) in pts
             y = SVector{3,T}(core_position(moving, t, x)...)
             ht, Πt, _ = background_state(case.background, t, y)
+            statescale = max(statescale, maximum(abs, ht), maximum(abs, Πt))
             hu = SVector{10,T}(U.work[J..., 1:10, k])
             relax = vcat(TGHb.core_relaxation_rate(hu, ht, ρ),
                          -ρ * (SVector{10,T}(U.work[J..., 11:20, k]) - Πt))
@@ -328,7 +330,14 @@ const TGHb = TreeGeneralizedHarmonic
               "$worst, max|want| = $off, max|∂ₜ target| = $ratescale"
         @test length(pts) > 50 && spatial
         @test off > 1e-2                        # the core is off its target …
-        @test worst ≤ 16 * eps(T) * (off + ratescale)   # … and relaxes toward it
+        # … and relaxes toward it. The target's rate is a centred difference
+        # over `δ = ε^{1/3} r_0`, and the kernel and this loop are two call
+        # sites of the background, which round differently on x86-64 (CLAUDE.md,
+        # "Two spellings of one expression are not bit-identical"). One ulp of
+        # the state becomes `eps · |state| / δ` in the rate: measured 7.8e−8 on
+        # GitHub's Linux runners against `0` on Apple silicon (2026-10-21).
+        δ = TGHb.layer_rate_step(moving)
+        @test worst ≤ 16 * eps(T) * (off + ratescale + statescale / δ)
         gh_rhs!(du, u, p_rest, t)
         scatter!(D, du)
         rest_pts = core_points(resting, t)
