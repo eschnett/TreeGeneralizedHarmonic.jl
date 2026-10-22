@@ -1,210 +1,139 @@
 # Thumbnails for SimWatch (added 2026-10-19): time series from a run's CSV
-# drawn as small PNGs, which `simwatch.toml`'s `[[images]]` point at and
-# SimWatch shows in its detail view (`FORMAT.md`: at most 512×512, about
-# 400×300 is best, replaced atomically before the status file is rewritten).
-# `FORMAT.md` suggests a dark background; these are dark on light (Erik's
-# choice, 2026-10-19).
+# drawn as small log-scale line plots, which `simwatch.toml`'s `[[images]]`
+# point at and SimWatch shows in its detail view.
 #
-# Included by `test/octant_runs.jl`. Plain Julia with no dependencies, so that
-# the run's environment does not grow a plotting package: a PNG of stored
-# (uncompressed) deflate blocks, a log-scale line plot, and a 3×5 digit font
-# for the axis labels. Nothing here may stop a run — `simwatch_plot` returns
-# `false` instead of throwing.
+# SVG from 2026-10-21, by SimWatch 1.3.0's `FORMAT.md` (until then PNGs drawn
+# pixel by pixel here, dark on light): SVG text written by hand, with no
+# plotting package, which SimWatch draws with its own built-in font (DejaVu
+# Sans, so `−`, Greek and superscripts are fine) at 512 pixels on the longer
+# side. What the format asks of it, and what is done:
+#
+# - **self-contained**: lines, `<text>`, no `<image>` and no other file;
+# - **the background**: white, black or transparent — here *transparent*,
+#   with the axes and labels in `currentColor` (black unless an embedding
+#   page says otherwise). SimWatch reads a transparent image with black ink as
+#   drawn for white and shows it as it is or flips it for a dark terminal, as
+#   its user's `image_theme` says; the plot itself no longer chooses. The
+#   grid is `currentColor` at low opacity, so that SimWatch's detection of the
+#   background does not count it as light ink;
+# - **colours**: the series in saturated hues of middling lightness (the PNGs'
+#   palette, with brown for its black), which read on white and keep their
+#   hue when SimWatch flips the image;
+# - **size**: `400 × 300` user units (`FORMAT.md`'s "about 400×300 is best"),
+#   far below its 1 MiB limit — a series is thinned to at most 1000 points;
+# - **atomic**: written to `<file>.tmp` and renamed over the old file, before
+#   the status file that names it is rewritten.
+#
+# Included by `test/octant_runs.jl` and `test/simwatch_tests.jl`. Nothing here
+# may stop a run — `simwatch_plot` returns `false` instead of throwing.
 
-const SW_BG = (0xfc, 0xfc, 0xfa)
-const SW_AXIS = (0x40, 0x40, 0x48)
-const SW_GRID = (0xdc, 0xdc, 0xe0)
-const SW_PALETTE = [(0xd5, 0x5e, 0x00), (0x00, 0x72, 0xb2), (0x00, 0x9e, 0x73),
-                    (0x96, 0x3c, 0xaa), (0x1e, 0x1e, 0x1e), (0x8c, 0x8c, 0x8c),
-                    (0xc8, 0x1e, 0x1e)]
-const SW_PALETTE_NAMES = ["orange", "blue", "green", "purple", "black", "grey", "red"]
+const SW_PALETTE = ["#d55e00", "#0072b2", "#009e73", "#963caa", "#8c564b", "#8c8c8c",
+                    "#c81e1e"]
+const SW_PALETTE_NAMES = ["orange", "blue", "green", "purple", "brown", "grey", "red"]
 
-# --- PNG -----------------------------------------------------------------------
+# A coordinate with one decimal: a tenth of a user unit is a seventh of a pixel.
+_sw_fmt(x) = string(round(x; digits=1))
 
-const _SW_CRC_TABLE = let t = zeros(UInt32, 256)
-    for n in 0:255
-        c = UInt32(n)
-        for _ in 1:8
-            c = isodd(c) ? 0xedb88320 ⊻ (c >> 1) : c >> 1
-        end
-        t[n + 1] = c
-    end
-    t
-end
-
-function _sw_crc32(bytes)
-    c = 0xffffffff
-    for b in bytes
-        c = _SW_CRC_TABLE[((c ⊻ b) & 0xff) + 1] ⊻ (c >> 8)
-    end
-    return c ⊻ 0xffffffff
-end
-
-function _sw_adler32(bytes)
-    a, b = UInt32(1), UInt32(0)
-    for x in bytes
-        a = (a + x) % 65521
-        b = (b + a) % 65521
-    end
-    return (b << 16) | a
-end
-
-_sw_be32(x) = UInt8[(x >> 24) & 0xff, (x >> 16) & 0xff, (x >> 8) & 0xff, x & 0xff]
-
-function _sw_chunk(io, kind::String, data::Vector{UInt8})
-    write(io, _sw_be32(UInt32(length(data))))
-    body = vcat(Vector{UInt8}(kind), data)
-    write(io, body)
-    write(io, _sw_be32(_sw_crc32(body)))
-    return nothing
-end
-
-# `img[y, x]` an RGB triple, row 1 at the top.
-function _sw_write_png(path, img::Matrix{NTuple{3,UInt8}})
-    hgt, wid = size(img)
-    raw = UInt8[]
-    sizehint!(raw, hgt * (3wid + 1))
-    for y in 1:hgt
-        push!(raw, 0x00)                    # filter: none
-        for x in 1:wid
-            append!(raw, img[y, x])
-        end
-    end
-    # zlib with stored deflate blocks of at most 65535 bytes.
-    z = UInt8[0x78, 0x01]
-    n = length(raw)
-    i = 1
-    while true
-        len = min(65535, n - i + 1)
-        last = i + len > n
-        push!(z, last ? 0x01 : 0x00)
-        append!(z, UInt8[len & 0xff, len >> 8, ~len & 0xff, (~len >> 8) & 0xff])
-        append!(z, view(raw, i:(i + len - 1)))
-        i += len
-        last && break
-    end
-    append!(z, _sw_be32(_sw_adler32(raw)))
-    tmp = path * ".tmp"
-    open(tmp, "w") do io
-        write(io, UInt8[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-        _sw_chunk(io, "IHDR", vcat(_sw_be32(UInt32(wid)), _sw_be32(UInt32(hgt)),
-                                   UInt8[8, 2, 0, 0, 0]))
-        _sw_chunk(io, "IDAT", z)
-        _sw_chunk(io, "IEND", UInt8[])
-    end
-    mv(tmp, path; force=true)
-    return nothing
-end
-
-# --- drawing -------------------------------------------------------------------
-
-# A 3×5 font: each glyph five rows of three bits, the top row first.
-const _SW_FONT = Dict{Char,NTuple{5,UInt8}}(
-    '0' => (7, 5, 5, 5, 7), '1' => (2, 6, 2, 2, 7), '2' => (7, 1, 7, 4, 7),
-    '3' => (7, 1, 7, 1, 7), '4' => (5, 5, 7, 1, 1), '5' => (7, 4, 7, 1, 7),
-    '6' => (7, 4, 7, 5, 7), '7' => (7, 1, 1, 1, 1), '8' => (7, 5, 7, 5, 7),
-    '9' => (7, 5, 7, 1, 7), '-' => (0, 0, 7, 0, 0), '.' => (0, 0, 0, 0, 2),
-    'e' => (0, 7, 7, 4, 7), 't' => (2, 7, 2, 2, 3), 'M' => (5, 7, 7, 5, 5),
-    ' ' => (0, 0, 0, 0, 0))
-
-function _sw_text!(img, x0, y0, s, color; scale=2)
-    x = x0
-    for ch in s
-        g = get(_SW_FONT, ch, _SW_FONT[' '])
-        for r in 1:5, c in 1:3
-            (g[r] >> (3 - c)) & 1 == 1 || continue
-            for dy in 0:(scale - 1), dx in 0:(scale - 1)
-                yy, xx = y0 + (r - 1) * scale + dy, x + (c - 1) * scale + dx
-                checkbounds(Bool, img, yy, xx) && (img[yy, xx] = color)
-            end
-        end
-        x += 4scale
-    end
-    return nothing
-end
-
-function _sw_line!(img, x0, y0, x1, y1, color, box)
-    xlo, xhi, ylo, yhi = box
-    n = max(abs(x1 - x0), abs(y1 - y0), 1)
-    for k in 0:ceil(Int, n)
-        x = round(Int, x0 + (x1 - x0) * k / n)
-        y = round(Int, y0 + (y1 - y0) * k / n)
-        for (dx, dy) in ((0, 0), (1, 0), (0, 1))
-            xx, yy = x + dx, y + dy
-            xlo ≤ xx ≤ xhi && ylo ≤ yy ≤ yhi && (img[yy, xx] = color)
-        end
-    end
-    return nothing
-end
+# A tick label's number, to three digits: `0.25`, `12.5`, `130`.
+_sw_tick(x) = (r = round(x; sigdigits=3); isinteger(r) ? string(Int(r)) : string(r))
 
 """
     simwatch_plot(path, t, series; width = 400, height = 300) -> Bool
 
 A log-scale line plot of the vectors in `series` against `t`, one colour of
-`SW_PALETTE` each in order, written to `path` as a PNG: decades labelled on
-the left, the time axis below. Non-positive and non-finite values are left
-out of their line. Returns whether it worked; it never throws.
+`SW_PALETTE` each in order, written to `path` as SVG (SimWatch 1.3.0's
+`FORMAT.md`; see this file's header): decades labelled `10⁻⁶` on the left,
+the time axis below, a transparent background with the axes in
+`currentColor`. Non-positive and non-finite values break their line. Returns
+whether it worked; it never throws.
 """
 function simwatch_plot(path, t::AbstractVector, series; width=400, height=300)
     try
-        img = fill(SW_BG, height, width)
-        xl, xr, yt, yb = 34, width - 8, 8, height - 22
-        box = (xl, xr, yt, yb)
         vals = [log10(v) for s in series for v in s if isfinite(v) && v > 0]
         (length(t) ≥ 1 && !isempty(vals)) || return false
+        xl, xr, yt, yb = 46.0, width - 10.0, 10.0, height - 26.0
         lo, hi = floor(minimum(vals)), ceil(maximum(vals))
         hi == lo && (hi += 1)
-        t0, t1 = Float64(minimum(t)), Float64(maximum(t))
+        tf = [Float64(x) for x in t if isfinite(x)]
+        isempty(tf) && return false
+        t0, t1 = minimum(tf), maximum(tf)
         t1 == t0 && (t1 = t0 + 1)
         px(tt) = xl + (xr - xl) * (tt - t0) / (t1 - t0)
         py(lv) = yb - (yb - yt) * (lv - lo) / (hi - lo)
-        # The decades, labelled with their exponent where there is room.
-        step = max(1, ceil(Int, (hi - lo) / 10))
+        io = IOBuffer()
+        println(io, """<?xml version="1.0" encoding="UTF-8"?>""")
+        println(io, """<svg xmlns="http://www.w3.org/2000/svg" width="$width" """ *
+                    """height="$height" viewBox="0 0 $width $height" """ *
+                    """font-family="DejaVu Sans, sans-serif" font-size="12">""")
+        # The grid: the decades and four time ticks.
+        println(io, """<g stroke="currentColor" stroke-opacity="0.18" stroke-width="1">""")
         for d in Int(lo):Int(hi)
-            y = round(Int, py(d))
-            for x in xl:xr
-                img[y, x] = SW_GRID
-            end
-            (d - Int(lo)) % step == 0 && _sw_text!(img, 2, y - 4, string(d), SW_AXIS)
+            y = _sw_fmt(py(d))
+            println(io, """<line x1="$(_sw_fmt(xl))" y1="$y" x2="$(_sw_fmt(xr))" y2="$y"/>""")
         end
-        # The time axis: four ticks, labelled.
+        for k in 1:4
+            x = _sw_fmt(px(t0 + k * (t1 - t0) / 4))
+            println(io, """<line x1="$x" y1="$(_sw_fmt(yt))" x2="$x" y2="$(_sw_fmt(yb))"/>""")
+        end
+        println(io, "</g>")
+        # The axes and their labels: the decades as powers of ten, where
+        # there is room, and the time at five ticks.
+        println(io, """<g fill="currentColor">""")
+        step = max(1, ceil(Int, (hi - lo) / 8))
+        for d in Int(lo):Int(hi)
+            (d - Int(lo)) % step == 0 || continue
+            e = d < 0 ? "−$(-d)" : string(d)
+            println(io, """<text x="$(_sw_fmt(xl - 4))" y="$(_sw_fmt(py(d) + 4))" """ *
+                        """text-anchor="end">10<tspan dy="-5" font-size="9">$e</tspan></text>""")
+        end
         for k in 0:4
-            tt = t0 + k * (t1 - t0) / 4
-            x = round(Int, px(tt))
-            for y in yt:yb
-                img[y, x] = SW_GRID
-            end
-            lbl = string(round(tt; digits=tt < 10 ? 1 : 0))
-            _sw_text!(img, clamp(x - 8, 0, width - 4 * 2 * length(lbl)), yb + 6, lbl,
-                      SW_AXIS)
+            x = px(t0 + k * (t1 - t0) / 4)
+            anchor = k == 0 ? "start" : k == 4 ? "end" : "middle"
+            println(io, """<text x="$(_sw_fmt(x))" y="$(_sw_fmt(yb + 16))" """ *
+                        """text-anchor="$anchor">$(_sw_tick(t0 + k * (t1 - t0) / 4))</text>""")
         end
-        for x in xl:xr
-            img[yb, x] = SW_AXIS
-        end
-        for y in yt:yb
-            img[y, xl] = SW_AXIS
-        end
+        println(io, "</g>")
+        println(io, """<path d="M$(_sw_fmt(xl)),$(_sw_fmt(yt))V$(_sw_fmt(yb))""" *
+                    """H$(_sw_fmt(xr))" fill="none" stroke="currentColor" """ *
+                    """stroke-width="1.2"/>""")
+        # The series, each a run of polylines broken where a value is missing,
+        # and a dot for a point alone. At most 1000 points of each.
+        stride = cld(length(t), 1000)
         for (i, s) in enumerate(series)
             color = SW_PALETTE[mod1(i, length(SW_PALETTE))]
-            prev = nothing
-            for (tt, v) in zip(t, s)
-                if !(isfinite(v) && v > 0)
-                    prev = nothing
-                    continue
+            runs = Vector{Vector{String}}()
+            run = String[]
+            for j in 1:stride:min(length(t), length(s))
+                tt, v = t[j], s[j]
+                if isfinite(tt) && isfinite(v) && v > 0
+                    push!(run, "$(_sw_fmt(px(Float64(tt)))),$(_sw_fmt(py(log10(v))))")
+                elseif !isempty(run)
+                    push!(runs, run)
+                    run = String[]
                 end
-                pt = (px(Float64(tt)), py(log10(v)))
-                if prev === nothing
-                    _sw_line!(img, pt..., pt..., color, box)
+            end
+            isempty(run) || push!(runs, run)
+            for r in runs
+                if length(r) == 1
+                    cx, cy = split(only(r), ',')
+                    println(io, """<circle cx="$cx" cy="$cy" r="1.6" fill="$color"/>""")
                 else
-                    _sw_line!(img, prev..., pt..., color, box)
+                    println(io, """<polyline points="$(join(r, ' '))" fill="none" """ *
+                                """stroke="$color" stroke-width="1.6" """ *
+                                """stroke-linejoin="round" stroke-linecap="round"/>""")
                 end
-                prev = pt
             end
         end
+        println(io, "</svg>")
         mkpath(dirname(path))
-        _sw_write_png(path, img)
+        tmp = path * ".tmp"
+        write(tmp, take!(io))
+        # `rename` replaces the old file atomically; `mv(; force = true)`
+        # would delete it first.
+        Base.Filesystem.rename(tmp, path)
         return true
     catch err
+        err isa InterruptException && rethrow()
         @warn "SimWatch: could not draw $path" exception = err maxlog = 1
         return false
     end

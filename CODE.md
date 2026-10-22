@@ -70,6 +70,9 @@ research project; the inherited documents live in `notes/`.
   - [Periodic](#periodic)
   - [Outer boundary: Dirichlet from the background, at the current time](#outer-boundary-dirichlet-from-the-background-at-the-current-time)
   - [Reflecting faces: symmetry planes (added 2026-10-02)](#reflecting-faces-symmetry-planes-added-2026-10-02)
+  - [The rotating octant: a quarter turn about `z` (added 2026-10-04)](#the-rotating-octant-a-quarter-turn-about-z-added-2026-10-04)
+  - [The quadrant: a hole moving along `x` (added 2026-10-20)](#the-quadrant-a-hole-moving-along-x-added-2026-10-20)
+  - [The rotating quadrant: a hole moving along its spin axis (added 2026-10-21)](#the-rotating-quadrant-a-hole-moving-along-its-spin-axis-added-2026-10-21)
   - [The interior: a pointwise damping layer](#the-interior-a-pointwise-damping-layer)
     - [The design, as steps 8a–8f leave it (rewritten in step 8f)](#the-design-as-steps-8a8f-leave-it-rewritten-in-step-8f)
     - [Step 5's layer: the analytic control](#step-5s-layer-the-analytic-control)
@@ -981,12 +984,15 @@ Two consequences shape the case list:
   all. A **boost preserves the harmonic condition** (`□x^a = 0` is
   Lorentz covariant), so a *boosted* Kerr in harmonic coordinates is
   harmonic too. That is what makes it the proof-of-concept case.
-- **A time-dependent gauge source is not supported.** Boosted
+- **A time-dependent *sampled* gauge source is not supported.** Boosted
   Kerr-Schild has `H_a(x − vt)`, which a per-chunk sample cannot
   represent and an in-kernel evaluation (nested duals per point per
   evaluation) would price at about one RHS. The driver refuses a
-  non-harmonic background that is not static, and says why; in-kernel
-  sources are an extension.
+  non-harmonic background that is not static when it is given no source,
+  and says why. **(Amended 2026-10-20.)** A boosted Kerr-Schild hole runs
+  with the algebraic source below, `KerrSchildSource` with the hole's lab
+  velocity, which moves with the hole: `kerr_schild_case(; v, x0,
+  gauge_source = :algebraic)` builds it (`test/boosted_tests.jl`).
 
 **How the two questions are answered** (step 3, `src/gauge.jl`), because
 they are not the same kind of question. **Harmonicity is a table** over
@@ -1213,6 +1219,81 @@ TreeAMR's `interpolate` turns the finder's sphere into the quadrant, and
 Kerr's `0.3`). A restart chain on the rotating octant is the uninterrupted
 run bit for bit (checked by hand, not in the suite).
 
+### The quadrant: a hole moving along `x` (added 2026-10-20)
+
+A non-spinning hole on the `x` axis, moving along it, is its own mirror image
+in `y = 0` and in `z = 0` at every time, and in nothing else: the boost breaks
+`x → −x`. `hole_case(; octant = :quadrant)` evolves the quarter
+`[−L, L] × [0, L]²` of the box, a quarter of its cost, with those two faces
+reflecting and the other four Dirichlet (the hook at the current time, so the
+data are the moving hole's). It refuses any other hole — off the axis, moving
+across it, or spinning (a spin along `z` keeps only the `z` mirror, one along
+`x` neither) — and says why. The parities are the octant's `state_parity`,
+and nothing else is new at the walls. The box is twice as long as it is
+wide, so `gh_forest` takes a root brick `(2r, r, r)`: `roots` is a count or
+three counts, and the *cells* must be cubes, `widths[d]/roots[d]` one number.
+
+A hole that crosses the box without a regrid needs its finest level along the
+whole path. `hole_forest(; path = Δc)` sweeps each shell along the segment
+`[c, c + Δc]` — for `shape = :cube` the box `(min − R, max + R)` along the
+path and `(c − R, c + R)` across it, for `:ball` the capsule — built once
+with `Δc = v t_end`; with `path = nothing` the shells are the old ones, bit
+for bit. It is the frozen hierarchy of the convergence protocol, and it is
+not cheap: radii `32, 16, 8, 4` along a travel of `8 M` on `L = 64` are 856
+blocks. `test/octant_runs.jl octant=quadrant` measures everything about the
+hole — the shells, the noise's excluded core, the finder's guess, the
+boundary check — about `c(t)`, and splits each shell into its trailing and
+leading half.
+
+**(Measured 2026-10-20**, `test/boosted_tests.jl`**.)** The boosted
+Kerr-Schild hole (`v = 1/5` from `x = −1/4`, `:damped` at `4/M`, the algebraic
+source, `q = 2`, uniform `h = 5/48`) on the quadrant `[−5/2, 5/2] × [0, 5/2]²`
+against the box `[−5/2, 5/2]³`: after 16 RK4 steps the two agree to
+`5.8·10⁻¹⁶` relative at every point outside the core. As for the octant,
+only a uniform quadrant is the box's restriction; a refined one is a
+different, symmetric discretization of the same problem. The runs are under
+[the boosted Kerr-Schild hole at binary
+speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20).
+
+### The rotating quadrant: a hole moving along its spin axis (added 2026-10-21)
+
+A Kerr hole spinning about `z` and moving along `z` has no mirror plane: the
+motion breaks `z → −z`, the spin `x → −x` and `y → −y`. It is its own image
+under a quarter turn about `z` at every time, though, which is the rotating
+octant's seam without its mirror. `hole_case(; octant = :rotating_quadrant)`
+evolves `[0, L]² × [−L, L]`, a quarter of the box, with the seam `(1, 2)`
+gluing `x = 0` to `y = 0` and Dirichlet data at the four faces `x = L`,
+`y = L` and `z = ±L`. It needs that hole — on the `z` axis, at rest or moving
+along it, spinning about `z` (Kerr-Schild or harmonic, any `a`, unrotated,
+translated or boosted along `z`) — and refuses any other, because a spin or a
+velocity across `z` would turn with the quadrant and run there as a different
+problem. `kerr_schild_case(; axis = 3)` builds the hole (`axis` is the
+coordinate it sits and moves on; `axis = 1` is the quadrant's hole bit for
+bit), `gh_forest` takes the root brick `(r, r, 2r)`, and `hole_forest(; path)`
+sweeps the capsule along `z`. Nothing at the seam is new: the state turns by
+`state_rotation`, both seam planes are evolved, and the finder needs nothing of
+its own. `test/octant_runs.jl octant=rotating_quadrant` records `J`'s
+component along the spin, `J n̂_z` with `n̂` the finder's spin axis (`hz_J`;
+the magnitude on every other domain), and the horizon's extent along `z` over
+its extent across, against `√(1 − v²) r₊/√(r₊² + a²)`.
+
+**(Measured 2026-10-21**, `test/boosted_tests.jl`**.)** Kerr-Schild at
+`a = 1/5` moving along `z` at `v = 1/5` from `z = −1/4` (`:damped` at `4/M`,
+`r_0 = 2/5`, `r_1 = 11/10`, the algebraic source, `q = 2`, uniform
+`h = 5/48`) on `[0, 5/2]² × [−5/2, 5/2]` against the box `[−5/2, 5/2]³`,
+after 16 RK4 steps, at every point outside the core. At rest the two agree to
+`3.6·10⁻¹⁴` (`0.4 ε` relative). Moving they differ by `1.3·10⁻¹⁰`, growing
+linearly with the steps (`2.5·10⁻¹²` after one), on the seam planes and the
+axis in the core and the inner layer, and the same without spin (`1.9·10⁻¹⁰`
+at `a = 0`). That is the box's, not the quadrant's: the analytic background is
+four-fold symmetric only to `56 ε`, and the moving layer's target rate, a
+centered difference over `δ = ε^{1/3} r_0`, divides that asymmetry by `δ` and
+injects it every step, while the quadrant's ghosts across the seam are the turn
+exactly. The claim bounds the difference by `nsteps · dt` times the rate's
+measured asymmetry. The `x` quadrant's mirror test has met the same mechanism
+since the rate: `3.8·10⁻¹¹`, where it was `5.8·10⁻¹⁶` above. The runs are under [a spinning hole along its
+axis](SINGULARITY_HANDLING.md#a-spinning-hole-along-its-axis-2026-10-21).
+
 ### The interior: a pointwise damping layer
 
 #### The design, as steps 8a–8f leave it (rewritten in step 8f)
@@ -1294,13 +1375,20 @@ case.**)** The right-hand side at every point is
 
 with `F` the GH right-hand side `(EXPANDED)` including the dissipation,
 `u_exact` the background's `(h, Π)` at `(x, t)`, and two smooth
-profiles:
+profiles. **(Amended 2026-10-20:** for a moving hole the `:damped` layer
+adds the target's rate where `F` is switched off,
+
+    ∂_t u = w F(u)  +  (1 − w) ∂_t u_exact  −  ρ (u − u_exact)
+
+— the `:fitted` layer's `target_rate` (step 8) for the analytic target —
+because without it the moving solution is not a solution of `(INTERIOR)`;
+"Why touch the interior" below.**)**
 
 | region | radii | `w` | `ρ` | what happens |
 |---|---|---|---|---|
 | evolved | `r ≥ r_1` | 1 | 0 | the Einstein equations, untouched |
-| damping layer | `r_0 ≤ r < r_1` | 1, ramping to 0 at its inner edge | 0 at `r_1`, rising smoothly to `ρ_max` | the equations plus a relaxation toward the analytic solution |
-| frozen core | `r < r_0` | 0 | 0 | nothing: `du = 0`, `F` not evaluated |
+| damping layer | `r_0 ≤ r < r_1` | 1, ramping to 0 at its inner edge | 0 at `r_1`, rising smoothly to `ρ_max` | the equations plus a relaxation toward the analytic solution (and, for a moving `:damped` hole, `(1 − w) ∂_t u_exact`, amended 2026-10-20) |
+| frozen core | `r < r_0` | 0 | 0 (`ρ_max` for a moving `:damped` hole, amended 2026-10-20) | nothing: `du = 0`, `F` not evaluated; a moving `:damped` core relaxes toward `u_exact` at the core rule's point, following its rate in the outer half `r > r_0/4` |
 
 The layer's outer radius sits inside the horizon with a margin: with
 `r_h,min(t)` the smallest coordinate distance from `c(t)` to the
@@ -1486,6 +1574,21 @@ The analytic solution is an **exact solution of `(INTERIOR)`** wherever
 it is regular: `F(u_exact) = ∂_t u_exact` and the relaxation term
 vanishes on it, so a static hole is an equilibrium and a boosted hole is
 an exact time-dependent solution, in the layer as much as outside.
+**(Amended 2026-10-20: not for the boosted hole.** Where `w < 1`,
+`w F(u_exact) = w ∂_t u_exact` falls short of `∂_t u_exact` by `(1 − w)
+∂_t u_exact`, and the layer trails a moving target by about `|∂_t
+u_exact|/ρ`: the boosted Kerr-Schild hole at `v = 1/5` had a layer residual
+of `6.5` at `4/M` at every `h`, and an error just outside the horizon
+`28–44×` the resting hole's at `1/16` (`SINGULARITY_HANDLING.md`, "The
+boosted Kerr-Schild hole at binary speed"). The moving `:damped` layer
+therefore carries `(1 − w) ∂_t u_exact`, and the static hole, for which it is
+zero, takes the branch without it bit for bit. `∂_t h` is `dmetric`'s time
+column from the pass the layer already makes; `∂_t Π` is a centered
+difference of that pass at `t ± δ`, `δ = ε^{1/3} r_0`
+(`background_state_rate`) — `10⁻¹⁰` of `|∂_t Π|`, and generic in the target,
+where `ddmetric` would put a second nested dual pass in every interior
+kernel. Its roundoff, `ε^{2/3}`, is what a moving hole's quadrant and box
+now agree to.**)**
 
 **Why a relaxation and not a slowed evolution alone** (decided in
 review; the pure mask `ρ = 0` was the first proposal and stays as a
@@ -1685,7 +1788,46 @@ because the core holds finite but arbitrary data on which `F` may be
 initial-data callback fills it with the analytic solution evaluated on
 the sphere `r_0` along the ray (continuous at `r_0`, finite everywhere),
 `du = 0` there, nothing else writes it, and the regrid transfer
-interpolates it like any other data. Every norm, monitor and error
+interpolates it like any other data. **(Amended 2026-10-20: a moving hole's
+`:damped` core follows its target.)** A core with `du = 0` keeps its `t = 0`
+data, the solution about `c(0)`, and when the hole moves its trailing side
+releases them into the layer, off the current solution by an amount that
+grows with the distance travelled. A boosted Kerr-Schild hole on the
+quadrant (`a = 0`, `v = 1/5`, `r_0 = 5/8`, `r_1 = 23/16`, `h = 1/16`, `4/M`)
+had a layer residual growing linearly — 6.3, 10.9, 14.8, 19.1, 30, 38 at
+`t = 1/2 … 3`, against `0.1` at rest, the trailing side 20× the leading —
+and died at `3.2 M`, when the points that were at the center at `t = 0`
+left the core (`r_0/v = 3.1 M`); step 8's moving harmonic sphere died the
+same way. So for `:damped` with `v ≠ 0` the core relaxes at the full rate,
+toward the layer's own target `u_exact(t, core_position(x, t))` at the core
+rule's point `c(t) + r_0 n̂` — the layer's `u_exact` at `r_0`, so the two
+agree there — and `F` is still not evaluated. **The metric relaxes in the
+ADM variables** `(α², β^i, γ_ij)`, `∂_t(α², β, γ) = −ρ_max ((α², β, γ) −
+(…)_exact)` mapped to `∂_t h` by the chain rule (`core_relaxation_rate`),
+and `Π` linearly. The plain `−ρ_max (u − u_exact)` was tried first and
+ended the run in its first chunk: on the center's path the target jumps from
+one side of the sphere `r_0` to the other as the center passes, and the
+straight line in `g` between Kerr-Schild at `±r_0 x̂` passes through
+`η + (2M/r_0) diag(1, n n)`, which is Euclidean (`g_tt = 2.2` at
+`r_0 = 5/8 M`) — the constraint monitor's `sqrt` threw there. Positive `α²`
+and positive-definite `γ` are convex, so the ADM path is a metric
+throughout, and near the target the two rates agree to first order. **(Amended
+2026-10-20:** in its outer half the core carries its target's rate too,
+`s(r) ∂_t u_exact(t, c(t) + r_0 n̂)` with `s` rising `C²` from 0 at `r_0/4`
+to 1 at `r_0/2` (`core_target_rate`, `core_rate_weight`), a centered
+difference along the core rule's moving point. Without it the core lags its
+target by `|∂_t u|/ρ_max`, and the points it releases on its trailing side
+carry that lag into the layer: on the suite's quadrant (`q = 2`, `h = 5/48`)
+the layer's rate alone took the residual after 32 steps from `34.6` to
+`12.3`, with the core's `3.3` against the resting hole's `2.6`. Not near the
+center: `n̂` turns at `v/r` and jumps where the center's path crosses a grid
+point; a point spends `(r_0/2)/v` in the outer half, many `1/ρ_max`, before
+it leaves.**)** A hole at rest keeps `du = 0`
+bit for bit (the kernel branches on `v` first, `core_follows`); `:frozen`
+keeps it too, being the variant that is measured to fail, and `:pasted`
+overwrites its core anyway. The tracked geometry is not changed: its
+`:fitted` core already relaxes, and its center's `v_est` is never exactly
+zero. Every norm, monitor and error
 kernel — and the refinement indicator — masks the whole interior
 `r < r_1`; the modified region is not a numerical solution and must not
 be reported as one or refined for its own sake. The apparent horizon
@@ -2580,7 +2722,8 @@ that is `GHCase`, which lives here with the backgrounds it is made of
 rather than in `driver.jl` **(amended in step 3**: the right-hand side
 needs a case two steps before there is a driver, and a struct cannot be
 defined twice**)**. Its constructor is where a moving non-harmonic
-background is refused.
+background with a sampled source is refused; with the algebraic Kerr-Schild
+source the boosted Kerr-Schild hole is a case (amended 2026-10-20).
 
 A background gives the initial state through one callback,
 `x ↦ (h_ab, Π_ab)` at time `t`, with `Π` from `∂_t g` (the `dmetric`
@@ -3916,7 +4059,15 @@ and GPUs across nodes.
   so the horizon's numbers are not recomputed; `test/octant_runs.jl` writes
   everything its CSV carries — constraints overall, by level, in shells and
   at the boundary, the error, the horizon, the track, the fit and the step —
-  and `finished`, `stopped` or `failed` at the end.
+  and `finished`, `stopped` or `failed` at the end. **(Amended 2026-10-21,
+  for SimWatch 1.3.0:** the writer has the reference writer's `group`,
+  `progress.fraction`, `slurm` keys and the chain's `previous_job_ids`, read
+  from the status file an earlier job left; the thumbnails
+  (`test/simwatch_plots.jl`) are SVG written by hand on a transparent
+  background with `currentColor` axes, which SimWatch draws with its own font
+  and adapts to a light or dark terminal as its user configures, instead of
+  dark-on-light PNGs; and `bench/simwatch.sh` is the batch jobs' copy of its
+  shell helper.**)**
 
 ## Checkpoint and restart
 
@@ -4557,6 +4708,34 @@ refinement level, short times.
   not at `M/2` in the masked norm (**item 6 partly met**). The open question
   records what is left and the recommendation (more interior work — the
   spin drift first — before excision's price).
+  **2026-10-20, outside G5's chart:** a boosted *Kerr-Schild* hole at
+  `a = 0`, `v = 1/5`, crosses `8 M` of a frozen capsule mesh on the quadrant
+  at the resting hole's level on the analytic layer at `8/M` — the error just
+  outside the horizon `1.1–1.3×` the resting hole's to `16 M` at `1/32`,
+  `ℋ` `0.8–1.2×` to `40 M`, order four from `r = 3` out, every find with
+  Schwarzschild's `M_irr`, `J` and contraction ([the boosted Kerr-Schild hole
+  at binary
+  speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)).
+  It says the analytic layer can follow a moving hole; it says nothing about
+  G5's chart, spin or `:fitted` layer, and G5 is not done. **2026-10-21:**
+  with the target's rate in the moving layer and core the same holds at the
+  default `4/M` — `ℋ` just outside the horizon the resting hole's to `3 %`
+  from `1/24` on, order four in every shell ([the moving `:damped` layer's
+  target
+  rate](SINGULARITY_HANDLING.md#the-moving-damped-layers-target-rate-2026-10-21)).
+  **2026-10-21, a spinning hole along its axis:** Kerr-Schild at `a = 1/2`
+  moving along its spin at `v = 1/5` on the rotating quadrant, `:damped` at
+  `4/M`, is at the resting hole's level in `ℋ` (`0.81–1.08×`) to `40 M` at
+  `1/24`, `1/32` and `1/40`, and its `J − a` drifts linearly at the resting hole's rate to `0.4–3 %`
+  (`4.0·10⁻⁸/M` at `1/32`), converging at order four; `:fitted` keeps `J`
+  within `4·10⁻⁶` too ([a spinning hole along its
+  axis](SINGULARITY_HANDLING.md#a-spinning-hole-along-its-axis-2026-10-21)).
+  So a moving spinning hole as such does not drift, and G5's `0.013` a `M`
+  belongs to something this run does not have — the boost across the spin,
+  the harmonic chart, or G5's `q = 2`, `v = 0.3`, `a = 7/10` and `m = 4`.
+  That is an elimination from one run that differs from G5 in all of these at
+  once, not a measurement of any of them: no run has yet moved a spinning hole
+  across its spin in Kerr-Schild, or along it in the harmonic chart.
 - **G6 — Infrastructure and the H200.** `io.jl`, slice output and
   viewers, `bin/gh.jl`, the per-phase benchmark on threads (TreeWave's
   table, on Symmetry) and **on the H200 in `Float64`**, in-kernel metric
@@ -5552,13 +5731,23 @@ for the dissipation). A 64-core EPYC node is `12.6×` slower than one H200 here
 
 Rules of thumb for a single Kerr-Schild hole, `M = 1`, spin `a ≤ 9/10` along
 `z`, at rest on the octant, drawn from the runs in
-[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#single-holes-on-the-octant-a--0-to-910-2026-10-02-to-2026-10-07):
+[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#single-holes-on-the-octant-a--0-to-910-2026-10-02-to-2026-10-07)
+— and, from 2026-10-20, the `a = 0` hole moving at `v = 1/5` on the quadrant
+(the rows marked *moving*, from [the boosted Kerr-Schild hole at binary
+speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)),
+and from 2026-10-21 the `a = 1/2` hole moving along its spin at `v = 1/5` on
+the rotating quadrant ([a spinning hole along its
+axis](SINGULARITY_HANDLING.md#a-spinning-hole-along-its-axis-2026-10-21)):
 `a = 0`, `3/5` and `9/10` are measured, the spins between follow from the
 rules below the table, and none of it is a guarantee. Common to every row:
 `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, `ρ_max = 4/M`, the Gaussian `γ0`
 (`1/M → 1/(10M)`), the algebraic source, the rotating octant (the mirrored
 one at `a = 0`), a finest level whose cube contains the whole horizon, and
-`24 M` — the shells about the hole saturate by about `8 M`. `h` is the
+`24 M` — the shells about the hole saturate by about `8 M`. The moving rows
+differ in the domain (`L = 64`: the quadrant for `a = 0` moving along `x`, the
+rotating quadrant for `a = 1/2` moving along `z`, its spin),
+the mesh (a frozen capsule along the path) and the length (`40 M`, `8 M` of
+travel). `h` is the
 spacing at the hole; a convergence pair keeps the layer's radii fixed in `M`,
 not in cells. The horizon's coordinate radius is `r₊ = 1 + √(1 − a²)` at the
 poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
@@ -5567,7 +5756,11 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 |---|---|---|---|---|
 | 0 | `:damped` | `1/16` (`1/16`, `1/24`) | `r_0 = 3/4`, `r_1 = 3/2` | measured: order 4 from `1/16` |
 | 0 | `:fitted` | `1/24` (`1/24`, `1/32`) | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured: `ℋ` outside `1.6×` `:damped`'s, the error `1.1×` |
+| 0, *moving* (`v = 1/5` along `x`) | `:damped` (with the target's rate, 2026-10-21) | `1/16` (`1/24`, `1/32`) | `r_0 = 5/8`, `r_1 = 23/16` (`8.4` cells inside the contracted horizon at `1/16`) | measured to `40 M` at `4/M`: from `1/24` on `ℋ` just outside the horizon `1.00–1.03×` the resting hole's and the error there `1.26–1.36×` to `16 M`; order 4 in every shell from `1/24` to `1/32`; at `1/16` `ℋ` there `1.4–1.6×` (`8/M`: `1.03–1.09×` its own resting hole, which `8/M` lowers too) |
+| 0, *moving* (`v = 1/5` along `x`) | `:fitted` | `1/24` | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured to `40 M`: stable, the error just outside the horizon `:damped`'s at `4/M`, `ℋ` there `13–15×` `:damped`'s at `8/M`; `ℋ` there does not converge to `1/32` at `m = 16`, even at rest; `trail_ramp = 9/10` raised the error there `1.5–2.4×` and lowered it over the evolved region to `0.72–0.91×` |
 | 0.3 | `:damped` | `1/16` (`1/16`, `1/24`) | `r_0 = 3/4`, `r_1 = 3/2` | the rules |
+| 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:damped` (with the target's rate) | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 23/16` (`9.4` cells inside the contracted pole `r₊ √(1 − v²) = 1.828` at `1/24`) | measured to `40 M` at `4/M`, with `1/40`: `ℋ` `0.81–1.08×` the resting hole's in every shell at every `h` and time, the error `1.1–1.6×` (the hole's position, late); order 4 outside the horizon in both pairs; `J − a` drifts at the resting hole's rate, order 4 |
+| 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:fitted` | `1/32` (the ring: at `1/24` the core surface is at `0.35 < a` on the equator) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured to `40 M`: stable, but `ℋ` just outside the horizon `43×` `:damped`'s at `1/32` and `176×` at `1/40`, `10–15×` its own resting hole; it does not converge from `1/32` to `1/40` at `m` fixed in cells, even at rest |
 | 0.3 | `:fitted` | `1/24` | `m = 16`, `n_L = 18`, `fit_cont = 2`, `lmax_fit = 12` | the rules (`fit_cont = 2` not yet run with spin) |
 | 0.6 | `:damped` | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 3/2` | measured: order `4.0`; `1/16` is not convergent |
 | 0.6 | `:fitted` | `1/32` (`1/32`, `1/48`) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured at `1/32`: `ℋ` outside `3.2×`, the error equal; the pair predicted |
@@ -5601,6 +5794,38 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   a bounded ring at the pole, `0.25 M` grows on the axis), while `0.625 M` is
   fine at `3/5`; between the two it is unknown. `fit_cont = 2` won every pair
   at `a = 0`; the spinning runs have used `fit_cont = 1` only.
+- **A moving hole** (added 2026-10-20, measured at `a = 0`, `v = 1/5`):
+  - **`:damped` at the default `4/M`, with the target's rate** (amended
+    2026-10-21). Without `(1 − w) ∂_t u_exact` in the layer and the core's
+    own rate the layer lagged a moving target by `|∂_t u|/ρ_max` — a
+    residual of `6.5` at `4/M` and `3.9` at `8/M` at every `h`, the error
+    just outside the horizon `28–44×` the resting hole's at `4/M` and `1/16`
+    — and `8/M` was the remedy. With the rates (`core_follows`, built
+    2026-10-20) the residual is `0.09–0.21`, `ℋ` just outside the horizon is
+    the resting hole's from `1/24` on, and `4/M` beats the old `8/M`
+    everywhere (`ℋ` over the evolved region `0.08–0.36×`). `8/M` now helps a
+    moving hole only as much as a resting one: at `1/16`, where it lowers
+    `ℋ` just outside `1.6–1.8×` at rest too, and not from `1/24` on.
+  - **Check `r_1` against the contracted horizon**, `2√(1 − v²)` along the
+    boost (`1.960` at `1/5`): the octant's `r_1 = 3/2` is `7.4` cells inside
+    it at `1/16`, below the rule's 8; `23/16` is `8.4`.
+  - **`1/16` is adequate** — at `4/M` `ℋ` just outside the horizon
+    `1.4–1.6×` the resting hole's and the error there `1.5–2.1×` from `4 M`
+    to `16 M`, every shell from `r = 3` out within `1.4×` — and `1/24`,
+    `1/32` is the convergence pair (order `4.0–4.1` in every shell).
+  - **The error against the analytic solution grows late, and `ℋ` does
+    not**: the found center runs ahead of the analytic one by truncation
+    error (`1.6·10⁻⁶` at `40 M` at `1/32`, order four), and by `40 M` the
+    error is `2.6–3.4×` the resting hole's in every shell at every `h`.
+  - The core must follow its target (`core_follows`, built 2026-10-20): with
+    `du = 0` the run died at `r_0/v = 3.1 M`.
+  - **Along its spin** (added 2026-10-21, measured at `a = 1/2`): the rotating
+    quadrant, and everything above holds unchanged — `ℋ` the resting hole's,
+    order four, the late error the position (`z − c_z = 1.2·10⁻⁶` at `40 M` at
+    `1/32`). Take `r_0` outside the ring and `r_1` against the contracted
+    *pole*, `r₊ √(1 − v²)`. A `:fitted` core surface must clear the ring on the
+    equator, `m + n_L` cells below `√(r₊² + a²)`: at `m = 20`, `n_L = 18` and
+    `a = 1/2` that rules out `1/24`. The spin's drift is the resting hole's.
 - **Screen a new `:fitted` depth** before a long run: the same tracked
   geometry with the exact target (`variant = :damped`) for `6 M` at the
   run's `h`, about an hour and a half at `1/96` — a bad depth grows from
@@ -5617,7 +5842,19 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   (52.8 M). On a hole, `main`'s rewritten kernel is `1.6–2.2×` faster per
   point, not the gauge wave's `8×` (measured 2026-10-14): `220 s/M` at `1/48`
   (38.0 M points on `L = 128`) and `460 s/M` at `1/96` (58.9 M). The layer's
-  kernel and the refined mesh's prolongation are what is left.
+  kernel and the refined mesh's prolongation are what is left. The moving
+  `a = 0` hole on the quadrant's capsule (measured 2026-10-20, `56–112` steps
+  per `M`): `34 s/M` at `1/16` (`3.51 M` points, `21 GB`), `125 s/M` at `1/24`
+  (`11.8 M`, `33 GB`), `234–250 s/M` at `1/32` (`28.0 M`, `54 GB`; `:fitted`
+  `64 GB`) — `40 M` in `0.4`, `1.4` and `2.6–2.8 h`, and `75–175 ns` per point
+  and step, `2–4×` the `a = 9/10` family's. The moving `a = 1/2` hole on the
+  rotating quadrant's capsule (measured 2026-10-21, `84–140` steps per `M`):
+  `130 s/M` at `1/24` (`11.8 M` points, `33 GB`), `254 s/M` at `1/32`
+  (`28.0 M`, `54 GB`; `:fitted` `243 s/M`, `64 GB`), `543 s/M` at `1/40`
+  (`54.8 M`, `89 GB`; `:fitted` `525 s/M`, `107 GB`) — `40 M` in `1.45`,
+  `2.7–2.8` and `5.8–6.0 h`, `71–131 ns` per point and step. `1/48` on that
+  capsule is `94.7 M` points, about `141 GB` for `:damped` and `171 GB` for
+  `:fitted` extrapolated linearly: not one H200.
 - **A convergence family fits one H200 only with thin outer levels**
   (measured 2026-10-19, `SINGULARITY_HANDLING.md`, "`a = 9/10` `:damped`
   converges at `1/96`"). Each coarse level of a nested-cube mesh is at least
@@ -6557,3 +6794,17 @@ on the static Kerr-Schild hole, and then run a boosted Kerr-Schild hole
 across the mesh with the analytic layer, against G5's harmonic `a = 7/10`
 rows; the damped harmonic gauge stays the extension for binaries, where no
 constants of the run make the data stationary.
+
+**Done (2026-10-20) for `a = 0`**: the boosted Kerr-Schild hole at `v = 1/5`,
+the speed of one member of a binary a few orbits before merger, crossed `8 M`
+of a frozen capsule mesh on [the quadrant](#the-quadrant-a-hole-moving-along-x-added-2026-10-20)
+to `40 M` with the analytic layer, at the resting hole's level once the layer
+relaxes at `8/M` and its core follows the target — under [the boosted
+Kerr-Schild hole at binary
+speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)
+— and, from 2026-10-21, at the default `4/M` once the layer and the core carry
+their target's rate ([the moving `:damped` layer's target
+rate](SINGULARITY_HANDLING.md#the-moving-damped-layers-target-rate-2026-10-21)).
+It was not compared with G5's rows, which differ in chart, speed (`0.3`),
+order (`q = 2`) and spin. A moving spinning Kerr-Schild hole, `a = 9/10`
+above all, is still open.

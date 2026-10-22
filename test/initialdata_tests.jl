@@ -171,8 +171,9 @@ end
 @testset "gh_forest builds the case's box and refuses one it cannot" begin
     # Guards the assumption TreeAMR's geometry makes and this package
     # inherits: blocks are cubes with one spacing per level, so a box that
-    # is not a cube would silently have anisotropic cells and every
-    # stencil would be scaled by the wrong `h`.
+    # is not in the root brick's proportions (a cube, for one count of
+    # roots) would silently have anisotropic cells and every stencil would
+    # be scaled by the wrong `h`.
     T = Float64
     case = gauge_wave_case(T; d=T(2), ε_KO=zero(T), γ0=zero(T), γ2=zero(T))
     forest = gh_forest(T, case; N=8, roots=2)

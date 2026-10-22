@@ -82,7 +82,8 @@ end
     # prescribed gauge source, which a per-chunk sample cannot represent.
     # Boosted Kerr-Schild is exactly it, and the message has to name the
     # case that works instead — this is the refusal `CLAUDE.md` says not to
-    # weaken.
+    # weaken. It is the *sampled* source's: with the algebraic one, which
+    # moves with the hole, the same background runs (`boosted_tests.jl`).
     T = Float64
     moving_ks = boost(KerrSchild{T}(1, 0), SVector{3,T}(3 // 10, 0, 0))
     @test !isharmonic(moving_ks)

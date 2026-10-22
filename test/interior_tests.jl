@@ -316,8 +316,10 @@ import SpacetimeMetrics as SM
         # The case derives it — and its damping profile moves with it — and
         # the tracked seed carries it: at `t = 1` the seed's center is where
         # the boosted Kerr-Schild metric above is singular. (A boosted
-        # Kerr-Schild *case* is refused as a moving non-harmonic background,
-        # so the case is harmonic Kerr under the same boost.)
+        # Kerr-Schild case with the *sampled* source is refused as a moving
+        # non-harmonic background — it runs with the algebraic source, which
+        # `boosted_tests.jl` builds — so the case here is harmonic Kerr under
+        # the same boost, which needs no source at all.)
         bh = SM.boost(SM.Harmonic(one(T), zero(T)), v)
         case = hole_case(T, bh; halfwidth=T(5), chunk=T(1 // 10),
                          interior=FittedSpec(T))

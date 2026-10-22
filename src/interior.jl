@@ -12,8 +12,13 @@
 #
 #   * `r ≥ r_1`      — evolved, `w = 1`, `ρ = 0`: the equations, untouched;
 #   * `r_0 ≤ r < r_1` — the layer, `w` ramping to 0 at its inner edge and
-#                       `ρ` rising from 0 at `r_1` to `ρ_max`;
-#   * `r < r_0`      — the frozen core, `du = 0` and `F` **not evaluated**.
+#                       `ρ` rising from 0 at `r_1` to `ρ_max` (a moving
+#                       `:damped` hole's adds `(1 − w) ∂_t u_exact`,
+#                       amended 2026-10-20);
+#   * `r < r_0`      — the frozen core, `du = 0` and `F` **not evaluated**
+#                       (a moving `:damped` hole's core relaxes toward the
+#                       analytic solution at `core_position` instead —
+#                       `core_follows`, amended 2026-10-20).
 #
 # **The second half of the file is the tracked geometry (step 8d)**: the same
 # three regions below the found horizon's offset surface `r_h(n̂) − m h`
@@ -342,9 +347,10 @@ end
 """
     is_frozen(int::Interior, r) -> Bool
 
-Whether the point at distance `r` from the center has `du = 0` and — this
-is the point of the predicate — whether `F` must **not** be evaluated
-there.
+Whether the point at distance `r` from the center has `du = 0` — or, for a
+moving `:damped` hole, the core's relaxation ([`core_follows`](@ref),
+amended 2026-10-20) — and — this is the point of the predicate — whether `F`
+must **not** be evaluated there.
 
 `r < r_0` for `:damped` and `:frozen`, `r < r_1` for `:pasted`, which
 freezes the whole interior and lets the limiter write it. `CLAUDE.md`:
@@ -355,6 +361,121 @@ is singular inside it, `F` of that data may be `NaN`, and `0 · NaN = NaN`
 @inline is_frozen(int::Interior{T,:damped}, r) where {T} = r < int.r_0
 @inline is_frozen(int::Interior{T,:frozen}, r) where {T} = r < int.r_0
 @inline is_frozen(int::Interior{T,:pasted}, r) where {T} = r < int.r_1
+
+"""
+    core_follows(interior) -> Bool
+
+Whether the frozen core *relaxes* toward the analytic solution rather than
+keeping its data (added 2026-10-20): true for the `:damped` variant of an
+[`Interior`](@ref) whose center moves, `v ≠ 0`, and false otherwise — a hole
+at rest, `:frozen`, `:pasted` (whose paste overwrites the core anyway) and
+the tracked geometry, whose `:fitted` core relaxes toward its own target and
+whose other variants keep `du = 0`.
+
+`CODE.md`, "The frozen core" (amended 2026-10-20): a moving hole's frozen
+core keeps its `t = 0` data, the analytic solution about `c(0)`, and the
+trailing side of the core releases them into the layer, where they are off
+the current solution by an amount that grows with the distance travelled —
+the boosted Kerr-Schild hole's layer residual grew linearly and the run
+died when the points that were at the center at `t = 0` left the core, at
+`t = r_0/|v|`. The kernel relaxes such a core at `ρ_max` toward the layer's
+target at [`core_position`](@ref) — the metric in the ADM variables
+([`core_relaxation_rate`](@ref)), `Π` linearly — and asks this *before* it
+evaluates that target, so a hole at rest is bit for bit the run it was.
+
+The same predicate gives the *layer* of such a sphere its target's rate,
+`(1 − w) ∂_t u_exact` (amended 2026-10-20, [`background_state_rate`](@ref)):
+without it the layer trails the moving solution by `|∂_t u_exact|/ρ_max`.
+"""
+@inline core_follows(::Any) = false
+
+"""
+    core_relaxation_rate(h, h_t, ρ) -> SVector{10}
+
+The rate `∂_t h` of a moving `:damped` core (added 2026-10-20): the metric
+relaxed toward the target `h_t` at the rate `ρ` **in the ADM variables**
+`(α², β^i, γ_ij)`, `∂_t (α², β^i, γ_ij) = −ρ ((α², β^i, γ_ij) − (…)_t)`, and
+mapped back to `h` by the chain rule of `g_tt = −α² + γ_ij β^i β^j`,
+`g_ti = γ_ij β^j`, `g_ij = γ_ij`:
+
+    ∂_t h_ij = ∂_t γ_ij
+    ∂_t h_ti = ∂_t γ_ij β^j + γ_ij ∂_t β^j
+    ∂_t h_tt = −∂_t α² + β^i ∂_t γ_ij β^j + 2 β_j ∂_t β^j
+
+**Why not `−ρ (h − h_t)`.** The core rule's target at a point near the
+center's path turns with `n̂` at `v/r` and, on the path itself, jumps from
+one side of the sphere `r_0` to the other as the center passes. The straight
+line in `h` between Kerr-Schild at `+r_0 x̂` and at `−r_0 x̂` passes through
+`g = η + (2M/r_0) diag(1, n n)` — Euclidean, `g_tt = 2.2` at `r_0 = 5/8 M`
+(`CLAUDE.md`, "The fit is made in `(log α, β^i, γ_ij, Π_ab)`, never in
+`g_ab`": the Lorentzian metrics are not convex in `g_ab`). Measured: the
+boosted quadrant hole relaxed linearly ended in its first chunk, in the
+constraint monitor's `sqrt` at such a point. A convex combination of
+positive `α²` and positive-definite `γ` is positive and positive-definite,
+so the path in these variables is a metric everywhere; near the target the
+two rates agree to first order. No `sqrt` is taken, so a degenerate stage
+value cannot throw here.
+"""
+@inline function core_relaxation_rate(h::SVector{10,T}, ht::SVector{10,T},
+                                      ρ) where {T}
+    A, βu, βl, γ = _adm_split(h)
+    At, βut, _, _ = _adm_split(ht)
+    dA = -ρ * (A - At)
+    dβ = -ρ * (βu - βut)
+    # `γ`'s offsets cancel in the difference: `h_ij − h_t,ij`.
+    dγ = -ρ * SMatrix{3,3,T}(h[5] - ht[5], h[6] - ht[6], h[7] - ht[7],
+                             h[6] - ht[6], h[8] - ht[8], h[9] - ht[9],
+                             h[7] - ht[7], h[9] - ht[9], h[10] - ht[10])
+    dγβ = dγ * βu
+    γdβ = γ * dβ
+    dtt = -dA + (βu[1] * dγβ[1] + βu[2] * dγβ[2] + βu[3] * dγβ[3]) +
+          2 * (βl[1] * dβ[1] + βl[2] * dβ[2] + βl[3] * dβ[3])
+    return SVector{10,T}(dtt, dγβ[1] + γdβ[1], dγβ[2] + γdβ[2], dγβ[3] + γdβ[3],
+                         dγ[1, 1], dγ[2, 1], dγ[3, 1], dγ[2, 2], dγ[3, 2], dγ[3, 3])
+end
+
+# `α² = −g_tt + β^i β_i`, `β_i = g_ti`, `β^i = γ^{ij} β_j`, `γ_ij = δ_ij + h_ij`
+# from the packed offset `h` — without the `sqrt` of `metric_quantities`.
+@inline function _adm_split(h::SVector{10,T}) where {T}
+    γ = SMatrix{3,3,T}(one(T) + h[5], h[6], h[7],
+                       h[6], one(T) + h[8], h[9],
+                       h[7], h[9], one(T) + h[10])
+    βl = SVector{3,T}(h[2], h[3], h[4])
+    βu = inv(γ) * βl
+    A = (one(T) - h[1]) + (βu[1] * βl[1] + βu[2] * βl[2] + βu[3] * βl[3])
+    return A, βu, βl, γ
+end
+
+@inline function core_follows(int::Interior{T,:damped}) where {T}
+    v = int.center.v
+    return !(iszero(v[1]) & iszero(v[2]) & iszero(v[3]))
+end
+
+"""
+    layer_rate_step(int::Interior) -> δ
+
+The time step of the centered difference that gives a moving `:damped`
+layer its target's rate `∂_t Π` ([`background_state_rate`](@ref), added
+2026-10-20): `δ = ε^{1/3} r_0`, the step that balances the difference's
+truncation against its roundoff, on the time a hole needs to move by a
+fraction of its core radius — the shortest time on which the target at a
+point of the layer changes, `r/|v| ≥ r_0` for every speed below light.
+`2⁻¹⁷ r_0`-ish at `Float64`, `5·10⁻³ r_0` at `Float32`.
+"""
+@inline layer_rate_step(int::Interior{T}) where {T} = cbrt(eps(T)) * int.r_0
+
+"""
+    core_rate_weight(int::Interior, r) -> s ∈ [0, 1]
+
+Where a moving `:damped` core follows its target's rate
+([`core_target_rate`](@ref), added 2026-10-20): `0` for `r ≤ r_0/4`, rising
+`C²` to `1` at `r_0/2` and beyond — the outer half of the core, through which
+every point the core releases into the layer passes last, and away from the
+center, where the core rule's target turns at `|v|/r` and jumps on the
+center's path.
+"""
+@inline core_rate_weight(int::Interior{T}, r) where {T} =
+    smoothstep(4 * r / int.r_0 - one(T))
 
 """
     interior_profiles(int::Interior, r) -> (w, ρ)
