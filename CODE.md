@@ -101,6 +101,7 @@ research project; the inherited documents live in `notes/`.
   - [Steps 8b–8′: the generic interior and the moving hole](#steps-8b8-the-generic-interior-and-the-moving-hole) (moved to [`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md))
   - [Robust stability on the octant (measured 2026-10-02)](#robust-stability-on-the-octant-measured-2026-10-02)
   - [Single black holes: recommended settings (added 2026-10-08)](#single-black-holes-recommended-settings-added-2026-10-08)
+  - [The analysis cadence on an H200 (measured 2026-10-22)](#the-analysis-cadence-on-an-h200-measured-2026-10-22)
   - [The right-hand side on an H200 (measured 2026-10-05)](#the-right-hand-side-on-an-h200-measured-2026-10-05)
   - [The right-hand side on a CPU (measured 2026-10-05)](#the-right-hand-side-on-a-cpu-measured-2026-10-05)
 - [Possible extensions](#possible-extensions)
@@ -3664,6 +3665,12 @@ things the writing settled, each stated where it is made in that file:
 The numbers are under [Measured results](#measured-results): Kerr's
 `A`, `M_irr`, `J` and `M_ch` recovered from sampled data in both charts
 and at `a = 9/10`, the interpolation's order, and what a find costs.
+**(Amended 2026-10-22:** the table's "about one RHS" for the ADM monitor is
+not what an H200 measures. There a pair of the ADM monitor and the error
+kernel costs about `30` right-hand sides, inferred from whole runs, and a
+find under a second: [The analysis cadence on an
+H200](#the-analysis-cadence-on-an-h200-measured-2026-10-22). A production run
+takes its analysis row every `M`.**)**
 
 ## Precision, threads, devices
 
@@ -5777,7 +5784,11 @@ Rules of thumb for a single Kerr-Schild hole, `M = 1`, spin `a ≤ 9/10` along
 speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)),
 and from 2026-10-21 the `a = 1/2` hole moving along its spin at `v = 1/5` on
 the rotating quadrant ([a spinning hole along its
-axis](SINGULARITY_HANDLING.md#a-spinning-hole-along-its-axis-2026-10-21)):
+axis](SINGULARITY_HANDLING.md#a-spinning-hole-along-its-axis-2026-10-21)),
+and from 2026-10-22 `a = 0`, `1/2` and `9/10` moving along their spin at
+`v = 1/5` and `1/2` ([aligned spin and
+velocity](SINGULARITY_HANDLING.md#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22),
+the rows marked *along `z`*, `20 M` each, `chunk = M`):
 `a = 0`, `3/5` and `9/10` are measured, the spins between follow from the
 rules below the table, and none of it is a guarantee. Common to every row:
 `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, `ρ_max = 4/M`, the Gaussian `γ0`
@@ -5798,9 +5809,11 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 | 0 | `:fitted` | `1/24` (`1/24`, `1/32`) | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured: `ℋ` outside `1.6×` `:damped`'s, the error `1.1×` |
 | 0, *moving* (`v = 1/5` along `x`) | `:damped` (with the target's rate, 2026-10-21) | `1/16` (`1/24`, `1/32`) | `r_0 = 5/8`, `r_1 = 23/16` (`8.4` cells inside the contracted horizon at `1/16`) | measured to `40 M` at `4/M`: from `1/24` on `ℋ` just outside the horizon `1.00–1.03×` the resting hole's and the error there `1.26–1.36×` to `16 M`; order 4 in every shell from `1/24` to `1/32`; at `1/16` `ℋ` there `1.4–1.6×` (`8/M`: `1.03–1.09×` its own resting hole, which `8/M` lowers too) |
 | 0, *moving* (`v = 1/5` along `x`) | `:fitted` | `1/24` | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured to `40 M`: stable, the error just outside the horizon `:damped`'s at `4/M`, `ℋ` there `13–15×` `:damped`'s at `8/M`; `ℋ` there does not converge to `1/32` at `m = 16`, even at rest; `trail_ramp = 9/10` raised the error there `1.5–2.4×` and lowered it over the evolved region to `0.72–0.91×` |
+| 0, *along `z`* (`v = 1/5`, `1/2`) | `:damped` (the core at `max(ρ_max, 12 |v|/r_0)`, 2026-10-22) | `1/16`; `1/24` at `v = 1/2` (`1/16`, `1/24`, `1/32`) | `r_0 = 1/2`, `r_1 = 19/16` (`8.7` cells inside the contracted pole `1.732` at `v = 1/2` and `1/16`; the ramp `11` cells) | measured to `20 M`: order 4 in the error outside the horizon; moving over resting in `[3, 5)` `1.38×` at `1/5` and `4.9×` at `1/2`, the same at every `h` (the moving solution and its position); `ℋ` `0.8–2.0×` at `1/2`, `0.65–1.01×` at `1/5` |
 | 0.3 | `:damped` | `1/16` (`1/16`, `1/24`) | `r_0 = 3/4`, `r_1 = 3/2` | the rules |
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:damped` (with the target's rate) | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 23/16` (`9.4` cells inside the contracted pole `r₊ √(1 − v²) = 1.828` at `1/24`) | measured to `40 M` at `4/M`, with `1/40`: `ℋ` `0.81–1.08×` the resting hole's in every shell at every `h` and time, the error `1.1–1.6×` (the hole's position, late); order 4 outside the horizon in both pairs; `J − a` drifts at the resting hole's rate, order 4 |
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:fitted` | `1/32` (the ring: at `1/24` the core surface is at `0.35 < a` on the equator) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured to `40 M`: stable, but `ℋ` just outside the horizon `43×` `:damped`'s at `1/32` and `176×` at `1/40`, `10–15×` its own resting hole; it does not converge from `1/32` to `1/40` at `m` fixed in cells, even at rest |
+| 0.5, *along `z`* (`v = 1/5`, `1/2`) | `:damped` (the core's transit rate) | `1/24` (`1/24`, `1/32`, `1/40`) | `r_0 = 3/4`, `r_1 = 5/4` (`8.8` cells inside the contracted pole `1.616` at `v = 1/2` and `1/24`) | measured to `20 M`: order 4 in the error outside the horizon; moving over resting in `[3, 5)` `1.13×` and `2.79×`; `J`'s drift `1.74–1.77·10⁻⁸/M` at `1/40` at every speed, order 4; at `v = 1/2` `ℋ` in `[3, 5)` converges at only `2.5–3.0` from `1/32` to `1/40` from `10 M` on, and the layer residual rises again at `1/40` |
 | 0.3 | `:fitted` | `1/24` | `m = 16`, `n_L = 18`, `fit_cont = 2`, `lmax_fit = 12` | the rules (`fit_cont = 2` not yet run with spin) |
 | 0.6 | `:damped` | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 3/2` | measured: order `4.0`; `1/16` is not convergent |
 | 0.6 | `:fitted` | `1/32` (`1/32`, `1/48`) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured at `1/32`: `ℋ` outside `3.2×`, the error equal; the pair predicted |
@@ -5810,6 +5823,8 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 | 0.8 | `:fitted` | `1/64` | `m = 16`, `n_L = 30`, `fit_cont = 1`, `lmax_fit = 12` | a guess: screen the depth first |
 | 0.9 | `:damped` | `1/96` (`1/96`, `1/128`) | `r_0 = 19/20`, `r_1 = 5/4` | measured: order `4.0` outside the horizon from `1/96` (from `1/72` except `ℋ` just outside it), to `32 M`; stationary to `128 M`; `1/48` is not convergent at `r_0 = 19/20` or `1` (`1/48 → 1/96` is `1935×` just outside); `r_0 = 1` equals `19/20` outside the horizon at `1/96` and is `13×` worse inside |
 | 0.9 | `:fitted` | `1/96`, no pair in reach of one H200 | `m = 16–18`, `n_L = 36`, `fit_cont = 1`, `lmax_fit = 12` | measured: stable to `128 M` at `m = 16`, but `ℋ` outside `1900×` `:damped`'s (the error `23×` at `128 M`) |
+| 0.9, *along `z`* (`v = 1/5`) | `:damped` | `1/72` (`1/72`, `1/96`; `1/128` moving does not fit one H200) | `r_0 = 19/20`, `r_1 = 5/4`, the resting layer; radii `32, 16, 8, 4, 3, 2` | measured to `20 M`: order 4 in the error outside the horizon from `1/72`; moving over resting in `[3, 5)` `0.86×`; `J`'s drift order 4; the finder's offset in `|J| − a` `1.1·10⁻⁵` (`6.8·10⁻⁶` at rest) |
+| 0.9, *along `z`* (`v = 1/2`) | `:damped` | `1/72` (`1/72`, `1/96`) | `r_0 = 19/20`, `r_1 = 9/8` (`5/4` is outside the contracted pole `1.244`) | measured to `20 M`: stable, order 4 outside the horizon, moving over resting `2.06×`; but the same layer **at rest grows** inside the horizon from `10 M` (`×382`, `×36`, `×3.4` over `[10, 20] M` at `1/72`, `1/96`, `1/128`), so it is not a layer for a hole that is ever at rest; the finder's offset in `|J| − a` `1.6·10⁻⁴` |
 
 - **The ring rule, for both variants.** On the equator Kerr-Schild's `H`
   varies on the length `L = (R² − a²)/R` at the core surface's radius `R`;
@@ -5866,6 +5881,28 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
     *pole*, `r₊ √(1 − v²)`. A `:fitted` core surface must clear the ring on the
     equator, `m + n_L` cells below `√(r₊² + a²)`: at `m = 20`, `n_L = 18` and
     `a = 1/2` that rules out `1/24`. The spin's drift is the resting hole's.
+  - **Choose `r_1` for the fastest speed the run will reach** (added
+    2026-10-22, from the aligned campaign). Put it at least 8 cells, at the
+    coarsest `h` of the family, below the contracted pole `r₊ √(1 − v²)` at
+    that speed, and keep the radii fixed in `M` across `v` and `h`. At
+    `a ≤ 1/2` one layer then serves every speed to `1/2`: `r_0 = 1/2`,
+    `r_1 = 19/16` at `a = 0` (`8.7` cells at `1/16`), `r_0 = 3/4`,
+    `r_1 = 5/4` at `a = 1/2` (`8.8` at `1/24`). At `a = 9/10` it does not.
+    The contracted pole at `v = 1/2` is `1.244`, so `r_1 ≤ 9/8` at `1/72`,
+    and that layer, `22` cells below the resting pole, grows at rest; the
+    resting `r_1 = 5/4` holds `v ≤ 1/5` only. Until a layer holds both, pick
+    the `a = 9/10` layer by the speed, and do not run `9/8` at rest.
+  - **The moving core relaxes at `max(ρ_max, 12 |v|/r_0)`** (`031ab30`), with
+    its target's rate mapped in ADM variables (`281a639`), both automatic.
+    Without them `a = 0` at `v = 1/2` failed in its first chunk, then held a
+    residual of `4.7` at every `h`. A small `r_0` raises the core's rate, and
+    `chunk_interior` refuses one above `1/dt`. What is left at `v = 1/2` is a
+    first-order residual at the point the core has just released; at
+    `a = 1/2` it rises again at `1/40`.
+  - **Production cadence: `chunk = M`, no split** (2026-10-22, [The analysis
+    cadence on an H200](#the-analysis-cadence-on-an-h200-measured-2026-10-22)):
+    `2.5×` cheaper than `M/2` with the trailing/leading split. Turn the split
+    on to diagnose a moving layer's two sides.
 - **Screen a new `:fitted` depth** before a long run: the same tracked
   geometry with the exact target (`variant = :damped`) for `6 M` at the
   run's `h`, about an hour and a half at `1/96` — a bad depth grows from
@@ -5894,7 +5931,17 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   (`54.8 M`, `89 GB`; `:fitted` `525 s/M`, `107 GB`) — `40 M` in `1.45`,
   `2.7–2.8` and `5.8–6.0 h`, `71–131 ns` per point and step. `1/48` on that
   capsule is `94.7 M` points, about `141 GB` for `:damped` and `171 GB` for
-  `:fitted` extrapolated linearly: not one H200.
+  `:fitted` extrapolated linearly: not one H200. Every number so far in this
+  item ran the analysis every `M/2`, the moving ones with the
+  trailing/leading split, and most of the moving runs' `71–175 ns` was that
+  analysis. The aligned campaign (measured 2026-10-22, `chunk = M`, no split,
+  TreeAMR 0.2.4) cost `21–34 ns` per point and step at its finest spacings:
+  `75 s/M` at `a = 0`, `1/32` (`21.6 M` points, `44 GiB`), `252 s/M` at
+  `a = 1/2`, `v = 1/2`, `1/40` (`58.4 M`, `92 GiB`), `587–605 s/M` at
+  `a = 9/10`, `1/128` at rest (`63.4 M`, `101 GiB`), and `628 s/M` at
+  `a = 9/10`, `v = 1/2`, `1/96` (`69.9 M`, `114 GiB`). That is `20 M` in
+  `0.45`, `1.44`, `3.4–3.9` and `3.5 h`. A moving `a = 9/10` capsule at
+  `1/128` is `106–166 M` points, about `170–260 GiB`: several GPUs.
 - **A convergence family fits one H200 only with thin outer levels**
   (measured 2026-10-19, `SINGULARITY_HANDLING.md`, "`a = 9/10` `:damped`
   converges at `1/96`"). Each coarse level of a nested-cube mesh is at least
@@ -5910,6 +5957,65 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   balance cascaded a level out to the root: 304 M points, out of an H200's
   memory. `roots = 4`, `N = 48` gives the same spacings with half-unit blocks
   at `1/96`.
+
+### The analysis cadence on an H200 (measured 2026-10-22)
+
+A moving-hole run on one H200 cost `71–175 ns` per point and step on
+2026-10-20 and 2026-10-21, against the right-hand-side kernel's `1.1 ns` a
+point ([below](#the-right-hand-side-on-an-h200-measured-2026-10-05)). This
+benchmark asked where that goes. The setup is the spinning
+hole's `1/32` row of `SINGULARITY_HANDLING.md`'s "A spinning hole along its
+axis": `a = 1/2`, `v = 1/5` along `z` on the rotating quadrant's capsule,
+`28.05 M` points, `112` steps per `M`, `:damped` at `4/M`, run to `6 M`. Six
+runs varied the chunk, the trailing/leading split (`split=`) and the finder
+(`finder=`), on TreeAMR 0.2.4, jobs 580683–580688 in `boosted-ks-5`. The logs
+are in `.claude/data/benchmark-cadence/b1`…`b6`, and `s/M` is the wall time
+from `4 M` to `6 M` over two:
+
+| run | chunk | split | finder | `s/M` |
+|---|---|---|---|---|
+| `b1` | `M/2` | on | on | `239` |
+| `b2` | `M/2` | off | on | `130` |
+| `b6` | `M/2` | off | off | `129` |
+| `b3` | `M` | off | on | `97` |
+| `b4` | `2M` | off | on | `80.5` |
+| `b5` | `2M` | off | off | `80.1` |
+
+- **TreeAMR 0.2.4's nested-mesh ghost fill** is `b1` against the same row on
+  0.2.3 (`254 s/M`, 2026-10-21): about `6 %`.
+- **The split costs `109 s/M`** at `chunk = M/2`, `55 s` a chunk (`b1 − b2`).
+  It runs the ADM monitor and the error kernel over the whole mesh once per
+  half of each of the six shells, twelve times a chunk, so about `4.5 s` per
+  pair.
+- **The rest of the analysis row costs about `33 s` a chunk** (`b2 − b3`,
+  and twice `b3 − b4`). That row runs the ADM monitor and the error kernel
+  seven times (globally and once per shell), and the GH monitor, the per-level
+  norms and the record's own analysis besides. About `4.7 s` per pair, the
+  same as the split's.
+- **The finder costs under a second a find**: `1.1 s/M` at two finds per `M`
+  (`b2 − b6`), `0.35 s/M` at one per `2M` (`b4 − b5`), with the spin, at
+  `N_ah = 12`.
+- **The evolution alone is about `64 s/M`**: `b3` less one chunk's analysis.
+  That is `0.14 s` per right-hand side with its ghost fill and RK4's
+  arithmetic, and `20 ns` per point and step.
+
+So on the H200 the analysis, not the finder or the evolution, was most of a
+run's cost: `175` of `239 s/M` in `b1`. [Analysis
+quantities](#analysis-quantities) prices the ADM monitor at "about one RHS".
+By the inference above, a pair of the ADM monitor and the error kernel is
+about `30` right-hand sides here (`4.5` against `0.14 s`); the kernels were
+not timed one by one.
+
+**The rule for a production run** (from 2026-10-22): `chunk = M` and
+`split=0`, `97 s/M` here, two and a half times cheaper than `b1`. The
+analysis is then a third of the run. Turn the split on only to diagnose a
+moving layer's two sides, for a run that needs them. `chunk = 2M` saves
+another `17 %`, at half the time resolution of the record and of the
+checkpoints. The aligned campaign of
+[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22)
+ran at `chunk = M` without the split, at `21–34 ns` per point and step at
+its finest spacings and `72–78 ns` on its smallest meshes (`2.7–3.7 M`
+points), where the analysis weighs most.
 
 ### The right-hand side on an H200 (measured 2026-10-05)
 

@@ -504,6 +504,26 @@ of a spinning hole as such (an elimination, not a test of G5's case).
 to `1/40` (`SINGULARITY_HANDLING.md`, "A spinning hole along its axis"; the
 moving `a = 1/2` rows of `CODE.md`'s table).
 
+From 2026-10-22 the package requires **TreeAMR 0.2.4** (`78e60ae`), whose
+nested-mesh ghost fill took a moving-hole row on one H200 from `254` to
+`239 s/M`. A benchmark of the analysis cadence found that most of those
+`239 s/M` are the analysis row, not the evolution: the trailing/leading split costs `109 s/M`
+at `chunk = M/2`, the rest of the row `33 s` a chunk, the finder under a
+second, and the evolution alone `64 s/M`, `20 ns` per point and step.
+Production runs now use `chunk = M` and `split=0` (`CODE.md`, "The analysis
+cadence on an H200"). The **aligned campaign** then moved Kerr-Schild
+`a = 0`, `1/2` and `9/10` along their spin at `v = 0`, `1/5` and `1/2`, to
+`20 M`, each at three spacings on one H200 a run: 28 runs, `29.7` GPU-hours.
+It forced two fixes to the moving `:damped` core. `281a639` maps the core
+target's rate in ADM variables (`a = 0`, `v = 1/2` died in its first chunk
+with `α² < 0`), and `031ab30` relaxes the core at `max(ρ_max, 12 |v|/r_0)`
+(a residual of `4.7` at every `h` at `v = 1/2`). Every cell that fits one
+H200 works and converges at order four outside the horizon. At `a = 9/10`
+no single layer serves every speed: `r_1 = 9/8`, which the contracted pole
+at `v = 1/2` needs, grows at rest, and `5/4` holds only `v ≤ 1/5`
+(`SINGULARITY_HANDLING.md`, "Aligned spin and velocity"; the *along `z`*
+rows of `CODE.md`'s table).
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -574,8 +594,12 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5596 assertions in 15m42** at four threads after the SimWatch
-1.3.0 change (2026-10-21, `1921d46`): its 66 new claims are the rotating
+The suite is **5604 assertions in 14m59** at four threads after the two
+moving-core fixes (2026-10-23, `281a639`, `031ab30`, on TreeAMR 0.2.4): its 8
+new claims are `boosted_tests.jl`'s, which a moving core staying a metric near
+its path and releasing its trailing cells within a jump/200 of their targets
+make `29.0 s` inside the suite. It was **5596 assertions in 15m42** at four
+threads after the SimWatch 1.3.0 change (2026-10-21, `1921d46`): its 66 new claims are the rotating
 quadrant's in `boosted_tests.jl` (`8efc5fe`: the refusals, the spinning moving
 hole's source, the quadrant against the box) and SimWatch 1.3.0's writer and
 SVG thumbnails in `simwatch_tests.jl`. It was **5530 assertions in 14m00** at
@@ -1047,6 +1071,24 @@ julia --project=. test/octant_runs.jl backend=cuda case=ks octant=rotating_quadr
 julia --project=. test/boosted_study.jl prefix=s shells=r1.93185,r3,r5 times=1,4,8,16,24,32,40
 ```
 
+From 2026-10-22 a production run takes **`chunk=1 split=0`**: the analysis
+row every `M` and no trailing/leading split, which is `2.5×` cheaper than
+`chunk=1/2` with the split (`CODE.md`, "The analysis cadence on an H200";
+`finder=0` turns the finder off, which saves under a second a find). The
+aligned campaign's rows are one such command each. The line below is its
+`a = 9/10`, `v = 1/2`, `1/96` row (job 580900 in `boosted-ks-7`, `3.5 h` on
+one H200). `test/aligned_study.jl` reads the campaign's data
+(`dir=`, default `.claude/data/aligned`, one subdirectory per batch; a batch
+named `*obsolete*` is skipped unless `batches=` names it; `runs=`, `times=`)
+and prints `SINGULARITY_HANDLING.md`'s "Aligned spin and velocity": the runs,
+moving against resting, the orders, the horizon, the layer residual, the cost
+and the verdict matrix. It needs no package, so it runs without `--project`:
+
+```bash
+julia --project=. test/octant_runs.jl backend=cuda case=ks octant=rotating_quadrant a=9/10 v=1/2 x0=-2 path=10 L=64 roots=4 radii=32,16,8,4,3,2 N=24 t_end=20 chunk=1 split=0 cfl=1/2 amplitude=0 r_0=19/20 r_1=9/8 group=aligned out=out/a9v5h96 checkpoint=out/a9v5h96/ck checkpoint_every=4 walltime=40000
+julia test/aligned_study.jl
+```
+
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
 and device tests behind
@@ -1067,7 +1109,8 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   pinned too). `SpacetimeMetrics`, `ApparentHorizonFinder`,
   `KorzynskiSpin`, `IMEXRungeKutta` and `TreeIOHDF5` (from 2026-10-09) are
   what `Project.toml`'s `[sources]` entries resolve, and TreeAMR is
-  General's release under `[compat]` `0.2` (from 2026-10-09, when the
+  General's release under `[compat]` `0.2.4` (from 2026-10-22, for its
+  nested-mesh ghost fill; `0.2` from 2026-10-09, when the
   checkpoints moved to TreeIOHDF5; `0.1.7` from 2026-10-04, for M12's
   rotating seam; `0.1.4` from 2026-10-01, for M9a's checkpoints; `0.1.3`
   before) — so `~/src/jl/…` is *not*
@@ -1094,6 +1137,15 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `2.0.0`, and `[compat]` here asks for `2.1`). `SpacetimeMetrics` is
   registered at the bound this package asks for, so its pin is a choice
   rather than a necessity.
+- **TreeIOHDF5 `main` can be ahead of the TreeAMR it admits** (found
+  2026-10-22). TreeIOHDF5 0.1.4 reads TreeAMR 0.2.5's `FieldSet.halfturn`,
+  but its `[compat]` lists TreeAMR `=0.2.2, …, =0.2.5`. So the `[sources]`
+  pin to `main` resolves it beside TreeAMR 0.2.4, and the first checkpoint
+  throws in `set_layout` ("type FieldSet has no field `halfturn`"). The
+  first `boosted-ks-7` batch lost ten jobs to it, each at `4 M`. That is
+  an upstream compat bug: TreeIOHDF5 0.1.4 should require `=0.2.5`. Until
+  it does, a copy that stays on TreeAMR 0.2.4 pins TreeIOHDF5 0.1.3, as
+  `boosted-ks-7` did. A run without `checkpoint=` does not notice.
 - **`notes/` is read-only.** The copies carry their provenance; when
   `CODE.md` departs from them, `CODE.md` says so. Do not "fix" a copy.
 - **Two derivative index conventions.** `SpacetimeMetrics.dmetric`
@@ -1700,6 +1752,26 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   that is about `141 GB` for `:damped` and `171 GB` for `:fitted`, against
   `144 GB`. A finer or longer run needs several GPUs (`mpi=true`) or a mesh
   that follows the hole.
+- **On a GPU the analysis row, not the evolution, is the expensive part**
+  (measured 2026-10-22). On one H200 at `28 M` points the evolution is
+  `64 s/M`. The trailing/leading split (`test/octant_runs.jl split=1`, the
+  default on the quadrants) adds `109 s/M` at `chunk=1/2`, and the rest of
+  the row `33 s` a chunk: a pair of the ADM monitor and the error kernel is
+  about `4.5 s`, some thirty right-hand sides, and the row runs seven of
+  them, the split twelve more. The finder is under a second. Use `chunk=1
+  split=0` for production, and the split only to diagnose a moving layer's
+  sides. Every number before 2026-10-22 that reads `71–175 ns` per point and
+  step was at `chunk=1/2` with the split. Before adding a monitor to the
+  row, price it in ADM-monitor evaluations.
+- **At `a = 9/10` the layer depends on the speed** (2026-10-22). The
+  contracted pole at `v = 1/2` is `1.244`, so `r_1` must be `9/8` there at
+  `1/72` (`5/4` is outside it). With `r_0 = 19/20` that layer grows inside
+  the horizon at rest from `10 M`, by `×382`, `×36` and `×3.4` over
+  `[10, 20] M` at `1/72`, `1/96` and `1/128`, while at `v = 1/2` it holds.
+  The resting `r_1 = 5/4` holds `v = 0` and `1/5`. A run that changes speed,
+  or a resting control for a `v = 1/2` row, has no layer that is known to
+  work; compare the moving `9/8` rows with the resting `5/4` ones outside
+  the horizon, where the two resting layers agree to three digits by `20 M`.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
   dissipation", — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in
@@ -1824,7 +1896,15 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   restarts it with no checkpoint unless the run has one, over its own log and
   appending to its CSV. Give every run longer than an hour `checkpoint=` and a
   `walltime=`. And inside a `while read` loop `ssh` eats the loop's stdin —
-  use `ssh -n`.
+  use `ssh -n`. **A requeue can hit a run that has finished** (2026-10-22, a
+  Slurm controller outage). `a9v2h72r` (job 580825) had reached `20 M`. The
+  requeued job restarted from its checkpoint at `t = 20`, `evolve!` refused
+  ("there is nothing left to run"), the batch script marked the SimWatch
+  status "failed", and the job's log was overwritten. The CSV and
+  `records.csv` were complete. After an outage, read the CSV's last `t`
+  before trusting a "failed" status. Correct the status by hand
+  (`status = "finished"` and a `message` saying what happened), and keep the
+  peak memory and wall time elsewhere, since the log is gone.
 
 ## Conventions
 
