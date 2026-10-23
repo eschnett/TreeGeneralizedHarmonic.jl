@@ -390,13 +390,13 @@ without it the layer trails the moving solution by `|∂_t u_exact|/ρ_max`.
 @inline core_follows(::Any) = false
 
 """
-    core_relaxation_rate(h, h_t, ρ) -> SVector{10}
+    core_relaxation_rate(h, h_t, ρ, ∂ₜh_t = 0) -> SVector{10}
 
 The rate `∂_t h` of a moving `:damped` core (added 2026-10-20): the metric
 relaxed toward the target `h_t` at the rate `ρ` **in the ADM variables**
-`(α², β^i, γ_ij)`, `∂_t (α², β^i, γ_ij) = −ρ ((α², β^i, γ_ij) − (…)_t)`, and
-mapped back to `h` by the chain rule of `g_tt = −α² + γ_ij β^i β^j`,
-`g_ti = γ_ij β^j`, `g_ij = γ_ij`:
+`(α², β^i, γ_ij)`, `∂_t (α², β^i, γ_ij) = ∂_t (…)_t − ρ ((α², β^i, γ_ij) −
+(…)_t)`, and mapped back to `h` by the chain rule of `g_tt = −α² + γ_ij β^i
+β^j`, `g_ti = γ_ij β^j`, `g_ij = γ_ij`:
 
     ∂_t h_ij = ∂_t γ_ij
     ∂_t h_ti = ∂_t γ_ij β^j + γ_ij ∂_t β^j
@@ -415,17 +415,44 @@ positive `α²` and positive-definite `γ` is positive and positive-definite,
 so the path in these variables is a metric everywhere; near the target the
 two rates agree to first order. No `sqrt` is taken, so a degenerate stage
 value cannot throw here.
+
+**The target's own rate is an ADM rate too** (amended 2026-10-22). `∂ₜh_t`,
+the rate of the target in `h` ([`core_target_rate`](@ref)), is read as the
+rate of the target's ADM variables at `h_t` — the inverse of the chain rule
+above, `∂_t γ_t = ∂ₜh_t,ij`, `∂_t β_t = γ_t⁻¹ (∂ₜh_t,ti − ∂_t γ_t β_t)`,
+`∂_t α_t² = −∂ₜh_t,tt + β_t ∂_t γ_t β_t + 2 β_t,j ∂_t β_t^j` — and added to
+the relaxation's before the one chain rule at `h`. Until 2026-10-22 the kernel
+added `∂ₜh_t` to the mapped relaxation in `h`, which is the target's ADM rate
+pushed through the chain rule at `h_t` rather than at `h`, and the two differ
+by the lag `h − h_t`. Near the center's path the target turns at `v r_⊥/r²`
+and the core lags it by a large fraction of itself, and that difference drove
+`α²` through zero: the boosted Kerr-Schild hole at `v = 1/2` (`a = 0`,
+`r_0 = 1/2`, `h = 1/16` and `1/32`) ended in its first chunk in the constraint
+monitor's `sqrt`, at a core point `(2h, h, −3h)` from the center (`α² =
+−1.2·10⁻³`, its target's least `0.088`). In the ADM variables the target's
+rate moves the state's `α²`, `β` and `γ` as it moves the target's, and the
+core's `α²` stays at or above its target's least (measured on that hole, and
+on a pointwise model of every core point of the campaign's rows). At `h = h_t`
+this is the rate it was, to roundoff; with `∂ₜh_t = 0` — every core point
+inside `r_0/4` — bit for bit. A hole at rest never calls it.
 """
-@inline function core_relaxation_rate(h::SVector{10,T}, ht::SVector{10,T},
-                                      ρ) where {T}
+@inline function core_relaxation_rate(h::SVector{10,T}, ht::SVector{10,T}, ρ,
+                                      ∂ₜht::SVector{10,T}=zero(SVector{10,T})) where {T}
     A, βu, βl, γ = _adm_split(h)
-    At, βut, _, _ = _adm_split(ht)
-    dA = -ρ * (A - At)
-    dβ = -ρ * (βu - βut)
+    At, βut, βlt, γt = _adm_split(ht)
+    # The target's ADM rate, by the inverse of the chain rule below at `h_t`.
+    dγt = SMatrix{3,3,T}(∂ₜht[5], ∂ₜht[6], ∂ₜht[7], ∂ₜht[6], ∂ₜht[8], ∂ₜht[9],
+                         ∂ₜht[7], ∂ₜht[9], ∂ₜht[10])
+    dβt = inv(γt) * (SVector{3,T}(∂ₜht[2], ∂ₜht[3], ∂ₜht[4]) - dγt * βut)
+    dγβt = dγt * βut
+    dAt = -∂ₜht[1] + (βut[1] * dγβt[1] + βut[2] * dγβt[2] + βut[3] * dγβt[3]) +
+          2 * (βlt[1] * dβt[1] + βlt[2] * dβt[2] + βlt[3] * dβt[3])
+    dA = dAt - ρ * (A - At)
+    dβ = dβt - ρ * (βu - βut)
     # `γ`'s offsets cancel in the difference: `h_ij − h_t,ij`.
-    dγ = -ρ * SMatrix{3,3,T}(h[5] - ht[5], h[6] - ht[6], h[7] - ht[7],
-                             h[6] - ht[6], h[8] - ht[8], h[9] - ht[9],
-                             h[7] - ht[7], h[9] - ht[9], h[10] - ht[10])
+    dγ = dγt - ρ * SMatrix{3,3,T}(h[5] - ht[5], h[6] - ht[6], h[7] - ht[7],
+                                  h[6] - ht[6], h[8] - ht[8], h[9] - ht[9],
+                                  h[7] - ht[7], h[9] - ht[9], h[10] - ht[10])
     dγβ = dγ * βu
     γdβ = γ * dβ
     dtt = -dA + (βu[1] * dγβ[1] + βu[2] * dγβ[2] + βu[3] * dγβ[3]) +
@@ -449,6 +476,50 @@ end
 @inline function core_follows(int::Interior{T,:damped}) where {T}
     v = int.center.v
     return !(iszero(v[1]) & iszero(v[2]) & iszero(v[3]))
+end
+
+"""
+    CORE_TRANSIT_EFOLDS = 12
+
+How many `e`-folds a moving `:damped` core relaxes over the time its center
+takes to cross the core radius, `r_0/|v|` ([`core_rate`](@ref), added
+2026-10-22).
+"""
+const CORE_TRANSIT_EFOLDS = 12
+
+"""
+    core_rate(int::Interior) -> ρ
+
+The relaxation rate of a moving `:damped` core (added 2026-10-22):
+`max(ρ_max, κ |v|/r_0)`, `κ` = [`CORE_TRANSIT_EFOLDS`](@ref) — `ρ_max` itself
+unless the hole crosses its core radius in less than `κ/ρ_max`. The layer keeps
+`ρ_max`.
+
+**Why.** The core rule's target `u_exact(c(t) + r_0 n̂)` jumps where the
+center's path crosses a point: `n̂` turns over, and the point's target goes
+from the sphere's leading side to its trailing side. A boosted Kerr-Schild
+hole is far from symmetric there: at `a = 0`, `v = 1/2`, `r_0 = 1/2` the
+target's `Π_tt` is `5.2` on the leading pole and `97.6` on the trailing one.
+No rate follows a jump ([`core_target_rate`](@ref) is zero there by design),
+so the core relaxes it, and has until the point leaves the core on the
+trailing side, at most `r_0/|v|` later. At `ρ_max = 4/M` that is `e^{−4}`: the
+point is released into the layer `4.7` off its target (`|Π|` `4.6`, `|h|`
+`0.9`), at depth zero on the trailing side of the path — the whole of the
+campaign's `v = 1/2` layer residual, the same at `h = 1/16`, `1/24`, `1/32`
+because it is the transit of one point, not a truncation error — and what the
+layer does not absorb leaves through `r_1`. At `κ |v|/r_0` the core keeps
+`e^{−κ}` of the jump. `κ = 12` leaves `e^{−12} · 130 ≈ 10⁻³` there, a
+hundredth of the resting hole's residual at `h = 1/32`, and keeps the
+`v = 1/5` families of `SINGULARITY_HANDLING.md` (`r_0 = 5/8` and `3/4`,
+`κ |v|/r_0 = 3.8` and `3.2`) at `ρ_max = 4/M`, bit for bit. A step that
+resolves the hole holds the rate (`chunk_interior` refuses `ρ dt > 1`):
+`12/M` at `v = 1/2`, `r_0 = 1/2` is `ρ dt = 0.21` at `h = 1/16`,
+`cfl = 1/2` (`dt = 1/56`).
+"""
+@inline function core_rate(int::Interior{T}) where {T}
+    v = int.center.v
+    s = sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
+    return max(int.ρ_max, T(CORE_TRANSIT_EFOLDS) * s / int.r_0)
 end
 
 """

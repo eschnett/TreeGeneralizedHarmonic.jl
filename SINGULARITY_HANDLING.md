@@ -18,6 +18,7 @@ here; links have been pointed at the right file.
 - [The boosted Kerr-Schild hole at binary speed (2026-10-20)](#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)
 - [The moving `:damped` layer's target rate (2026-10-21)](#the-moving-damped-layers-target-rate-2026-10-21)
 - [A spinning hole along its axis (2026-10-21)](#a-spinning-hole-along-its-axis-2026-10-21)
+- [Aligned spin and velocity: which holes the algorithm holds (2026-10-22)](#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -2336,6 +2337,12 @@ alike to within 10 %):
 That is `175`, `126` and `75 ns` per point and step, `2–4×` what the
 `a = 9/10` family above costs per point at a similar size; where the
 difference goes (the finder every `M/2`, the smaller mesh) was not measured.
+**(2026-10-22:** not the finder, which is under a second a find, but the
+analysis row every `M/2` and the trailing/leading split, which together are
+about three quarters of such a run's cost (`175` of `239 s/M` for the
+spinning hole's `1/32` row below, on TreeAMR 0.2.4); the evolution alone is about `20 ns` per
+point and step — `CODE.md`, [The analysis cadence on an
+H200](CODE.md#the-analysis-cadence-on-an-h200-measured-2026-10-22).**)**
 
 **`:damped` at `8/M` puts the moving hole at the resting hole's level
 (measured 2026-10-20).** Moving over resting, at `ρ_max = 8/M`:
@@ -2936,9 +2943,338 @@ property of a moving spinning hole as such.
   run on the rotating quadrant, not on the half-box the `a = 0` section
   assumed, but a capsule at `1/96` is `(96/40)³ ≈ 14` times `1/40`'s points. `:fitted`'s
   ring bound grows with `a` too: at `a = 1/2` it already rules out `1/24`.
+  **(2026-10-22:** with the thin outer levels of the resting `a = 9/10`
+  campaign the capsule is `44.5 M` points at `1/96` and `v = 1/5`, and
+  `:damped` holds the hole at `1/72` and `1/96` — [the next
+  section](#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22).**)**
 - **`:fitted` at a fixed physical margin**, as for `a = 0`: a pair with `m`
   scaled with `1/h` (`20` at `1/32`, `25` at `1/40`), and why the motion costs
   `:fitted` `10–15×` and `:damped` nothing.
+
+## Aligned spin and velocity: which holes the algorithm holds (2026-10-22)
+
+The sections above moved two holes at one speed: `a = 0` along `x` and
+`a = 1/2` along its spin, both at `v = 1/5`. This campaign asks which holes the
+analytic layer holds when the spin and the velocity are aligned, over the
+matrix `a ∈ {0, 1/2, 9/10}` × `v ∈ {0, 1/5, 1/2}`, each cell at three spacings
+and each moving row against the same hole at rest. `v = 1/2` is two and a half
+times a binary member's speed a few orbits out: a stress test of the moving
+layer and its core. `a = 9/10` is the highest spin the octant has held, at
+`1/96` ([Single holes on the
+octant](#single-holes-on-the-octant-a--0-to-910-2026-10-02-to-2026-10-07)).
+The campaign forced two fixes to the moving core, and it found one layer that
+grows at rest.
+
+**The setup** (`test/octant_runs.jl octant=rotating_quadrant`):
+
+- Kerr-Schild, `M = 1`, the spin `a` along `z`, moving along `z` at `v` from
+  `z = −2` at `t = 0` to `20 M`, where it is at `z = −2`, `2` or `8`, with the
+  algebraic source at its spin and velocity.
+- The rotating quadrant `[0, 64]² × [−64, 64]`, root brick `(4, 4, 8)`, and
+  the frozen capsule along the path, `path = 20 v` (`0`, `4`, `10 M`): radii
+  `32, 16, 8, 4` at `a = 0` and `1/2`, `32, 16, 8, 4, 3, 2` at `a = 9/10`
+  (thin outer levels, as in the resting `a = 9/10` campaign). From `2.7 M`
+  points (`a = 0`, at rest, `1/16`) to `69.9 M` (`a = 9/10`, `v = 1/2`,
+  `1/96`).
+- `:damped` at `ρ_max = 4/M` with the target's rate, and from `031ab30` the
+  moving core at `max(ρ_max, 12 |v|/r_0)` (below). `q = 4`, `cfl = 1/2`,
+  `ε_KO = 1/2`, the Gaussian `γ0` about `c(t)`, the finder every chunk
+  (`N_ah = 12`, with the spin), no noise, a checkpoint every four chunks.
+- **`chunk = M`, without the trailing/leading split** (`chunk=1 split=0`).
+  On the previous section's `1/32` row that is `97 s/M` against `239` at
+  `chunk = M/2` with the split, at the same step, and the evolution alone is
+  `64 s/M`. The benchmark is in `CODE.md`, [The analysis cadence on an
+  H200](CODE.md#the-analysis-cadence-on-an-h200-measured-2026-10-22).
+  Without the split the CSV has no extents and no `hz_J`. `J` here is
+  `records.csv`'s, the Korzyński `J`'s magnitude, so at `a = 0` it is
+  `|J| ≥ 0`.
+- **The radii are fixed in `M` across `v`**, chosen so that `r_1` is at least
+  8 cells inside the contracted pole `r₊ √(1 − v²)` at `v = 1/2` and the
+  coarsest `h`:
+
+| `a` | `r_0` | `r_1` | `h` | `r₊`; at `v = 1/2` | `r_1` below it, coarsest `h` (at rest) | ramp | ring length `(r_0² − a²)/r_0` |
+|---|---|---|---|---|---|---|---|
+| `0` | `1/2` | `19/16` | `1/16`, `1/24`, `1/32` | `2`; `1.732` | `8.7` cells (`13.0`) | `11` cells | — |
+| `1/2` | `3/4` | `5/4` | `1/24`, `1/32`, `1/40` | `1.866`; `1.616` | `8.8` (`14.8`) | `12` | `10` cells |
+| `9/10` | `19/20` | `9/8` | `1/72`, `1/96`, `1/128` | `1.436`; `1.244` | `8.5` (`22.4`) | `12.6` | `7.0` |
+| `9/10`, the `r` rows | `19/20` | `5/4` | the same | the same | `11.3` at `v = 1/5` (`13.4`) | `21.6` | `7.0` |
+
+`r_1 = 5/4` is the resting `a = 9/10` campaign's layer. It lies outside the
+contracted pole at `v = 1/2` (`1.244`) and cannot hold that speed; the `r`
+rows were added when `9/8` grew at rest (below). `1/128` fits one H200 only at
+rest: moving, the capsule is `105.6 M` points at `v = 1/5` and `165.7 M` at
+`1/2`, about `170` and `260 GiB` extrapolated linearly from the largest
+rows, against the H200's `140 GiB`.
+
+- One H200 a run on Symmetry, from copies with `CUDA` added, on TreeAMR 0.2.4:
+  `boosted-ks-5` (jobs 580693–580713, at `78e60ae`: every resting row but the
+  `r` family's), `boosted-ks-6` (580742–580744, `a = 1/2`, `v = 1/5`, at
+  `281a639`; 580822–580826, the `r` family) and `boosted-ks-7` (580890–580900,
+  at `031ab30`: the other moving rows). That is 28 runs and `29.7` GPU-hours.
+  The rows are named `a{0,5,9}v{0,2,5}h{N}`, `h = 1/N`, and `a9v{0,2}h{N}r`.
+  The CSVs, logs, batch scripts and SimWatch files are in
+  `.claude/data/aligned/{ks5,ks6,ks7}`; the `*-obsolete` directories hold the
+  runs the fixes replaced, and the checkpoints are deleted. This command
+  prints every table below from them:
+
+  ```bash
+  julia test/aligned_study.jl
+  ```
+
+The norms are point-weighted L2 about the hole's current center
+`c(t) = (0, 0, −2 + v t)`, in three shells. `r_h` runs from the equatorial
+horizon radius `√(r₊² + a²)` (`2`, `1.932`, `1.695`) to `9/4`, `r3` is
+`[3, 5)`, and `r5` is `[5, 8)`. "In" is the evolved band between `r_1` and the
+equatorial radius, and "global" the whole evolved region. "Error" is the
+distance from the moving analytic solution, `ℋ` the Hamiltonian constraint.
+
+**Two fixes the campaign forced** (`CODE.md`, the frozen core's paragraph
+under "The interior", amended twice on 2026-10-22). Both leave a hole at rest
+bit for bit:
+
+- **`281a639`, the core's target rate mapped in ADM variables.** The first
+  `a = 0`, `v = 1/2` rows, at `1/16` and `1/32`, ended in their first chunk.
+  At a core point `(2h, h, −3h)` from the center, `α²` reached
+  `−1.2·10⁻³`. The target's rate had been added in `h`, which maps it at the
+  target and not at the state, and near the path, where the target turns at
+  `v r_⊥/r²`, the mismatch drove `α²` through zero.
+- **`031ab30`, the core relaxing at `max(ρ_max, 12 |v|/r_0)`.** With the
+  first fix alone the `v = 1/2` rows had a layer residual of about `4.7` at
+  every `h`. That is the core target's jump where the path crosses a point,
+  released on the trailing side after `r_0/v` with `e^{−4}` of it left.
+  What the layer did not absorb crossed `r_1`, and moving over resting
+  outside the horizon grew to `20–50×` by `20 M`. The core's rate is now
+  `12/M` at `a = 0`, `v = 1/2`, `4.8/M` at `a = 0`, `v = 1/5`, `8/M` at
+  `a = 1/2`, `v = 1/2` and `6.3/M` at `a = 9/10`, `v = 1/2`. At `a = 1/2`
+  and `9/10` with `v = 1/5` it would be `3.2` and `2.5/M`, below `ρ_max`.
+- The moving rows were rerun after each fix. The resting rows are bit for bit
+  unchanged by both. The `a = 1/2`, `v = 1/5` rows are unchanged by the
+  second, and so, their core rate being below `ρ_max`, are the `r` family's
+  `v = 1/5` rows.
+
+**Every run reached `20 M` and every find succeeded** (21 a run).
+
+**The verdict (measured 2026-10-22).** "Works": every row of the cell
+reached `20 M` with finite norms and a global error that grows by at most
+`2×` over `[10, 20] M`. "From": the coarsest `h` from which every adjacent
+pair converges at order `3.5–5` in the error in `r3` and `r5`. "`×`": the
+error in `r3`, moving over resting, at the finest moving `h` at `20 M`.
+
+| `a` \ `v` | `0` | `1/5` | `1/2` |
+|---|---|---|---|
+| `0` | works, from `1/16` | works, from `1/16`; `×1.38` | works, from `1/24`; `×4.9` |
+| `1/2` | works, from `1/24` | works, from `1/24`; `×1.13` | works, from `1/24`; `×2.79` |
+| `9/10`, `r_1 = 9/8` | **grows** inside the horizon from `10 M`: `×382`, `×36`, `×3.4` over `[10, 20] M` at `1/72`, `1/96`, `1/128` | not run | works, from `1/72`; `×2.06` |
+| `9/10`, `r_1 = 5/4` | works, from `1/72` | works, from `1/72`; `×0.86` | `r_1` outside the contracted pole |
+
+The orders at the finest pair at `20 M`, and the finest row's growth of the
+global error over `[10, 20] M`:
+
+| `a` | `v` | pair | error `r3` | `r5` | global | `ℋ` `r3` | `ℋ` `r5` | growth |
+|---|---|---|---|---|---|---|---|---|
+| `0` | `0` | `1/24 → 1/32` | `4.04` | `4.04` | `4.51` | `4.01` | `4.01` | `1.03` |
+| `0` | `1/5` | `1/24 → 1/32` | `4.06` | `4.05` | `5.49` | `4.03` | `4.03` | `1.02` |
+| `0` | `1/2` | `1/24 → 1/32` | `4.14` | `4.01` | `4.64` | `4.21` | `4.32` | `1.01` |
+| `1/2` | `0` | `1/32 → 1/40` | `4.03` | `4.03` | `8.45` | `3.99` | `4.00` | `1.05` |
+| `1/2` | `1/5` | `1/32 → 1/40` | `4.03` | `4.04` | `8.04` | `4.00` | `4.01` | `1.07` |
+| `1/2` | `1/2` | `1/32 → 1/40` | `4.04` | `3.99` | `3.32` | `2.96` | `2.80` | `1.01` |
+| `9/10`, `9/8` | `0` | `1/96 → 1/128` | `4.03` | `4.04` | `16.3` | `3.87` | `4.00` | `3.36` |
+| `9/10`, `9/8` | `1/2` | `1/72 → 1/96` | `4.04` | `4.06` | `5.68` | `4.01` | `3.97` | `1.08` |
+| `9/10`, `5/4` | `0` | `1/96 → 1/128` | `4.03` | `4.04` | `4.09` | `3.87` | `4.00` | `1.44` |
+| `9/10`, `5/4` | `1/5` | `1/72 → 1/96` | `4.05` | `4.05` | `4.34` | `3.96` | `4.02` | `1.41` |
+
+The error outside the horizon converges at order four in every cell that was
+run, and the coarsest `h` of each family is within `1.8×` of the order-4
+extrapolation from the finest (within `1.08×` in every cell but `a = 0`,
+`v = 1/2`). Two exceptions to fourth order:
+
+- **`a = 1/2`, `v = 1/2`: `ℋ` converges at only `2.5–3.0`** from `1/32` to
+  `1/40`: in `r3` from `10 M` on (`2.48`, `2.96` at `10` and `20 M`), in
+  `r5` at `20 M` (`2.80`). The global error goes at `3.3`, and the layer
+  residual does not fall there either (below).
+- **`a = 9/10`, `r_1 = 9/8`, at rest: the band inside the horizon grows.**
+  The global error, which is dominated by that band, is flat to `10 M` and
+  then rises at every `h`: at `1/72` it is `5.3·10⁻⁴` at `10 M`,
+  `6.2·10⁻³` at `16 M` and `0.20` at `20 M`. It falls about tenfold per step
+  in `h` (`×382`, `×36`, `×3.4` over `[10, 20] M`) but is there at every
+  `h`. By `20 M` it has not reached `r3`, whose error is the `r_1 = 5/4`
+  row's to three digits. The `r_1 = 5/4` rows grow by `1.22–1.44×`
+  instead, the linear growth of accumulated truncation error the resting
+  campaign measured.
+
+**Moving over resting (measured 2026-10-22)**, at the finest moving `h`, at
+`5 M` and `20 M`:
+
+| `a` | `v` | `h` | error `r_h` | `r3` | `r5` | `ℋ` `r_h` | `r3` | `r5` |
+|---|---|---|---|---|---|---|---|---|
+| `0` | `1/5` | `1/32` | `1.26`, `1.39` | `1.08`, `1.38` | `0.98`, `1.35` | `1.00`, `1.01` | `0.93`, `1.01` | `0.70`, `0.74` |
+| `0` | `1/2` | `1/32` | `3.99`, `5.06` | `3.33`, `4.90` | `2.22`, `3.84` | `1.38`, `1.22` | `1.33`, `1.96` | `1.17`, `1.25` |
+| `1/2` | `1/5` | `1/40` | `1.14`, `1.16` | `1.04`, `1.13` | `0.96`, `1.12` | `1.00`, `1.01` | `0.95`, `1.00` | `0.71`, `0.73` |
+| `1/2` | `1/2` | `1/40` | `3.54`, `3.20` | `3.25`, `2.79` | `2.18`, `2.74` | `2.04`, `1.20` | `1.43`, `2.10` | `1.23`, `1.50` |
+| `9/10`, `5/4` | `1/5` | `1/96` | `0.97`, `1.00` | `0.72`, `0.86` | `0.67`, `1.13` | `0.98`, `0.98` | `0.60`, `0.65` | `0.49`, `0.36` |
+| `9/10`, `9/8` | `1/2` | `1/96` | `2.08`, `1.98` | `1.67`, `2.06` | `0.93`, `1.97` | `2.12`, `1.89` | `1.19`, `1.26` | `0.45`, `0.36` |
+
+- **The error's excess is the same at every `h`.** At `a = 0`, `v = 1/2`
+  the error in `r3` at `20 M` is `5.03×` the resting hole's at `1/24` and
+  `4.90×` at `1/32`; at `a = 1/2`, `v = 1/2` it is `2.71×`, `2.79×` and
+  `2.79×` at `1/24`, `1/32`, `1/40`. In a norm that converges at order four
+  that is the moving solution's own truncation error, together with the
+  hole's position, as at `v = 1/5` before. It is not a layer term. `ℋ`,
+  which does not see a position, is `0.8–2.7×` the resting hole's at the
+  finest `h` at any time.
+- **At `v = 1/5` the moving hole is the resting one** in `ℋ`
+  (`0.92–1.01×` at `a = 0` and `1/2` in `r_h` and `r3`). At `a = 9/10` it is
+  below it (`0.36–0.98×`): the moving hole's shells are another part of the
+  same mesh, and the ratio is not a quality.
+- **At `1/16` the `a = 0`, `v = 1/2` hole keeps a layer term**: the error in
+  `r_h` is `13.4×` the resting hole's at `5 M` (`3.9–4.0×` from `1/24` on),
+  and the orders from `1/16` to `1/24` there are `4.6–7.7`. That is why its
+  cell is asymptotic only from `1/24`.
+
+**The horizon (measured 2026-10-22).** `M_irr − √(r₊/2)` and `|J| − a` at
+`20 M`, at `1 M` (where the finder sees the initial data), and the drift
+`d|J|/dt` over `[10, 20] M` with its order against the next coarser `h`, at
+the finest `h`:
+
+| `a` | `v` | `h` | `ΔM_irr`, `1 M` / `20 M` | `|J| − a`, `1 M` / `20 M` | `d|J|/dt` (order) | `dM_irr/dt` (order) |
+|---|---|---|---|---|---|---|
+| `0` | `0` | `1/32` | `2.3e−9` / `1.25e−7` | `3.6e−11` / `3.6e−11` | — | `3.3e−9` (`4.04`) |
+| `0` | `1/5` | `1/32` | `1.1e−8` / `1.25e−7` | `5.4e−11` / `6.1e−11` | — | `2.8e−9` (`3.99`) |
+| `0` | `1/2` | `1/32` | `6.5e−8` / `2.47e−7` | `7.6e−10` / `7.9e−10` | — | `3.5e−9` (`4.64`) |
+| `1/2` | `0` | `1/40` | `−1.0e−9` / `3.24e−8` | `2.7e−8` / `4.09e−7` | `1.75e−8` (`3.98`) | `3.3e−10` (`3.89`) |
+| `1/2` | `1/5` | `1/40` | `−1.3e−9` / `3.04e−8` | `3.0e−8` / `4.10e−7` | `1.74e−8` (`4.08`) | `1.7e−10` (`3.74`) |
+| `1/2` | `1/2` | `1/40` | `2.23e−7` / `2.71e−7` | `7.03e−7` / `1.09e−6` | `1.77e−8` (`4.16`) | `6.6e−11` (`15`) |
+| `9/10`, `5/4` | `0` | `1/128` | `1.87e−7` / `1.89e−7` | `6.83e−6` / `6.94e−6` | `6.7e−9` (`4.06`) | `−8.0e−10` (`4.25`) |
+| `9/10`, `5/4` | `1/5` | `1/96` | `3.68e−7` / `3.68e−7` | `1.07e−5` / `1.10e−5` | `1.90e−8` (`4.08`) | `−1.9e−9` (`4.37`) |
+| `9/10`, `9/8` | `1/2` | `1/96` | `6.67e−6` / `6.74e−6` | `1.63e−4` / `1.63e−4` | `1.71e−8` (`4.75`) | `6.0e−9` (`1.03`) |
+
+- **The drift is the evolution's, and it converges at order four.** `J`'s
+  drift at `a = 1/2` and `1/40` is the same at all three speeds,
+  `1.74–1.77·10⁻⁸/M`, at order `4.0–4.2`, and at `a = 9/10` it goes at
+  `4.06–4.08` with the `r_1 = 5/4` layer. `M_irr`'s drift goes at order
+  `3.6–4.6` at `a = 0`, at `3.7–3.9` at `a = 1/2` from `1/32` to `1/40` at
+  rest and at `v = 1/5`, and at `4.3–4.4` at `a = 9/10` with `r_1 = 5/4`. At
+  `a = 1/2`, `v = 1/2` it is too small to have an order (`6.6·10⁻¹¹/M`), and
+  at `a = 9/10`, `v = 1/2` it goes at `1.0`.
+- **The offset at `1 M` is the finder's, and it grows with `a` and `v`.**
+  It is the same at every `h` and constant in time on top of the drift.
+  `|J| − a` is `6.83·10⁻⁶` at `a = 9/10` at rest, as in the resting
+  campaign, which named it the finder's at `N_ah = 12`. Here it is
+  `1.07·10⁻⁵` at `v = 1/5` and `1.63·10⁻⁴` at `v = 1/2`, and `M_irr`'s is
+  `1.9`, `3.7` and `67·10⁻⁷`. At `a = 1/2` and `v = 1/2` the offset is
+  `7.0–8.8·10⁻⁷` in `J` and `1.8–2.2·10⁻⁷` in `M_irr` at every `h`. A faster,
+  higher-spin hole has a less round, contracted horizon on the finder's
+  fixed `N_ah = 12` grid; that this is the cause is likely, not measured.
+- At `a = 0` `|J|` stays below `10⁻⁹` from `1/24` on at every speed
+  (`2·10⁻⁸` at most at `1/16`).
+
+The **layer residual** (the `:damped` layer's distance from the analytic
+solution it relaxes to) at `20 M` at the three spacings, and its orders:
+
+| `a` | `v = 0` | `v = 1/5` | `v = 1/2` |
+|---|---|---|---|
+| `0` | `0.319`, `0.189`, `0.101` (`1.3`, `2.2`) | `0.403`, `0.365`, `0.279` (`0.24`, `0.94`) | `2.56`, `1.75`, `1.25` (`0.93`, `1.17`) |
+| `1/2` | `0.373`, `0.218`, `0.146` (`1.9`, `1.8`) | `0.357`, `0.202`, `0.134` (`2.0`, `1.9`) | `0.364`, `0.263`, `0.346` (`1.1`, `−1.2`) |
+| `9/10`, `9/8` | `11.4`, `6.76`, `4.08` (`1.8`, `1.8`) | — | `4.67`, `2.78` (`1.8`) |
+| `9/10`, `5/4` | `2.51`, `1.50`, `0.882` (`1.8`, `1.8`) | `1.60`, `0.955` (`1.8`) | — |
+
+- **At `v = 1/2` what is left is first order.** At `a = 0` it is the
+  released point of `CODE.md`'s amendment, the point that has just crossed
+  `r_0` on the trailing side: `2.56` at `1/16`, as the `cfl = 1/2` row
+  there, and order `0.9–1.2`. At `a = 1/2` it rises again at `1/40`
+  (`0.26` at `1/32`, `0.35` at `1/40`, slowly decreasing in time), which is the cell whose `ℋ`
+  converges at only `2.5–3.0`.
+- At rest and at `v = 1/5`, from `a = 1/2` on, it converges at order `1.75–2.0`,
+  as the resting campaigns' did. The resting `r` rows reproduce the resting
+  `a = 9/10` campaign's `2.51`, `1.50`, `0.88`.
+- **The moving `a = 9/10`, `r_1 = 9/8` rows have less than half the resting
+  rows' residual** (`4.67` against `11.4` at `1/72`, `2.78` against `6.76`
+  at `1/96`) and do not grow (`1.01×` and `1.08×` over `[10, 20] M`). Their
+  core relaxes at `6.3/M`; at rest the core does not relax at all
+  (`du = 0`). That the core's rate is what holds the moving layer is
+  suggestive, not shown: the moving band is also `8.5` cells deep at `1/72`,
+  where the resting one is `22.4`.
+
+**What a run costs** (measured 2026-10-22) on one H200, `chunk = M`, no
+split, at the finest `h`. `s/M` is over `[10, 20] M`, monitors and finds
+included; the wall time and the peak memory (the largest `nvidia-smi` sample)
+are from the log:
+
+| row | points | steps per `M` | `s/M` | `20 M` | GPU memory | ns per point and step |
+|---|---|---|---|---|---|---|
+| `a = 0`, `v = 0`, `1/32` | `21.6 M` | `111` | `75` | `0.45 h` | `44 GiB` | `31` |
+| `a = 0`, `v = 1/2`, `1/32` | `29.9 M` | `112` | `113` | `0.68 h` | `55 GiB` | `34` |
+| `a = 1/2`, `v = 0`, `1/40` | `42.2 M` | `139` | `177` | `1.05 h` | `71 GiB` | `30` |
+| `a = 1/2`, `v = 1/2`, `1/40` | `58.4 M` | `140` | `252` | `1.44 h` | `92 GiB` | `31` |
+| `a = 9/10`, `v = 0`, `1/128`, both layers | `63.4 M` | `443` | `587–605` | `3.4–3.9 h` | `101 GiB` | `21` |
+| `a = 9/10`, `v = 1/5`, `1/96` (`r`) | `44.5 M` | `336` | `446` | `2.77 h` | `78 GiB` | `30` |
+| `a = 9/10`, `v = 1/2`, `1/96` | `69.9 M` | `336` | `628` | `3.53 h` | `114 GiB` | `27` |
+
+Over all 28 rows a point and step cost `21–78 ns`. The small meshes pay the
+per-chunk analysis most (`72–78 ns` at `1/16`, `2.7–3.7 M` points), the
+finest rows `21–34 ns`, against the bare evolution's `20 ns` of the
+benchmark. That is `2–3×` cheaper per point than the sections above at the
+same spacings, which ran `chunk = M/2` with the split (`71–175 ns`). The
+memory is about `15 GiB` plus `1.3–1.5 GiB` per million points. The one row without a memory figure, `a9v2h72r`, lost its log
+to a requeue (below).
+
+**Operations (2026-10-22).**
+
+- **TreeIOHDF5 `main` broke the first `boosted-ks-7` batch.** TreeIOHDF5
+  0.1.4 reads TreeAMR 0.2.5's `FieldSet.halfturn`, but its `[compat]` admits
+  TreeAMR `=0.2.2, …, =0.2.5`. The package's `[sources]` pin to `main`
+  resolved it beside TreeAMR 0.2.4, and ten of the eleven jobs
+  (580867–580876) ended at their first checkpoint, at `4 M`, in TreeIOHDF5's
+  `set_layout` ("type FieldSet has no field `halfturn`"); the eleventh,
+  580877, stopped at `3 M`. `boosted-ks-7` was pinned to TreeIOHDF5 0.1.3 and
+  all eleven were resubmitted (580890–580900). `boosted-ks-5` and `-6`
+  had resolved before 0.1.4 appeared.
+- **A Slurm controller outage requeued a run that had finished.** `a9v2h72r`
+  (job 580825) reached `20 M`; the requeued job restarted from its last
+  checkpoint, `t = 20`, and `evolve!` refused ("there is nothing left to
+  run"). It exited non-zero, so the batch script marked the SimWatch status
+  "failed", and the restart overwrote the job's log. The CSV and
+  `records.csv` were complete. The status was corrected by hand to
+  "finished", with a message saying what happened.
+- TreeAMR 0.2.5, the half-turn seam, is out; the campaign stayed on 0.2.4.
+
+**What it says.** Spin and velocity aligned along `z`, the analytic layer at
+the default `4/M`, with the target's rate and the core at its transit rate,
+holds every cell that fits one H200 to `20 M` and converges at order four
+outside the horizon. That is `a = 0` and `1/2` at `v` up to `1/2`, and
+`a = 9/10` at rest and at `v = 1/5` with `r_1 = 5/4`, or at `v = 1/2` with
+`r_1 = 9/8`. The coarsest spacing in the convergent regime is the resting
+hole's at every speed but one: `1/16` at `a = 0` (`1/24` at `v = 1/2`),
+`1/24` at `1/2`, `1/72` at `9/10`. The motion costs the error outside the
+horizon a factor that does not depend on `h`: `1.1–1.4` at `v = 1/5`
+(`0.86` at `a = 9/10`), `2–5` at `1/2`. The horizon's drift converges at order four, and `J`'s at
+`a = 1/2` does not depend on the speed. What does not work is one layer at
+`a = 9/10` for every speed. The contracted pole at `v = 1/2` needs
+`r_1 ≤ 9/8`, and `r_1 = 9/8` grows inside the horizon at rest. The finder's
+offset grows to `1.6·10⁻⁴` in `J` at `a = 9/10`, `v = 1/2`.
+
+**What is open** (2026-10-22):
+
+- **`a = 9/10` at `v = 1/2` with a layer that does not grow at rest.** `r_1`
+  must stay `8` cells below `1.244`, and `r_0` outside the ring and the ring
+  rule, so the ramp is at most about `0.2 M`. Which of the resting `9/8`
+  layer's properties makes it grow is unmeasured: its depth (`22` cells
+  below the pole at `1/72`, where `5/4` is `13`), its ramp (`12.6` cells
+  against `21.6`) or its frozen core. A hole whose speed changes, as a
+  binary member's does, needs one layer for every speed it passes through.
+- **The first-order residual at the released point.** At `v = 1/2` it
+  converges at order one at `a = 0`, and at `a = 1/2` not at all from `1/32`
+  to `1/40`, where `ℋ` outside goes at `2.5–3.0`. `CODE.md`'s untried remedy
+  is a core target that matches `∂_r u_exact` at `r_0`.
+- **The finder's offset.** An `N_ah` scan on the initial data, host-side and
+  cheap, would tell the finder's part of `|J| − a` from the evolution's at
+  `a = 9/10` and `v = 1/2`.
+- **A spin not parallel to the motion**, G5's case; unchanged from the
+  previous section.
+- **Circular orbits**; unchanged.
+- **Several GPUs for `a = 9/10` at `1/128` moving.** `105.6 M` and
+  `165.7 M` points, about two and three H200s (`test/octant_runs.jl
+  mpi=true`), would give the moving `a = 9/10` cells a third spacing.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 
