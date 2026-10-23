@@ -194,7 +194,8 @@ ranges of `α`, `γ`'s spectrum, `|β|` and `Π`'s scale, and the gate radius;
 `gh_stage_limiter!` — the state's third writer, the integrator's stage
 limiter beside the paste — `BoundsAccounting`, the validity monitor
 (`validity_rows`) and `evolved_nonfinite`, which is what `max_speed_of`
-and the record's `finite` now read. `diag` has 22 slots; the record grew
+and the record's `finite` now read. `diag` has 22 slots (17 from
+2026-10-23, when the monitor became a fold); the record grew
 `bounds_hits`, `bounds_nonfinite`, `bounds_r_max` and the eight
 `min_detγ_layer` … `max_Π_shell` rows. `test/bounds_tests.jl` is its
 file, and `hole_runs.jl`'s `bounds` section its long runs.
@@ -524,6 +525,28 @@ at `v = 1/2` needs, grows at rest, and `5/4` holds only `v ≤ 1/5`
 (`SINGULARITY_HANDLING.md`, "Aligned spin and velocity"; the *along `z`*
 rows of `CODE.md`'s table).
 
+From 2026-10-23 the package requires **TreeAMR 0.2.6**, and **every norm is
+a fold over points**, its M15 `mesh_fold`, which this package asked for: the
+callback sees several `diag` slots of one point, its position (bit for bit
+`point_position`'s), level and a block tag, and folds into an `isbits`
+accumulator of `Sum`/`Max`/`Min` fields — one sweep and one collective for
+any number of results. `constraints.jl` has `diag_norms` (the one fold behind
+`masked_norms`, `evolved_volume`, `constraint_norms`, `error_norms`),
+`slot_norms`, `record_norms` (constraints and errors together: what
+`record!` reads once after its three monitors, which write disjoint slots)
+and `level_constraint_norms` as one fold binned by level; `bounds.jl`'s
+validity monitor and `evolved_nonfinite` are folds over the state vector
+(`validity_and_nonfinite` both at once; their kernels and `diag`'s slots
+18–22 are gone, `NDIAG = 17`); the projection's counts and `field_scales`
+are one fold each. A record row went from 37 reductions (54 on an ADM chunk,
+65 with the indicator) to 2 (4). `test/octant_runs.jl`'s `observe` runs each
+monitor once and folds three times — the whole mesh, the levels, the
+boundary band, the shells and the half-shells in one accumulator — where it
+re-ran the ADM monitor and the error kernel once per shell and half-shell to
+select points and made about 280–350 reductions; its CSV is the old one to
+the ten digits it writes on the quadrant, the rotating octant and a
+`:fitted` hole at `a = 0` (`CODE.md`, "Analysis quantities").
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -594,7 +617,12 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5604 assertions in 14m59** at four threads after the two
+The suite is **5617 assertions in 14m38** at four threads after the folds
+(2026-10-23, TreeAMR 0.2.6): its 13 new claims are `bounds_tests.jl`'s
+validity rows and finiteness count against a host loop (8), the per-level
+bins against `at_level` in `reflection_tests.jl` (4) and `record_norms`
+against its two halves in `constraints_tests.jl` (1); the MPI comparison's
+263 pass unchanged. It was **5604 assertions in 14m59** at four threads after the two
 moving-core fixes (2026-10-23, `281a639`, `031ab30`, on TreeAMR 0.2.4): its 8
 new claims are `boosted_tests.jl`'s, which a moving core staying a metric near
 its path and releasing its trailing cells within a jump/200 of their targets
@@ -995,7 +1023,17 @@ will bite a batch script: **do not export `JULIA_EXCLUSIVE=1` for the
 one-thread suite.** A one-thread parent then pins itself to a single CPU,
 and `test/threading_tests.jl`'s four-thread subprocess inherits the
 affinity mask and aborts with `Too many threads requested for
-JULIA_EXCLUSIVE option` — the environment, not the code. The `symmetry-hpc`
+JULIA_EXCLUSIVE option` — the environment, not the code. Two more (found 2026-10-23, with
+the folds): **the suite no longer fits `amddebugq`'s or `h200debugq`'s hour**
+on these nodes — three jobs stopped at `type_tests.jl` at 60 min, with two
+compiling against each other's pidfiles — so submit it to `amdq` or `h200q`;
+and **`mpi_tests.jl` inside a SLURM job needs `HYDRA_LAUNCHER=fork`**
+(with `MPIR_CVAR_CH4_SHM_POSIX_RELEASE_GATHER_ENABLE=0`): MPICH's `mpiexec`
+otherwise starts its ranks with `srun`, which waits for a step the suite
+already holds ("Requested nodes are busy") until the workload's 3600 s
+timeout. With both, the suite passed on an EPYC 7532 (cn084), an EPYC 8534P
+(cn112) and an H200 host (cn111, Xeon Gold 6442Y), the MPI comparison in its
+own job (cn079, cn113). The `symmetry-hpc`
 skill has the rest of the cluster's mechanics.
 
 **SimWatch in a batch job** (2026-10-21): `bench/simwatch.sh` is a verbatim
@@ -1109,7 +1147,8 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   pinned too). `SpacetimeMetrics`, `ApparentHorizonFinder`,
   `KorzynskiSpin`, `IMEXRungeKutta` and `TreeIOHDF5` (from 2026-10-09) are
   what `Project.toml`'s `[sources]` entries resolve, and TreeAMR is
-  General's release under `[compat]` `0.2.4` (from 2026-10-22, for its
+  General's release under `[compat]` `0.2.6` (from 2026-10-23, for M15's
+  folds over points; `0.2.4` from 2026-10-22, for its
   nested-mesh ghost fill; `0.2` from 2026-10-09, when the
   checkpoints moved to TreeIOHDF5; `0.1.7` from 2026-10-04, for M12's
   rotating seam; `0.1.4` from 2026-10-01, for M9a's checkpoints; `0.1.3`
@@ -1146,6 +1185,9 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   an upstream compat bug: TreeIOHDF5 0.1.4 should require `=0.2.5`. Until
   it does, a copy that stays on TreeAMR 0.2.4 pins TreeIOHDF5 0.1.3, as
   `boosted-ks-7` did. A run without `checkpoint=` does not notice.
+  **(Resolved 2026-10-23** for this package: it requires TreeAMR 0.2.6,
+  which TreeIOHDF5 `main` (0.1.5) admits. A copy of an older commit on
+  TreeAMR 0.2.4 still needs the 0.1.3 pin.**)**
 - **`notes/` is read-only.** The copies carry their provenance; when
   `CODE.md` departs from them, `CODE.md` says so. Do not "fix" a copy.
 - **Two derivative index conventions.** `SpacetimeMetrics.dmetric`
@@ -1413,12 +1455,20 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   is a band — which is how the three interior variants are compared over
   "the `G` points outside `r_1`" and how the gauge drift is read at the
   horizon.
-- **A reduction that crosses blocks is TreeAMR's `mesh_mapreduce`, never a
-  host fold of ours** (from 2026-10-01). TreeAMR combines the per-block
-  partials on the host, and over MPI (its M7) gathers one partial per rank;
-  a `sum`, `maximum` or weighted loop over `block_mapreduce`'s vector here
-  would be a per-rank answer under MPI. `mesh_mapreduce` combines pairwise,
-  so an L2 compared with a stored number is compared to roundoff;
+- **A reduction that crosses blocks is TreeAMR's `mesh_fold` or
+  `mesh_mapreduce`, never a host fold of ours** (from 2026-10-01; the fold
+  from 2026-10-23). TreeAMR combines the per-block partials on the host,
+  and over MPI (its M7) gathers one partial per rank; a `sum`, `maximum` or
+  weighted loop over `block_mapreduce`'s vector here would be a per-rank
+  answer under MPI. Several numbers, or one number over a region smaller
+  than a block, are **one fold** with a field each, never several
+  reductions or a monitor re-run with a mask to select points: a point's
+  values do not depend on the mask, and each reduction is a sweep and a
+  collective. The fold's `rf` must return `init`'s exact type (a `Sum(1)`
+  beside a `Sum(0.0)` is refused), everything it closes over must be
+  `isbits`, and a region is asked of the point as `is_evolved(mask, p.x)`
+  with the masks the kernels take. The blocks combine pairwise, so an L2
+  compared with a stored number is compared to roundoff;
   `threading_tests.jl`'s exact claim names the combination.
 - **A checkpoint is written after the analysis row and before the regrid**
   (decided 2026-10-01; TreeHydro writes after it). A restart recomputes the
@@ -1437,7 +1487,7 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   holds the checkpoint functions from TreeAMR 0.2.0, is a hard dependency
   here (TreeHydro left HDF5 to the caller), so they are always there.
 - **The `diag` slots are a contiguous-range interface.** `block_mapreduce`
-  reduces an integer or a *contiguous* range of variables and refuses
+  and `mesh_fold` read an integer or a *contiguous* range of variables and refuse
   anything else — a device cannot be handed an arbitrary index vector cell
   by cell — so `DIAG_CGH` (four) and `DIAG_MOM` (three) are the *first* of
   a run and are indexed as `DIAG_CGH + a - 1`. Adding a slot in the middle

@@ -140,7 +140,7 @@ export derive_target_bounds, target_cache, fill_target!, refill_target
 export StateBounds, default_bounds, default_gate, check_bounds_gate
 export bounds_project, sym_eigen3, state_validity, with_bounds
 export BoundsAccounting, take_chunk!, apply_bounds!, gh_stage_limiter!
-export validity_rows, evolved_nonfinite
+export validity_rows, validity_and_nonfinite, evolved_nonfinite
 
 # Boundaries: the Dirichlet hook, and the parities of the reflecting faces
 export dirichlet, has_outer_face, state_parity, even_parity, state_rotation,
@@ -158,6 +158,7 @@ export state_partition, gh_limiter!, gh_integrator, gh_solve, ProblemRef
 export AllPoints, is_evolved, adm_constraints_at_node
 export gh_constraint!, adm_constraint!, gh_error!
 export masked_counts, evolved_volume, masked_norms, constraint_norms, error_norms
+export diag_norms, slot_norms, record_norms
 export level_constraint_norms
 
 # Refinement: the masked Löhner indicator, its marks and its bounds

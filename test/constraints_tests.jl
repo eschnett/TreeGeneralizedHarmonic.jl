@@ -361,6 +361,12 @@ end
     @test length(rec.mom_l2) == 3
     @test rec.gauge_l2[1] == masked_norms(prob, DIAG_CGH).l2
     @test rec.ham_l2 == 0                  # no ADM pass has run into `diag`
+    # `record_norms` is the two in one fold (2026-10-23): each slot's sum and
+    # peak are folded alike whatever else the fold carries, so the fields
+    # are the separate folds' bit for bit.
+    gh_error!(prob, u, zero(T))
+    both = record_norms(prob)
+    @test both == merge(constraint_norms(prob), error_norms(prob))
     # The slot map, asserted rather than assumed: `block_mapreduce` reduces
     # a *contiguous* range of variables and nothing else, so `DIAG_CGH` and
     # `DIAG_MOM` are the first of a run of four and of three and must stay
@@ -369,17 +375,13 @@ end
     # refinement indicator `τ`); step 8b appended eight (the range
     # projection's three, the validity monitor's four and the evolved
     # region's non-finite count); none moved one (amended in steps 5, 6
-    # and 8b).
+    # and 8b). The last five went on 2026-10-23, when the validity monitor
+    # and the count became folds over the state vector.
     @test (DIAG_SPEED, DIAG_CGH, DIAG_HAM, DIAG_MOM, DIAG_MASK) ==
           (1, 2, 6, 7, 10)
     @test (DIAG_ERR, DIAG_RES, DIAG_DRIFT, DIAG_TAU) == (11, 12, 13, 14)
     @test (TreeGeneralizedHarmonic.DIAG_BOUNDS,
            TreeGeneralizedHarmonic.DIAG_BOUNDS_NF,
-           TreeGeneralizedHarmonic.DIAG_BOUNDS_R,
-           TreeGeneralizedHarmonic.DIAG_DETG,
-           TreeGeneralizedHarmonic.DIAG_LAPSE,
-           TreeGeneralizedHarmonic.DIAG_HMAX,
-           TreeGeneralizedHarmonic.DIAG_PIMAX,
-           TreeGeneralizedHarmonic.DIAG_NONFINITE) == Tuple(15:22)
-    @test NDIAG == 22
+           TreeGeneralizedHarmonic.DIAG_BOUNDS_R) == Tuple(15:17)
+    @test NDIAG == 17
 end

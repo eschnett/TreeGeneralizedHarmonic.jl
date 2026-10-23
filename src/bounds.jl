@@ -746,17 +746,19 @@ function _apply_bounds!(bd::StateBounds, int::Union{Interior,FittedInterior}, p,
     T = eltype(p.U.work)
     map_blocks!(gh_bounds_kernel!, p.U, statearray(u, p.U), p.diag.work,
                 p.origins, p.spacings, bd, int, T(t))
-    # Exact integers in `T`: a block holds at most `N³` points.
-    n = round(Int, tofloat64(mesh_mapreduce(identity, +, zero(T), p.diag;
-                                            vars=DIAG_BOUNDS)))
+    # One fold for the three slots (amended 2026-10-23: up to three
+    # reductions); exact integers in `T`, since a block holds at most `N³`
+    # points.
+    r = mesh_fold(_bounds_counts, TreeAMR.combine,
+                  (n=Sum(zero(T)), nf=Sum(zero(T)), r=Max(zero(T))), p.diag;
+                  vars=DIAG_BOUNDS:DIAG_BOUNDS_R)
+    n = round(Int, tofloat64(r.n.value))
     acc = p.accounting
     if acc !== nothing
         acc.calls += 1
         if n > 0
-            nf = round(Int, tofloat64(mesh_mapreduce(
-                identity, +, zero(T), p.diag; vars=DIAG_BOUNDS_NF)))
-            rmax = tofloat64(mesh_mapreduce(identity, max, zero(T), p.diag;
-                                            vars=DIAG_BOUNDS_R))
+            nf = round(Int, tofloat64(r.nf.value))
+            rmax = tofloat64(r.r.value)
             acc.hits += n
             acc.nonfinite += nf
             acc.r_max = max(acc.r_max, rmax)
@@ -771,6 +773,9 @@ function _apply_bounds!(bd::StateBounds, int::Union{Interior,FittedInterior}, p,
     end
     return n
 end
+
+@inline _bounds_counts(acc, p) =
+    TreeAMR.combine(acc, (n=Sum(p.u[1]), nf=Sum(p.u[2]), r=Max(p.u[3])))
 
 """
     gh_stage_limiter!(u, integrator, p::GHProblem, t)
@@ -805,54 +810,69 @@ end
 
 # --- the validity monitor ----------------------------------------------------
 
-"""
-    gh_validity_kernel!(diag, state, origins, spacings, region)
-
-The validity monitor's four slots at every owned point inside `region` (a
-[`ShellMask`](@ref) — the layer or the shell outside `r_1`):
-`DIAG_DETG = det γ`, `DIAG_LAPSE =` the signed lapse, `DIAG_HMAX = max|h_ab|`
-and `DIAG_PIMAX = max|Π_ab|` ([`state_validity`](@ref)). Outside the region
-each slot holds the neutral value of the reduction it is read with —
-`floatmax` for the two minima, `0` for the two maxima — written through a
-branch.
-
-It reads the state array, not the working array: no stencil, no ghosts, no
-scatter.
-"""
-@kernel function gh_validity_kernel!(diag, @Const(state), @Const(origins),
-                                     @Const(spacings), region)
-    I = @index(Global, NTuple)
-    b = I[4]
-    c = ntuple(d -> I[d], Val(3))
-    T = eltype(diag)
-    if is_evolved(region, point_position(origins, spacings, b, I))
-        hv = SVector{NC,T}(ntuple(v -> state[c..., v, b], Val(NC)))
-        Πv = SVector{NC,T}(ntuple(v -> state[c..., NC + v, b], Val(NC)))
-        dγ, α, hm, Πm = state_validity(hv, Πv)
-        diag[c..., DIAG_DETG, b] = dγ
-        diag[c..., DIAG_LAPSE, b] = α
-        diag[c..., DIAG_HMAX, b] = hm
-        diag[c..., DIAG_PIMAX, b] = Πm
-    else
-        diag[c..., DIAG_DETG, b] = floatmax(T)
-        diag[c..., DIAG_LAPSE, b] = floatmax(T)
-        diag[c..., DIAG_HMAX, b] = zero(T)
-        diag[c..., DIAG_PIMAX, b] = zero(T)
-    end
+# The validity monitor as one fold over the state vector (amended
+# 2026-10-23, TreeAMR 0.2.6's `mesh_fold`): until then a kernel wrote the
+# four quantities into four `diag` slots, once per region, and twelve
+# reductions read them back. `rf` asks the three regions' own `isbits` masks
+# at the point's position — `p.x` is `coordinates`' value bit for bit, which
+# is `point_position`'s — and evaluates [`state_validity`](@ref) once for any
+# region that holds it. It also counts the evolved region's non-finite
+# components, so the record's `finite` row costs no sweep of its own. No
+# neighbour is read, so no scatter and no ghost fill.
+struct ValidityFold{ML,MS,ME}
+    layer::ML
+    shell::MS
+    evolved::ME
 end
 
-# The four extremes over one region, `nothing` where the region holds no
+@inline _validity_bin(::Type{T}) where {T} =
+    (detγ=Min(floatmax(T)), α=Min(floatmax(T)), h=Max(zero(T)), Π=Max(zero(T)))
+
+@inline _validity_bin(on::Bool, dγ::T, α::T, hm::T, Πm::T) where {T} =
+    on ? (detγ=Min(dγ), α=Min(α), h=Max(hm), Π=Max(Πm)) : _validity_bin(T)
+
+@inline function _state_validity(u::NTuple{N,T}) where {N,T}
+    hv = SVector{NC,T}(ntuple(v -> u[v], Val(NC)))
+    Πv = SVector{NC,T}(ntuple(v -> u[NC + v], Val(NC)))
+    return state_validity(hv, Πv)
+end
+
+@inline function (f::ValidityFold)(acc, p)
+    T = typeof(p.h)
+    inl = is_evolved(f.layer, p.x)
+    ins = is_evolved(f.shell, p.x)
+    ine = is_evolved(f.evolved, p.x)
+    # One assignment, through a ternary: a name assigned in two branches
+    # would be boxed (`CLAUDE.md`, "A closure in a kernel …").
+    dγ, α, hm, Πm = inl | ins | ine ? _state_validity(p.u) :
+                    (floatmax(T), floatmax(T), zero(T), zero(T))
+    q = (layer=_validity_bin(inl, dγ, α, hm, Πm), shell=_validity_bin(ins, dγ, α, hm, Πm),
+         evolved=_validity_bin(ine, dγ, α, hm, Πm),
+         nonfinite=Sum(ine ? count(x -> !isfinite(x), p.u) : 0))
+    return TreeAMR.combine(acc, q)
+end
+
+# The non-finite count alone, over one mask.
+struct NonfiniteFold{M}
+    mask::M
+end
+
+@inline (f::NonfiniteFold)(acc, p) =
+    TreeAMR.combine(acc, Sum(is_evolved(f.mask, p.x) ? count(x -> !isfinite(x), p.u) : 0))
+
+# The four extremes of one region's bin, `nothing` where the region holds no
 # point (a minimum still at its neutral `floatmax`).
-function _validity(p, u, region)
-    T = eltype(p.U.work)
-    map_blocks!(gh_validity_kernel!, p.U, p.diag.work, statearray(u, p.U),
-                p.origins, p.spacings, region)
-    mn(v) = mesh_mapreduce(identity, min, floatmax(T), p.diag; vars=v)
-    mx(v) = mesh_mapreduce(identity, max, zero(T), p.diag; vars=v)
+function _validity_report(bin)
+    T = typeof(bin.h.value)
     report(x) = x == floatmax(T) ? nothing : tofloat64(x)
-    return (detγ=report(mn(DIAG_DETG)), α=report(mn(DIAG_LAPSE)),
-            h=tofloat64(mx(DIAG_HMAX)), Π=tofloat64(mx(DIAG_PIMAX)))
+    return (detγ=report(bin.detγ.value), α=report(bin.α.value),
+            h=tofloat64(bin.h.value), Π=tofloat64(bin.Π.value))
 end
+
+const NO_VALIDITY = (min_detγ_layer=nothing, min_α_layer=nothing, max_h_layer=nothing,
+                     max_Π_layer=nothing, min_detγ_shell=nothing, min_α_shell=nothing,
+                     max_h_shell=nothing, max_Π_shell=nothing, min_detγ_evolved=nothing,
+                     min_α_evolved=nothing)
 
 """
     validity_rows(p::GHProblem, u, t) -> NamedTuple
@@ -874,48 +894,46 @@ metrics and where; these say how close the layer, and the evolved points
 next to it, are to leaving it, chunk by chunk — whether or not the
 projection is on — so a run that ends in a degenerate metric has its
 approach on the record. `Float64`, as every row is.
+
+One fold over the state vector for the three regions (amended 2026-10-23:
+three kernel launches and twelve reductions until then).
 """
-function validity_rows(p, u, t)
+validity_rows(p, u, t) = first(validity_and_nonfinite(p, u, t))
+
+"""
+    validity_and_nonfinite(p::GHProblem, u, t) -> (rows, nonfinite)
+
+[`validity_rows`](@ref) and [`evolved_nonfinite`](@ref) from one sweep
+(added 2026-10-23): the driver's analysis row reads both.
+"""
+function validity_and_nonfinite(p, u, t)
     int = p.interior
-    int === nothing && return (min_detγ_layer=nothing, min_α_layer=nothing,
-                               max_h_layer=nothing, max_Π_layer=nothing,
-                               min_detγ_shell=nothing, min_α_shell=nothing,
-                               max_h_shell=nothing, max_Π_shell=nothing,
-                               min_detγ_evolved=nothing, min_α_evolved=nothing)
     T = eltype(p.U.work)
+    int === nothing && return (NO_VALIDITY, evolved_nonfinite(p, u, t))
     h = minimum_spacing(T, p.U.forest)
     G = first(p.U.G)
     # The bands through the interior's own masks (amended in step 8d), so
     # that the tracked geometry's layer and shell are its surface's bands and
-    # the sphere's are step 8b's `ShellMask`s, value for value.
-    layer = _validity(p, u, layer_mask(int, T(t)))
-    shell = _validity(p, u, shell_mask(int, T(t), G * h))
-    # The whole evolved region (added in step 8d): the minimum lapse over it
-    # is the lapse-collapse trigger's input, and `det γ` comes with the pass.
-    evolved = _validity(p, u, interior_mask(int, T(t)))
-    return (min_detγ_layer=layer.detγ, min_α_layer=layer.α,
+    # the sphere's are step 8b's `ShellMask`s, value for value; and the whole
+    # evolved region (added in step 8d), whose minimum lapse is the
+    # lapse-collapse trigger's input.
+    f = ValidityFold(layer_mask(int, T(t)), shell_mask(int, T(t), G * h),
+                     interior_mask(int, T(t)))
+    init = (layer=_validity_bin(T), shell=_validity_bin(T), evolved=_validity_bin(T),
+            nonfinite=Sum(0))
+    r = mesh_fold(f, TreeAMR.combine, init, p.U, u)
+    layer = _validity_report(r.layer)
+    shell = _validity_report(r.shell)
+    evolved = _validity_report(r.evolved)
+    rows = (min_detγ_layer=layer.detγ, min_α_layer=layer.α,
             max_h_layer=layer.h, max_Π_layer=layer.Π,
             min_detγ_shell=shell.detγ, min_α_shell=shell.α,
             max_h_shell=shell.h, max_Π_shell=shell.Π,
             min_detγ_evolved=evolved.detγ, min_α_evolved=evolved.α)
+    return (rows, r.nonfinite.value)
 end
 
 # --- the evolved region's finiteness -----------------------------------------
-
-@kernel function gh_nonfinite_kernel!(diag, @Const(state), @Const(origins),
-                                      @Const(spacings), mask)
-    I = @index(Global, NTuple)
-    b = I[4]
-    c = ntuple(d -> I[d], Val(3))
-    T = eltype(diag)
-    if is_evolved(mask, point_position(origins, spacings, b, I))
-        diag[c..., DIAG_NONFINITE, b] = _fold(ntuple(Val(2 * NC)) do v
-            isfinite(state[c..., v, b]) ? zero(T) : one(T)
-        end)
-    else
-        diag[c..., DIAG_NONFINITE, b] = zero(T)
-    end
-end
 
 """
     evolved_nonfinite(p::GHProblem, u, t; mask = interior_mask(p.interior, t)) -> Int
@@ -931,12 +949,11 @@ This is what the driver's finiteness checks read (amended in step 8b):
 layer's stencils do, and the region the range projection exists to repair.
 A `NaN` in the core is a hit, not the end of the run; a `NaN` where the
 equations are evolved still is.
+
+One fold over the state vector (amended 2026-10-23: a kernel into a `diag`
+slot and a reduction until then).
 """
 function evolved_nonfinite(p, u, t; mask=interior_mask(p.interior,
                                                        eltype(p.U.work)(t)))
-    T = eltype(p.U.work)
-    map_blocks!(gh_nonfinite_kernel!, p.U, p.diag.work, statearray(u, p.U),
-                p.origins, p.spacings, mask)
-    return round(Int, tofloat64(mesh_mapreduce(identity, +, zero(T), p.diag;
-                                               vars=DIAG_NONFINITE)))
+    return mesh_fold(NonfiniteFold(mask), TreeAMR.combine, Sum(0), p.U, u).value
 end

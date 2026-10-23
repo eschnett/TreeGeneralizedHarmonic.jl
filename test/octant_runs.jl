@@ -431,19 +431,8 @@ function nearboundary(forest, k)
     return any(d -> (OUTER_HI[d] && ext[d][2] ≥ forest.extents[d][2]) ||
                     (OUTER_LO[d] && ext[d][1] ≤ forest.extents[d][1]), 1:3)
 end
-# Point-weighted L2 of `diag` slot `v` over the blocks `keep(k)` selects.
-function band_l2(p, v, keep)
-    f = p.U.forest
-    w = k -> keep(k) ? one(T) : zero(T)
-    n = mesh_mapreduce(identity, +, zero(T), p.diag; vars=TreeGeneralizedHarmonic.DIAG_MASK,
-                       weight=w)
-    s = mesh_mapreduce(x -> x * x, +, zero(T), p.diag; vars=v, weight=w)
-    return n > 0 ? sqrt(s / n) : zero(T)
-end
 const DIAG_ERR = TreeGeneralizedHarmonic.DIAG_ERR
-bndkeep(p) = k -> nearboundary(p.U.forest, k)
-# The largest component's band norm, as for the whole mesh.
-band_max(p, first, n, keep) = maximum(band_l2(p, first + i - 1, keep) for i in 1:n)
+const DIAG_MASK = TreeGeneralizedHarmonic.DIAG_MASK
 
 # One half of a shell about the moving center (added 2026-10-20): the points
 # of `lo ≤ |x − c| < hi` with `(x − c)·dir > 0` — `dir = −v̂` the trailing
@@ -466,6 +455,82 @@ end
     s = d1 * m.dir[1] + d2 * m.dir[2] + d3 * m.dir[3]
     return (m.lo * m.lo ≤ r²) & (r² < m.hi * m.hi) & (s > 0)
 end
+
+# The row's point-weighted norms as one fold (added 2026-10-23, TreeAMR
+# 0.2.6's `mesh_fold`). Until then each number was its own `mesh_mapreduce`,
+# about 280 a row and 70 more with the split, and each shell and half-shell
+# re-ran the monitors with its own mask only to select its points; the
+# monitors' values at an evolved point do not depend on the mask, so one pass
+# of each with the interior's mask and this fold give the same numbers (the
+# sums to roundoff, the maxima exactly). The fold reads `diag`'s slots
+# `DIAG_CGH:DIAG_ERR` — `C_a`, `ℋ`, `ℳ_i`, the mask and the error — and bins
+# every owned point into: the whole mesh, its level, the boundary band (the
+# block's `tag`), its shell about `c(t)` and, with the split, its trailing or
+# leading half-shell. A bin holds the evolved point count and, for the nine
+# other slots, the sum of squares and the peak, so that `mom` and `gauge` are
+# still the largest component's norm. The shells select by `ShellMask`'s and
+# `HalfShellMask`'s own arithmetic, so their points are the masked re-runs'
+# where the band lies in the evolved region; a point inside the interior has
+# a mask of zero and counts in no bin. On a `:fitted` hole whose offset surface
+# is not the sphere `r_in` (a spinning one) that drops the layer points
+# between the two, which the `ShellMask`-only re-run counted; at `a = 0` the
+# two are the same sphere, and the CSV is the re-runs' to its ten digits.
+const ROW_NV = DIAG_ERR - DIAG_CGH + 1      # slots 2:11 of `diag`
+const ROW_MASK = DIAG_MASK - DIAG_CGH + 1    # the mask's position among them
+const ROW_NQ = ROW_NV - 1                    # the slots with norms
+@inline _row_slot(u, i) = i < ROW_MASK ? u[i] : u[i + 1]
+rowbin(::Type{T}) where {T} = (n=Sum(zero(T)), s2=ntuple(_ -> Sum(zero(T)), Val(ROW_NQ)),
+                               mx=ntuple(_ -> Max(zero(T)), Val(ROW_NQ)))
+@inline rowbin(u) = (n=Sum(u[ROW_MASK]),
+                     s2=ntuple(i -> Sum(_row_slot(u, i) * _row_slot(u, i)), Val(ROW_NQ)),
+                     mx=ntuple(i -> Max(abs(_row_slot(u, i))), Val(ROW_NQ)))
+
+struct RowFold{T,NL,NS,NH}
+    center::SVector{3,T}
+    edges::NTuple{NS,Tuple{T,T}}
+    dir::SVector{3,T}                       # +v̂: the leading half
+end
+
+@inline function (f::RowFold{T,NL,NS,NH})(acc, p) where {T,NL,NS,NH}
+    q = rowbin(p.u)
+    ks = sum(ntuple(i -> is_evolved(ShellMask(f.center, f.edges[i]...), p.x) ? i : 0,
+                    Val(NS)); init=0)
+    kt = sum(ntuple(i -> is_evolved(HalfShellMask(f.center, f.edges[i]..., -f.dir), p.x) ?
+                         i : 0, Val(NH)); init=0)
+    kl = sum(ntuple(i -> is_evolved(HalfShellMask(f.center, f.edges[i]..., f.dir), p.x) ?
+                         i : 0, Val(NH)); init=0)
+    return (all=TreeAMR.combine(acc.all, q), lev=addto(acc.lev, p.level + 1, q),
+            bnd=p.tag ? TreeAMR.combine(acc.bnd, q) : acc.bnd,
+            shell=addto(acc.shell, ks, q), trail=addto(acc.trail, kt, q),
+            lead=addto(acc.lead, kl, q))
+end
+
+function row_fold(p, center, edges, dir, ::Val{NL}, ::Val{NS}, ::Val{NH}) where {NL,NS,NH}
+    bin = rowbin(T)
+    init = (all=bin, lev=ntuple(_ -> bin, Val(NL)), bnd=bin, shell=ntuple(_ -> bin, Val(NS)),
+            trail=ntuple(_ -> bin, Val(NH)), lead=ntuple(_ -> bin, Val(NH)))
+    f = RowFold{T,NL,NS,NH}(center, edges, dir)
+    return mesh_fold(f, TreeAMR.combine, init, p.diag; vars=DIAG_CGH:DIAG_ERR,
+                     tag=k -> nearboundary(p.U.forest, k))
+end
+
+# A bin's norms, in the record's shape: the slots are `C_a` (1:4), `ℋ` (5),
+# `ℳ_i` (6:8) and the error (9) among the bin's nine.
+function binnorms(b)
+    n = b.n.value
+    l2(i) = n > 0 ? sqrt(b.s2[i].value / n) : zero(n)
+    mx(i) = b.mx[i].value
+    return (points=n, ham_l2=l2(5), ham_linf=mx(5),
+            mom_l2=SVector(l2(6), l2(7), l2(8)), mom_linf=SVector(mx(6), mx(7), mx(8)),
+            gauge_l2=SVector(l2(1), l2(2), l2(3), l2(4)),
+            gauge_linf=SVector(mx(1), mx(2), mx(3), mx(4)), err_l2=l2(9), err_linf=mx(9))
+end
+
+# The state's point-weighted L2 and its L∞ over every owned value, one fold
+# over the state vector (2026-10-23: two reductions and a count until then).
+@inline statefold(acc, p) =
+    TreeAMR.combine(acc, (n=Sum(one(p.h)), sq=Sum(sum(x -> x * x, p.u)),
+                          mx=Max(maximum(abs, p.u))))
 
 # The found horizon's coordinate extents (added 2026-10-20), as
 # `test/hole_runs.jl`'s moving rows measure them: the finder's shape about its
@@ -615,18 +680,34 @@ function draw_images()
 end
 
 function observe(p, t, u, rec)
+    # Each monitor once, over the evolved region; everything below is folds
+    # over what they wrote (amended 2026-10-23: once per shell and half-shell
+    # too, until then).
     gh_constraint!(p, u, t)
     adm_constraint!(p, u, t)
-    pts = constraint_norms(p; weighting=:points)
-    vol = constraint_norms(p)
-    lev = level_constraint_norms(p)
-    bk = bndkeep(p)
-    bnd = (band_l2(p, DIAG_HAM, bk), band_max(p, DIAG_MOM, 3, bk),
-           band_max(p, DIAG_CGH, 4, bk))
-    # The number of points over every rank's blocks, not this rank's.
-    npts = T(TreeGeneralizedHarmonic.rank_reduce(+, p.U, statelength(p.U))) / p.U.nvars
-    s2 = sqrt(mesh_mapreduce(x -> x * x, +, zero(T), p.U, u) / (npts * p.U.nvars))
-    s∞ = mesh_mapreduce(abs, max, zero(T), p.U, u)
+    hole && gh_error!(p, u, t; shell=horizon_shell(case, p.interior))
+    vol = record_norms(p)
+    # The shells about the hole: about its analytic center `c(t)`, the origin
+    # for a hole at rest there (amended 2026-10-20: the origin always).
+    c_t = hole ? SVector{3,T}(center_at(case.center, T(t))) : zero(SVector{3,T})
+    edges = if hole
+        r_in = case.interior isa FittedSpec ?
+               shell_r[1] - case.interior.margin * minimum_spacing(T, p.U.forest) :
+               case.interior.r_1
+        vcat([r_in], shell_r, [T(Inf)])
+    else
+        T[]
+    end
+    nshell = max(length(edges) - 1, 0)
+    bands = ntuple(i -> (edges[i], edges[i + 1]), nshell)
+    dir = SVector{3,T}(on_axis(v_dir))
+    rf = row_fold(p, c_t, bands, dir, Val(nlev), Val(nshell), Val(split_on ? nshell : 0))
+    pts = binnorms(rf.all)
+    st = mesh_fold(statefold, TreeAMR.combine,
+                   (n=Sum(zero(T)), sq=Sum(zero(T)), mx=Max(zero(T))), p.U, u)
+    s2 = sqrt(st.sq.value / (st.n.value * p.U.nvars))
+    s∞ = st.mx.value
+    bnd = binnorms(rf.bnd)
     row = Any[t, time() - t_wall0, pts.ham_l2, pts.ham_linf, mom2(pts), mom∞(pts),
               gauge2(pts), gauge∞(pts), vol.ham_l2, mom2(vol), gauge2(vol), s2, s∞]
     extra = Dict{String,Any}(
@@ -642,87 +723,63 @@ function observe(p, t, u, rec)
         "state" => Dict("l2" => s2, "linf" => s∞))
     err = nothing
     if hole
-        gh_error!(p, u, t; shell=horizon_shell(case, p.interior))
-        e = error_norms(p)
-        ep = masked_norms(p, DIAG_ERR; weighting=:points)
-        err = (ep.l2, ep.linf, e.residual, e.drift, e.err_l2)
+        err = (pts.err_l2, pts.err_linf, vol.residual, vol.drift, vol.err_l2)
         append!(row, err)
-        extra["error"] = Dict("l2" => ep.l2, "linf" => ep.linf, "l2_volume" => e.err_l2,
-                              "layer_residual" => e.residual, "drift_htt" => e.drift)
+        extra["error"] = Dict("l2" => pts.err_l2, "linf" => pts.err_linf,
+                              "l2_volume" => vol.err_l2, "layer_residual" => vol.residual,
+                              "drift_htt" => vol.drift)
     end
     # One set of columns per level `0:nlev-1` whether or not the mesh has
     # blocks there (amended 2026-10-20): a level the shells refine away
     # entirely — level 0 when the first radius reaches every root — is `NaN`,
     # where it shifted every later column by one.
     levels = Dict{String,Any}()
-    bylevel = [findfirst(n -> n.level == ℓ, lev) for ℓ in 0:(nlev - 1)]
-    for i in bylevel
-        i === nothing && (append!(row, fill(NaN, 6)); continue)
-        n = lev[i]
+    present = Set(level.(p.U.forest.leaves))
+    for ℓ in 0:(nlev - 1)
+        ℓ in present || (append!(row, fill(NaN, 6)); continue)
+        n = binnorms(rf.lev[ℓ + 1])
         append!(row, (n.ham_l2, n.ham_linf, mom2(n), mom∞(n), gauge2(n), gauge∞(n)))
-        levels["L$(n.level)"] = Dict{String,Any}(
+        levels["L$ℓ"] = Dict{String,Any}(
             "points" => n.points, "ham_l2" => n.ham_l2, "ham_linf" => n.ham_linf,
             "mom_l2" => mom2(n), "gauge_l2" => gauge2(n))
     end
     if hole
-        for i in bylevel
-            i === nothing && (push!(row, NaN); continue)
-            n = lev[i]
-            el = masked_norms(p, DIAG_ERR; weighting=:points, at_level=n.level).l2
+        for ℓ in 0:(nlev - 1)
+            ℓ in present || (push!(row, NaN); continue)
+            el = binnorms(rf.lev[ℓ + 1]).err_l2
             push!(row, el)
-            levels["L$(n.level)"]["err_l2"] = el
+            levels["L$ℓ"]["err_l2"] = el
         end
     end
     extra["levels"] = levels
-    append!(row, bnd)
+    append!(row, (bnd.ham_l2, mom2(bnd), gauge2(bnd)))
     boundary = Dict{String,Any}("note" => "the blocks touching an outer face",
-                                "ham_l2" => bnd[1], "mom_l2" => bnd[2],
-                                "gauge_l2" => bnd[3])
+                                "ham_l2" => bnd.ham_l2, "mom_l2" => mom2(bnd),
+                                "gauge_l2" => gauge2(bnd))
     if hole
-        eb = band_l2(p, DIAG_ERR, bk)
-        push!(row, eb)
-        boundary["err_l2"] = eb
+        push!(row, bnd.err_l2)
+        boundary["err_l2"] = bnd.err_l2
     end
     extra["boundary"] = boundary
-    # The shells: each monitor once per shell, masked to it — about the hole's
-    # analytic center `c(t)`, the origin for a hole at rest there (amended
-    # 2026-10-20: the origin always).
     if hole
-        r_in = case.interior isa FittedSpec ?
-               shell_r[1] - case.interior.margin * minimum_spacing(T, p.U.forest) :
-               case.interior.r_1
-        edges = vcat([r_in], shell_r, [T(Inf)])
         shells = Dict{String,Any}()
-        c_t = center_at(case.center, T(t))
-        for i in 1:(length(edges) - 1)
-            m = ShellMask(c_t, edges[i], edges[i + 1])
-            gh_constraint!(p, u, t; mask=m)
-            adm_constraint!(p, u, t; mask=m)
-            n = constraint_norms(p; weighting=:points)
-            gh_error!(p, u, t; mask=m)
-            e = masked_norms(p, DIAG_ERR; weighting=:points)
-            append!(row, (n.ham_l2, n.ham_linf, mom2(n), gauge2(n), e.l2, e.linf))
+        for i in 1:nshell
+            n = binnorms(rf.shell[i])
+            append!(row, (n.ham_l2, n.ham_linf, mom2(n), gauge2(n), n.err_l2, n.err_linf))
             shells[shell_names[i]] = Dict{String,Any}(
                 "range" => @sprintf("[%g, %g)", edges[i], edges[i + 1]),
                 "ham_l2" => n.ham_l2, "ham_linf" => n.ham_linf, "mom_l2" => mom2(n),
-                "gauge_l2" => gauge2(n), "err_l2" => e.l2, "err_linf" => e.linf)
+                "gauge_l2" => gauge2(n), "err_l2" => n.err_l2, "err_linf" => n.err_linf)
         end
         # Each shell's two halves (added 2026-10-20), into the CSV after all
-        # the shells: `ℋ` and the error, so the ADM monitor and the error
-        # kernel once per half. Each kernel writes `DIAG_MASK`, so the norm
-        # read after it is over that half's points.
+        # the shells: `ℋ` and the error.
         if split_on
-            for i in 1:(length(edges) - 1), (side, sgn) in (("trail", -1), ("lead", 1))
-                dir = SVector{3,T}(on_axis(sgn * v_dir))
-                m = HalfShellMask{T}(c_t, edges[i], edges[i + 1], dir)
-                adm_constraint!(p, u, t; mask=m)
-                n = masked_norms(p, DIAG_HAM; weighting=:points)
-                gh_error!(p, u, t; mask=m)
-                e = masked_norms(p, DIAG_ERR; weighting=:points)
-                append!(row, (n.l2, n.linf, e.l2, e.linf))
+            for i in 1:nshell, (side, half) in (("trail", rf.trail), ("lead", rf.lead))
+                n = binnorms(half[i])
+                append!(row, (n.ham_l2, n.ham_linf, n.err_l2, n.err_linf))
                 shells[shell_names[i]][side] = Dict{String,Any}(
-                    "ham_l2" => n.l2, "ham_linf" => n.linf, "err_l2" => e.l2,
-                    "err_linf" => e.linf)
+                    "ham_l2" => n.ham_l2, "ham_linf" => n.ham_linf, "err_l2" => n.err_l2,
+                    "err_linf" => n.err_linf)
             end
         end
         extra["shells"] = shells
@@ -753,7 +810,7 @@ function observe(p, t, u, rec)
             gauge2(pts), gauge∞(pts), s2)
     err === nothing || !isrank0 || @printf("   err %.3e / %.3e  res %.3e  drift %.3e", err[1], err[2],
                                err[3], err[4])
-    isrank0 && @printf("   bnd ℋ %.3e C %.3e", bnd[1], bnd[3])
+    isrank0 && @printf("   bnd ℋ %.3e C %.3e", bnd.ham_l2, gauge2(bnd))
     split_on && isrank0 &&
         @printf("   c_%s %.4f  hz %s %.4f  %s/%s %.5f (%.5f)  trail|lead err %.3e|%.3e",
                 axname, center_at(case.center, T(t))[axis], axname,

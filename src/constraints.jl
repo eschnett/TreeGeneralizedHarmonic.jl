@@ -563,14 +563,20 @@ The three error rows of the analysis record, from whatever
 The residual and the drift are L∞ only, as `CODE.md`'s table asks: an L2
 over a region the mask excludes would have to be divided by that region's
 own volume, and the number those rows are read for is the worst point.
+
+One fold over `DIAG_MASK:DIAG_DRIFT` (amended 2026-10-23: seven reductions
+until then). The residual and the drift live where the mask is zero, so the
+fold reads every owned point and does not gate on it, as the reductions did.
 """
 function error_norms(p::GHProblem{T}) where {T}
-    volume = evolved_volume(p)
-    err = masked_norms(p, DIAG_ERR; volume=volume)
-    res = masked_norms(p, DIAG_RES; volume=volume)
-    drift = masked_norms(p, DIAG_DRIFT; volume=volume)
-    return (err_l2=err.l2, err_linf=err.linf, residual=res.linf,
-            drift=drift.linf)
+    return _error_rows(diag_norms(p, DIAG_MASK:DIAG_DRIFT))
+end
+
+function _error_rows(r)
+    err = slot_norms(r, DIAG_ERR)
+    return (err_l2=err.l2, err_linf=err.linf,
+            residual=slot_norms(r, DIAG_RES).linf,
+            drift=slot_norms(r, DIAG_DRIFT).linf)
 end
 
 """
@@ -587,56 +593,132 @@ masked_counts(p::GHProblem{T}) where {T} =
     block_mapreduce(identity, +, zero(T), p.diag; vars=DIAG_MASK)
 
 """
-    evolved_volume(p::GHProblem) -> T
+    evolved_volume(p::GHProblem; weighting = :volume, at_level = nothing) -> T
 
-The volume of the points the mask counted: each block's count from
-`DIAG_MASK` times its cell volume `h³`, summed over the mesh by TreeAMR's
-`mesh_mapreduce`.
+The volume of the points the mask counted: each point's `DIAG_MASK` times
+its cell volume `h³` (or times one, `weighting = :points`), summed over the
+mesh by TreeAMR's `mesh_fold`.
 
-It is the denominator of every masked norm, it is the same for all of
-them, and it is a full sweep of the `diag` array — so
-[`constraint_norms`](@ref) takes it once and hands it to the eight norms
-it assembles rather than letting each recompute it.
+It is the denominator of every masked norm and the same for all of them,
+so [`diag_norms`](@ref) carries it in the same sweep as the norms it
+divides (amended 2026-10-23: [`constraint_norms`](@ref) took it once and
+handed it to eight further reductions).
 """
 function evolved_volume(p::GHProblem{T}; weighting::Symbol=:volume,
                         at_level=nothing) where {T}
-    return mesh_mapreduce(identity, +, zero(T), p.diag; vars=DIAG_MASK,
-                          weight=_norm_weight(T, p.U.forest, weighting, at_level))
+    return diag_norms(p, DIAG_MASK:DIAG_MASK; weighting=weighting,
+                      at_level=at_level).volume
 end
 
-# The per-block weight of a norm (added 2026-10-02): the cell volume `h³`
-# (`:volume`, the record's), or one per point (`:points`), which gives every
-# grid point the same weight whatever its level — on a nested hierarchy whose
-# levels hold about as many points each, that weights the levels equally
-# where the volume weight is all but the coarsest. `at_level` keeps the blocks
-# of that refinement level only, by a weight of zero for the others.
-function _norm_weight(::Type{T}, forest, weighting::Symbol, lev) where {T}
-    weighting in (:volume, :points) || throw(ArgumentError(
+# The fold behind every masked norm (added 2026-10-23, TreeAMR 0.2.6's
+# `mesh_fold`): over `NV` contiguous `diag` slots, of which the `M`-th is
+# `DIAG_MASK`, it sums the evolved points (`n`), their weight (`vol`), each
+# slot's square times the weight, and each slot's largest magnitude. The
+# weight is per point — the cell volume `h³` (`VOL`) or one — and zero for a
+# block of another level than `level` (`-1` keeps every level), which is
+# today's `_norm_weight` moved from the block to the point; the same norm
+# through `mesh_mapreduce`, which scaled a block's sum by its `h³` after the
+# fact, differs in the last place. The masked points hold exact zeros, as
+# they did for the reductions, so the slots are read at every owned point and
+# a `NaN` there still reaches the maximum. `isbits`, so a device takes it as
+# a kernel argument.
+struct SlotNorms{NV,VOL,M}
+    level::Int
+end
+
+@inline (f::SlotNorms{NV,VOL,M})(acc, p) where {NV,VOL,M} =
+    TreeAMR.combine(acc, _slot_point(Val(NV), Val(VOL), Val(M),
+                                     f.level < 0 || p.level == f.level, p))
+
+# One point's contribution; zeros where `keep` is false.
+@inline function _slot_point(::Val{NV}, ::Val{VOL}, ::Val{M}, keep::Bool,
+                             p) where {NV,VOL,M}
+    z = zero(p.h)
+    w = VOL ? p.h^3 : one(p.h)
+    m = p.u[M]
+    return (n=Sum(keep ? m : z), vol=Sum(keep ? m * w : z),
+            s2=ntuple(i -> Sum(keep ? p.u[i] * p.u[i] * w : z), Val(NV)),
+            mx=ntuple(i -> Max(keep ? abs(p.u[i]) : z), Val(NV)))
+end
+
+_slot_init(::Type{T}, ::Val{NV}) where {T,NV} =
+    (n=Sum(zero(T)), vol=Sum(zero(T)), s2=ntuple(_ -> Sum(zero(T)), Val(NV)),
+     mx=ntuple(_ -> Max(zero(T)), Val(NV)))
+
+_weighting_is_volume(weighting::Symbol) =
+    weighting === :volume ? true : weighting === :points ? false :
+    throw(ArgumentError(
         "a norm is weighted by :volume (each point by its cell volume h³) or " *
         "by :points (each point by one), got :$weighting"))
-    keep(k) = lev === nothing || level(k) == lev
-    return weighting === :volume ?
-           (k -> keep(k) ? spacing(T, forest, k)^3 : zero(T)) :
-           (k -> keep(k) ? one(T) : zero(T))
+
+"""
+    diag_norms(p::GHProblem, slots::UnitRange; weighting = :volume,
+               at_level = nothing) -> NamedTuple
+
+Every masked norm of the `diag` slots `slots` from **one** sweep and one
+collective (added 2026-10-23): TreeAMR's `mesh_fold` over the slots and
+`DIAG_MASK` together, returning the evolved point count `points`, the
+evolved `volume` (by `weighting`), and per slot the sum of squares and the
+peak, which [`slot_norms`](@ref) turns into `(l2, linf)`.
+
+It reads `diag` and launches no monitor, so it reports what the monitors
+last wrote, and since the monitors write disjoint slots — `C_a`, then `ℋ`
+and `ℳ_i`, then the error, the residual and the drift — one fold after all
+of them is what [`record_norms`](@ref) is. `at_level = ℓ` keeps the points
+of refinement level `ℓ` alone, the `L∞` included.
+"""
+function diag_norms(p::GHProblem{T}, slots::UnitRange{Int}; weighting::Symbol=:volume,
+                    at_level=nothing) where {T}
+    lo = min(first(slots), DIAG_MASK)
+    hi = max(last(slots), DIAG_MASK)
+    return _diag_norms(p, Val(hi - lo + 1), Val(_weighting_is_volume(weighting)),
+                       Val(DIAG_MASK - lo + 1), lo,
+                       at_level === nothing ? -1 : Int(at_level))
+end
+
+function _diag_norms(p::GHProblem{T}, ::Val{NV}, ::Val{VOL}, ::Val{M}, lo::Int,
+                     level::Int) where {T,NV,VOL,M}
+    r = mesh_fold(SlotNorms{NV,VOL,M}(level), TreeAMR.combine, _slot_init(T, Val(NV)),
+                  p.diag; vars=lo:(lo + NV - 1))
+    return (first=lo, points=r.n.value, volume=r.vol.value,
+            s2=SVector{NV,T}(map(s -> s.value, r.s2)),
+            mx=SVector{NV,T}(map(m -> m.value, r.mx)))
 end
 
 """
-    masked_norms(p::GHProblem, v::Integer; volume) -> (l2, linf)
+    slot_norms(r, v; volume = r.volume) -> (l2, linf)
+
+The L2 and L∞ of `diag` slot `v` from a [`diag_norms`](@ref) result `r`:
+the L2 divided by the evolved volume, zero where nothing is evolved.
+"""
+function slot_norms(r, v::Integer; volume=r.volume)
+    i = v - r.first + 1
+    1 ≤ i ≤ length(r.s2) || throw(ArgumentError(
+        "diag slot $v is not among the folded slots $(r.first):" *
+        "$(r.first + length(r.s2) - 1)"))
+    l2 = iszero(volume) ? zero(volume) : sqrt(r.s2[i] / volume)
+    return (l2=l2, linf=r.mx[i])
+end
+
+"""
+    masked_norms(p::GHProblem, v::Integer; weighting = :volume,
+                 at_level = nothing, volume = nothing) -> (l2, linf)
 
 The volume-weighted L2 and L∞ norms of `diag` variable `v` over the
 **evolved** points — the mask's own definition of which those are.
 
-`CODE.md`, "Analysis quantities": the norms are TreeAMR's `mesh_mapreduce`
-— per-block partials weighted by each block's `h³` and combined on the
-host, and over MPI gathered from every rank and folded in rank order
-(TreeAMR's M7) — so they do not depend on the thread count, and are
-promised to roundoff across rank counts and backends **(amended 2026-10-01**: until then this package combined the
-per-block partials itself, left to right, which `mesh_mapreduce`'s pairwise
-sum moves in the last place**)**. The L2 is normalized by the evolved
-volume rather than by the domain's, so that masking a region out does not
-make the number look smaller than it is; where nothing is masked that is
-TreeAMR's `volume_weighted_norm`, which `test/constraints_tests.jl` asserts
-rather than assumes.
+`CODE.md`, "Analysis quantities": the norms are TreeAMR's `mesh_fold`
+(amended 2026-10-23; `mesh_mapreduce` from 2026-10-01, and this package's
+own left-to-right combination before that) — each block one sequential fold
+in index order on its owner's thread, the blocks combined on the host, and
+over MPI gathered from every rank and folded in rank order (TreeAMR's M7) —
+so they do not depend on the thread count, and are promised to roundoff
+across rank counts and backends. The L2 is normalized by the evolved volume
+rather than by the domain's, so that masking a region out does not make the
+number look smaller than it is; where nothing is masked that is TreeAMR's
+`volume_weighted_norm`, which `test/constraints_tests.jl` asserts rather
+than assumes. The volume comes from the same sweep unless `volume` is
+given.
 
 The masked points hold exactly zero — the kernels wrote it there — so the
 maximum is over the evolved points too, and `NaN` from a blown-up run
@@ -646,21 +728,13 @@ still propagates.
 weight one instead of its cell volume, and divides by the number of evolved
 points — the norm a robust-stability test on a nested hierarchy reads, where
 the volume weight would be the coarsest level's. `at_level = ℓ` reduces over
-the blocks of refinement level `ℓ` alone, `L∞` included; `volume` is then
+the blocks of refinement level `ℓ` alone, `L∞` included; the volume is then
 that level's evolved volume (or point count).
 """
 function masked_norms(p::GHProblem{T}, v::Integer; weighting::Symbol=:volume,
-                      at_level=nothing,
-                      volume=evolved_volume(p; weighting=weighting,
-                                            at_level=at_level)) where {T}
-    weight = _norm_weight(T, p.U.forest, weighting, at_level)
-    num = mesh_mapreduce(x -> x * x, +, zero(T), p.diag; vars=v, weight=weight)
-    linf = at_level === nothing ?
-           mesh_mapreduce(abs, max, zero(T), p.diag; vars=v) :
-           mesh_mapreduce(abs, max, zero(T), p.diag; vars=v,
-                          weight=_norm_weight(T, p.U.forest, :points, at_level))
-    l2 = iszero(volume) ? zero(T) : sqrt(num / volume)
-    return (l2=l2, linf=linf)
+                      at_level=nothing, volume=nothing) where {T}
+    r = diag_norms(p, v:v; weighting=weighting, at_level=at_level)
+    return slot_norms(r, v; volume=volume === nothing ? r.volume : T(volume))
 end
 
 """
@@ -672,6 +746,8 @@ record holds them: `gauge_l2` and `gauge_linf` per component of `C_a`
 component of `ℳ_i` (three each).
 
 `weighting` and `at_level` are [`masked_norms`](@ref)'s (added 2026-10-02).
+One fold over `DIAG_CGH:DIAG_MASK` (amended 2026-10-23: seventeen
+reductions until then).
 
 It reads the `diag` field set and launches nothing, so the caller decides
 which monitors ran: [`gh_constraint!`](@ref) alone leaves the ADM slots
@@ -680,12 +756,16 @@ them separately and `CODE.md` gives them different cadences.
 """
 function constraint_norms(p::GHProblem{T}; weighting::Symbol=:volume,
                           at_level=nothing) where {T}
-    volume = evolved_volume(p; weighting=weighting, at_level=at_level)
-    nrm(v) = masked_norms(p, v; weighting=weighting, at_level=at_level,
-                          volume=volume)
+    return _constraint_rows(diag_norms(p, DIAG_CGH:DIAG_MASK; weighting=weighting,
+                                       at_level=at_level))
+end
+
+function _constraint_rows(r)
+    nrm(v) = slot_norms(r, v)
     gauge = ntuple(a -> nrm(DIAG_CGH + a - 1), Val(4))
     ham = nrm(DIAG_HAM)
     mom = ntuple(i -> nrm(DIAG_MOM + i - 1), Val(3))
+    T = typeof(ham.l2)
     return (gauge_l2=SVector{4,T}(ntuple(a -> gauge[a].l2, Val(4))),
             gauge_linf=SVector{4,T}(ntuple(a -> gauge[a].linf, Val(4))),
             ham_l2=ham.l2, ham_linf=ham.linf,
@@ -694,17 +774,62 @@ function constraint_norms(p::GHProblem{T}; weighting::Symbol=:volume,
 end
 
 """
+    record_norms(p::GHProblem) -> NamedTuple
+
+[`constraint_norms`](@ref)' fields and [`error_norms`](@ref)' together,
+from **one** fold over `DIAG_CGH:DIAG_DRIFT` (added 2026-10-23): what the
+driver's analysis row reads once [`gh_constraint!`](@ref), the ADM pass on
+its cadence and [`gh_error!`](@ref) have run. The three monitors write
+disjoint slots, and the same `DIAG_MASK` for the same mask, so the one sweep
+sees each monitor's own numbers; the `ℋ` and `ℳ_i` fields are the last ADM
+pass's, which the driver reads only on the chunks the pass ran.
+"""
+function record_norms(p::GHProblem{T}) where {T}
+    r = diag_norms(p, DIAG_CGH:DIAG_DRIFT)
+    return (; _constraint_rows(r)..., _error_rows(r)...)
+end
+
+"""
     level_constraint_norms(p::GHProblem; weighting = :points) -> Vector
 
 [`constraint_norms`](@ref) once per refinement level present in the mesh,
 coarsest first, each as a `NamedTuple` with its `level` and its evolved
 `points` (added 2026-10-02): where a growing mode lives, by level. Like
-`constraint_norms` it reads `diag` and launches no monitor.
+`constraint_norms` it reads `diag` and launches no monitor. One fold for
+all the levels (amended 2026-10-23), binned by the point's level: 2:1
+balance makes the levels present one contiguous range.
 """
 function level_constraint_norms(p::GHProblem{T}; weighting::Symbol=:points) where {T}
     levels = sort!(unique(level.(p.U.forest.leaves)))
-    return map(levels) do ℓ
-        n = evolved_volume(p; weighting=:points, at_level=ℓ)
-        (; level=ℓ, points=n, constraint_norms(p; weighting=weighting, at_level=ℓ)...)
+    lmin, lmax = first(levels), last(levels)
+    lmax - lmin + 1 == length(levels) || throw(ArgumentError(
+        "the levels present, $levels, are not one contiguous range, which 2:1 " *
+        "balance promises; the per-level fold bins them as one"))
+    bins = _level_norms(p, Val(DIAG_MASK - DIAG_CGH + 1),
+                        Val(_weighting_is_volume(weighting)), lmin,
+                        Val(lmax - lmin + 1))
+    return map(enumerate(levels)) do (i, ℓ)
+        (; level=ℓ, points=bins[i].points, _constraint_rows(bins[i])...)
+    end
+end
+
+# One `SlotNorms` bin per level `lmin + k − 1`, `k ∈ 1:L`.
+struct LevelSlotNorms{NV,VOL,M,L}
+    lmin::Int
+end
+
+@inline (f::LevelSlotNorms{NV,VOL,M,L})(acc, p) where {NV,VOL,M,L} =
+    addto(acc, p.level - f.lmin + 1, _slot_point(Val(NV), Val(VOL), Val(M), true, p))
+
+function _level_norms(p::GHProblem{T}, ::Val{NV}, ::Val{VOL}, lmin::Int,
+                      ::Val{L}) where {T,NV,VOL,L}
+    M = DIAG_MASK - DIAG_CGH + 1
+    init = ntuple(_ -> _slot_init(T, Val(NV)), Val(L))
+    r = mesh_fold(LevelSlotNorms{NV,VOL,M,L}(lmin), TreeAMR.combine, init, p.diag;
+                  vars=DIAG_CGH:DIAG_MASK)
+    return map(r) do b
+        (first=DIAG_CGH, points=b.n.value, volume=b.vol.value,
+         s2=SVector{NV,T}(map(s -> s.value, b.s2)),
+         mx=SVector{NV,T}(map(m -> m.value, b.mx)))
     end
 end
