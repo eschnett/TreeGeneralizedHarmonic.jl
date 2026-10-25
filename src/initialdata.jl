@@ -170,7 +170,7 @@ struct GHCase{T,B,D,I,R,H,X,E,S}
     horizon::H                   # a `Horizon`, or `nothing`
     bounds::X                    # a `StateBounds`, or `nothing`
     chunk::T
-    gauge::S                     # a `KerrSchildSource`, or `nothing` (2026-10-02)
+    gauge::S                     # an `AlgebraicGaugeSource`, or `nothing` (2026-10-02)
 end
 
 function GHCase(::Type{T}, background; box, periodic,
@@ -180,10 +180,13 @@ function GHCase(::Type{T}, background; box, periodic,
                 w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), target=nothing,
                 refinement=nothing, horizon=nothing, bounds=nothing,
                 chunk=zero(T), gauge_source=nothing) where {T}
-    gauge_source === nothing || gauge_source isa KerrSchildSource{T} ||
+    gauge_source === nothing || gauge_source isa AlgebraicGaugeSource{T} ||
         throw(ArgumentError(
             "gauge_source is nothing (the sampled H_a(x), or none on a harmonic " *
-            "background) or a KerrSchildSource{$T}, got a $(typeof(gauge_source))."))
+            "background) or an algebraic source in the case's type $T (a " *
+            "KerrSchildSource{$T}, a CompositeKerrSchildSource{$T}, a " *
+            "DampedHarmonicSource{$T} or a RolledGaugeSource{$T}), got a " *
+            "$(typeof(gauge_source))."))
     gauge_source !== nothing || isharmonic(background) || isstatic(background) ||
         throw(ArgumentError(
         "this background is neither harmonic nor static, so its prescribed " *
@@ -248,7 +251,7 @@ function GHCase(::Type{T}, background; box, periodic,
     # with a gauge transient (added 2026-10-02).
     gauge_source === nothing ||
         check_gauge_source(background, gauge_source, T; center=center_at(c, zero(T)),
-                           scale=gauge_source.M)
+                           scale=gauge_scale(gauge_source))
     return GHCase{T,typeof(background),typeof(damping),typeof(int),
                   typeof(refinement),typeof(horizon),typeof(bounds),
                   typeof(ε),typeof(gauge_source)}(
@@ -694,7 +697,12 @@ from its own mass and spin (`spin = (0, 0, a)`), at any position and — from
 2026-10-20 — under any `boost`, with the hole's lab velocity
 [`hole_velocity`](@ref) (`−u` for `boost(m, u)`). That is what lets a moving
 Kerr-Schild hole run at all: its prescribed source depends on time, which the
-sampled one cannot represent.
+sampled one cannot represent. `:composite` (added in step B1) is the same hole
+as a [`CompositeKerrSchildSource`](@ref) of one [`TrackedHole`](@ref) on its
+line from `center` ([`tracked_hole`](@ref)), which is `:algebraic` bit for bit;
+any other [`AlgebraicGaugeSource`](@ref) — a [`RolledGaugeSource`](@ref) from
+the hole's own source to a [`DampedHarmonicSource`](@ref), say — is passed
+through, and checked at `t = 0`.
 """
 function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                    chunk,
@@ -793,8 +801,10 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
             (bspin === nothing ? "a background with no spin parameter, or a " *
                                  "rotated spinning hole" : "a = $bspin") * "."))
     end
-    src = gauge_source === :algebraic ?
-          algebraic_source(T, background) : gauge_source
+    src = gauge_source === :algebraic ? algebraic_source(T, background) :
+          gauge_source === :composite ?
+          CompositeKerrSchildSource(tracked_hole(T, background; center=center)) :
+          gauge_source
     damping = γ0 !== nothing ? γ0 :
               GaussianDamping(T; near=1 / T(M), far=1 / (10 * T(M)),
                               width=3 * T(M), center=HoleCenter(T, center, v))
@@ -843,6 +853,13 @@ end
 # spinning hole is the source's own case, and a nested boost, whose rest-frame
 # spin is Thomas-rotated, is what `check_gauge_source` refuses at construction.
 function algebraic_source(::Type{T}, background) where {T}
+    M, a, v = _kerr_schild_parameters(background)
+    return KerrSchildSource(T; M=M, spin=(0, 0, a), velocity=v)
+end
+
+# The bare `KerrSchild`'s mass and spin under `translate`s and `boost`s, and the
+# hole's lab velocity.
+function _kerr_schild_parameters(background)
     bare = background
     while bare isa Union{SpacetimeMetrics.TranslatedMetric,SpacetimeMetrics.BoostedMetric}
         bare = bare.metric
@@ -853,8 +870,20 @@ function algebraic_source(::Type{T}, background) where {T}
         "hole_velocity; for any other hole pass KerrSchildSource(T; M, spin, " *
         "velocity) itself. Got a $(typeof(background))."))
     v = hole_velocity(background)
-    return KerrSchildSource(T; M=bare.mass, spin=(0, 0, bare.spin),
-                            velocity=(v[1], v[2], v[3]))
+    return bare.mass, bare.spin, (v[1], v[2], v[3])
+end
+
+"""
+    tracked_hole(T, background; center) -> TrackedHole{T}
+
+The [`TrackedHole`](@ref) of a translated and boosted Kerr-Schild
+`background` (added in step B1): its mass, its spin along `z`, its lab
+velocity, on the line from `center` at `t = 0` without acceleration. Its
+[`KerrSchildSource`](@ref) is `gauge_source = :algebraic`'s, bit for bit.
+"""
+function tracked_hole(::Type{T}, background; center) where {T}
+    M, a, v = _kerr_schild_parameters(background)
+    return TrackedHole(T; M=M, spin=(0, 0, a), center=center, velocity=v)
 end
 
 """

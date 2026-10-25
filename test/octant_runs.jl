@@ -109,7 +109,19 @@
 #                                   bitant, and
 #                                   r_0 > a for :damped, which the ring of radius
 #                                   a must be inside)
-#   r_0=3/4 r_1=3/2 source=algebraic|sampled   the hole's layer and gauge source
+#   r_0=3/4 r_1=3/2 source=algebraic|sampled|composite
+#                                   the hole's layer and gauge source (composite,
+#                                   added in step B1: the tracked Kerr-Schild
+#                                   source of one hole, algebraic's bits)
+#   gauge=ks|dh                     (added in step B1) the hole's own Kerr-Schild
+#                                   gauge, or the damped harmonic gauge rolled on
+#                                   from it, H = f H_KS + (1 − f) H_DH with
+#                                   f = exp(−((t − t0)/sigma_g)⁴) after t0:
+#   sigma_g=10 t0=0                 the roll-on, in M
+#   sigma_r=32 A_L1=1 A_L2=0 A_S=1  the damped harmonic gauge (SpECTRE's form):
+#   e=2 (or e_L1= e_L2= e_S=)       the Gaussian about the origin and the
+#                                   amplitudes (1/M) and exponents of
+#                                   μ_L1 L + μ_L2 log(1/α) and μ_S
 #   interior=damped|fitted          step 5's analytic layer, or step 8's fitted
 #                                   target on the tracked horizon (margin m=8,
 #                                   lmax_shape=4, lmax_fit=8, the finder every
@@ -317,17 +329,20 @@ haskey(OPTIONS, "roots") || roots * N == L ||
     error("L = $L must be a multiple of N = $N (one root block is N cells of h = 1)")
 case = if hole
     src = opt("source", "algebraic")
-    src in ("algebraic", "sampled") || error("source is algebraic or sampled, got $src")
+    src in ("algebraic", "sampled", "composite") ||
+        error("source is algebraic, sampled or composite, got $src")
     # The layer by step 8c's rule at this order: `ρ_max = 4/M` (the default),
     # `ρ_ramp = 1`, `r_1 − r_0 ≥ n_L h`; GHSO2's `ε_KO`, the Gaussian `γ0`.
-    gs = src == "algebraic" ? :algebraic : nothing
+    gs0 = src == "algebraic" ? :algebraic : src == "composite" ? :composite : nothing
+    gauge_kind = opt("gauge", "ks")
+    gauge_kind in ("ks", "dh") || error("gauge is ks or dh, got $gauge_kind")
     finder = opt("finder", "1") != "0" ? Horizon(T; every=1, N=12, spin=true) : nothing
     # The hole's motion, exact (the case converts it into `T` once), passed
     # only on the quadrants so that the octants' cases are built as before, and
     # the axis only on the rotating quadrant, so the quadrant's is as before.
     motion = quadrant || bitant ? (v=v_hole, x0=x0_hole) :
              rquadrant ? (v=v_hole, x0=x0_hole, axis=3) : (;)
-    if opt("interior", "damped") == "fitted"
+    build_case(gs) = if opt("interior", "damped") == "fitted"
         m = parse(Int, opt("margin", "8"))
         spec = FittedSpec(T; variant=Symbol(opt("variant", "fitted")), margin=m,
                           n_L=parse(Int, opt("n_L", "0")), lmax_shape=4,
@@ -354,6 +369,26 @@ case = if hole
                          γ2=γ2, octant=Symbol(symmetry), motion..., gauge_source=gs,
                          margin=parse(Int, opt("margin", "8")), horizon=finder)
     end
+    c = build_case(gs0)
+    # The damped harmonic gauge (added in step B1), rolled on from the hole's own
+    # algebraic source: the case is built once for that source and once more
+    # with the roll-on, which `GHCase` checks at `t = 0`, where it is the
+    # hole's own source.
+    if gauge_kind == "dh"
+        c.gauge === nothing &&
+            error("gauge=dh rolls on from the hole's algebraic source; source=sampled has none")
+        e_all = parse(Int, opt("e", "2"))
+        dh = DampedHarmonicSource(T; σ_r=T(rat(opt("sigma_r", "32"))),
+                                  A_L1=T(rat(opt("A_L1", "1"))),
+                                  A_L2=T(rat(opt("A_L2", "0"))),
+                                  A_S=T(rat(opt("A_S", "1"))),
+                                  e_L1=parse(Int, opt("e_L1", string(e_all))),
+                                  e_L2=parse(Int, opt("e_L2", string(e_all))),
+                                  e_S=parse(Int, opt("e_S", string(e_all))))
+        c = build_case(RolledGaugeSource(c.gauge, dh; σ_g=T(rat(opt("sigma_g", "10"))),
+                                         t_0=T(rat(opt("t0", "0")))))
+    end
+    c
 else
     minkowski_octant_case(T; L=L, ε_KO=ε_KO, γ0=γ0, γ2=γ2, chunk=chunk,
                           rotating=rotating)
@@ -393,7 +428,13 @@ hole && isrank0 && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin
                 case.interior isa FittedSpec ?
                 "fitted target, tracked, margin $(case.interior.margin)" :
                 "damped layer, r_0 = $(case.interior.r_0), r_1 = $(case.interior.r_1)",
-                case.gauge === nothing ? "sampled" : "algebraic")
+                case.gauge === nothing ? "sampled" :
+                case.gauge isa RolledGaugeSource ?
+                "$(opt("source", "algebraic")), rolled on to the damped harmonic gauge " *
+                "(t0 = $(case.gauge.t_0), σ_g = $(case.gauge.σ_g), σ_r = " *
+                "$(case.gauge.to.σ_r), A = ($(case.gauge.to.A_L1), $(case.gauge.to.A_L2), " *
+                "$(case.gauge.to.A_S)), e = ($(case.gauge.to.e_L1), $(case.gauge.to.e_L2), " *
+                "$(case.gauge.to.e_S)))" : opt("source", "algebraic"))
 isrank0 && @printf("        noise %.3g (seed %d), backend %s, %d threads, %d rank(s)\n",
                    amplitude, seed, typeof(backend), Threads.nthreads(),
                    use_mpi ? MPI.Comm_size(MPI.COMM_WORLD) : 1)
@@ -639,7 +680,18 @@ if hole
     setup["a"] = Float64(a_spin)
     setup["M_irr_kerr"] = M_irr_kerr
     setup["interior"] = case.interior isa FittedSpec ? "fitted" : "damped"
-    setup["gauge_source"] = case.gauge === nothing ? "sampled" : "algebraic"
+    setup["gauge_source"] = case.gauge === nothing ? "sampled" : opt("source", "algebraic")
+    if case.gauge isa RolledGaugeSource
+        dh = case.gauge.to
+        setup["gauge"] = "damped harmonic, rolled on"
+        setup["rollon"] = Dict("t0" => Float64(case.gauge.t_0),
+                               "sigma_g" => Float64(case.gauge.σ_g))
+        setup["damped_harmonic"] = Dict("sigma_r" => Float64(dh.σ_r),
+                                        "A" => Float64.([dh.A_L1, dh.A_L2, dh.A_S]),
+                                        "e" => [dh.e_L1, dh.e_L2, dh.e_S])
+    else
+        setup["gauge"] = "Kerr-Schild"
+    end
     case.interior isa FittedSpec ? (setup["margin_cells"] = case.interior.margin) :
                                    (setup["r_0"] = Float64(case.interior.r_0);
                                     setup["r_1"] = Float64(case.interior.r_1))

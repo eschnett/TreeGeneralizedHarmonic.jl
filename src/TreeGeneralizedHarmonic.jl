@@ -93,6 +93,10 @@ export apply_stencil, apply_mixed_stencil
 # Gauge sources
 export isharmonic, isstatic, sample_gauge_source!
 export KerrSchildSource, algebraic_gauge_source, gauge_source, check_gauge_source
+# Step B1: more algebraic sources, and the momentum that satisfies C_a = 0.
+export AlgebraicGaugeSource, TrackedHole, CompositeKerrSchildSource, composite_weights
+export DampedHarmonicSource, RolledGaugeSource, rollon_weight, effective_source
+export gauge_consistent_momentum, convert_source, gauge_scale, tracked_hole
 
 # Cases, backgrounds and initial data
 export GHCase, with_interior, with_refinement, with_horizon, with_dissipation

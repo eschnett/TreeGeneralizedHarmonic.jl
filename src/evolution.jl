@@ -206,7 +206,7 @@ end
 end
 
 """
-    gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
+    gh_rhs_head(T, work, Hwork, inner, b, x, t, var, st, sv, inv_h, γ0, γ2, εh,
                 ::Val{q}, ::Val{HASH}, ::Val{DISS}) -> (; ∂ₜh, msrc, β, divβ, divA, A)
 
 What every component of `F(u)` at one owned point needs. In `CODE.md`'s streaming
@@ -236,11 +236,14 @@ and the coefficients"**)**.
 `var` is the point's linear index in `work`, `st` the per-axis strides and `sv` the
 per-variable one ([`work_strides`](@ref)); `γ0` is this point's constraint-damping
 rate, a **profile** the caller evaluates (`CODE.md`, "Gauge and constraint
-damping"). No closure is formed here or below: every loop is `@ntuple`, so nothing
-is a call on a device whether or not inlining is forced.
+damping"). `x` is the point's position (on lanes, one `Vec` per axis) and `t` the
+time, which an algebraic gauge source may read (added in step B1); nothing else
+here reads them, and a source that does not is compiled without them. No closure
+is formed here or below: every loop is `@ntuple`, so nothing is a call on a device
+whether or not inlining is forced.
 """
-@inline function gh_rhs_head(::Type{T}, work, Hwork, inner, b::Int, var::Int, st,
-                             sv::Int, inv_h, γ0, γ2, εh, ::Val{q}, ::Val{HASH},
+@inline function gh_rhs_head(::Type{T}, work, Hwork, inner, b::Int, x, t, var::Int,
+                             st, sv::Int, inv_h, γ0, γ2, εh, ::Val{q}, ::Val{HASH},
                              ::Val{DISS}) where {T,q,HASH,DISS}
     w1 = derivative_weights(T, Val(q), Val(1))
     wD = dissipation_weights(T, dissipation_rank(Val(q)))
@@ -262,8 +265,8 @@ is a call on a device whether or not inlining is forced.
     # (3) the source, from the state, its gradients and `∂ₜh` — the gauge source
     #     read at the owned point (`Hsrc` has no ghosts to read) or, for the
     #     algebraic source, evaluated from the state and the `∂g` just formed
-    #     (added 2026-10-02).
-    Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), hv, ∂ₜh, ∂h)
+    #     (added 2026-10-02), at the point's position and time (step B1).
+    Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), x, t, hv, ∂ₜh, ∂h)
     msrc = gh_node_source_lean(g4, gu4, α, sqrtγ, ∂ₜh, ∂h, Hl, dHl, γ0, γ2)
 
     # (4) the coefficients of the Π components.
@@ -330,8 +333,8 @@ index — the kernel loops over the components — or a constant.
 end
 
 """
-    gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
-                  ::Val{q}, ::Val{HASH}, ::Val{DISS})
+    gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, x, t, var, st, sv, inv_h, γ0,
+                  γ2, εh, ::Val{q}, ::Val{HASH}, ::Val{DISS})
 
 `F(u)` at one owned point written straight into `du`, component `v` at
 `du[o + (v − 1) sd]`, as each is finished (added 2026-10-05). The ten `∂ₜh` are
@@ -346,9 +349,9 @@ the source before the components and the loop at run time, it is 1.2 ns a point
 against 8.5 for step 3's kernel (`CODE.md`, "The right-hand side on an H200").
 """
 @inline function gh_rhs_store!(du, o::Int, sd::Int, ::Type{T}, work, Hwork, inner,
-                               b::Int, var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
+                               b::Int, x, t, var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
                                ::Val{q}, ::Val{HASH}, ::Val{DISS}) where {T,q,HASH,DISS}
-    head = gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
+    head = gh_rhs_head(T, work, Hwork, inner, b, x, t, var, st, sv, inv_h, γ0, γ2, εh,
                        Val(q), Val(HASH), Val(DISS))
     ∂ₜh = head.∂ₜh
     @nexprs 10 v -> (@inbounds du[o + (v - 1) * sd] = ∂ₜh[v])
@@ -362,7 +365,7 @@ against 8.5 for step 3's kernel (`CODE.md`, "The right-hand side on an H200").
 end
 
 """
-    gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
+    gh_rhs_at_point(T, work, Hwork, inner, b, x, t, var, st, sv, inv_h, γ0, γ2, εh,
                     ::Val{q}, ::Val{HASH}, ::Val{DISS}) -> (∂ₜh, ∂ₜΠ)
 
 `F(u)` at one owned point, as two `SVector{10}`s: the fused right-hand side of
@@ -394,11 +397,11 @@ against on analytic data. The two are not bit-identical and are not expected to
 be: the spellings sum in other orders, and one body reached from two call sites is
 contracted into fused multiply-adds differently (`CODE.md`, "Measured results").
 """
-@inline function gh_rhs_at_point(::Type{T}, work, Hwork, inner, b::Int,
+@inline function gh_rhs_at_point(::Type{T}, work, Hwork, inner, b::Int, x, t,
                                  var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
                                  ::Val{q}, ::Val{HASH},
                                  ::Val{DISS}) where {T,q,HASH,DISS}
-    head = gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
+    head = gh_rhs_head(T, work, Hwork, inner, b, x, t, var, st, sv, inv_h, γ0, γ2, εh,
                        Val(q), Val(HASH), Val(DISS))
     msrc = head.msrc
     ∂ₜΠ = SVector{NC,T}(@ntuple 10 v ->
@@ -435,9 +438,10 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
           (I[1] + G[1] - 1) * st[1] + (I[2] + G[2] - 1) * st[2] +
           (I[3] + G[3] - 1) * st[3]
 
-    # The position, for the damping profile and for the interior. Three
-    # fused multiply-adds per point, and the compiler drops them where
-    # neither asks (a constant `γ0` and `INT === :none`).
+    # The position, for the damping profile, for the interior and — from step
+    # B1 — for a gauge source that reads it. Three fused multiply-adds per
+    # point, and the compiler drops them where none asks (a constant `γ0`,
+    # `INT === :none` and a source without a position).
     x = point_position(origins, spacings, b, I)
     γ0 = damping_rate(damping, t, x)
     # The Kreiss–Oliger amplitude over the cell, per point (step 8c): the
@@ -461,8 +465,8 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
         # closure, so a device compiles it without calls whether or not the
         # backend forces inlining (`CODE.md`, "The right-hand side on an H200").
         o, sd = state_offset(du, I)
-        gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, var, st, sv, inv_h, γ0,
-                      γ2, εh, Val(q), Val(HASH), Val(DISS))
+        gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, x, t, var, st, sv, inv_h,
+                      γ0, γ2, εh, Val(q), Val(HASH), Val(DISS))
     else
         # The interior's view of the point (step 8d): the radius for step
         # 5's sphere, and for the tracked geometry the radius with the two
@@ -550,7 +554,7 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                 end
             end
         else
-            ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
+            ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, x, t, var, st, sv,
                                        inv_h, γ0, γ2, εh, Val(q), Val(HASH),
                                        Val(DISS))
             if is_outside(interior, g)
@@ -705,13 +709,17 @@ speed check read it.
     Hl = lanes(Val(W), Hwork)
     dl = lanes(Val(W), du)
     o, sd = state_offset(du, I)
+    # The lanes' positions as one `Vec` per axis, for a gauge source that reads
+    # the position (added in step B1); unused, and dropped, for every other.
+    xv = (Vec(ntuple(l -> xs[l][1], Val(W))), Vec(ntuple(l -> xs[l][2], Val(W))),
+          Vec(ntuple(l -> xs[l][3], Val(W))))
     if INT === :none
-        gh_rhs_store!(dl, o, sd, V, wl, Hl, inner, b, var, st, sv, inv_h, γ0, V(γ2),
-                      εh, Val(q), Val(HASH), Val(DISS))
+        gh_rhs_store!(dl, o, sd, V, wl, Hl, inner, b, xv, t, var, st, sv, inv_h, γ0,
+                      V(γ2), εh, Val(q), Val(HASH), Val(DISS))
     elseif all(ntuple(l -> is_outside(interior, interior_point(interior, t, xs[l])),
                       Val(W)))
-        ∂ₜh, ∂ₜΠ = gh_rhs_at_point(V, wl, Hl, inner, b, var, st, sv, inv_h, γ0, V(γ2),
-                                   εh, Val(q), Val(HASH), Val(DISS))
+        ∂ₜh, ∂ₜΠ = gh_rhs_at_point(V, wl, Hl, inner, b, xv, t, var, st, sv, inv_h, γ0,
+                                   V(γ2), εh, Val(q), Val(HASH), Val(DISS))
         @nexprs 10 v -> (dl[o + (v - 1) * sd] = ∂ₜh[v])
         @nexprs 10 v -> (dl[o + (NC + v - 1) * sd] = ∂ₜΠ[v])
     else
@@ -1181,10 +1189,13 @@ target_work(::Nothing) = nothing
 target_work(fs::FieldSet) = fs.work
 
 # The gauge source's working array, or `nothing` where there is none. The
-# kernel never asks whether it has one — its `Val` already said.
+# kernel never asks whether it has one — its `Val` already said. With a time,
+# the source a launch at `t` evaluates (step B1, [`effective_source`](@ref)): a
+# roll-on is its `from` before it starts and its `to` after it ends.
 gauge_work(::Nothing) = nothing
 gauge_work(fs::FieldSet) = fs.work
-gauge_work(src::KerrSchildSource) = src
+gauge_work(src::AlgebraicGaugeSource) = src
+gauge_work(src, t) = gauge_work(effective_source(src, t))
 
 """
     gh_rhs!(du, u, p::GHProblem, t)
@@ -1218,7 +1229,7 @@ end
 # The kernel's arguments, in one place (added 2026-10-05): `gh_rhs!` and the
 # benchmarks that launch the kernel by itself (`bench/`) build them alike.
 gh_rhs_kernel_args(p::GHProblem, du, t) =
-    (statearray(du, p.U), p.U.work, gauge_work(p.Hsrc), p.origins, p.spacings,
+    (statearray(du, p.U), p.U.work, gauge_work(p.Hsrc, t), p.origins, p.spacings,
      p.case.background, p.case.γ0, p.case.γ2, p.case.ε_KO, p.interior,
      eltype(p.U.work)(t), target_work(p.target), p.t_target, p.target_rate, p.trail,
      _exact_fit(p), p.valG, p.valq, p.valH, p.valdiss, p.valint, p.valsimd)

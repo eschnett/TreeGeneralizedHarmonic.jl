@@ -189,7 +189,7 @@ recomputed from `h`.
 end
 
 """
-    gh_constraint_kernel!(diag, work, Hwork, origins, spacings, mask,
+    gh_constraint_kernel!(diag, work, Hwork, origins, spacings, mask, t,
                           ::Val{G}, ::Val{q}, ::Val{HASH})
 
 The gauge constraint `C_a = Γ_a + H_a` at one owned point, written into
@@ -209,7 +209,7 @@ fed `dg[a, b, c] = ∂_c g_ab`, SpacetimeMetrics' index order, because it is
 the one ported function written against `dmetric`.
 """
 @kernel function gh_constraint_kernel!(diag, @Const(work), Hwork,
-                                       @Const(origins), @Const(spacings), mask,
+                                       @Const(origins), @Const(spacings), mask, t,
                                        ::Val{G}, ::Val{q},
                                        ::Val{HASH}) where {G,q,HASH}
     I = @index(Global, NTuple)
@@ -236,7 +236,9 @@ the one ported function written against `dmetric`.
 
     g4, gu4, α, β, _, sqrtγ = metric_quantities(_sym4(hv))
     ∂ₜh = β[1]*∂h[1] + β[2]*∂h[2] + β[3]*∂h[3] + (α / sqrtγ) * Πv
-    Hl, _ = gauge_source(T, Hwork, inner, b, Val(HASH), hv, ∂ₜh, ∂h)
+    # At the point's position and time, for a source that reads them (step B1).
+    Hl, _ = gauge_source(T, Hwork, inner, b, Val(HASH),
+                         point_position(origins, spacings, b, I), t, hv, ∂ₜh, ∂h)
     Cl = g4 * gauge_constraint_at_node(g4, _dg4_last(∂ₜh, ∂h), gu4 * Hl)
 
     # **A branch, not a multiplication by zero (fixed in step 5).** Step 4
@@ -434,7 +436,7 @@ differencing the dissipation operator as well.
     # The algebraic source's gradient needs `∂_t g`, which the first
     # evolution equation gives without the source (added 2026-10-02).
     ∂ₜh₀ = β[1]*∂h[1] + β[2]*∂h[2] + β[3]*∂h[3] + (α / sqrtγ) * Πv
-    Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), hv, ∂ₜh₀, ∂h)
+    Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), x, t, hv, ∂ₜh₀, ∂h)
     ∂ₜh, ∂ₜΠ = gh_node_rhs_expanded(hv, Πv, ∂h, ∂Π, ∂∂h, Hl, dHl, γ0, γ2)
 
     φ = α / sqrtγ
@@ -500,8 +502,8 @@ function gh_constraint!(p::GHProblem{T}, u, t;
                         mask=interior_mask(p.interior, T(t))) where {T}
     _prepare_monitor!(p, u, t)
     map_blocks!(gh_constraint_kernel!, p.U, p.diag.work, p.U.work,
-                gauge_work(p.Hsrc), p.origins, p.spacings, mask,
-                p.valG, p.valq, p.valH)
+                gauge_work(p.Hsrc, t), p.origins, p.spacings, mask,
+                eltype(p.U.work)(t), p.valG, p.valq, p.valH)
     return p
 end
 
@@ -519,7 +521,7 @@ function adm_constraint!(p::GHProblem{T}, u, t;
                          mask=interior_mask(p.interior, T(t))) where {T}
     _prepare_monitor!(p, u, t)
     map_blocks!(adm_constraint_kernel!, p.U, p.diag.work, p.U.work,
-                gauge_work(p.Hsrc), p.origins, p.spacings, p.case.γ0,
+                gauge_work(p.Hsrc, t), p.origins, p.spacings, p.case.γ0,
                 p.case.γ2, mask, eltype(p.U.work)(t), p.valG, p.valq, p.valH)
     return p
 end
