@@ -104,6 +104,23 @@ research project; the inherited documents live in `notes/`.
   - [The analysis cadence on an H200 (measured 2026-10-22)](#the-analysis-cadence-on-an-h200-measured-2026-10-22)
   - [The right-hand side on an H200 (measured 2026-10-05)](#the-right-hand-side-on-an-h200-measured-2026-10-05)
   - [The right-hand side on a CPU (measured 2026-10-05)](#the-right-hand-side-on-a-cpu-measured-2026-10-05)
+- [Binary black holes (proposed 2026-10-25)](#binary-black-holes-proposed-2026-10-25)
+  - [What the single holes hand over](#what-the-single-holes-hand-over)
+  - [A case without a background](#a-case-without-a-background)
+  - [The gauge](#the-gauge)
+  - [One interior per hole](#one-interior-per-hole)
+  - [The tracks](#the-tracks)
+  - [The common horizon and the handover](#the-common-horizon-and-the-handover)
+  - [Initial data](#initial-data)
+  - [The outer boundary and the wave zone](#the-outer-boundary-and-the-wave-zone)
+  - [The symmetric domains](#the-symmetric-domains)
+  - [Refinement for two holes](#refinement-for-two-holes)
+  - [The waveform](#the-waveform)
+  - [The record](#the-record)
+  - [What it costs (predicted)](#what-it-costs-predicted)
+  - [Validation](#validation)
+  - [Milestones G7 and G8](#milestones-g7-and-g8)
+  - [What this asks Erik to decide](#what-this-asks-erik-to-decide)
 - [Possible extensions](#possible-extensions)
 - [Open questions](#open-questions)
 
@@ -119,7 +136,10 @@ research project; the inherited documents live in `notes/`.
   — binaries, excision, a dynamical gauge, radiative boundaries,
   an efficient GPU kernel — is under
   [Possible extensions](#possible-extensions), each with the design note
-  that would start it.
+  that would start it. **(Amended 2026-10-25:** binaries, with the gauge,
+  the boundary and the waveform they need, are designed under [Binary black
+  holes](#binary-black-holes-proposed-2026-10-25), with milestones G7 and
+  G8 beyond the proof.**)**
 - **GPU-efficient, meaning memory-bandwidth-frugal.** GHSO2's goal
   statement carries over verbatim: reduce storage and memory bandwidth
   as far as the formulation allows. That is why the second-order-in-space
@@ -188,7 +208,9 @@ research project; the inherited documents live in `notes/`.
   Everything `SpacetimeMetrics` provides: Minkowski, the gauge wave,
   shifted Minkowski, Kerr-Schild, Kerr in harmonic coordinates, and
   translations, rotations and boosts of these. Constraint-satisfying
-  binary data from an elliptic solver is an extension.
+  binary data from an elliptic solver is an extension. **(Amended
+  2026-10-25:** proposed under [Initial data](#initial-data) for binaries:
+  superposed Kerr-Schild, then XCTS through a file.**)**
 - **No checkpoint and restart** (decided in review). A proof of concept
   runs to completion; checkpointing arrives with TreeAMR's M9 or as a
   production extension. **(Amended 2026-10-01**, Erik's decision: it
@@ -4828,6 +4850,12 @@ refinement level, short times.
   promise is a fast GPU kernel: it measures, and hands the measurement
   to the research project under
   [Possible extensions](#possible-extensions).
+- **G7 — Two holes; G8 — An inspiral** (proposed 2026-10-25). Beyond the
+  proof of concept: a head-on collision through merger and ringdown, then
+  an equal-mass binary from XCTS data, each with its waveform. The design
+  and the acceptance are under [Binary black
+  holes](#binary-black-holes-proposed-2026-10-25), and the steps are
+  `PLAN.md`'s B1–B9.
 
 ## Measured results
 
@@ -6683,6 +6711,610 @@ code.)
 (`perf_event_paranoid = 4`), so instructions a cycle and pipe occupancy above are
 inferred from the native code and the clock.
 
+## Binary black holes (proposed 2026-10-25)
+
+*Status: a design for review. Nothing in this section is built or
+measured.* It extends the proof of concept to two black holes that orbit,
+merge and ring down, with the gravitational waves they emit as the result.
+`PLAN.md`'s steps B1–B9 are the work breakdown, and the two milestones are
+under [Milestones G7 and G8](#milestones-g7-and-g8): two holes colliding
+head-on (G7), and an equal-mass binary through inspiral, merger and ringdown
+(G8). What it needs Erik to decide is under [What this asks Erik to
+decide](#what-this-asks-erik-to-decide).
+
+**Units.** The total mass is `M = 1`, so each hole of an equal-mass pair has
+`M_A = 1/2`. Every single-hole setting in [Single black holes: recommended
+settings](#single-black-holes-recommended-settings-added-2026-10-08) is in
+units of the hole's own mass and scales by `M_A`: the spacing at the hole,
+the layer's radii, `ρ_max = 4/M_A = 8/M`, `γ0`'s `1/M_A`. The
+convergence pair `1/24`, `1/32` of the moving `:damped` hole is `1/48`,
+`1/64` here. The orbital speed of each hole is about `½ √(M/d)` at
+separation `d` (Newtonian): `0.16` at `d = 10 M`, `0.29` at `d = 3 M`.
+That is inside what the single moving holes measured.
+
+### What the single holes hand over
+
+Everything a binary needs *per hole* has been run on one hole that moves:
+
+- **The moving `:damped` layer.** With its target's rate and a core that
+  follows (2026-10-20/21) it holds a boosted Kerr-Schild hole at the
+  resting hole's level and converges at order four outside the horizon.
+  The aligned campaign extends this to `v = 1/2` and `a ≤ 9/10` along the
+  spin (2026-10-22). The bitant campaign moved holes across their spin
+  (2026-10-24/25, `5f391ee` and `6558e06`, not yet on `main`), which is a
+  binary's own configuration: spins along `z`, motion in the plane `z = 0`.
+  Every row there was stable and converged at order four outside the
+  horizon, except at `v = 1/2`, which is faster than a binary's holes move
+  before merger.
+- **The `:fitted` layer** holds every moving hole it was given. But `ℋ`
+  just outside the horizon is `13–15×` `:damped`'s at `a = 0` and `43–176×`
+  at `a = 1/2`, and it does not converge at a margin fixed in cells.
+- **The tracked geometry**, the finder along a trajectory, coasting and the
+  jump refusal (steps 8d and 8).
+- **The algebraic Kerr-Schild source**, which moves with its hole.
+- **Checkpoints and job chains**, MPI with the analysis on rank 0, and
+  SimWatch.
+- **From TreeAMR 0.2.6**: the half turn (M14), `interpolate` that folds
+  points through mirrors and seams and returns second derivatives, and the
+  relative boundary hook (`CellBoundary(Relative(f))`), which reads the
+  block's own interior.
+
+What does not carry over is the object every case is built around:
+`GHCase`'s `background`.
+
+### A case without a background
+
+One analytic background supplies seven things to a single-hole case. A
+binary has no analytic solution, so each needs a replacement:
+
+| what | from the background today | for two holes |
+|---|---|---|
+| the initial data | `state(background, 0, x)` | superposed Kerr-Schild, then XCTS ([Initial data](#initial-data)) |
+| the Dirichlet data | `state(background, t, x)` at the boundary | the initial data, frozen, at a far boundary ([The outer boundary](#the-outer-boundary-and-the-wave-zone)) |
+| the gauge source | `−Γ_a` sampled, or `KerrSchildSource` | a composite of per-hole sources ([The gauge](#the-gauge)) |
+| the layer's target | `u_exact` | per hole, from its track or a fit ([One interior per hole](#one-interior-per-hole)) |
+| the error reference | `u_exact` | none: constraints, self-convergence and the horizons |
+| the center | `HoleCenter`, a line | per hole, a track ([The tracks](#the-tracks)) |
+| the radii and the seed | `horizon_min_radius`, `analytic_horizon_radius` | per hole, from the hole's boosted Kerr-Schild parameters, then from the finds |
+
+**(Proposed.)** A hole becomes a value of its own: `HoleSpec{T}`, `isbits`,
+holding the mass, the spin vector, the initial center and velocity, and the
+interior's spec (an `Interior`'s radii or a `FittedSpec`). `GHCase` takes
+`holes::NTuple{K,HoleSpec}`, with `K` a type parameter so that the kernel's
+composition below is unrolled. `background` stays, renamed for what it
+becomes: the *data*, read at `t = 0` and by the frozen boundary hook, and
+never as the truth. A single-hole case is `holes = (spec,)`, built from its
+background as now, and is the case it was **bit for bit**: that is the first
+claim of step B3. `error_norms` refuses a case whose data are not a
+solution, and says why.
+
+### The gauge
+
+The gauge source must:
+
+- make the initial data nearly stationary near each hole, so that the run
+  starts with the data's own junk and no gauge transient on top;
+- move with the holes;
+- be harmless far away, where the waves are extracted;
+- survive the merger;
+- stay algebraic in `g`, so that the principal part is still GHSO2's and
+  no field set has to be re-sampled.
+
+There are two candidates, and both are algebraic.
+
+**The tracked Kerr-Schild source (proposed first).**
+`H_a = Σ_A w_A(x, t) H^A_a(g)`. `H^A` is `KerrSchildSource`'s closed form
+with hole `A`'s `M_A`, `S_A` and its 4-velocity `u_A(t)` from the track. The
+weights are a partition of unity,
+`w_A = Π_{B≠A} r_B^p / Σ_C Π_{D≠C} r_D^p` with `r_A = |x − c_A(t)|` and
+`p = 4` **(proposed)**. Then `w_A = 1 − O((r_A/d)^p)` on hole `A`'s
+horizon, `10⁻⁴` at `d = 10`, and with one hole the source is
+`KerrSchildSource` bit for bit.
+
+- **What it buys.** Near each hole the data are a boosted Kerr-Schild hole
+  in its own gauge, up to the companion's tidal field. That is the gauge
+  every single-hole number was measured in, and the gauge the per-hole
+  `:damped` target is written in.
+- **What it adds to `∂_a H_b`.** Two terms the single hole does not have:
+  `∂w_A`, analytic in `x`, with `∂_t w_A` through the track's velocity; and
+  `(∂H^A/∂u_A) du_A/dt`, through the track's acceleration. Both are small,
+  `|du_A/dt| = M/(2d²)`: `0.005/M` at `d = 10` and `0.06/M` at `d = 3`. Both
+  must be in the kernel anyway. If `∂_t H` is not the time derivative of the
+  `H` in use, the system is not the generalized harmonic system for any `H`,
+  and the difference shows up in `C_a`.
+- **At merger** the source becomes the remnant's: one hole with the common
+  horizon's `M` and `S` and its track's velocity, blended in time over
+  `10 M` **(proposed)**.
+- **What is not known** is whether the composite survives the last orbit.
+  There the weights change over the holes' own size, and neither hole's
+  `H^A(g)` sees only its own hole.
+
+**The damped harmonic gauge**, rolled on from the tracked source. This is
+Szilágyi–Lindblom–Scheel 2009, in SpECTRE's form as written under [Open
+questions](#open-questions):
+`H = f(t) H_KS(g) + (1 − f(t)) H_DH(g)` with `f = e^{−((t − t_0)/σ_g)⁴}` and
+`σ_g = 15–25 M`, as SpEC uses.
+
+- **Why it rolls on from the tracked source.** SpEC rolls on from the
+  initial `H(x)` frozen in space. That is right in SpEC's comoving frame and
+  wrong here, where the holes cross the grid: `8 M` in `50 M` at `d = 10`.
+  The tracked source moves with them.
+- **What it buys.** It is the gauge with a record through merger, and it
+  knows one rate and nothing else about the holes.
+- **What it costs.** After the roll-on, the analytic per-hole target is in
+  the wrong gauge, so this gauge pairs with `:fitted`.
+
+**The pairing is the decision.** The two coherent choices are:
+
+- **(α)** the tracked Kerr-Schild source with `:damped` per hole: accurate
+  per hole, and untested through a merger;
+- **(β)** the damped harmonic gauge with `:fitted` per hole: SpEC's gauge
+  with the weaker interior.
+
+Step B1 builds both sources and runs each on a single moving hole. Step B7's
+head-on collision is the first test of either through a merger.
+**(Proposed:)** build (α) first, and keep (β) as the measured alternative.
+
+A third pairing is noted and not planned: a Kerr-Schild source near each
+hole, with the damped harmonic gauge between and beyond the holes. It is the
+same composite with a third weight.
+
+**The initial momentum follows from the gauge.** Whatever the source, the
+data are `(γ_ij, K_ij)` with a lapse and a shift, and `Π` needs `∂_t α` and
+`∂_t β^i` as well. Those two are free. Choosing them so that
+`C_a = H_a + Γ_a = 0` at `t = 0` is four linear equations per point:
+`Γ_a` is linear in `∂_t g_tb`, with `g^{tt} = −1/α²` on the diagonal
+(**proposed**: `gauge_consistent_momentum`). For one boosted Kerr-Schild
+hole under its own source the result must be the analytic `Π` to roundoff,
+and that is its test.
+
+### One interior per hole
+
+**The composition.** Each hole carries its own geometry and its own target.
+The kernel takes a tuple `(I_1, …, I_K)` and composes it point by point:
+
+- `w = min_A w_A` and `ρ = max_A ρ_A`;
+- the core is the union of the holes' cores;
+- the target is the target of the hole whose `ρ_A` is largest at the point.
+
+Before merger the layers are disjoint: each lies inside its own horizon,
+and the apparent horizons of two separate holes do not overlap. So the
+composition decides nothing until the handover below.
+
+Everything that asks "is this point evolved?" takes the composite mask, in
+which a point is evolved when it is outside every offset surface: every
+norm, the indicator, the projection's gate, and the finder's footprint guard.
+
+**The profiles.**
+
+- `γ0`: SpEC's three Gaussians **(proposed)**. One on each track, at the
+  single hole's `1/M_A` with width `3 M_A`; one on the origin, of width
+  `d`, for the remnant; and `1/(10 M)` far away.
+- `ε_KO`: a `HorizonDissipation` per hole.
+
+**The radius checks** apply per hole. Each is checked against its hole's
+contracted horizon at its current speed, from its boosted Kerr-Schild
+parameters, and then from the finds. (The bitant campaign's branch makes
+`horizon_min_radius` exact across the spin, which a binary's spinning
+holes need.)
+
+**The target, two ways:**
+
+- **Tracked `:damped`.** The target is the analytic boosted Kerr-Schild
+  hole with the hole's input `M_A` and `S_A`, on the track's center and
+  velocity. `Interior` already holds a `target` metric; here it is the
+  track's hole, rebuilt every piece. The core follows its target with the
+  target's rate (`core_follows`), as the single moving hole's does.
+
+  This target is not the solution near a hole of a binary. It misses the
+  companion's tidal field over the layer, `M_B r²/d³`: `5·10⁻⁴` at
+  `d = 10` and `0.02` at `d = 3`. It also misses the orbit's acceleration
+  across the layer: `0.005` and `0.06`. Step 8c's rule may make that
+  enough: a smooth layer at `4/M` with a ramp of at least `4G` cells holds
+  an inexact target and leaves the exterior what the exact one leaves.
+  Step B2 measures it.
+- **`:fitted`.** Nothing is new but the composition and the tracks; each
+  fit is one hole's own.
+
+### The tracks
+
+**Prediction.** `HorizonTrack` carries the center along a line,
+`c_find + v_est (t − t_find)`, with `v_est` the difference of the last two
+finds. On an orbit that lags, since the velocity is the chord's at the
+previous interval's midpoint. The prediction is then off by about `a Δt²`,
+with `a = M/(2d²)` the centripetal acceleration:
+
+- at `chunk = M` and `d = 10` that is `0.005 M`, a third of a cell at
+  `h = 1/64`;
+- at `d = 3` it is `0.06 M`, four cells.
+
+Nothing checks it: the jump refusal is on `r_min`, not on the center. At
+the next find the layer and the gauge source move by as much.
+
+**(Proposed:)**
+
+- **A quadratic prediction**: a least-squares fit in time over the last
+  four finds. What remains is the jerk term, under a cell at `d = 3`.
+- **A find cadence set by the predicted error.** Shorten the interval until
+  `a Δt² ≤ G h/4`. A find costs under a second, and it runs at a piece
+  boundary without the analysis row.
+- **A center-jump check** beside the `r_min` one: the found origin must lie
+  within `G h/2` of the prediction.
+- **Continuity in time.** Each new prediction is blended into the old one
+  over the next interval, so that `c_A(t)` and `u_A(t)` are `C¹`. The gauge
+  source and the target both read them.
+
+**Pieces.** A moving `:fitted` chunk is already solved in pieces of
+`h/(4|v|)`. The tracked target and the gauge source are rebuilt per piece,
+each on that piece's line, exactly as the single moving hole's target
+moves.
+
+**One track per hole.** Under the half turn there is one track, and its
+image is the other hole ([The symmetric
+domains](#the-symmetric-domains)).
+
+### The common horizon and the handover
+
+**Finding it.** The finder looks for a common horizon at every find once
+the tracks are closer than `d_c` **(proposed `4 M`**, before formation in
+every equal-mass simulation**)**.
+
+- It is seeded on a sphere about the center of mass that encloses both
+  individual horizons.
+- Before formation the find fails. A failed common find is recorded, never
+  thrown and never coasted: there is no common track until the first
+  success.
+- It needs `lmax ≈ 24`: ThreePunctures measured that `KorzynskiSpin` needs
+  that on a just-formed horizon.
+- **Formation** is three successive finds with a nondecreasing area that
+  enclose both individual horizons: every collocation point of each
+  individual surface lies at positive depth below the common one
+  **(proposed)**.
+
+**The handover (proposed).** It waits until the common *core* surface,
+`m + n_L` cells below the common horizon, encloses both individual core
+surfaces. Then:
+
+1. The common layer, `:fitted`, joins the composite. It is `:fitted`
+   whatever the individual variants were, since no analytic target exists
+   for a hole that has just merged.
+2. At the next chunk the individual layers are dropped and their tracks
+   retired. Their finds stop, and losing one after formation ends nothing.
+
+The composition makes this continuous outside the common core: those
+points are under the common layer before and after. Inside the common core
+`F` is not evaluated, so the individual holes' singular regions are relaxed
+toward the common fit at `ρ_max`.
+
+**What is not known** is whether a just-formed common core can hold both
+individual cores at an affordable `h`. The common horizon appears around
+the pair with a gap that narrows at the neck, and `m + n_L ≈ 36` cells is
+`0.56 M` at `1/64`. The head-on run measures the gap. If it is too small,
+the handover waits, with both individual layers active inside the common
+horizon until it fits.
+
+**The shape at `lmax = 24`** costs about `0.6 µs` per layer point, up from
+`79 ns` at `lmax = 8` as `(lmax + 1)²`, but only over the common layer's
+points **(predicted)**.
+
+**After the ringdown**, about `30 M` after formation, the common horizon is
+Kerr to the finder's accuracy. Under (α) the common layer may then switch to
+`:damped` toward the remnant's boosted Kerr-Schild hole, through the
+existing `handover`, to recover the analytic layer's accuracy for the
+ringdown's tail **(proposed, optional)**.
+
+### Initial data
+
+Three sources, in the order the steps use them.
+
+**1. Superposed boosted Kerr-Schild, unsolved** (steps B3–B7).
+`g = η + Σ_A (g_A − η)`, each `g_A` a boosted, translated, rotated
+`KerrSchild`. `Π` comes from the superposition's own `∂_t g`, or from
+`gauge_consistent_momentum`.
+
+- The data violate the constraints where the two holes' fields overlap.
+  The constraint damping removes the violation, and it radiates as junk.
+  These data serve the head-on collision and every development test, but
+  not a waveform.
+- XCTS has this metric (`SuperposedKerrSchild` in its `src/freedata.jl`).
+  But it holds `Vector`s and so cannot be a kernel argument, and XCTS's
+  dependencies are local paths, which this package does not take.
+- **(Proposed:)** an `isbits` superposition belongs in `SpacetimeMetrics`
+  upstream, where the backgrounds live. Until then it is written here, with
+  the attenuation option `w_A = exp(−|x − c_A|²/ℓ²)` that XCTS's free data
+  use.
+
+**2. XCTS** (step B8, for the inspiral). It solves the five XCTS fields on
+superposed Kerr-Schild free data (SpEC's direct-K variant), compactified to
+`i⁰`, to `10⁻¹⁰`. Three things stand between its solution and this
+package's grid:
+
+- **XCTS's production data stop at the horizon.** Its isolated-horizon
+  conditions (`horizon_bc = true`) put the apparent horizon on the excision
+  sphere. This package evolves `m` cells inside the horizon before its
+  layer begins, so those data would end too early.
+  **(Proposed:)** use XCTS's default inner condition instead,
+  `horizon_bc = false`: Dirichlet to the free data, on excision spheres
+  inside each hole's core surface. `solve_xcts` takes it on the two-hole
+  mesh as on the one-hole one. Everything this package evolves with `F` is
+  then solved data, and the horizon is wherever the solution puts it,
+  found afterwards. Inside the sphere the free data take over, and their
+  derivatives jump at the sphere, which lies where the core relaxes without
+  `F`. SolveConstraints, the Gridap prototype XCTS replaced, excised the
+  same way, a short distance inside each horizon.
+  The alternative keeps the isolated-horizon data and extends them inward
+  by a regular fit (`fit.jl`'s solid harmonics). That is a turducken: the
+  region between the horizon and the core violates the constraints, hidden
+  causally.
+- **Its solution lives on spectral elements**, in a package with local-path
+  sources. **(Proposed:)** a host tool, run in an environment that has both
+  packages (as `bench/`'s CUDA copies do), evaluates XCTS's solution at
+  TreeAMR's points and writes the forest and the state through TreeIOHDF5.
+  `evolve!` then starts from that file. The mesh is chosen on the
+  superposed data of the same holes, because the initial-data cycle cannot
+  evaluate XCTS in a kernel. The two data sets differ by smooth
+  corrections.
+- **Its frame is inertial.** XCTS ignores `orbital_omega` and carries the
+  orbit in per-hole boosts, so the boosts must be the quasi-circular
+  velocities. Eccentricity reduction comes later.
+
+XCTS supplies the lapse and the shift; `gauge_consistent_momentum` supplies
+`∂_t α` and `∂_t β`.
+
+**3. Not ThreePunctures.** Its slices are maximal and quasi-isotropic:
+
+- Each horizon is at a coordinate radius of about `M_A/2 = 1/4`, against
+  Kerr-Schild's `2 M_A = 1`. The `m + n_L ≈ 36` cells this package's layer
+  needs inside it would mean `h ≈ 1/150` instead of `1/48–1/64`.
+- Inside the throat is a second asymptotic end, not a singularity that a
+  layer could hide.
+
+Its data are TreeBSSN's. The two codes are compared on the physics (the
+waveform and the remnant), not on the same slice.
+
+### The outer boundary and the wave zone
+
+The Dirichlet hook writes the analytic solution, and a binary has none.
+There are three options:
+
+1. **Freeze the initial data at a far boundary** **(proposed)**, at
+   `L > T + R_ext`, where `T` is the run's length and `R_ext` the outermost
+   extraction radius. Then nothing from the boundary reaches an extraction
+   sphere during the run.
+   - The hook becomes time-independent: the superposed data at `t = 0`.
+   - XCTS's correction to those data at the boundary is of order
+     `(M_ADM − Σ M_A)/L`, about `10⁻⁵` at `L ≈ 1000 M`.
+   - What it costs is outer levels ([What it
+     costs](#what-it-costs-predicted)).
+2. **The relative hook** (TreeAMR's `Relative`). A ghost becomes the frozen
+   data plus the deviation at the nearest evolved point, which is a zero
+   gradient on the deviation. An outgoing wave then leaves with a
+   first-order reflection instead of Dirichlet's total one, which allows a
+   smaller `L`. Step B5 measures it against (1) on a Teukolsky wave.
+3. **Constraint-preserving radiative conditions** (Kreiss–Winicour 2006;
+   Rinne 2006; Lindblom et al. 2006) need the characteristic fields at the
+   boundary point. Not planned.
+
+**The wave zone** gets a level floor **(proposed)**: a ball about the
+origin of radius `R_ext` plus a margin, at spacing `h_w = M/2`.
+
+- **Why that spacing.** At ringdown the `(2, 2)` mode has `Mω ≈ 0.55`, a
+  wavelength of about `11 M`, which is 22 points at `q = 4`. In the
+  inspiral at `d = 10` the wavelength is about `100 M`.
+- **Why a floor is needed.** Without it, the Löhner indicator coarsens the
+  wave zone: its global floor is set by the near zone's amplitude, about a
+  thousand times the wave's.
+- **The extraction radii** are `R = 50, 60, 75, 100 M` **(proposed)**.
+- **Beyond `R_ext`**, each level is as thin as 2:1 balance allows, two
+  blocks wide.
+
+### The symmetric domains
+
+| configuration | symmetry | domain | share of the box |
+|---|---|---|---|
+| head-on, equal masses, no spin, along `z` | three mirrors | the reflecting octant (`octant = true`): one hole on the `z` axis, the other its image in `z = 0` | `1/8` |
+| head-on, equal spins along the axis | quarter turn about `z`, mirror in `z` | the rotating octant | `1/8` |
+| equal masses, equal spins along `z`, orbiting in `z = 0` | half turn about `z`, mirror in `z` | `[0, L] × [−L, L] × [0, L]`, `halfturn = (1, 2)`, root brick `(r, 2r, r)` | `1/4` |
+| unequal masses, or unequal spins along `z` | mirror in `z` | the bitant | `1/2` |
+| precessing spins | none | the box | `1` |
+
+**The half turn is new here.** TreeAMR 0.2.5's M14, `halfturn = (d1, d2)`,
+glues the low face of `x` to itself, reversed along `y`.
+
+- **The state's map** is the tensor's: a component changes sign by `(−1)^k`,
+  `k` the number of its indices in `{x, y}`. So `h_tx`, `h_ty`, `h_xz` and
+  `h_yz` are odd, the other six even, and the same for `Π`
+  (`state_halfturn`).
+- **TreeAMR refuses** an odd `roots[2]` and a reflecting face in `x` or
+  `y`; the mirror in `z` is allowed.
+- **Each hole crosses the seam twice an orbit.** The domain holds hole 1,
+  hole 2, or parts of both. So the kernel's tuple holds both geometries,
+  the second the image of the first under the turn: center and velocity
+  `(−x, −y, z)`, and the shape's real coefficients with odd `m` negated
+  **(proposed)**. There is one track, of hole 1 in the whole plane.
+- **The finder needs nothing new.** TreeAMR 0.2.6's `interpolate` folds a
+  point beyond the seam onto its image and turns the state, so a find of
+  hole 1 at `x < 0` reads hole 2. The fit's sampler works the same way.
+- **The seam plane** holds each point and its image, both evolved.
+  `add_noise!` must leave them alone, as on the rotating octant.
+- **Compare on uniform meshes only.** A refined half-turn domain is not the
+  refined box's restriction (the octant's lesson). And a moving hole's box
+  agrees with its symmetric domain only to the amplified roundoff of the
+  target's rate, as `boosted_tests.jl` bounds it.
+
+### Refinement for two holes
+
+- **Per-hole floors.** Each hole gets a level floor from its core surface,
+  widened by its travel per chunk; the mesh takes the union. Under the half
+  turn the image hole has its floor too.
+- **The wave-zone floor** from [the outer
+  boundary](#the-outer-boundary-and-the-wave-zone).
+- **The common geometry's floor**, from formation on.
+- **The ceiling** at the outer boundary, as now.
+- **The indicator** reads the composite mask.
+
+A regrid moves a block by at most one level, and near merger a hole moves
+`0.3 M` a chunk, 19 cells at `h = 1/64`. The travel margin has to carry the
+finest level ahead of the hole, as it does for a single hole.
+
+### The waveform
+
+**`Ψ₄` at the extraction points, not on the mesh** **(proposed)**.
+TreeAMR 0.2.6's `interpolate` returns `h`, `∂h`, `∂∂h`, `Π` and `∂Π` at a
+batch of points (Lagrange `q + 2`, whose second derivative is order `q`).
+From those, pointwise algebra forms:
+
+- `γ`, `K` and `∂K`, as `adm_from_metric` and the ADM monitor do;
+- the spatial Ricci tensor;
+- `E_ij = R_ij + K K_ij − K_ik K^k_j` and `B_ij = ε_(i^{kl} D_k K_{l)j}`;
+- `Ψ₄ = (E_ij − i B_ij) m̄^i m̄^j`, in the coordinate radial tetrad
+  (Gram–Schmidt from `r̂`, as the Einstein Toolkit's WeylScal4 builds it).
+
+The sign and the normalisation are fixed once, against the Teukolsky wave's
+analytic strain, and written down. An extraction is a few hundred points
+per sphere, which is far less than a right-hand side **(predicted)**.
+
+**The modes.** `ash_transform(grid, R Ψ₄, −2)` on an
+`AbstractSphericalHarmonics` grid, `ℓ ≤ 8` **(proposed)**.
+
+**The balance laws.** The same spheres give the ADM mass, momentum and
+angular momentum as surface integrals. The modes give the radiated energy,
+momentum and angular momentum by integration in time (Ruiz et al. 2008).
+
+**The cadence.** Every `M/4` **(proposed)**, at the boundaries of the
+chunk's pieces, after a ghost fill with that time's hook. It runs on rank 0
+through `interpolate_state`, outside the analysis row, whose monitors take
+`33 s` a chunk on one H200.
+
+**The output** is a CSV per radius, `(t, ℓ, m, Re, Im)`. Extrapolation to
+infinity and the strain, by fixed-frequency integration (Reisswig–Pollney
+2011), are post-processing scripts in `test/`, as `octant_study.jl` is.
+`Ψ₄` on the mesh, for slices, is an extension of the ADM monitor and waits
+for step 9's viewers.
+
+### The record
+
+- **Per hole:** the track's center and velocity, `r_min` and `r_max`, the
+  horizon's `A`, `M_irr`, `J` and `M_ch`, and the fit's validity.
+- **For the pair:** the separation and the orbital phase.
+- **The common horizon:** its rows from its first attempt, with
+  `success = false` until formation.
+- **The run:** the handover's state, the constraints under the composite
+  mask, and the gauge roll-on's `f(t)`.
+- **The extraction** goes to its own file.
+
+**The checkpoint** carries everything the loop now carries: the tracks,
+the common track, the handover state, the predictions' history and the
+extraction's running integrals.
+
+### What it costs (predicted)
+
+**The mesh.** An equal-mass, non-spinning binary from `d = 10 M` at
+`h = 1/64` at the holes, on the half-turn quarter domain, with balls for
+levels:
+
+| region | spacings and radii | points (millions) |
+|---|---|---|
+| the hole (one per quarter domain) | `1/64` to `2 M`, `1/32` to `4 M`, `1/16` to `8 M` (the single hole's `4, 8, 16 M_A`) | 12 |
+| about the pair | `1/8` to `16 M`, `1/4` to `32 M` | 4 |
+| the wave zone | `1/2` to `100 M` | 8 |
+| the far region | `1, 2, 4, 8` to `1060 M`, each level two blocks wide | 11 |
+| **total** | | **35** |
+
+Block granularity and cubes can double that. At `1.6–2.0 kB` a point that is
+`55–140 GB`: one H200 at the low end, two at the high end.
+
+**The run.** The quadrupole formula gives about `800 M` from `d = 10` to
+merger, `5 d⁴/(256 ν M³)` with `ν = 1/4`. Adding the ringdown and the
+wave's travel to `R_ext` makes `T ≈ 1000 M`, so `L ≈ 1100 M`.
+
+**The time.** With `cfl = 1/2` there are 128 steps a `M`. At the aligned
+campaign's `21–34 ns` per point and step, that is `100–300 s` a `M`, or
+`30–85 h` on one H200 at `1/64`. The convergence triple `1/48, 1/64, 1/80`
+costs `0.56 + 1 + 1.8` times that: about `100–290` H200-hours.
+
+**The head-on collision** on the octant, from rest at `d = 10`, merges after
+a free fall of about `35 M`. It needs about `200 M` and `L ≈ 300 M`: a few
+hours on one H200.
+
+**The levers:**
+
+- **Subcycling**, which TreeAMR does not do. The outer levels step at the
+  holes' time step, and with subcycling the run would cost about what its
+  finest three levels cost, `4×` less. This is not a prerequisite.
+- **The far boundary** is `30 %` of the points. The relative hook at
+  `L ≈ 300 M` would drop the two outermost levels, about an eighth of the
+  points.
+
+### Validation
+
+- **Self-convergence** at three resolutions: the constraints, and `Ψ₄`'s
+  `(2, 2)` phase and amplitude.
+- **The extraction against a known wave**: a linearised Teukolsky
+  quadrupole wave (Teukolsky 1982), whose `Ψ₄` is analytic.
+- **The head-on ringdown** against the Schwarzschild quasinormal mode,
+  `M_f ω = 0.3737 − 0.0890 i` for `ℓ = 2`, with `M_f` from the common
+  horizon.
+- **The equal-mass, non-spinning remnant** against Scheel et al. 2009:
+  `M_f/M = 0.9516` and `χ_f = 0.6865`.
+- **The balance laws**: `M_ADM − E_rad = M_f` and `J_ADM − J_rad = J_f`, to
+  the junk radiation's uncertainty.
+- **The waveform against an SXS waveform** of the same mass ratio, aligned
+  in time and phase in the inspiral.
+- **TreeBSSN on the same physical configuration**, which is what TreeBSSN
+  was built for.
+
+### Milestones G7 and G8
+
+- **G7 — Two holes.** Equal-mass, non-spinning holes from rest at
+  `d = 10 M` on the reflecting octant, from superposed Kerr-Schild data,
+  through merger and ringdown to the wave's passage of `R_ext`, at three
+  resolutions. *Accept:*
+  - the run stable, with the constraints at truncation level under the
+    composite mask and converging;
+  - each individual horizon found at every find until the handover, and
+    the common horizon found with a nondecreasing area, `J` at zero to
+    truncation;
+  - the handover completed with no projection hit outside the common core;
+  - `Ψ₄`'s `(2, 0)` mode converging, and its ringdown frequency within
+    `1 %` of the Schwarzschild mode for the measured `M_f`;
+  - `M_ADM − E_rad − M_f` recorded;
+  - the extraction validated on the Teukolsky wave and the boundary's
+    reflection measured first (steps B5 and B6).
+- **G8 — An inspiral.** An equal-mass, non-spinning, quasi-circular binary
+  from XCTS data at `d ≈ 10 M`, on the half-turn quarter domain, through
+  merger and ringdown, at three resolutions. *Accept:*
+  - `Ψ₄`'s `(2, 2)` phase and amplitude converging, with the measured
+    order and the phase difference between the two finest at merger
+    recorded;
+  - `M_f` and `χ_f` within their self-convergence error of Scheel et al.'s;
+  - the energy and angular-momentum balances closing to the junk's
+    uncertainty;
+  - the waveform compared with an SXS waveform of the same mass ratio,
+    with the mismatch recorded;
+  - the cost recorded.
+
+  Aligned spins, unequal masses and eccentricity reduction come after G8.
+
+### What this asks Erik to decide
+
+1. **The gauge and the interior together**: (α) the tracked Kerr-Schild
+   source with `:damped` per hole, built first, or (β) the damped harmonic
+   gauge with `:fitted`. Steps B1 and B2 measure both on one moving hole
+   before step B3 commits the composition.
+2. **The case**: `GHCase` with `holes` and the background demoted to data,
+   or a separate `BinaryCase`. The first keeps one driver and makes the
+   single hole a binary with one hole.
+3. **The superposed metric**: upstream in `SpacetimeMetrics` (not yet
+   requested), or kept here.
+4. **XCTS**: its default Dirichlet inner boundary on spheres inside the
+   cores, or its isolated-horizon data extended inward. And the file
+   handoff from a host tool.
+5. **The outer boundary**: frozen data at `L > T + R_ext`, or the relative
+   hook at a smaller `L` if step B5 shows its reflection is small enough.
+6. **Subcycling in TreeAMR**: the largest cost lever, about `4×`, and not
+   needed for G7 or G8.
+
 ## Possible extensions
 
 What separates the proof of concept from a production code, listed with
@@ -6719,25 +7351,40 @@ the design note that would start each:
   Szilágyi–Lindblom–Scheel 2009): `H_a` algebraic in `g` and
   `log(√γ/α)`, its gradient by the chain rule through `∂_a g`, no extra
   variables, no extra exchange; the fix for the gauge drift G4 records,
-  and the prerequisite for binaries.
+  and the prerequisite for binaries. **(Designed 2026-10-25** under [The
+  gauge](#the-gauge), rolled on from a tracked Kerr-Schild source, and
+  paired with the interior there.**)**
 - **A radiative outer boundary** for solutions not known at the
   boundary: the standard `1/r` outgoing extrapolation into the ghosts
   along the ray, needing a device-capable hook that reads the block's
-  interior (TreeAMR's `CODE.md` names the gap).
+  interior (TreeAMR's `CODE.md` names the gap). **(2026-10-25:** TreeAMR's
+  relative hook, `CellBoundary(Relative(f))`, is that hook for a
+  zero-gradient deviation from frozen data; [The outer
+  boundary](#the-outer-boundary-and-the-wave-zone) proposes measuring it
+  against a far frozen boundary.**)**
 - **Time-dependent prescribed gauge sources** evaluated in the kernel,
   which would admit boosted Kerr-Schild; priced at about one RHS per
   evaluation by GHSO2's `gauge_source_grad` timing.
 - **A hole tracker** for the *interior layer* when the center is not
   known in advance — the volume-weighted centroid of `α < α_thr`
   through `block_mapreduce`, or the horizon finder itself; the
-  refinement already follows the indicator.
+  refinement already follows the indicator. **(Built in step 8d** from the
+  finder; a binary's orbit needs a quadratic prediction and a center-jump
+  check, proposed 2026-10-25 under [The tracks](#the-tracks).**)**
 - **Binaries**: superposed Kerr-Schild as the approximate data, then
   constraint-satisfying data from `XCTS` / `SolveConstraints` through
   the same `(h, Π)` callback on the host; needs excision or an interior
   layer per hole, the gauge driver and the radiative boundary.
+  **(Designed 2026-10-25** under [Binary black
+  holes](#binary-black-holes-proposed-2026-10-25): an interior layer per
+  hole, a handover to a common one at merger, and XCTS data through a file
+  rather than a callback.**)**
 - **Gravitational-wave extraction**: `Ψ_4` on extraction spheres, modes
   through spin-weighted harmonics, needing the interpolation of
-  prerequisite 1.
+  prerequisite 1. **(Designed 2026-10-25** under [The
+  waveform](#the-waveform): `Ψ_4` at the spheres' points from TreeAMR
+  0.2.6's second-derivative interpolation, the modes by
+  `AbstractSphericalHarmonics`' spin-weighted transform.**)**
 - **The native RK stepper** with stage updates as kernels (GHSO2's
   `timestepper.jl`, made backend-generic), lifting TreeWave's 3.6× cap.
 - **GPU kernel efficiency**, as a research project seeded by G6's
