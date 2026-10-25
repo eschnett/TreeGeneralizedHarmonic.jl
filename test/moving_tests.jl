@@ -64,20 +64,23 @@ const TGHm = TreeGeneralizedHarmonic
               T(1 // 1000)
     end
 
-    # Guards the first find of a boosted spinning hole: `horizon_min_radius`
-    # of a boost is the rest frame's times `√(1 − v²)`, a bound that is exact
-    # only when the smallest radius lies along the boost. G5's hole has it on
-    # the spin axis, which a boost along x̂ does not contract; seeded with the
-    # bound, the first find (0.716) is refused as a jump of 0.034 at
-    # h = 5/256 (measured in step 8). A hole at rest must keep its seed.
+    # Guards the first find of a boosted spinning hole: until 2026-10-24
+    # `horizon_min_radius` of a boost was the rest frame's times `√(1 − v²)`,
+    # a bound that is exact only when the smallest radius lies along the
+    # boost. G5's hole has it on the spin axis, which a boost along x̂ does not
+    # contract; seeded with the bound, the first find (0.716) was refused as
+    # a jump of 0.034 at h = 5/256 (measured in step 8). The seed is the
+    # analytic surface's least radius, and `horizon_min_radius` is now the
+    # same number (the contracted spheroid's shortest semi-axis). A hole at
+    # rest must keep its seed.
     @testset "the seed of a boosted hole is its analytic surface" begin
         spec = FittedSpec(T; variant=:fitted, margin=4, lmax_shape=12)
         cb = hole_case(T, boosted; halfwidth=T(5 // 2), chunk=T(1 // 4), interior=spec,
                        horizon=Horizon(T; every=1, N=12, spin=false))
         tr = seed_track(cb, 0)
-        @test horizon_min_radius(boosted) ≈ sqrt(T(51 // 100)) * sqrt(T(91 // 100))
+        @test horizon_min_radius(boosted) ≈ sqrt(T(51 // 100)) rtol = 1e-12
         @test tr.r_min ≈ sqrt(T(51 // 100)) rtol = 1e-12   # the spin axis
-        @test tr.r_min > horizon_min_radius(boosted) + T(3 // 100)
+        @test tr.r_min > sqrt(T(51 // 100)) * sqrt(T(91 // 100)) + T(3 // 100)
         @test tr.r_max == horizon_max_radius(boosted)
         for bg in (SM.Harmonic(one(T), T(7 // 10)), SM.KerrSchild(one(T), T(9 // 10)))
             cs = hole_case(T, bg; halfwidth=T(5 // 2), chunk=T(1 // 4), interior=spec,

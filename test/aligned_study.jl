@@ -44,6 +44,19 @@
 # only the rows from the last start are read; a restart from a checkpoint (a
 # `t > 0`) continues the chain, its repeated times reduced to the last row.
 #
+# From 2026-10-24 it also reads the **transverse** campaign (`campaign=transverse`,
+# default `dir` `.claude/data/transverse`): the same holes spinning about `z` and
+# moving along `x` from `x = −2`, on the bitant `[−64, 64]² × [0, 64]` (the `z`
+# mirror alone, `test/octant_runs.jl octant=bitant`), the same radii, spacings and
+# layers but `r_1 = 5/4` at `a = 9/10` at every speed — the hole's least radius
+# is the pole's `r₊` at every speed when the boost is across the spin — at
+# `v ∈ {0, 1/5, 1/2}` each. Its rows are `b{0,5,9}v{0,2,5}h{N}`. It adds one
+# section, each transverse row against the aligned row of the same `a`, `v` and
+# `h` (`aligned=<dir>`, default `.claude/data/aligned`; at `a = 9/10` the
+# `r_1 = 5/4` family at `v = 0` and `1/5`, `9/8` at `1/2`).
+#
+#     julia test/aligned_study.jl campaign=transverse [dir=<data>] [aligned=<data>]
+#
 # With `split` off the CSV has no `hz_J` and no extents: `J` is `records.csv`'s,
 # the Korzyński `J`'s *magnitude*, so `J − a` at `a = 0` is `|J| ≥ 0` and its
 # sign carries nothing there; the extent ratio is not reported.
@@ -55,10 +68,14 @@ rat(s) = (p = split(s, '/'); length(p) == 2 ? parse(Int, p[1]) / parse(Int, p[2]
 opts = Dict(String(k) => String(v)
             for (k, v) in (split(a, '='; limit=2) for a in ARGS if occursin('=', a)))
 
-default_dir = first(filter(isdir, [joinpath(@__DIR__, "..", ".claude", "data", "aligned"),
-                                   joinpath(@__DIR__, "..", "..", "..", "data", "aligned"),
-                                   "."]))
-const DIR = normpath(abspath(get(opts, "dir", default_dir)))
+const CAMPAIGN = get(opts, "campaign", "aligned")
+CAMPAIGN in ("aligned", "transverse") ||
+    error("campaign is aligned or transverse, got $CAMPAIGN")
+data_dir(name) = first(filter(isdir, [joinpath(@__DIR__, "..", ".claude", "data", name),
+                                      joinpath(@__DIR__, "..", "..", "..", "data", name),
+                                      "."]))
+const DIR = normpath(abspath(get(opts, "dir", data_dir(CAMPAIGN))))
+const ALIGNED_DIR = normpath(abspath(get(opts, "aligned", data_dir("aligned"))))
 const TIMES = rat.(split(get(opts, "times", "2,5,10,20"), ','))
 const HTIMES = [1.0, 5.0, 10.0, 20.0]          # the horizon's table
 const RTIMES = [1.0, 10.0, 20.0]               # the layer residual's
@@ -66,22 +83,41 @@ const T_END = 20.0
 const PICK = haskey(opts, "runs") ? String.(split(opts["runs"], ',')) : nothing
 const BATCHES = haskey(opts, "batches") ? String.(split(opts["batches"], ',')) : nothing
 
-# The campaign's layer families: the name's digit and suffix (`code` is the
-# two), the spin, the label, the spacings and the speeds that were run.
-const SPINS = [(code="0", digit='0', suffix="", a=0.0, label="0", Ns=[16, 24, 32],
-                vs="025"),
-               (code="5", digit='5', suffix="", a=0.5, label="1/2", Ns=[24, 32, 40],
-                vs="025"),
-               (code="9", digit='9', suffix="", a=0.9, label="9/10, r_1 = 9/8",
-                Ns=[72, 96, 128], vs="05"),
-               (code="9r", digit='9', suffix="r", a=0.9, label="9/10, r_1 = 5/4",
-                Ns=[72, 96, 128], vs="02")]
+# The campaigns' layer families: the name's prefix (`a` aligned, `b`
+# transverse), digit and suffix (`code` is the digit and the suffix), the spin,
+# the label, the spacings and the speeds that were run.
+const ALIGNED_SPINS = [
+    (prefix='a', code="0", digit='0', suffix="", a=0.0, label="0", Ns=[16, 24, 32],
+     vs="025"),
+    (prefix='a', code="5", digit='5', suffix="", a=0.5, label="1/2", Ns=[24, 32, 40],
+     vs="025"),
+    (prefix='a', code="9", digit='9', suffix="", a=0.9, label="9/10, r_1 = 9/8",
+     Ns=[72, 96, 128], vs="05"),
+    (prefix='a', code="9r", digit='9', suffix="r", a=0.9, label="9/10, r_1 = 5/4",
+     Ns=[72, 96, 128], vs="02")]
+const TRANSVERSE_SPINS = [
+    (prefix='b', code="0", digit='0', suffix="", a=0.0, label="0", Ns=[16, 24, 32],
+     vs="025"),
+    (prefix='b', code="5", digit='5', suffix="", a=0.5, label="1/2", Ns=[24, 32, 40],
+     vs="025"),
+    (prefix='b', code="9", digit='9', suffix="", a=0.9, label="9/10",
+     Ns=[72, 80, 96, 128], vs="025")]
+const SPINS = CAMPAIGN == "transverse" ? TRANSVERSE_SPINS : ALIGNED_SPINS
+# The rows that were not run because they do not fit one H200.
+const NO_FIT = CAMPAIGN == "transverse" ?
+               Set(["b5v2h40", "b5v5h40", "b9v5h96", "b9v0h128", "b9v2h128", "b9v5h128"]) :
+               Set(["a9v2h128", "a9v5h128", "a9v2h128r", "a9v5h128r"])
+# The rows of a family's spacings that were never planned: the transverse
+# campaign ran `1/80` at `a = 9/10` only for `v = 0` and `1/2`, as the second
+# spacing that fits one H200 at `v = 1/2`.
+const NOT_PLANNED = CAMPAIGN == "transverse" ? Set(["b9v2h80"]) : Set{String}()
 const SPEEDS = [(code='0', v=0.0, label="0"), (code='2', v=0.2, label="1/5"),
                 (code='5', v=0.5, label="1/2")]
-spin(c) = SPINS[findfirst(s -> s.code == c, SPINS)]
+spin(c, prefix='a') = (fs = prefix == 'b' ? TRANSVERSE_SPINS : ALIGNED_SPINS;
+                       fs[findfirst(s -> s.code == c, fs)])
 speed(c) = SPEEDS[findfirst(s -> s.code == c, SPEEDS)]
 speeds(a) = filter(v -> v.code in a.vs, SPEEDS)
-runname(a, v, N) = "a$(a.digit)v$(v.code)h$N$(a.suffix)"
+runname(a, v, N) = "$(a.prefix)$(a.digit)v$(v.code)h$N$(a.suffix)"
 # Kerr-Schild (`M = 1`): `r₊` and the irreducible mass.
 r_plus(a) = 1 + sqrt(1 - a^2)
 m_irr(a) = sqrt(r_plus(a) / 2)
@@ -106,11 +142,11 @@ function table(header, rows)
     println()
 end
 
-# `a9v2h96r` → (family "9r", speed '2', N = 96).
+# `a9v2h96r` → (family "9r", speed '2', N = 96, prefix 'a').
 function parse_name(nm)
-    m = match(r"^a([059])v([025])h(\d+)(r?)$", nm)
+    m = match(r"^([ab])([059])v([025])h(\d+)(r?)$", nm)
     m === nothing && return nothing
-    return (acode=m[1] * m[4], vcode=m[2][1], N=parse(Int, m[3]))
+    return (acode=m[2] * m[5], vcode=m[3][1], N=parse(Int, m[4]), prefix=m[1][1])
 end
 
 # A CSV as a header and rows of numbers, short rows padded with `NaN`.
@@ -161,11 +197,11 @@ end
 # row of each and the wall time made cumulative over the chain's jobs (`wall`
 # starts again from zero with every job), the records by time, the status file
 # and the logs.
-function readrun(batch, name)
-    d = joinpath(DIR, batch, name)
+function readrun(batch, name; dir=DIR)
+    d = joinpath(dir, batch, name)
     info = parse_name(name)
     sw = readsimwatch(d)
-    pts, mib = readlogs(joinpath(DIR, batch), name)
+    pts, mib = readlogs(joinpath(dir, batch), name)
     hdr, raw = readcsv(joinpath(d, "octant.csv"))
     idx = Dict(h => j for (j, h) in enumerate(hdr))
     jw = get(idx, "wall", nothing)
@@ -217,7 +253,7 @@ function readrun(batch, name)
     else
         hsrc = "none"
     end
-    a, v = spin(info.acode), speed(info.vcode)
+    a, v = spin(info.acode, info.prefix), speed(info.vcode)
     return (; name, batch, label="$batch/$name", info..., a=a.a, alabel=a.label, v=v.v,
             vlabel=v.label, status=sw.status, t, rows=[bytime[τ] for τ in t], idx,
             cum=[cum[τ] for τ in t], shell, hz, hsrc, points=pts, gpu_mib=mib,
@@ -272,19 +308,51 @@ growth(r, q="err_l2") = (b = min(T_END, tlast(r)); isfinite(b) && b >= 12 ?
 
 # Every row of the data directory, and the one used for each (a, v, N): the
 # latest batch that has data.
-function readall()
-    isdir(DIR) || error("no data directory $DIR")
-    batches = [b for b in sort(readdir(DIR)) if isdir(joinpath(DIR, b)) &&
-               (BATCHES === nothing ? !occursin("obsolete", b) : b in BATCHES)]
-    all_runs = [readrun(b, n) for b in batches for n in sort(readdir(joinpath(DIR, b)))
-                if isdir(joinpath(DIR, b, n)) && parse_name(n) !== nothing]
-    PICK === nothing || filter!(r -> r.name in PICK || r.label in PICK, all_runs)
+function readall(dir=DIR; batches_=BATCHES, pick=PICK)
+    isdir(dir) || error("no data directory $dir")
+    batches = [b for b in sort(readdir(dir)) if isdir(joinpath(dir, b)) &&
+               (batches_ === nothing ? !occursin("obsolete", b) : b in batches_)]
+    all_runs = [readrun(b, n; dir=dir) for b in batches
+                for n in sort(readdir(joinpath(dir, b)))
+                if isdir(joinpath(dir, b, n)) && parse_name(n) !== nothing]
+    pick === nothing || filter!(r -> r.name in pick || r.label in pick, all_runs)
     chosen = Dict{Tuple{String,Char,Int},Any}()
     for r in all_runs                               # batches in name order: later wins
         isempty(r.t) && haskey(chosen, (r.acode, r.vcode, r.N)) && continue
         chosen[(r.acode, r.vcode, r.N)] = r
     end
     return all_runs, chosen
+end
+
+# Each transverse row against the aligned row of the same `a`, `v` and `h`
+# (added 2026-10-24): the error and `ℋ` in the three shells, and the horizon.
+# At `a = 9/10` the aligned rows of the same layer, `r_1 = 5/4`, at `v = 0` and
+# `1/5`; at `1/2` the aligned hole had only `r_1 = 9/8`.
+function against_aligned(pick)
+    isdir(ALIGNED_DIR) || (println("(no aligned data at `$ALIGNED_DIR`)\n"); return)
+    _, achosen = readall(ALIGNED_DIR; batches_=nothing, pick=nothing)
+    acode(a, v) = a.code == "9" ? (v.code == '5' ? "9" : "9r") : a.code
+    println("## Transverse against aligned\n")
+    println("`transverse / aligned` at the same `a`, `v` and `h`, each about its own ",
+            "`c(t)`; the aligned data `$ALIGNED_DIR`. At `a = 9/10` the aligned rows ",
+            "are `r_1 = 5/4`'s at `v = 0`, `1/5` and `9/8`'s at `1/2` (`*`). `ΔJ` and ",
+            "`ΔM` are `|J| − a` and `M_irr − √(r₊/2)`, transverse and aligned.\n")
+    rows = Vector{String}[]
+    for a in SPINS, v in speeds(a), N in a.Ns
+        r = pick(a, v, N)
+        ra = get(achosen, (acode(a, v), v.code, N), nothing)
+        (r === nothing || ra === nothing || isempty(r.t)) && continue
+        τ = min(tlast(r), tlast(ra), T_END)
+        push!(rows, vcat([r.name, ra.name * (acode(a, v) == "9" ? "*" : ""), fmtt(τ)],
+                         [fmtr(reg(r, q, s, τ) / reg(ra, q, s, τ))
+                          for q in ("err_l2", "ham_l2") for s in REGIONS],
+                         [fmts(hzat(r, :J, τ) - a.a), fmts(hzat(ra, :J, τ) - a.a),
+                          fmts(hzat(r, :M_irr, τ) - m_irr(a.a)),
+                          fmts(hzat(ra, :M_irr, τ) - m_irr(a.a))]))
+    end
+    table(vcat(["run", "aligned", "t"], ["err $s" for s in REGIONS],
+               ["ham $s" for s in REGIONS], ["ΔJ", "ΔJ aligned", "ΔM", "ΔM aligned"]), rows)
+    return nothing
 end
 
 function main()
@@ -294,9 +362,13 @@ function main()
     wanted(name) = PICK === nothing || name in PICK
     v0 = SPEEDS[1]
 
-    println("# Aligned motion: a spinning Kerr-Schild hole moving along its spin axis\n")
+    transverse = CAMPAIGN == "transverse"
+    println(transverse ?
+            "# Transverse motion: a Kerr-Schild hole spinning about z and moving along x\n" :
+            "# Aligned motion: a spinning Kerr-Schild hole moving along its spin axis\n")
     println("data: `$DIR`. Point-weighted L2 norms; the shells are about the hole's ",
-            "current center `c(t) = (0, 0, −2 + v t)`: `r_h` from the horizon's ",
+            "current center `c(t) = ", transverse ? "(−2 + v t, 0, 0)" : "(0, 0, −2 + v t)",
+            "`: `r_h` from the horizon's ",
             "equatorial radius `√(r₊² + a²)` (2 at `a = 0`, 1.93185 at 1/2, 1.69463 at ",
             "9/10) to 9/4, `r3` from 3 to 5, `r5` from 5 to 8; `global` is the evolved ",
             "region (outside `r_1`). `—`: missing, or not reached yet.\n")
@@ -307,8 +379,9 @@ function main()
         nm = runname(a, v, N)
         wanted(nm) || continue
         r = pick(a, v, N)
+        r === nothing && nm in NOT_PLANNED && continue
         r === nothing && (push!(rows, [nm, "—", a.label, v.label, hlabel(N), "—", "—", "no",
-                                       a.digit == '9' && v.code != '0' && N == 128 ?
+                                       nm in NO_FIT ?
                                        "not run (no fit on one H200)" : "missing", "—", "—",
                                        "—", "—"]);
                           continue)
@@ -341,6 +414,8 @@ function main()
                         for τ in TIMES])
         end
     end
+
+    transverse && against_aligned(pick)
 
     println("## Convergence orders\n")
     println("`log(e_c/e_f)/log(h_c/h_f)` for adjacent spacings; 4 is expected outside ",

@@ -34,9 +34,19 @@
 # axis is `x` on the quadrant and `z` on the rotating quadrant, and everything
 # the quadrant measures along `x` it measures along `z` there.
 #
+# From 2026-10-24 a spinning hole may move across its spin
+# (`octant=bitant a=1/2 v=1/5 x0=-1`): a boosted Kerr-Schild hole spinning about
+# z on the x axis, moving along it, on the bitant `[−L, L]² × [0, L]` with the
+# mirror at `z = 0` alone, `c(t) = (x0 + v t, 0, 0)`. No half turn maps that
+# hole onto itself, so the bitant is half the box and twice the quadrants'
+# points. Its motion axis is `x`, as on the quadrant, and `hz_J` is `J`'s
+# component along z, as on the rotating quadrant.
+#
 #     julia --project=. --threads=4 test/octant_runs.jl case=ks octant=quadrant v=1/5 x0=-1 L=8 N=16 roots=1 radii=4,3,2 r_0=5/8 r_1=23/16 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/quad
 #
 #     julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating_quadrant a=1/2 v=1/5 x0=-1 L=8 N=24 roots=1 radii=4,3,2 r_0=3/4 r_1=23/16 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/spin
+#
+#     julia --project=. --threads=4 test/octant_runs.jl case=ks octant=bitant a=1/2 v=1/5 x0=-1 L=8 N=24 roots=1 radii=4,3,2 r_0=3/4 r_1=23/16 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/bitant
 #
 #     julia --project=. --threads=4 test/octant_runs.jl L=16 radii=8,4 t_end=1 out=out/oct
 #
@@ -55,7 +65,7 @@
 #   t_end=128 chunk=1 cfl=1/4 q=4   the run
 #   eps=1/2 gamma0=1 gamma2=0       ε_KO, γ0, γ2
 #   case=minkowski|ks               flat space, or the Kerr-Schild hole
-#   octant=reflecting|rotating|quadrant|rotating_quadrant
+#   octant=reflecting|rotating|quadrant|rotating_quadrant|bitant
 #                                   three mirrors (a = 0 only), or the
 #                                   quarter turn about z and the mirror at z = 0
 #                                   (any a), or (added 2026-10-20) the quadrant
@@ -67,12 +77,18 @@
 #                                   [0, L]² × [−L, L], the quarter turn about z
 #                                   and no mirror, for a hole spinning about z
 #                                   and moving along it (ks, any a): a (r, r, 2r)
-#                                   root brick and the shells swept along z
-#   v=0 x0=0                        the quadrants only: the hole's speed along the
-#                                   motion axis — x on the quadrant, z on the
-#                                   rotating quadrant — and its position on that
-#                                   axis at t = 0; it is at x0 + v t along it
-#   path=v·t_end                    the quadrants only: the length along the
+#                                   root brick and the shells swept along z; or
+#                                   (added 2026-10-24) the bitant [−L, L]² × [0, L],
+#                                   the mirror at z = 0 alone, for a hole spinning
+#                                   about z and moving along x (ks, any a): a
+#                                   (2r, 2r, r) root brick and the shells swept
+#                                   along x
+#   v=0 x0=0                        the quadrants and the bitant only: the hole's
+#                                   speed along the motion axis — x on the
+#                                   quadrant and the bitant, z on the rotating
+#                                   quadrant — and its position on that axis at
+#                                   t = 0; it is at x0 + v t along it
+#   path=v·t_end                    the same domains only: the length along the
 #                                   motion axis of the segment from x0 the shells
 #                                   are swept along (the capsule mesh, frozen; in M)
 #   split=0|1                       also each shell's trailing ((x − c(t))·v̂ < 0)
@@ -81,14 +97,16 @@
 #                                   (x/y; z/x on the rotating quadrant) against
 #                                   √(1 − v²) times the rest frame's (1 along x;
 #                                   r₊/√(r₊² + a²) = √(r₊/2) along z) (default: on
-#                                   for the quadrants, v̂ = +x — +z on the rotating
-#                                   quadrant — at v = 0). On the rotating quadrant
-#                                   the centre and the found origin are `c_z` and
-#                                   `hz_z`, and `hz_J` is the Korzyński J's
-#                                   component along z, J times the spin axis's z
-#                                   (the magnitude elsewhere)
+#                                   for the quadrants and the bitant, v̂ = +x — +z
+#                                   on the rotating quadrant — at v = 0). On the
+#                                   rotating quadrant the centre and the found
+#                                   origin are `c_z` and `hz_z`; there and on the
+#                                   bitant `hz_J` is the Korzyński J's component
+#                                   along z, J times the spin axis's z (the
+#                                   magnitude elsewhere)
 #   a=0                             the hole's spin along z, in M (ks only; a ≠ 0
-#                                   needs octant=rotating or rotating_quadrant, and
+#                                   needs octant=rotating, rotating_quadrant or
+#                                   bitant, and
 #                                   r_0 > a for :damped, which the ring of radius
 #                                   a must be inside)
 #   r_0=3/4 r_1=3/2 source=algebraic|sampled   the hole's layer and gauge source
@@ -221,13 +239,15 @@ casename = opt("case", "minkowski")
 casename in ("minkowski", "ks") || error("case is minkowski or ks, got $casename")
 hole = casename == "ks"
 symmetry = opt("octant", "reflecting")
-symmetry in ("reflecting", "rotating", "quadrant", "rotating_quadrant") ||
-    error("octant is reflecting, rotating, quadrant or rotating_quadrant, got $symmetry")
+symmetry in ("reflecting", "rotating", "quadrant", "rotating_quadrant", "bitant") ||
+    error("octant is reflecting, rotating, quadrant, rotating_quadrant or bitant, got $symmetry")
 rotating = symmetry == "rotating"
 quadrant = symmetry == "quadrant"
 # The rotating quadrant (added 2026-10-21): the spinning hole moving along z.
 rquadrant = symmetry == "rotating_quadrant"
-moving_domain = quadrant || rquadrant
+# The bitant (added 2026-10-24): the spinning hole moving across its spin, along x.
+bitant = symmetry == "bitant"
+moving_domain = quadrant || rquadrant || bitant
 # The axis the hole sits and moves on: z on the rotating quadrant, x elsewhere
 # (the split's `v̂` at rest on an octant, as before).
 axis = rquadrant ? 3 : 1
@@ -247,7 +267,7 @@ moving_domain && !hole &&
     error("octant = $symmetry is the moving hole's domain, and needs case = ks")
 moving_domain || (iszero(v_hole) && iszero(x0_hole) && !haskey(OPTIONS, "path")) ||
     error("v = $v_hole, x0 = $x0_hole and path = are a hole on an axis, which " *
-          "only octant = quadrant (x) or rotating_quadrant (z) maps onto itself " *
+          "only octant = quadrant or bitant (x) or rotating_quadrant (z) maps onto itself " *
           "(the $symmetry octant needs the hole at the origin, at rest)")
 abs(v_hole) < 1 || error("v = $v_hole is the hole's speed in units of c, and must be below 1")
 # The trailing/leading split and the horizon's extents (added 2026-10-20): new
@@ -266,9 +286,11 @@ M_irr_kerr = sqrt(r_plus / 2)
 # the polar over the equatorial radius, `r₊/√(r₊² + a²)`, along the spin axis z.
 ratio_expected = axis == 3 ? contraction_expected * (r_plus / r_equator) :
                  contraction_expected
-# The least radius of a hole moving at `v` (`a = 0`, or along the spin): `r₊`
-# contracted along the boost, exactly `r₊` at rest.
-r_hmin = r_plus * contraction_expected
+# The least radius of a hole moving at `v`: along the spin, `r₊` contracted
+# along the boost, exactly `r₊` at rest; across it (from 2026-10-24) the pole's
+# `r₊` or the equator's `√(r₊² + a²)` contracted, whichever is less.
+r_hmin = axis == 3 ? r_plus * contraction_expected :
+         min(r_plus, r_equator * contraction_expected)
 
 backend = if opt("backend", "cpu") == "cuda"
     @eval using CUDA
@@ -303,7 +325,7 @@ case = if hole
     # The hole's motion, exact (the case converts it into `T` once), passed
     # only on the quadrants so that the octants' cases are built as before, and
     # the axis only on the rotating quadrant, so the quadrant's is as before.
-    motion = quadrant ? (v=v_hole, x0=x0_hole) :
+    motion = quadrant || bitant ? (v=v_hole, x0=x0_hole) :
              rquadrant ? (v=v_hole, x0=x0_hole, axis=3) : (;)
     if opt("interior", "damped") == "fitted"
         m = parse(Int, opt("margin", "8"))
@@ -338,11 +360,13 @@ else
 end
 # The quadrant's box is twice as long in x, and its shells are swept along the
 # hole's path from `(x0, 0, 0)` (added 2026-10-20); the rotating quadrant's is
-# twice as long in z, swept from `(0, 0, x0)` (added 2026-10-21); the octants'
-# forest is the one it was.
+# twice as long in z, swept from `(0, 0, x0)` (added 2026-10-21); the bitant's
+# twice as long in x and y, swept from `(x0, 0, 0)` (added 2026-10-24); the
+# octants' forest is the one it was.
 on_axis(s) = ntuple(d -> d == axis ? s : 0, 3)
 forest0 = moving_domain ?
-          hole_forest(T, case; N=N, roots=ntuple(d -> d == axis ? 2 * roots : roots, 3),
+          hole_forest(T, case; N=N,
+                      roots=ntuple(d -> d == axis || (bitant && d ≤ 2) ? 2 * roots : roots, 3),
                       center=on_axis(x0_hole), radii=radii, shape=:cube,
                       path=iszero(path_x) ? nothing : on_axis(path_x), comm=comm) :
           hole_forest(T, case; N=N, roots=roots, center=(0, 0, 0), radii=radii,
@@ -359,7 +383,7 @@ isrank0 && println("        points by level: ",
                    "; total ", sum(last, points_by_level))
 isrank0 && @printf("        case %s, t_end = %s, chunk = %s, cfl = %s, q = %d, ε_KO = %s, γ0 = %s, γ2 = %s\n",
         casename, t_end, chunk, cfl, q, ε_KO, hole ? "Gaussian 1/M → 1/(10M)" : γ0, γ2)
-quadrant && isrank0 && @printf("        moving: v = %s along x from x0 = %s (at x = %s at t_end), shells swept along %s; x/y contraction √(1 − v²) = %.6f\n",
+(quadrant || bitant) && isrank0 && @printf("        moving: v = %s along x from x0 = %s (at x = %s at t_end), shells swept along %s; x/y contraction √(1 − v²) = %.6f\n",
                                 v_hole, x0_hole, x0_hole + v_hole * t_end, path_x,
                                 contraction_expected)
 rquadrant && isrank0 && @printf("        moving: v = %s along z from z0 = %s (at z = %s at t_end), shells swept along %s; z/x extent √(1 − v²) · r₊/√(r₊² + a²) = %.6f · %.6f = %.6f\n",
@@ -794,7 +818,7 @@ function observe(p, t, u, rec)
         found = rec.horizon_success === true
         found || (ext = (NaN, NaN, NaN))
         hz_ratio = ext[axis] / ext[across]
-        hz_J = !rquadrant ? something(rec.J, NaN) :
+        hz_J = !(rquadrant || bitant) ? something(rec.J, NaN) :
                rec.J === nothing || rec.spin_axis === nothing ? NaN :
                rec.J * rec.spin_axis[3]
         append!(row, (Float64(center_at(case.center, T(t))[axis]),
@@ -818,7 +842,7 @@ function observe(p, t, u, rec)
                 ("x", "y", "z")[across], hz_ratio,
                 ratio_expected, extra["shells"][eq_shell]["trail"]["err_l2"],
                 extra["shells"][eq_shell]["lead"]["err_l2"])
-    split_on && rquadrant && isrank0 &&
+    split_on && (rquadrant || bitant) && isrank0 &&
         @printf("  M_irr %.6f (%.6f)  J_z %.6f (%s)", something(rec.M_irr, NaN),
                 M_irr_kerr, hz_J, a_spin)
     isrank0 && println()
@@ -839,7 +863,7 @@ function observe(p, t, u, rec)
             hz["extent"] = collect(ext)
             hz["ratio"] = hz_ratio
             hz["ratio_expected"] = ratio_expected
-            rquadrant && (hz["J_along_spin"] = hz_J)
+            (rquadrant || bitant) && (hz["J_along_spin"] = hz_J)
         end
         extra["horizon"] = hz
         spin = rec.J === nothing || rec.M_ch === nothing || rec.spin_axis === nothing ?
@@ -859,7 +883,7 @@ function observe(p, t, u, rec)
                  t, extra["shells"][shell_names[2]]["ham_l2"], pts.ham_l2,
                  rec.M_irr === nothing ? "—" : @sprintf("%+.2e", rec.M_irr - M_irr_kerr),
                  rec.J === nothing ? "—" :
-                 @sprintf("%+.2e", (rquadrant ? hz_J : rec.J) - a_spin)) *
+                 @sprintf("%+.2e", (rquadrant || bitant ? hz_J : rec.J) - a_spin)) *
         (split_on ? (rquadrant ?
                      @sprintf("; z/x = %.5f (expected %.5f)", hz_ratio, ratio_expected) :
                      @sprintf("; x/y = %.5f (√(1 − v²) = %.5f)", hz_ratio,

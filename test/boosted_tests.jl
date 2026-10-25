@@ -16,6 +16,12 @@
 # the seam of `rotation_tests.jl` and no mirror. Its background is the same
 # type as the quadrant's (a translated, boosted `KerrSchild`), so its run is the
 # quadrant's kernel.
+#
+# From 2026-10-24 for a spinning hole moving across its spin — spinning about
+# `z`, moving along `x` — on the bitant `[−L, L]² × [0, L]` (`octant =
+# :bitant`): the `z` mirror alone, since no half turn maps that hole onto
+# itself. Its least horizon radius is the contracted spheroid's shortest
+# semi-axis, where it was the rest frame's least radius contracted.
 
 using Test
 using TreeAMR
@@ -106,7 +112,7 @@ const TGHb = TreeGeneralizedHarmonic
         @test_throws msg hole_case(T, SM.boost(SM.KerrSchild(one(T), T(1 // 2)),
                                                SVector{3,T}(-1 // 5, 0, 0));
                                    kw..., octant=:quadrant)
-        @test_throws ":rotating_quadrant, got :half" kerr_schild_case(T; kw..., octant=:half)
+        @test_throws ":bitant, got :half" kerr_schild_case(T; kw..., octant=:half)
         # A hole at rest anywhere on the axis is one.
         @test kerr_schild_case(T; kw..., center=(T(1), 0, 0),
                                octant=:quadrant).center.v == zero(SVector{3,T})
@@ -861,5 +867,188 @@ const TGHb = TreeGeneralizedHarmonic
         @test asym_u ≤ 256 * eps(T) * uscale            # measured 56 ε
         @test asym_rate ≤ 2 * asym_u / δ                 # the difference's 1/δ
         @test mov.diff ≤ nsteps * dt * asym_rate         # measured 1.3e−10 of 9.1e−8
+    end
+
+    @testset "the bitant takes the hole spinning about z and moving in z = 0, and refuses any other" begin
+        # Guards the domain of a hole moving across its spin: the `z` mirror
+        # is its symmetry, since a mirror keeps a velocity in its plane and a
+        # spin along its normal; no half turn is, since a half turn keeps only
+        # the vectors along its axis. A spin turned off `z`, a center or a
+        # velocity off the plane would run on the bitant as a different, wrong
+        # problem.
+        msg = "its own mirror image in that plane at every time"
+        a = T(1 // 2)
+        bi = kerr_schild_case(T; a=a, v=v, x0=-1, kw..., octant=:bitant)
+        @test bi.box == ((T(-8), T(8)), (T(-8), T(8)), (zero(T), T(8)))
+        @test bi.reflecting == ((false, false), (false, false), (true, false))
+        @test bi.rotating == (0, 0) && has_outer_face(bi)
+        @test center_at(bi.center, T(10)) ≈ SVector{3,T}(1, 0, 0) atol = 8eps(T)
+        # Along y, at rest anywhere in the plane, and without spin, it is one too.
+        @test kerr_schild_case(T; a=a, v=v, x0=1, axis=2, kw...,
+                               octant=:bitant).center.v == SVector{3,T}(0, 1 // 5, 0)
+        @test kerr_schild_case(T; a=a, kw..., center=(T(1), T(-2), 0),
+                               octant=:bitant).center.v == zero(SVector{3,T})
+        @test kerr_schild_case(T; v=v, x0=x0, kw..., octant=:bitant).reflecting ==
+              ((false, false), (false, false), (true, false))
+        # A spin turned off the axis, a center off the plane, a velocity across it.
+        @test_throws msg hole_case(T, SM.rotate(SM.KerrSchild(one(T), a), 0, T(π) / 2, 0);
+                                   kw..., octant=:bitant)
+        @test_throws msg kerr_schild_case(T; a=a, kw..., center=(0, 0, T(1 // 4)),
+                                          octant=:bitant)
+        @test_throws msg kerr_schild_case(T; a=a, v=v, x0=-1, axis=3, kw...,
+                                          octant=:bitant)
+        @test_throws ":rotating_quadrant or :bitant, got :half" kerr_schild_case(
+            T; kw..., octant=:half)
+        # Its forest: the (2, 2, 1) brick with cubic cells.
+        f = gh_forest(T, bi; N=8, roots=(2, 2, 1))
+        @test f.roots == (2, 2, 1) && f.reflecting == bi.reflecting && nleaves(f) == 4
+        @test all(k -> all(e -> e[2] - e[1] == 8, block_extent(T, f, k)), f.leaves)
+        @test_throws "root blocks must be cubes" gh_forest(T, bi; N=8, roots=(2, 1, 1))
+    end
+
+    @testset "the least radius of a hole moving across its spin is the contracted spheroid's" begin
+        # Guards `horizon_min_radius` of a boosted spinning hole, which
+        # `check_interior_radii` puts `r_1` inside of. It was the rest frame's
+        # least radius, the pole's, contracted whatever the boost's direction,
+        # which across the spin is far too low — `1.244` where the horizon's
+        # least radius is the pole's own `1.436` at `a = 9/10`, `v = 1/2` — and
+        # refused `r_1 = 5/4`. Against the analytic surface sampled on a fine
+        # sphere, and bit for bit the old bound where that bound is exact.
+        function sampled_min(bg)
+            r = T(Inf)
+            for i in 0:400, j in 0:400
+                θ, φ = T(π) * i / 400, 2 * T(π) * j / 400
+                n = SVector{3,T}(sin(θ) * cos(φ), sin(θ) * sin(φ), cos(θ))
+                r = min(r, TGHb.analytic_horizon_radius(bg, n))
+            end
+            return r
+        end
+        boosted(a, u) = SM.boost(SM.KerrSchild(one(T), T(a)), SVector{3,T}(u...))
+        rp(a) = 1 + sqrt(1 - T(a)^2)
+        for (a, u, exact) in ((9 // 10, (-1 // 2, 0, 0), rp(9 // 10)),
+                              (9 // 10, (0, -1 // 5, 0), rp(9 // 10)),
+                              (1 // 2, (-1 // 2, 0, 0),
+                               sqrt(rp(1 // 2)^2 + 1 // 4) * sqrt(T(3)) / 2),
+                              (1 // 2, (-1 // 5, 0, 0), rp(1 // 2)),
+                              (1 // 2, (-3 // 10, 0, -3 // 10), nothing))
+            bg = SM.translate(boosted(a, u), SVector{4,T}(0, -2, 0, 0))
+            r = horizon_min_radius(bg)
+            @test r ≈ sampled_min(bg) rtol = 1e-4
+            exact === nothing || @test r ≈ exact rtol = 1e-12
+            @test r > rp(a) * sqrt(1 - sum(abs2, u))       # above the old bound
+        end
+        # Along the spin, without spin, and at rest: the old bound, bit for bit.
+        for (a, u) in ((9 // 10, (0, 0, -1 // 2)), (0, (-1 // 5, 0, 0)), (0, (0, 1 // 2, 1 // 2)),
+                       (1 // 2, (0, 0, 0)))
+            bg = boosted(a, u)
+            @test horizon_min_radius(bg) === rp(a) * sqrt(1 - sum(abs2, SVector{3,T}(u...)))
+        end
+        # A rotated spinning hole boosted along its turned spin is the same.
+        rot = SM.boost(SM.rotate(SM.KerrSchild(one(T), T(9 // 10)), 0, T(π) / 2, 0),
+                       SVector{3,T}(-1 // 2, 0, 0))
+        @test horizon_min_radius(rot) ≈ sampled_min(rot) rtol = 1e-4
+        # So `r_1 = 5/4` sits 13 cells inside a hole at `a = 9/10` moving across
+        # its spin at `v = 1/2` at `h = 1/72`, as at rest.
+        @test (horizon_min_radius(boosted(9 // 10, (-1 // 2, 0, 0))) - 5 // 4) * 72 > 13
+    end
+
+    @testset "the boosted hole spinning across its motion: its algebraic source is its −Γ" begin
+        # Guards the source of a hole whose spin and velocity are orthogonal:
+        # the spin 4-vector `γ a (v·ŝ, ŝ + …)` is the rest frame's `(0, 0, 0,
+        # a)` itself, since `v·ŝ = 0` — a source that boosted it as along the
+        # spin is a gauge transient, away from `t = 0` too.
+        a = T(9 // 10)
+        bi = kerr_schild_case(T; a=a, v=1 // 2, x0=-1, kw..., r_0=T(19 // 20),
+                              r_1=T(5 // 4), octant=:bitant)
+        bg = bi.background
+        γ = 1 / sqrt(1 - T(1 // 4))
+        @test hole_velocity(bg) == SVector{3,T}(1 // 2, 0, 0)
+        @test bi.gauge.u ≈ SVector{4,T}(γ, γ / 2, 0, 0)
+        @test bi.gauge.S ≈ SVector{4,T}(0, 0, 0, a)
+        @test check_gauge_source(bg, bi.gauge, T; center=(T(-1), 0, 0), scale=1) ≤ 1e-13
+        worst = zero(T)
+        for x in (SVector{3,T}(2, 1, 0), SVector{3,T}(-3, 2, 4), SVector{3,T}(1, -2, -3))
+            p = SVector{4,T}(10, x...)
+            Hs, dHs = SM.gauge_source_grad(bg, p)
+            g, dg = SM.dmetric(bg, p)
+            h = TGHb.pack_g(g)
+            ∂ₜh = TGHb.pack_sym(SMatrix{4,4,T}(dg[a, b, 1] for a in 1:4, b in 1:4))
+            ∂h = ntuple(i -> TGHb.pack_sym(SMatrix{4,4,T}(dg[a, b, i + 1]
+                                                         for a in 1:4, b in 1:4)), 3)
+            Ha, dHa = algebraic_gauge_source(bi.gauge, h, ∂ₜh, ∂h)
+            mag = max(maximum(abs, Hs), maximum(abs, dHs))
+            worst = max(worst, maximum(abs, Ha - Hs) / mag, maximum(abs, dHa - dHs) / mag)
+        end
+        @test worst ≤ 1e-13
+        # The radii the hole's resting layer has hold it at `v = 1/2` too.
+        @test horizon_min_radius(bg) ≈ 1 + sqrt(1 - a^2) rtol = 1e-12
+    end
+
+    @testset "the spinning hole moving along x on the bitant is the hole in the box" begin
+        # Guards the mirror under a hole that moves across its spin: the parity
+        # of a state whose `h_tz`, `h_xz` and `h_yz` vanish on `z = 0` while
+        # `h_ty` does not, the moving core and layer straddling the mirror, the
+        # algebraic source at a velocity across the spin, the Gaussian `γ0`
+        # following `c(t)`, the Dirichlet data at five faces, and the (4, 4, 2)
+        # brick. The quadrant's fixture with `a = 1/5`: its ring inside
+        # `r_0 = 2/5`, and `r_1 = 11/10` 8 cells inside the horizon. Through
+        # `gh_solve`, sixteen RK4 steps, compared point by point outside the
+        # core; uniform meshes only. As on the quadrant, the moving layer's
+        # target rate is a centered difference in time whose roundoff differs
+        # between a point and its mirror image, so the claim is `ε^{2/3}`.
+        q = 2
+        G = q ÷ 2 + 1
+        ops = Operators(prolongation=q + 2, restriction=q + 2)
+        hk = (; halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=T(11 // 10), chunk=T(1 // 10),
+              a=T(1 // 5), v=v, x0=-1 // 4, gauge_source=:algebraic)
+        h = T(5 // 48)
+        dt = h / 8
+        nsteps = 16
+        runs = map((:bitant, false)) do octant
+            case = kerr_schild_case(T; hk..., octant=octant)
+            f = gh_forest(T, case; N=12, roots=octant === false ? 4 : (4, 4, 2))
+            U = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
+                            parity=state_parity(f))
+            fill_exact!(U, case, zero(T))
+            u = statevector(U)
+            gather!(u, U)
+            p = GHProblem(U, GhostSchedule(U, ops), case; q=q,
+                          interior=with_ρ_max(case.interior, 4))
+            u1 = gh_solve(p, u, (zero(T), nsteps * dt); dt=dt)
+            change = maximum(abs, u1 - u)
+            scatter!(U, u1)
+            (; case, U, change)
+        end
+        o, b = runs
+        @test o.U.forest.roots == (4, 4, 2) && minimum_spacing(T, o.U.forest) == h
+        @test o.case.gauge === b.case.gauge
+        function point(U, x)
+            f = U.forest
+            for k in 1:nleaves(f)
+                org = block_origin(T, f, f.leaves[k])
+                i = ntuple(d -> round(Int, (x[d] - org[d]) / spacing(T, f, f.leaves[k])), 3)
+                all(d -> 0 ≤ i[d] < f.N, 1:3) && return k, i .+ (1 .+ U.G)
+            end
+            return nothing
+        end
+        c1 = center_at(o.case.center, nsteps * dt)
+        diff, scale, npts, hty = zero(T), zero(T), 0, zero(T)
+        for k in 1:nleaves(o.U.forest), I in CartesianIndices(interiorview(o.U, k, 1))
+            J = Tuple(I) .+ o.U.G
+            x = SVector{3,T}(coordinates(o.U, k, J)...)
+            sum(abs2, x - c1) < (2 // 5)^2 && continue      # the core: stale by design
+            kb, Jb = point(b.U, x)
+            diff = max(diff, maximum(abs, o.U.work[J..., :, k] .- b.U.work[Jb..., :, kb]))
+            scale = max(scale, maximum(abs, o.U.work[J..., :, k]))
+            # The spin's own component on the mirror: `h_ty` (slot 3).
+            iszero(x[3]) && (hty = max(hty, abs(o.U.work[J..., 3, k])))
+            npts += 1
+        end
+        @info "spinning hole moving across its spin, bitant against the box after " *
+              "$nsteps steps: max|Δ| = $diff, max|u| = $scale over $npts points, " *
+              "max|u(t) − u(0)| = $(o.change)"
+        @test npts > 55_000
+        @test o.change > 1e-6 && hty > 1e-3             # moved, and spins on the mirror
+        @test diff ≤ eps(T)^(2 // 3) * scale
     end
 end

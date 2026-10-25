@@ -63,7 +63,7 @@ using ApparentHorizonFinder: ADMVars, find_horizon, horizon_grid,
 using KernelAbstractions: @Const, @index, @kernel
 using KernelAbstractions: Backend, CPU, allocate, get_backend
 using KorzynskiSpin: horizon_spin
-using LinearAlgebra: UpperTriangular, cond, det, dot, qr, tr
+using LinearAlgebra: Symmetric, UpperTriangular, cond, det, dot, eigvals, qr, tr
 using Dates: Dates, DateTime
 using Random: Xoshiro
 using TOML: TOML

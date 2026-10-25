@@ -217,8 +217,10 @@ import SpacetimeMetrics as SM
         @test horizon_min_radius(SM.KerrSchild(one(T), a)) ≈ rp
         @test horizon_max_radius(SM.KerrSchild(one(T), a)) ≈ sqrt(rp^2 + a^2)
         # A translation and a rotation move the surface without changing a
-        # radius; a boost contracts the minimum by √(1 − v²) and leaves the
-        # maximum, which is the transverse extent.
+        # radius; a boost along the spin contracts the minimum by √(1 − v²),
+        # one across it contracts the equator and leaves the pole (amended
+        # 2026-10-24: the bound √(1 − v²) was taken in every direction), and
+        # both leave the maximum, which is the transverse extent.
         base = SM.Harmonic(one(T), a)
         @test horizon_min_radius(SM.translate(base, SVector{4,T}(0, 1, 2, 3))) ≈
               horizon_min_radius(base)
@@ -227,8 +229,12 @@ import SpacetimeMetrics as SM
               horizon_min_radius(base)
         v = T(3 // 10)
         bst = SM.boost(base, SVector{3,T}(v, 0, 0))
-        @test horizon_min_radius(bst) ≈ horizon_min_radius(base) * sqrt(1 - v^2)
+        @test horizon_min_radius(bst) ≈
+              min(horizon_min_radius(base), horizon_max_radius(base) * sqrt(1 - v^2))
         @test horizon_max_radius(bst) ≈ horizon_max_radius(base)
+        bsz = SM.boost(base, SVector{3,T}(0, 0, v))
+        @test horizon_min_radius(bsz) ≈ horizon_min_radius(base) * sqrt(1 - v^2)
+        @test horizon_max_radius(bsz) ≈ horizon_max_radius(base)
     end
 
     # The layer's default relaxation rate is `4/M` read from the hole
