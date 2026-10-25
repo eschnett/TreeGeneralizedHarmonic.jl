@@ -73,6 +73,7 @@ research project; the inherited documents live in `notes/`.
   - [The rotating octant: a quarter turn about `z` (added 2026-10-04)](#the-rotating-octant-a-quarter-turn-about-z-added-2026-10-04)
   - [The quadrant: a hole moving along `x` (added 2026-10-20)](#the-quadrant-a-hole-moving-along-x-added-2026-10-20)
   - [The rotating quadrant: a hole moving along its spin axis (added 2026-10-21)](#the-rotating-quadrant-a-hole-moving-along-its-spin-axis-added-2026-10-21)
+  - [The bitant: a hole moving across its spin (added 2026-10-24)](#the-bitant-a-hole-moving-across-its-spin-added-2026-10-24)
   - [The interior: a pointwise damping layer](#the-interior-a-pointwise-damping-layer)
     - [The design, as steps 8a–8f leave it (rewritten in step 8f)](#the-design-as-steps-8a8f-leave-it-rewritten-in-step-8f)
     - [Step 5's layer: the analytic control](#step-5s-layer-the-analytic-control)
@@ -1294,6 +1295,60 @@ exactly. The claim bounds the difference by `nsteps · dt` times the rate's
 measured asymmetry. The `x` quadrant's mirror test has met the same mechanism
 since the rate: `3.8·10⁻¹¹`, where it was `5.8·10⁻¹⁶` above. The runs are under [a spinning hole along its
 axis](SINGULARITY_HANDLING.md#a-spinning-hole-along-its-axis-2026-10-21).
+
+### The bitant: a hole moving across its spin (added 2026-10-24)
+
+A Kerr hole spinning about `z` and moving along `x` is its own image under the
+mirror `z → −z` and under nothing else. A mirror keeps a velocity in its plane
+and a spin (an axial vector) along its normal. A rotation keeps only the vectors
+along its axis, so no rotation holds a spin and a velocity that are not
+parallel. In particular TreeAMR 0.2.5's half-turn seam (M14) holds a spinning
+hole only when the spin and the velocity lie on the turn's axis — the aligned
+case, where the rotating quadrant's quarter turn already does better. A turn
+about `x` reverses a spin along `z`, and one about `z` reverses the velocity.
+`hole_case(; octant = :bitant)` evolves `[−L, L]² × [0, L]`, half the box, with
+the face `z = 0` reflecting and the other five Dirichlet. That is twice the
+points of the quadrants. It needs a hole in the plane `z = 0`, at rest or moving
+in it, spinning about `z` (Kerr-Schild or harmonic, any `a`, unrotated,
+translated or boosted in the plane), and refuses any other.
+`kerr_schild_case(; a, v, x0)` with `axis = 1` builds the hole, `gh_forest`
+takes the root brick `(2r, 2r, r)`, and `hole_forest(; path)` sweeps the
+capsule along `x`. The parities are the octant's. `test/octant_runs.jl
+octant=bitant` records `J`'s component along `z` as `hz_J`, as the rotating
+quadrant does.
+
+**The least horizon radius across the spin (amended 2026-10-24).**
+`horizon_min_radius` of a boosted hole was the rest frame's least radius times
+`√(1 − v²)` in every direction. That is exact along the spin, or without
+spin. Across the spin it is far too low: the contraction acts on the
+equatorial radius `√(r₊² + a²)` along `v`, and the pole's `r₊` is unchanged.
+At `a = 9/10`, `v = 1/2` the bound was `1.244` where the horizon's least radius
+is `1.436`, and it refused `r_1 = 5/4`. Both Kerr charts put the horizon on a
+spheroid, and a boost maps it to an ellipsoid, `A ↦ Λ A Λ` with
+`Λ = I + (γ − 1) v̂ v̂ᵀ` (`horizon_ellipsoid`). Its shortest semi-axis is now the
+least radius, and the old bound is kept bit for bit where it was exact. So
+across the spin `r_1 = 5/4` is 13 cells inside the `a = 9/10` hole at `1/72` at
+every speed. Along the spin the contracted pole at `v = 1/2` forces `9/8`,
+which grows at rest ([aligned spin and
+velocity](SINGULARITY_HANDLING.md#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22)).
+
+**(Measured 2026-10-24**, `test/boosted_tests.jl`**.)** Kerr-Schild at
+`a = 1/5` moving along `x` at `v = 1/5` from `x = −1/4` (`:damped` at `4/M`,
+`r_0 = 2/5`, `r_1 = 11/10`, the algebraic source, `q = 2`, uniform
+`h = 5/48`) on `[−5/2, 5/2]² × [0, 5/2]` against the box `[−5/2, 5/2]³`: after
+16 RK4 steps they agree to `7.6·10⁻¹¹` of `127` at every point outside the
+core, which is the moving layer's target rate's roundoff, as on the quadrants.
+
+**(Measured 2026-10-25**, [spin across the
+motion](SINGULARITY_HANDLING.md#spin-across-the-motion-the-bitant-2026-10-24)**.)**
+Kerr-Schild `a ∈ {0, 1/2, 9/10}` × `v ∈ {0, 1/5, 1/2}` along `x`, 23 rows on
+one H200 each to `20 M`: every row is stable, and every cell converges at
+order four outside the horizon except `a = 1/2` at `v = 1/2`, which is not yet
+in that regime at `1/32`. Without spin, and at rest, the bitant agrees with the
+rotating quadrant to a few per cent. Moving across the spin adds an excess near
+the horizon that falls at order `7–8` from `1/24` to `1/32`.
+The source of a hole moving across its spin has the rest frame's spin 4-vector,
+`(0, 0, 0, a)`, since `v·ŝ = 0`.
 
 ### The interior: a pointwise damping layer
 
@@ -5818,7 +5873,12 @@ axis](SINGULARITY_HANDLING.md#a-spinning-hole-along-its-axis-2026-10-21)),
 and from 2026-10-22 `a = 0`, `1/2` and `9/10` moving along their spin at
 `v = 1/5` and `1/2` ([aligned spin and
 velocity](SINGULARITY_HANDLING.md#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22),
-the rows marked *along `z`*, `20 M` each, `chunk = M`):
+the rows marked *along `z`*, `20 M` each, `chunk = M`), and from 2026-10-25
+`a = 1/2` and `9/10` moving along `x` across their spin at `v = 1/5` and
+`1/2` on the bitant ([spin across the
+motion](SINGULARITY_HANDLING.md#spin-across-the-motion-the-bitant-2026-10-24),
+the rows marked *across*, `20 M` each, `chunk = M`; at `a = 0` they are the
+*along `z`* rows):
 `a = 0`, `3/5` and `9/10` are measured, the spins between follow from the
 rules below the table, and none of it is a guarantee. Common to every row:
 `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, `ρ_max = 4/M`, the Gaussian `γ0`
@@ -5844,6 +5904,7 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:damped` (with the target's rate) | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 23/16` (`9.4` cells inside the contracted pole `r₊ √(1 − v²) = 1.828` at `1/24`) | measured to `40 M` at `4/M`, with `1/40`: `ℋ` `0.81–1.08×` the resting hole's in every shell at every `h` and time, the error `1.1–1.6×` (the hole's position, late); order 4 outside the horizon in both pairs; `J − a` drifts at the resting hole's rate, order 4 |
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:fitted` | `1/32` (the ring: at `1/24` the core surface is at `0.35 < a` on the equator) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured to `40 M`: stable, but `ℋ` just outside the horizon `43×` `:damped`'s at `1/32` and `176×` at `1/40`, `10–15×` its own resting hole; it does not converge from `1/32` to `1/40` at `m` fixed in cells, even at rest |
 | 0.5, *along `z`* (`v = 1/5`, `1/2`) | `:damped` (the core's transit rate) | `1/24` (`1/24`, `1/32`, `1/40`) | `r_0 = 3/4`, `r_1 = 5/4` (`8.8` cells inside the contracted pole `1.616` at `v = 1/2` and `1/24`) | measured to `20 M`: order 4 in the error outside the horizon; moving over resting in `[3, 5)` `1.13×` and `2.79×`; `J`'s drift `1.74–1.77·10⁻⁸/M` at `1/40` at every speed, order 4; at `v = 1/2` `ℋ` in `[3, 5)` converges at only `2.5–3.0` from `1/32` to `1/40` from `10 M` on, and the layer residual rises again at `1/40` |
+| 0.5, *across* (`v = 1/5`, `1/2` along `x`, the spin along `z`) | `:damped` (the core's transit rate) | `1/24` at `v = 1/5`; at `v = 1/2` `1/32` is not yet asymptotic (`1/24`, `1/32`; `1/40` does not fit one H200 on the bitant) | `r_0 = 3/4`, `r_1 = 5/4`, the aligned layer (`10.2` cells inside the contracted equator `1.673` at `v = 1/2` and `1/24`) | measured to `20 M`: stable; near the horizon the error is `4.1×` (`v = 1/5`) and `7.5×` (`1/2`) the aligned hole's at `1/24`, `1.6×` and `2.5×` at `1/32`, falling at order `7–8`; at `v = 1/2` the layer residual stays at `1.0` and `J`'s drift is `2.2×` the aligned hole's at `1/32` |
 | 0.3 | `:fitted` | `1/24` | `m = 16`, `n_L = 18`, `fit_cont = 2`, `lmax_fit = 12` | the rules (`fit_cont = 2` not yet run with spin) |
 | 0.6 | `:damped` | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 3/2` | measured: order `4.0`; `1/16` is not convergent |
 | 0.6 | `:fitted` | `1/32` (`1/32`, `1/48`) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured at `1/32`: `ℋ` outside `3.2×`, the error equal; the pair predicted |
@@ -5855,6 +5916,7 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 | 0.9 | `:fitted` | `1/96`, no pair in reach of one H200 | `m = 16–18`, `n_L = 36`, `fit_cont = 1`, `lmax_fit = 12` | measured: stable to `128 M` at `m = 16`, but `ℋ` outside `1900×` `:damped`'s (the error `23×` at `128 M`) |
 | 0.9, *along `z`* (`v = 1/5`) | `:damped` | `1/72` (`1/72`, `1/96`; `1/128` moving does not fit one H200) | `r_0 = 19/20`, `r_1 = 5/4`, the resting layer; radii `32, 16, 8, 4, 3, 2` | measured to `20 M`: order 4 in the error outside the horizon from `1/72`; moving over resting in `[3, 5)` `0.86×`; `J`'s drift order 4; the finder's offset in `|J| − a` `1.1·10⁻⁵` (`6.8·10⁻⁶` at rest) |
 | 0.9, *along `z`* (`v = 1/2`) | `:damped` | `1/72` (`1/72`, `1/96`) | `r_0 = 19/20`, `r_1 = 9/8` (`5/4` is outside the contracted pole `1.244`) | measured to `20 M`: stable, order 4 outside the horizon, moving over resting `2.06×`; but the same layer **at rest grows** inside the horizon from `10 M` (`×382`, `×36`, `×3.4` over `[10, 20] M` at `1/72`, `1/96`, `1/128`), so it is not a layer for a hole that is ever at rest; the finder's offset in `|J| − a` `1.6·10⁻⁴` |
+| 0.9, *across* (`v = 1/5`, `1/2` along `x`, the spin along `z`) | `:damped` | `1/72` (`1/72`, `1/96` at `1/5`; `1/72`, `1/80` at `1/2`) | `r_0 = 19/20`, `r_1 = 5/4`, the resting layer at every speed (the least radius across the spin is the pole's `1.436`, `13.4` cells at `1/72`); radii `32, 16, 8, 4, 3, 2` | measured to `20 M`: stable, order 4 outside the horizon; moving over resting in `[3, 5)` `0.87×` and `1.96×`; at `v = 1/5` the aligned row outside the horizon; at `v = 1/2` the error in `[r_h, 9/4)` `19×` the resting hole's at `1/80` (order 8), the band inside the horizon and the layer residual not converging; the finder's offset the resting hole's (`6·10⁻⁶`) |
 
 - **The ring rule, for both variants.** On the equator Kerr-Schild's `H`
   varies on the length `L = (R² − a²)/R` at the core surface's radius `R`;
@@ -5922,6 +5984,15 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
     and that layer, `22` cells below the resting pole, grows at rest; the
     resting `r_1 = 5/4` holds `v ≤ 1/5` only. Until a layer holds both, pick
     the `a = 9/10` layer by the speed, and do not run `9/8` at rest.
+    **Across the spin** (amended 2026-10-25) the motion contracts the equator
+    and not the pole, and `r_1 = 5/4` serves `a = 9/10` at every speed to
+    `1/2`; read the margin from `horizon_min_radius`, which is exact there.
+  - **Across its spin** (added 2026-10-25, the bitant): the same layers, at
+    twice the points of the quadrants. Expect an excess near the horizon at
+    the coarser spacings that the aligned hole does not have: at `a = 1/2` it
+    is `4–8×` the aligned hole's error at `1/24` and `1.6–2.5×` at `1/32`.
+    Read a convergence claim at `v = 1/2` from `1/32` on, and from a pair
+    finer than `1/72 → 1/80` at `a = 9/10`, which needs several GPUs.
   - **The moving core relaxes at `max(ρ_max, 12 |v|/r_0)`** (`031ab30`), with
     its target's rate mapped in ADM variables (`281a639`), both automatic.
     Without them `a = 0` at `v = 1/2` failed in its first chunk, then held a

@@ -547,6 +547,30 @@ select points and made about 280–350 reductions; its CSV is the old one to
 the ten digits it writes on the quadrant, the rotating octant and a
 `:fitted` hole at `a = 0` (`CODE.md`, "Analysis quantities").
 
+From 2026-10-24 a **spinning hole moves across its spin** on the **bitant**:
+`hole_case(; octant = :bitant)` is `[−L, L]² × [0, L]` with the mirror at
+`z = 0` alone, for a hole in that plane, spinning about `z` and moving in the
+plane (`kerr_schild_case(; a, v, x0)`, `axis = 1` or `2`). `gh_forest` takes
+the brick `(2r, 2r, r)`. It is half the box and twice the quadrants' points,
+because no rotation maps that hole onto itself (`CODE.md`, "The bitant").
+`horizon_min_radius` of a boosted spinning hole is now exact across the spin,
+the contracted spheroid's shortest semi-axis (`horizon_ellipsoid`), and it is
+unchanged bit for bit where the old bound was exact. `test/aligned_study.jl
+campaign=transverse` reads the campaign's data and sets each row against the
+aligned row of the same `a`, `v` and `h`. The **transverse campaign**
+(2026-10-25, Symmetry `transverse-1`) moved Kerr-Schild `a = 0`, `1/2` and
+`9/10` along `x`, spinning about `z`, at `v = 0`, `1/5` and `1/2`, to `20 M`:
+23 rows on one H200 each, `29.1` GPU-hours. Every row is stable, and every
+cell converges at order four outside the horizon except `a = 1/2` at
+`v = 1/2`, not yet in that regime at `1/32`. The exact least radius lets
+`r_1 = 5/4` serve `a = 9/10` at every speed. Moving across the spin adds an
+excess near the horizon that falls at order `7–8` (at `a = 1/2` `4–8×` the
+aligned hole's at `1/24`, `1.6–2.5×` at `1/32`). At `v = 1/2` the layer
+residual does not fall, and at `a = 9/10` the band inside the horizon does
+not converge. The finder's `J` offset is the resting hole's
+(`SINGULARITY_HANDLING.md`, "Spin across the motion"). `1/40` at `a = 1/2`
+and `1/96` at `a = 9/10`, `v = 1/2` need several GPUs.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -617,7 +641,12 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5617 assertions in 14m38** at four threads after the folds
+The suite is **5664 assertions in 14m12** at four threads after the bitant
+(2026-10-24, TreeAMR 0.2.6): its 47 new claims are `boosted_tests.jl`'s four
+bitant testsets (the domain and its refusals, the exact least radius against
+the sampled surface, the source of a hole moving across its spin, and the
+bitant against the box, `3.9 s`) and two rewritten radius claims in
+`interior_tests.jl` and `moving_tests.jl`. It was **5617 assertions in 14m38** at four threads after the folds
 (2026-10-23, TreeAMR 0.2.6): its 13 new claims are `bounds_tests.jl`'s
 validity rows and finiteness count against a host loop (8), the per-level
 bins against `at_level` in `reflection_tests.jl` (4) and `record_norms`
@@ -1822,6 +1851,14 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   or a resting control for a `v = 1/2` row, has no layer that is known to
   work; compare the moving `9/8` rows with the resting `5/4` ones outside
   the horizon, where the two resting layers agree to three digits by `20 M`.
+- **A half turn cannot hold a hole whose spin and velocity are not parallel**
+  (2026-10-24). A rotation keeps only the vectors along its axis, and a mirror
+  keeps the polar vectors in its plane and the axial ones along its normal. So
+  a hole spinning about `z` and moving along `x` has the `z` mirror and no
+  turn: TreeAMR's half-turn seam (M14) about `x` reverses its spin, and one
+  about `z` reverses its velocity. Its domain is the bitant, at twice the
+  quadrants' points. The half turn is for a pair of holes, each the other's
+  image.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
   dissipation", — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in
