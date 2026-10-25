@@ -3394,6 +3394,31 @@ pairwise where this package's loop summed left to right, so the L2 norms
 moved in the last place and nothing printed to the digits this document
 records did; `max`, `min` and the counts are unchanged bit for bit. The
 denominator is `evolved_volume`, one weighted reduction of the mask.**)**
+**(Amended 2026-10-23:** the norms are TreeAMR 0.2.6's **folds over
+points**, `mesh_fold` (M15, which this package asked for): the callback sees
+a whole owned point — several `diag` slots at once, its position bit for bit
+`point_position`'s, its spacing, level and a per-block tag — and folds it
+into an `isbits` accumulator of `Sum`, `Max` and `Min` fields, so one sweep
+and one collective give every norm of every region. `diag_norms` is the one
+fold behind `masked_norms`, `evolved_volume`, `constraint_norms`,
+`error_norms` and the new `record_norms` (the last two together, which is
+what the driver's row reads after its three monitors: they write disjoint
+slots); `level_constraint_norms` bins every level in one fold; the validity
+monitor and the evolved region's finiteness count are one fold over the
+state vector, with the regions' masks asked at the point (the kernel that
+wrote them into four `diag` slots, and the non-finite kernel's slot, are
+gone: `diag` has 17 slots); the projection's three counts are one fold, and
+the indicator's ten reference amplitudes another, without the scratch field
+set. A record row made 37 reductions (54 on an ADM chunk, 65 with the
+indicator) and makes 2 (4 with the indicator); `test/octant_runs.jl`'s row,
+which re-ran the ADM monitor and the error kernel once per shell and
+half-shell only to select their points, runs each monitor once and folds
+three times. The weight is now per point, `p.h³`, where `mesh_mapreduce`
+scaled a block's sum: a sum may move in the last place (`threading_tests.jl`'s
+exact claim held unchanged, its spacings being powers of two), maxima, minima and counts
+are unchanged bit for bit, and each block is still one sequential fold on
+its owner's thread, so the norms are bit-identical across thread counts.
+The speed and `τ_max`, one number each, stay `mesh_mapreduce`s.**)**
 
 **(Implemented and measured in step 4**, `src/constraints.jl`.**)** Five
 things the writing settled, each stated where it is made in that file:
@@ -3504,7 +3529,10 @@ things the writing settled:
   somewhere the mesh reaches, which is the configuration error step 5's
   check was written for, and not something to repair.
   `diag` has **22** slots from step 8b: the projection's three, the
-  monitor's four and the non-finite count, appended.
+  monitor's four and the non-finite count, appended. **(Amended
+  2026-10-23:** 17 — the monitor and the count are folds over the state
+  vector, see [Analysis quantities](#analysis-quantities)'s constraints
+  paragraph.**)**
 
 **(Implemented and measured in step 6.)** The mesh-statistics row gains
 `τ_max` and the refinement centroid, and both come out of the flagging pass
@@ -4317,6 +4345,8 @@ What this package needs from TreeAMR. None blocks G0–G3.
    over `block_mapreduce`'s per-block vector, which would have been
    per-rank answers under M7, are gone — and M9's checkpoint half, M9a,
    is in use: [Checkpoint and restart](#checkpoint-and-restart).**)**
+   **(Amended 2026-10-23:** or a `mesh_fold`, TreeAMR 0.2.6's fold over
+   points, which carries many results through one collective.**)**
    **(Done upstream and in use, 2026-10-19:** M7 has been released since
    TreeAMR 0.1.5, and [Running distributed](#running-distributed) is what
    this package had left to do — four host paths that were not, after all,
@@ -6016,6 +6046,18 @@ checkpoints. The aligned campaign of
 ran at `chunk = M` without the split, at `21–34 ns` per point and step at
 its finest spacings and `72–78 ns` on its smallest meshes (`2.7–3.7 M`
 points), where the analysis weighs most.
+
+**(Amended 2026-10-23:** the row no longer re-runs a monitor per shell or
+half-shell. `test/octant_runs.jl`'s `observe` runs the GH monitor, the ADM
+monitor and the error kernel once each and folds three times (`mesh_fold`,
+[Analysis quantities](#analysis-quantities)), so the split costs one larger
+accumulator and not twelve monitor pairs, and the rest of the row about one
+pair where it was seven — by the inference above about `4.5 s` a chunk on
+this mesh in place of `33 s`, and `55 s` of the split's gone. That is a
+prediction from the table, not a measurement; the H200 timing is still to
+be made. On the development machine (four threads, the quadrant smoke run
+of `CLAUDE.md`, 0.24 M points) the second chunk's wall time went from `22.1`
+to `19.9 s` with the split, and the CSV is the old one to its ten digits.**)**
 
 ### The right-hand side on an H200 (measured 2026-10-05)
 

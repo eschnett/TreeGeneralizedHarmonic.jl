@@ -211,6 +211,9 @@ const TREEAMR_NAMES = (
     # ODE coupling
     :statevector, :statearray, :scatter!, :gather!, :map_blocks!,
     :block_mapreduce, :mesh_mapreduce, :volume_weighted_norm,
+    # Folds over points (M15, TreeAMR 0.2.6; added 2026-10-23): every norm of
+    # the analysis record, one sweep and one collective a region set
+    :mesh_fold, :block_fold, :Sum, :Max, :Min, :addto,
     # Regridding
     :Refine, :Coarsen, :Keep, :flag_blocks, :buffered_flags, :complete_marks,
     :regrid!, :adapt_to_initial_data!,
@@ -246,10 +249,11 @@ const TREEIOHDF5_NAMES = (:save_checkpoint, :load_checkpoint)
 # (`commrank`, `commsize`, `allgather`, `allgatherv`, `bcast`) and
 # `RegridMark`, the `isbits` flag the travelling margin's marks are gathered
 # as: TreeHydro reaches for the same verbs, and a rename would surface only
-# in a distributed run, which most of the suite is not.
+# in a distributed run, which most of the suite is not. And, from 2026-10-23,
+# `combine`, the folds' typed `op`, which TreeAMR keeps qualified.
 const TREEAMR_INTERNAL = (:threadchunks, :inside, :stencil_hits, :stencil_position,
                           :commrank, :commsize, :allgather, :allgatherv, :bcast,
-                          :RegridMark)
+                          :RegridMark, :combine)
 
 # The backgrounds of `CODE.md`'s "Initial data and backgrounds" table, the
 # two derivative passes the pointwise algebra is tested against, the ADM

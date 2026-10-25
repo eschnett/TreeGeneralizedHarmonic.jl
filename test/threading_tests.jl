@@ -49,16 +49,19 @@ include("thread_workload.jl")
     @test split(chomp(out), '\n') == reference
 end
 
-@testset "The masked norms are TreeAMR's host combine of per-block partials" begin
+@testset "The masked norms are a fold of per-block partials combined on the host" begin
     # The cheap, local half of the claim above, and the one that fails
     # legibly: the subprocess test says only that two long outputs differ,
-    # while this names the function. The norms are `mesh_mapreduce` (amended
-    # 2026-10-01; until then the combination was this package's own loop):
-    # per-block partials, each weighted by its block's `h³`, combined on the
-    # host by `mapreduce(identity, +, ·)` — so a running total split across
-    # tasks could only appear inside a block, which is what this checks,
-    # against a serial loop over each block's points and Base's pairwise sum
-    # over the blocks, with exact equality.
+    # while this names the function. The norms are TreeAMR's `mesh_fold`
+    # (amended 2026-10-23; `mesh_mapreduce` from 2026-10-01, this package's
+    # own loop before): each block one sequential fold over its points on its
+    # owner's thread, each point weighted by its `h³`, the blocks combined on
+    # the host by `mapreduce(identity, +, ·)` — so a running total split
+    # across tasks could only appear inside a block, which is what this
+    # checks, against a serial loop over each block's points and Base's
+    # pairwise sum over the blocks, with exact equality. The weight is a
+    # power of two here, so it is exact whether it scales a point or a
+    # block's sum.
     T = Float64
     q = 4
     case = shifted_minkowski_case(T; ε_KO=zero(T), γ0=one(T), γ2=T(-1 // 2))

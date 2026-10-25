@@ -65,13 +65,15 @@ end
 # time step is taken from, the two constraint monitors of step 4, and the
 # indicator that says which points a masked norm counts. Step 5 adds the
 # masked error and the interior residual, step 6 the refinement indicator,
-# step 8b the range projection's three and the validity monitor's four —
-# **appended**, never inserted, for the reason the next paragraph gives.
+# step 8b the range projection's three — **appended**, never inserted, for
+# the reason the next paragraph gives. Step 8b's validity monitor's four and
+# the evolved region's non-finite count (18–22) went on 2026-10-23, when
+# both became folds over the state vector and stopped writing `diag`.
 #
 # `DIAG_CGH` and `DIAG_MOM` are the *first* of a contiguous run — four and
-# three slots — because `block_mapreduce` reduces a contiguous range of
-# variables and nothing else: a device cannot be handed an arbitrary index
-# vector cell by cell.
+# three slots — because `block_mapreduce` and `mesh_fold` read a contiguous
+# range of variables and nothing else: a device cannot be handed an
+# arbitrary index vector cell by cell.
 const DIAG_SPEED = 1          # λ = α√(tr γ^{ij}) + |β|
 const DIAG_CGH = 2            # C_a = Γ_a + H_a, a = t, x, y, z   (2:5)
 const DIAG_HAM = 6            # the ADM Hamiltonian constraint ℋ
@@ -84,12 +86,7 @@ const DIAG_TAU = 14           # the Löhner indicator τ, masked inside r_1
 const DIAG_BOUNDS = 15        # 1 where the range projection fired, else 0
 const DIAG_BOUNDS_NF = 16     # 1 where it found a non-finite component
 const DIAG_BOUNDS_R = 17      # the radius where it fired, 0 elsewhere
-const DIAG_DETG = 18          # det γ in the monitor's region (floatmax outside)
-const DIAG_LAPSE = 19         # the signed lapse there (floatmax outside)
-const DIAG_HMAX = 20          # max_ab |h_ab| there (0 outside)
-const DIAG_PIMAX = 21         # max_ab |Π_ab| there (0 outside)
-const DIAG_NONFINITE = 22     # non-finite values at an evolved point
-const NDIAG = 22
+const NDIAG = 17
 
 # **The error slots are magnitudes, not components (proposed in step 5.)**
 # `CODE.md`'s analysis table says "`|u − u_exact|` per component into

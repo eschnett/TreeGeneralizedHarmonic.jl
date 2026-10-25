@@ -1055,19 +1055,18 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     function record!(p, t, u, dt, steps, λ, λ_end, cflnum)
         mesh = U.forest
         shell = horizon_shell(case, p.interior)
+        # The three monitors write disjoint `diag` slots, so one fold after
+        # them is every norm of the row (amended 2026-10-23: 24 reductions,
+        # 41 on an ADM chunk, until then).
         gh_constraint!(p, u, t)
-        c = constraint_norms(p)
-        adm = if adm_every > 0 && iszero(mod(length(records), adm_every))
-            adm_constraint!(p, u, t)
-            a = constraint_norms(p)
-            (ham_l2=a.ham_l2, ham_linf=a.ham_linf,
-             mom_l2=maximum(a.mom_l2), mom_linf=maximum(a.mom_linf))
-        else
-            (ham_l2=nothing, ham_linf=nothing, mom_l2=nothing,
-             mom_linf=nothing)
-        end
+        ran_adm = adm_every > 0 && iszero(mod(length(records), adm_every))
+        ran_adm && adm_constraint!(p, u, t)
         gh_error!(p, u, t; shell=shell)
-        e = error_norms(p)
+        c = e = record_norms(p)
+        adm = ran_adm ?
+              (ham_l2=c.ham_l2, ham_linf=c.ham_linf, mom_l2=maximum(c.mom_l2),
+               mom_linf=maximum(c.mom_linf)) :
+              (ham_l2=nothing, ham_linf=nothing, mom_l2=nothing, mom_linf=nothing)
         # The horizon, every `k`-th chunk of the record — `CODE.md`'s
         # cadence, counted on the same `length(records)` the ADM monitor
         # is. It runs *before* the indicator and after the norms because
@@ -1115,7 +1114,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # the rows above left in `diag`.
         bh = acc === nothing ? (hits=nothing, nonfinite=nothing,
                                 r_max=nothing) : take_chunk!(acc)
-        val = validity_rows(p, u, t)
+        # One sweep for both (amended 2026-10-23).
+        val, nonfinite = validity_and_nonfinite(p, u, t)
         if fitted && spec.α_trigger > 0 && val.min_α_evolved !== nothing &&
            val.min_α_evolved < spec.α_trigger
             trigger_pending = true
@@ -1143,7 +1143,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                bounds_r_max=bh.r_max, val..., trk..., fr...,
                nblocks=nleaves(mesh), levels=forest_levels(mesh),
                h=R(minimum_spacing(T, mesh)),
-               finite=evolved_nonfinite(p, u, t) == 0)
+               finite=nonfinite == 0)
         push!(records, rec)
         observer === nothing || call_observer(observer, p, t, u, rec)
         lost === nothing ||

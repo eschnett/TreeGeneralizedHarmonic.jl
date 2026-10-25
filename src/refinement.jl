@@ -219,30 +219,20 @@ it is legal inside a kernel.
     return τ
 end
 
-"""
-    gh_scale_kernel!(out, work, origins, spacings, mask, ::Val{G})
+# The fold behind [`field_scales`](@ref) (added 2026-10-23, TreeAMR 0.2.6's
+# `mesh_fold`): `|h_v|` at every evolved point, per component, into ten
+# maxima. A branch and not a multiplication by the mask, for the reason
+# every masked value in this package is written through a branch: the frozen
+# core holds stale data on which `h` may be `NaN`, and `0 · NaN = NaN` would
+# poison the maximum and with it every `τ` on the mesh.
+struct ScaleFold{M}
+    mask::M
+end
 
-`|h_v|` at every owned point, masked to the evolved region — the field
-[`field_scales`](@ref) reduces.
-
-A branch and not a multiplication by the mask, for the reason every masked
-slot in this package is written through a branch: the frozen core holds
-stale data on which `h` may be `NaN`, and `0 · NaN = NaN` would poison the
-maximum and with it every `τ` on the mesh.
-"""
-@kernel function gh_scale_kernel!(out, @Const(work), @Const(origins),
-                                  @Const(spacings), mask, ::Val{G}) where {G}
-    I = @index(Global, NTuple)
-    b = I[4]
-    inner = ntuple(d -> I[d], Val(3))
-    c = ntuple(d -> I[d] + G[d], Val(3))
-    T = eltype(out)
-
-    keep = is_evolved(mask, point_position(origins, spacings, b, I))
-    ntuple(Val(NC)) do v
-        out[inner..., v, b] = keep ? abs(work[c..., v, b]) : zero(T)
-        nothing
-    end
+@inline function (f::ScaleFold)(acc, p)
+    T = typeof(p.h)
+    keep = is_evolved(f.mask, p.x)
+    return TreeAMR.combine(acc, ntuple(v -> Max(keep ? abs(p.u[v]) : zero(T)), Val(NC)))
 end
 
 """
@@ -279,24 +269,18 @@ refreshed at every pass rather than frozen at `t = 0`, because the
 hierarchy changes under the initial-data cycle and the largest `|h|` over
 *grid points* outside `r_1` moves with the resolution.
 
-One scratch field set is allocated per call, which is the pattern
-TreeHydro's criterion uses for its primitives: during
-`adapt_to_initial_data!` the forest is still changing, so a field set built
-before the pass would have the wrong number of blocks by the second one.
+It reads the working array `U.work`, which the caller has scattered into.
+One fold over it, the ten maxima in one accumulator (amended 2026-10-23:
+until then a kernel wrote `|h_v|` into a scratch field set allocated per
+call, and ten reductions read it, because `mesh_mapreduce` reduces a
+contiguous range to one value). `origins` and `spacings` are no longer
+read — the fold's position is `point_position`'s bit for bit — and stay in
+the signature for its callers.
 """
 function field_scales(U::FieldSet{T,3}, mask, origins, spacings) where {T}
-    backend = get_backend(U.work)
-    scratch = FieldSet{T}(U.forest, NC; G=0, centering=U.centering,
-                          parity=even_parity(U.forest, NC),
-                          rotation=identity_rotation(U.forest, NC), backend=backend)
-    map_blocks!(gh_scale_kernel!, U, scratch.work, U.work, origins, spacings,
-                mask, Val(U.G))
-    # One reduction per component: `mesh_mapreduce` takes a contiguous
-    # variable range and reduces it to one value, so a single launch over
-    # `1:NC` would give the maximum over all ten and lose the per-component
-    # numbers the calibration table reports.
-    return ntuple(v -> mesh_mapreduce(identity, max, zero(T), scratch; vars=v),
-                  Val(NC))
+    r = mesh_fold(ScaleFold(mask), TreeAMR.combine, ntuple(_ -> Max(zero(T)), Val(NC)),
+                  U; vars=1:NC)
+    return map(m -> m.value, r)
 end
 
 field_scale(U::FieldSet{T,3}, mask, origins, spacings) where {T} =

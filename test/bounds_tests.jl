@@ -16,7 +16,8 @@
 using Test
 using TreeAMR
 using TreeGeneralizedHarmonic
-using TreeGeneralizedHarmonic: NC, _sym4, _pack10, _adm_split, _pairindex
+using TreeGeneralizedHarmonic: NC, _sym4, _pack10, _adm_split, _pairindex, layer_mask,
+                               shell_mask, interior_mask, state_validity
 using KernelAbstractions: CPU
 using LinearAlgebra: Diagonal, I, Symmetric, eigvals, normalize
 using StaticArrays: SMatrix, SVector
@@ -375,6 +376,55 @@ end
         @test A[gate[2:4]..., xx, gate[1]] == T(-3 // 2)
         gh_stage_limiter!(u, nothing, p, zero(T))
         @test acc.hits == 3
+    end
+
+    # Guards the validity monitor and the finiteness count as folds over the
+    # state vector (2026-10-23; a kernel into `diag` and twelve reductions
+    # before): the regions are the interior's own masks asked at the fold's
+    # position, and the extremes and counts are exact against a host loop
+    # over `coordinates` — they are minima, maxima and integers.
+    @testset "the validity rows and the finiteness count are a host loop's, exactly" begin
+        U = FieldSet{T}(forest, 2NC; G=G, centering=vertexcentered(3), backend=CPU())
+        p = GHProblem(U, GhostSchedule(U, ops), case; q=q)
+        fill_exact!(U, case, zero(T))
+        u = statevector(U)
+        gather!(u, U)
+        A = statearray(u, U)
+        t = T(1 // 20)
+        h = minimum_spacing(T, forest)
+        regions = (layer_mask(int, t), shell_mask(int, t, G * h), interior_mask(int, t))
+        ext = [[floatmax(T), floatmax(T), zero(T), zero(T)] for _ in regions]
+        nonfinite = 0
+        N = forest.N
+        for b in 1:nblocks(U), k in 1:N, j in 1:N, i in 1:N
+            x = coordinates(U, b, (i + G, j + G, k + G))
+            v = A[i, j, k, :, b]
+            for (r, m) in enumerate(regions)
+                is_evolved(m, x) || continue
+                dγ, α, hm, Πm = state_validity(SVector{NC,T}(v[1:NC]),
+                                               SVector{NC,T}(v[(NC + 1):2NC]))
+                ext[r] .= (min(ext[r][1], dγ), min(ext[r][2], α), max(ext[r][3], hm),
+                           max(ext[r][4], Πm))
+            end
+            is_evolved(regions[3], x) && (nonfinite += count(!isfinite, v))
+        end
+        rows, nf = validity_and_nonfinite(p, u, t)
+        @test rows == validity_rows(p, u, t)
+        @test (rows.min_detγ_layer, rows.min_α_layer, rows.max_h_layer,
+               rows.max_Π_layer) == Tuple(ext[1])
+        @test (rows.min_detγ_shell, rows.min_α_shell, rows.max_h_shell,
+               rows.max_Π_shell) == Tuple(ext[2])
+        @test (rows.min_detγ_evolved, rows.min_α_evolved) == Tuple(ext[3][1:2])
+        @test nf == nonfinite == 0 == evolved_nonfinite(p, u, t)
+        # Two NaNs at an evolved point, in `h_tt` and `Π_tt`: the count is
+        # the evolved region's, and the lapse's minimum propagates the NaN
+        # (`h_tt` is not in `γ`, so `det γ` stays finite).
+        A[1, 1, 1, 1, 1] = A[1, 1, 1, NC + 1, 1] = T(NaN)
+        x1 = coordinates(U, 1, (1 + G, 1 + G, 1 + G))
+        @test is_evolved(regions[3], x1)
+        rows, nf = validity_and_nonfinite(p, u, t)
+        @test nf == 2 == evolved_nonfinite(p, u, t)
+        @test isnan(rows.min_α_evolved) && isfinite(rows.min_detγ_evolved)
     end
 
     # The control. A projection that wrote back where it did not fire —

@@ -241,6 +241,15 @@ import SpacetimeMetrics as SM
         @test sum(x.points for x in lv) == npts
         @test sum(x.ham_l2^2 * x.points for x in lv) ≈ n.ham_l2^2 * npts rtol = 1e-12
         @test maximum(x.ham_linf for x in lv) == n.ham_linf
+        # One fold bins every level (2026-10-23), and each bin is the fold
+        # that keeps that level alone, bit for bit: the same points, the same
+        # per-block order, zeros from the other levels' blocks.
+        for x in lv
+            a = constraint_norms(p; weighting=:points, at_level=x.level)
+            @test (; x..., level=nothing, points=nothing) ==
+                  (; level=nothing, points=nothing, a...)
+            @test x.points == evolved_volume(p; weighting=:points, at_level=x.level)
+        end
     end
 
     @testset "a noisy octant run restarts bit for bit" begin
