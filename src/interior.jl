@@ -720,9 +720,13 @@ shell_mask(int::Interior{T}, t, width) where {T} =
 # center to the horizon over all directions, and it is analytic for every
 # background here. The Kerr horizon is oblate in these charts, so the
 # minimum is on the spin axis and the maximum on the equator; a boost
-# contracts along `v`, and taking `√(1 − v²)` on the minimum whatever the
-# boost's direction is conservative — which is the side an assertion
-# wants to be wrong on.
+# contracts along `v`. Taking `√(1 − v²)` on the minimum is exact when the
+# boost is along the spin (or the hole does not spin), and conservative
+# otherwise — so conservative that a hole spinning about `z` and moving along
+# `x` at `a = 9/10`, `v = 1/2` had its least radius put at `1.244` where it is
+# `1.436`, and `r_1 = 5/4` refused (amended 2026-10-24): the surface is an
+# ellipsoid, a boost maps it to another, and the other's shortest semi-axis is
+# the exact minimum.
 
 """
     horizon_min_radius(background) -> T
@@ -738,7 +742,11 @@ with `R = r − M`, so the axis value is `√(M² − a²)` and the equatorial o
 is exactly `M`. `translate` and `rotate` move and turn the surface without
 changing either radius; `boost` contracts along `v` by `√(1 − v²)`, which
 lowers the minimum and leaves the maximum (the transverse extent)
-unchanged.
+unchanged. The contracted minimum is `√(1 − v²)` times the rest frame's when
+the boost is along the spin axis or the hole does not spin; across the spin it
+is the shortest semi-axis of the contracted spheroid
+([`horizon_ellipsoid`](@ref); amended 2026-10-24, when it was that bound in
+every direction).
 
 This is what [`check_interior_radii`](@ref) puts the layer inside of, and
 what the horizon finder of step 7 will be checked against. For `a = 0.9`
@@ -764,11 +772,72 @@ horizon_min_radius(m::SpacetimeMetrics.RotatedMetric) =
     horizon_min_radius(m.metric)
 horizon_max_radius(m::SpacetimeMetrics.RotatedMetric) =
     horizon_max_radius(m.metric)
-horizon_min_radius(m::SpacetimeMetrics.BoostedMetric) =
-    horizon_min_radius(m.metric) *
-    sqrt(1 - (m.velocity[1]^2 + m.velocity[2]^2 + m.velocity[3]^2))
+function horizon_min_radius(m::SpacetimeMetrics.BoostedMetric)
+    v = m.velocity
+    β² = v[1]^2 + v[2]^2 + v[3]^2
+    r = horizon_min_radius(m.metric)
+    contracted = r * sqrt(1 - β²)
+    # The rest frame's minimum is along `v` — the spin axis, or any direction
+    # without spin — and the contraction acts on it alone: the bound is exact,
+    # and is kept bit for bit (amended 2026-10-24).
+    iszero(β²) && return contracted
+    A = horizon_ellipsoid(m.metric)
+    A === nothing && return contracted
+    v̂ = SVector{3,Float64}(tofloat64(v[1]), tofloat64(v[2]), tofloat64(v[3])) /
+         sqrt(tofloat64(β²))
+    λ_top = 1 / tofloat64(r)^2
+    dot(v̂, A * v̂) ≥ (1 - 1e-12) * λ_top && return contracted
+    λ = eigvals(Symmetric(horizon_ellipsoid(m)))
+    return oftype(contracted, 1 / sqrt(maximum(λ)))
+end
 horizon_max_radius(m::SpacetimeMetrics.BoostedMetric) =
     horizon_max_radius(m.metric)
+
+"""
+    horizon_ellipsoid(background) -> SMatrix{3,3,Float64} or nothing
+
+The horizon's surface about the hole's center as the ellipsoid `xᵀ A x = 1`
+(added 2026-10-24), in `Float64` — it is a statement about the geometry, read
+on the host — or `nothing` for a background whose horizon is not known to be
+one.
+
+Both Kerr charts put the horizon on the oblate spheroid
+`(x² + y²)/(R² + a²) + z²/R² = 1` ([`analytic_horizon_radius`](@ref)), so
+`A = diag(1/(R² + a²), 1/(R² + a²), 1/R²)`. `translate` leaves it, `rotate`
+turns it, `A ↦ R A Rᵀ`, and `boost` maps the lab point `x` to the rest
+frame's `Λ x`, `Λ = I + (γ − 1) v̂ v̂ᵀ`, so `A ↦ Λ A Λ`: an ellipsoid again,
+whose largest eigenvalue `λ` gives the least coordinate radius `1/√λ` —
+[`horizon_min_radius`](@ref) of a hole moving across its spin.
+"""
+function horizon_ellipsoid end
+
+function _spheroid_ellipsoid(R, a)
+    R² = tofloat64(R)^2
+    a² = tofloat64(a)^2
+    return SMatrix{3,3,Float64}(1 / (R² + a²), 0, 0, 0, 1 / (R² + a²), 0, 0, 0, 1 / R²)
+end
+horizon_ellipsoid(ks::KerrSchild) = _spheroid_ellipsoid(horizon_min_radius(ks), ks.spin)
+horizon_ellipsoid(ha::Harmonic) = _spheroid_ellipsoid(horizon_min_radius(ha), ha.spin)
+horizon_ellipsoid(m::SpacetimeMetrics.TranslatedMetric) = horizon_ellipsoid(m.metric)
+function horizon_ellipsoid(m::SpacetimeMetrics.RotatedMetric)
+    A = horizon_ellipsoid(m.metric)
+    A === nothing && return nothing
+    # `x_old = Rᵀ x`, spatial block only (`analytic_horizon_radius`'s).
+    R = SMatrix{3,3,Float64}(tofloat64(m.R[i + 1, j + 1]) for i in 1:3, j in 1:3)
+    return R * A * R'
+end
+function horizon_ellipsoid(m::SpacetimeMetrics.BoostedMetric)
+    A = horizon_ellipsoid(m.metric)
+    A === nothing && return nothing
+    v = SVector{3,Float64}(tofloat64(m.velocity[1]), tofloat64(m.velocity[2]),
+                           tofloat64(m.velocity[3]))
+    β² = dot(v, v)
+    iszero(β²) && return A
+    γ = 1 / sqrt(1 - β²)
+    Λ = one(SMatrix{3,3,Float64}) + (γ - 1) / β² * v * v'
+    return Λ * A * Λ
+end
+horizon_ellipsoid(::AbstractMetric) = nothing
 
 """
     geometry_radii(interior, background) -> (r_min, r_max)

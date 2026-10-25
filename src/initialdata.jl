@@ -676,6 +676,16 @@ motion breaks the `z` mirror and the spin the `x` and `y` ones. It needs that
 hole — center `(0, 0, z₀)`, velocity `(0, 0, v)` with any `v`, any spin along
 `z`, unrotated — and refuses any other; its forest takes the root brick
 `(r, r, 2r)`.
+`octant = :bitant` (added 2026-10-24) is the half `(−halfwidth, halfwidth)² ×
+(0, halfwidth)` of the box, reflecting at `z = 0` and Dirichlet at the other
+five faces: the domain of a hole spinning about `z` and moving in the plane
+`z = 0`, which the `z` mirror maps onto itself at every time — a mirror keeps
+a velocity in its plane and a spin along its normal. No rotation does: a half
+turn keeps only the vectors along its axis, so it holds a spinning hole only
+when the spin and the velocity both lie on that axis (`:rotating_quadrant`'s
+case). It needs that hole — center `(x₀, y₀, 0)`, velocity `(v_x, v_y, 0)`,
+any spin along `z`, unrotated — and refuses any other; its forest takes the
+root brick `(2r, 2r, r)`.
 
 `gauge_source` (added 2026-10-02) is `nothing` — the sampled `H_a(x)`, or no
 source on a harmonic background — a [`KerrSchildSource`](@ref), or
@@ -716,10 +726,10 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
     # the keyword's default zero, which a boosted hole does not have).
     v = case_velocity(T, background, velocity)
     kind = octant === false ? :none : octant === true ? :reflecting : octant
-    kind in (:none, :reflecting, :rotating, :quadrant, :rotating_quadrant) ||
+    kind in (:none, :reflecting, :rotating, :quadrant, :rotating_quadrant, :bitant) ||
         throw(ArgumentError(
         "octant is false, true (the same as :reflecting), :rotating, " *
-        ":quadrant or :rotating_quadrant, got $(repr(octant))."))
+        ":quadrant, :rotating_quadrant or :bitant, got $(repr(octant))."))
     spin = hasproperty(background, :spin) ? background.spin : nothing
     if kind === :rotating
         (all(iszero, center) && all(iszero, v) && spin !== nothing) ||
@@ -769,6 +779,19 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
             "the quadrant. Got center = $center, velocity = $v and " *
             (rspin === nothing ? "a background with no spin parameter, or a " *
                                  "rotated spinning hole" : "a = $rspin") * "."))
+    elseif kind === :bitant
+        # The hole may be translated and boosted in the plane z = 0, and
+        # `hole_spin` refuses a rotated spinning hole (added 2026-10-24).
+        bspin = hole_spin(background)
+        (iszero(center[3]) && iszero(v[3]) && bspin !== nothing) || throw(ArgumentError(
+            "a bitant case mirrors the solution across z = 0, so the hole must be " *
+            "its own mirror image in that plane at every time: in it, moving in it " *
+            "(or at rest), and spinning about z (Kerr-Schild or Harmonic with any " *
+            "a, unrotated, translated or boosted in the plane) — a mirror keeps a " *
+            "velocity in its plane and a spin along its normal, and flips the " *
+            "rest. Got center = $center, velocity = $v and " *
+            (bspin === nothing ? "a background with no spin parameter, or a " *
+                                 "rotated spinning hole" : "a = $bspin") * "."))
     end
     src = gauge_source === :algebraic ?
           algebraic_source(T, background) : gauge_source
@@ -779,11 +802,12 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
     return GHCase(T, background;
                   box=ntuple(d -> (kind === :none ||
                                    (kind === :quadrant && d == 1) ||
-                                   (kind === :rotating_quadrant && d == 3) ? -L :
+                                   (kind === :rotating_quadrant && d == 3) ||
+                                   (kind === :bitant && d ≤ 2) ? -L :
                                    zero(T), L), Val(3)),
                   periodic=(false, false, false),
                   reflecting=ntuple(d -> (kind === :reflecting ||
-                                          (kind === :rotating && d == 3) ||
+                                          (kind in (:rotating, :bitant) && d == 3) ||
                                           (kind === :quadrant && d ≥ 2), false),
                                     Val(3)),
                   rotating=kind in (:rotating, :rotating_quadrant) ? (1, 2) :
@@ -853,7 +877,9 @@ case's center `(x0, 0, 0)`, its velocity derived from the background. `axis`
 (added 2026-10-21) is the coordinate the hole sits and moves on, `1` by
 default; `axis = 3` is the spinning hole moving along its spin, at `(0, 0, x0
 + v t)`, boosted by `(0, 0, −v)` and translated by `(0, 0, 0, x0)`, the hole
-of `octant = :rotating_quadrant`. A moving
+of `octant = :rotating_quadrant`. With `a ≠ 0` and `axis = 1` the hole spins
+about `z` and moves across its spin, the hole of `octant = :bitant` (added
+2026-10-24). A moving
 hole needs `gauge_source = :algebraic` (or a [`KerrSchildSource`](@ref)): its
 source depends on time, which the sampled one cannot represent. Pass them
 exactly (`v = 1//5`), since they are converted once into `T`; `x0` replaces
@@ -909,7 +935,8 @@ interface-order rule on.
 `N` and `roots` have no defaults: they are the two numbers a convergence
 study varies. `roots` is one count for every dimension or a brick of three,
 `(r₁, r₂, r₃)` (added 2026-10-20, for the quadrant's `2 × 1 × 1` and the
-rotating quadrant's `1 × 1 × 2`; see [`hole_case`](@ref)). TreeAMR's blocks are cubes with one isotropic spacing,
+rotating quadrant's `1 × 1 × 2`, and from 2026-10-24 the bitant's `2 × 2 × 1`;
+see [`hole_case`](@ref)). TreeAMR's blocks are cubes with one isotropic spacing,
 so the box's widths must be in the brick's proportions — the *cells* are
 cubes, `widths[d]/roots[d]` one number — and `h = width[d]/(roots[d]·N)`.
 

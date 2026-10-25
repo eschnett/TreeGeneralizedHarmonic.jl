@@ -19,6 +19,7 @@ here; links have been pointed at the right file.
 - [The moving `:damped` layer's target rate (2026-10-21)](#the-moving-damped-layers-target-rate-2026-10-21)
 - [A spinning hole along its axis (2026-10-21)](#a-spinning-hole-along-its-axis-2026-10-21)
 - [Aligned spin and velocity: which holes the algorithm holds (2026-10-22)](#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22)
+- [Spin across the motion: the bitant (2026-10-24)](#spin-across-the-motion-the-bitant-2026-10-24)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -3270,11 +3271,281 @@ offset grows to `1.6·10⁻⁴` in `J` at `a = 9/10`, `v = 1/2`.
   cheap, would tell the finder's part of `|J| − a` from the evolution's at
   `a = 9/10` and `v = 1/2`.
 - **A spin not parallel to the motion**, G5's case; unchanged from the
-  previous section.
+  previous section. (Measured in the Kerr-Schild chart on 2026-10-25: [spin
+  across the motion](#spin-across-the-motion-the-bitant-2026-10-24).)
 - **Circular orbits**; unchanged.
 - **Several GPUs for `a = 9/10` at `1/128` moving.** `105.6 M` and
   `165.7 M` points, about two and three H200s (`test/octant_runs.jl
   mpi=true`), would give the moving `a = 9/10` cells a third spacing.
+
+## Spin across the motion: the bitant (2026-10-24)
+
+The previous section moved each hole along its spin. This one turns the
+velocity through a right angle: the spin along `z`, the motion along `x`, over
+the same matrix `a ∈ {0, 1/2, 9/10}` × `v ∈ {0, 1/5, 1/2}`, with the same
+layers and the same spacings. It is the geometry of G5's case, a spin that
+is not parallel to the motion, but in the Kerr-Schild chart and with the
+analytic `:damped` layer (G5 is the harmonic chart with `:fitted`). Each
+transverse row is compared with the aligned row of the same `a`, `v` and `h`.
+The rows at rest are the same physics on another domain, and they are
+the bitant's check against the rotating quadrant.
+
+**No rotation holds this hole** (`CODE.md`, [The
+bitant](CODE.md#the-bitant-a-hole-moving-across-its-spin-added-2026-10-24)).
+The request was for TreeAMR 0.2.5's half-turn seam. A half turn keeps only
+vectors along its axis: one about `x` reverses the spin and one about `z`
+reverses the velocity. The hole's one symmetry is the mirror `z → −z`, so its
+domain is the **bitant** `[−L, L]² × [0, L]`, half the box and twice the
+quadrants' points. The half turn is for a pair of holes, each the other's
+image.
+
+**The setup** (`test/octant_runs.jl octant=bitant`):
+
+- Kerr-Schild, `M = 1`, the spin `a` along `z`, moving along `x` at `v` from
+  `x = −2` at `t = 0` to `20 M`, with the algebraic source at its spin and
+  velocity.
+- The bitant `[−64, 64]² × [0, 64]`, root brick `(8, 8, 4)`. The frozen
+  capsule runs along the path, `path = 20 v` along `x`, with the aligned
+  campaign's radii (`32, 16, 8, 4`, and `32, 16, 8, 4, 3, 2` at
+  `a = 9/10`). The meshes run from `5.4 M` points (`a = 0`, at rest, `1/16`)
+  to `89.1 M` (`a = 9/10`, `v = 1/5`, `1/96`).
+- As in the aligned campaign: `:damped` at `ρ_max = 4/M` with the target's
+  rate, and the moving core at `max(ρ_max, 12 |v|/r_0)`. `q = 4`,
+  `cfl = 1/2`, `ε_KO = 1/2`, the Gaussian `γ0` about `c(t)`, and the finder
+  every chunk (`N_ah = 12`, with the spin). No noise, `chunk = M`, no split,
+  and a checkpoint every `2 M` (every `M` at `a = 9/10`).
+- **Across the spin one layer serves every speed.** The least horizon radius
+  is now exact for a boosted spinning hole (`horizon_ellipsoid`, `CODE.md`).
+  The motion along `x` contracts the equatorial radius `√(r₊² + a²)` and
+  leaves the pole `r₊` alone. At `a = 9/10`, `v = 1/2` the least radius is
+  the pole's `1.436`, where the aligned hole's contracted pole is `1.244`. So
+  the resting `r_1 = 5/4`, which the aligned campaign could not run at
+  `v = 1/2`, is `13.4` cells inside at `1/72` at every speed. At `a = 0` and
+  `1/2` the radii are the aligned ones.
+
+| `a` | `r_0` | `r_1` | `h` | least radius at rest; at `v = 1/2` | `r_1` below it, coarsest `h`, `v = 1/2` | ramp |
+|---|---|---|---|---|---|---|
+| `0` | `1/2` | `19/16` | `1/16`, `1/24`, `1/32` | `2`; `1.732` | `8.7` cells | `11` cells |
+| `1/2` | `3/4` | `5/4` | `1/24`, `1/32`, `1/40` | `1.866`; `1.673` (the contracted equator) | `10.2` | `12` |
+| `9/10` | `19/20` | `5/4` | `1/72`, `1/80`, `1/96` | `1.436`; `1.436` (the pole) | `13.4` | `21.6` |
+
+`1/80` at `a = 9/10` was added at rest and at `v = 1/2`, because `1/96` at
+`v = 1/2` does not fit one H200. Six rows were not run for the same reason;
+the estimates below are linear in the points from the largest rows, at about
+`16 GiB` plus `1.3 GiB` per million points, against the H200's `140 GiB`:
+
+| row | points | memory |
+|---|---|---|
+| `a = 1/2`, `v = 1/5`, `1/40` | `102 M` | about `150 GiB` |
+| `a = 1/2`, `v = 1/2`, `1/40` | `117 M` | about `170 GiB` |
+| `a = 9/10`, `v = 1/2`, `1/96` | `140 M` | about `200 GiB` |
+| `a = 9/10`, `1/128`, at rest | `127 M` | about `180 GiB` |
+| `a = 9/10`, `1/128`, `v = 1/5` | `211 M` | about `290 GiB` |
+| `a = 9/10`, `1/128`, `v = 1/2` | `331 M` | about `450 GiB` |
+
+- One H200 a run on Symmetry, `transverse-1`, from a copy with `CUDA` added,
+  on TreeAMR 0.2.6 at `495313f` plus the bitant's changes. The smoke run was
+  job 582097. The 23 rows were jobs 582102–582124, on `h200q,h200preq`
+  (`h200q`'s group limit was full). They are named `b{0,5,9}v{0,2,5}h{N}`,
+  `h = 1/N`.
+- `h200preq` pre-empted 14 jobs. Each batch script resubmitted itself on a
+  pre-emption (exit `143`) or at its wall-time limit (exit `3`), and the
+  successor continued from the newest checkpoint; the last was job 582419.
+  The 23 rows took `29.1` GPU-hours of evolution, not counting the work lost
+  to the pre-emptions or the startups.
+- The CSVs, logs, batch scripts and SimWatch files are in
+  `.claude/data/transverse/tr1`. The checkpoints (`275 GB`) stayed on
+  Symmetry. This command prints every table below from them, with the
+  aligned rows from `.claude/data/aligned`:
+
+  ```bash
+  julia test/aligned_study.jl campaign=transverse
+  ```
+
+The norms and shells are the previous section's, about
+`c(t) = (−2 + v t, 0, 0)`. `r_h` is `[√(r₊² + a²), 9/4)`, `r3` is `[3, 5)`,
+`r5` is `[5, 8)`, "in" is the evolved band between `r_1` and the equatorial
+radius, and "global" is the whole evolved region.
+
+**Every run reached `20 M` and every find succeeded** (21 a run).
+
+**The verdict (measured 2026-10-25)**, with the previous section's
+definitions. "From": the coarsest `h` from which every adjacent pair
+converges at order `3.5–5` in the error in `r3` and `r5`. "`×`": the error in
+`r3`, moving over resting, at the finest moving `h` at `20 M`.
+
+| `a` \ `v` | `0` | `1/5` | `1/2` |
+|---|---|---|---|
+| `0` | works, from `1/16` | works, from `1/16`; `×1.39` | works, from `1/24`; `×4.95` |
+| `1/2` | works, from `1/24` | works, from `1/24`; `×1.32` | works, **not yet asymptotic** at `1/24 → 1/32` (orders `6.8`, `5.7`); `×4.55` |
+| `9/10` | works, from `1/72` | works, from `1/72`; `×0.87` | works, from `1/72` (one pair, `1/72 → 1/80`); `×1.96`; the band inside the horizon does not converge |
+
+The orders at the finest pair at `20 M`, and the finest row's growth of the
+global error over `[10, 20] M`:
+
+| `a` | `v` | pair | error `r3` | `r5` | global | `ℋ` `r3` | `ℋ` `r5` | growth |
+|---|---|---|---|---|---|---|---|---|
+| `0` | `0` | `1/24 → 1/32` | `4.03` | `4.02` | `4.49` | `4.00` | `4.00` | `1.02` |
+| `0` | `1/5` | `1/24 → 1/32` | `4.05` | `4.03` | `5.46` | `4.02` | `4.02` | `1.02` |
+| `0` | `1/2` | `1/24 → 1/32` | `4.13` | `4.00` | `4.62` | `4.22` | `4.33` | `1.01` |
+| `1/2` | `0` | `1/32 → 1/40` | `4.03` | `4.02` | `8.49` | `3.99` | `4.00` | `1.05` |
+| `1/2` | `1/5` | `1/24 → 1/32` | `4.78` | `4.20` | `8.27` | `5.59` | `6.47` | `1.00` |
+| `1/2` | `1/2` | `1/24 → 1/32` | `6.79` | `5.65` | `8.52` | `7.96` | `8.27` | `1.01` |
+| `9/10` | `0` | `1/80 → 1/96` | `3.99` | `4.01` | `5.21` | `3.91` | `4.00` | `1.41` |
+| `9/10` | `1/5` | `1/72 → 1/96` | `3.99` | `4.00` | `6.12` | `3.95` | `4.01` | `1.08` |
+| `9/10` | `1/2` | `1/72 → 1/80` | `4.00` | `4.01` | `1.21` | `4.08` | `4.42` | `1.00` |
+
+**Transverse against aligned (measured 2026-10-25)**, at the same `a`, `v`
+and `h`, at `20 M`; at `a = 9/10`, `v = 1/2` against the aligned `r_1 = 9/8`
+row:
+
+| `a` | `v` | `h` | error `r_h` | `r3` | `r5` | global | `ℋ` `r_h` | `r3` | `r5` |
+|---|---|---|---|---|---|---|---|---|---|
+| `0` | all | all | `0.98–1.00` | `0.97–1.00` | `0.97–0.99` | `0.98–0.99` | `0.96–1.00` | `0.98–1.00` | `0.98–1.00` |
+| `1/2` | `0` | `1/24`–`1/40` | `1.00–1.02` | `0.99` | `0.98` | `1.02–1.04` | `1.00–1.02` | `0.98` | `0.99` |
+| `1/2` | `1/5` | `1/24` | `4.10` | `1.37` | `1.23` | `1.75` | `3.93` | `1.63` | `2.05` |
+| `1/2` | `1/5` | `1/32` | `1.59` | `1.15` | `1.17` | `1.73` | `2.00` | `1.06` | `1.04` |
+| `1/2` | `1/2` | `1/24` | `7.51` | `3.47` | `2.16` | `3.71` | `4.06` | `4.68` | `6.02` |
+| `1/2` | `1/2` | `1/32` | `2.54` | `1.62` | `1.43` | `2.94` | `3.06` | `2.47` | `3.74` |
+| `9/10` | `0` | `1/72`, `1/96` | `0.95–0.96` | `0.94–0.95` | `0.94–0.95` | `1.00` | `0.82` | `0.92` | `0.99` |
+| `9/10` | `1/5` | `1/72` | `0.82` | `0.95` | `1.00` | `2.50` | `3.00` | `0.74` | `0.91` |
+| `9/10` | `1/5` | `1/96` | `0.81` | `0.97` | `1.01` | `1.50` | `0.77` | `0.74` | `0.91` |
+| `9/10` | `1/2` | `1/72` | `13.9` | `0.90` | `0.95` | `0.43` | `36.1` | `0.71` | `0.91` |
+
+- **Without spin the bitant is the rotating quadrant.** An `a = 0` hole
+  moving along `x` is the aligned hole moving along `z`, turned. The two
+  domains agree to `0–3 %` in every shell at every `h` and speed, and in
+  `M_irr` to `1–15 %` of its offset, which is `10⁻⁷`. The spinning holes at
+  rest agree to `0–8 %`, except `ℋ` just outside the `a = 9/10` horizon,
+  which is `0.82×` on the bitant.
+- **A spinning hole moving across its spin has an excess near the horizon,
+  and it falls fast with `h`.** At `a = 1/2` the error in `r_h` is `4.1×`
+  the aligned row's at `1/24` and `1.6×` at `1/32` (`v = 1/5`), and `7.5×`
+  and `2.5×` at `v = 1/2`. Moving over resting in `r_h` it is `4.3×` and
+  `1.9×` at `v = 1/5` (aligned `1.2×` at `1/32`), and `16×` and `7.5×` at
+  `v = 1/2` (aligned `3.0×`). The orders in `r_h` from `1/24` to `1/32` are
+  `7.8` and `7.6`, and they carry `r3`'s to `4.8` and `6.8`. So the term
+  that dominates at `1/24` is not order four. Whether `1/40` makes the
+  transverse rows the aligned ones is not measured: those two rows need
+  `150` and `170 GiB`.
+- **At `a = 9/10` the same excess appears at `v = 1/2` and not at `1/5`.** At
+  `v = 1/5` the bitant equals the aligned row outside the horizon
+  (`0.95–1.01×` in `r3` and `r5`). The global error is `2.5×` and `1.5×` the
+  aligned row's at `1/72` and `1/96`, in the band inside the horizon. At
+  `v = 1/2` the error in `r_h` is `28×` the resting hole's at `1/72` and
+  `19×` at `1/80` (`ℋ` `140×` and `93×`), order `8.0` there. Yet `r3` and
+  `r5` are at or below the aligned `9/8` row's at `1/72`, and they converge
+  at order four.
+- **At `a = 9/10`, `v = 1/2` the band inside the horizon does not converge.**
+  Its L2 error goes from `4.35·10⁻⁴` at `1/72` to `3.87·10⁻⁴` at `1/80`
+  (order `1.1`). Its L∞ rises, from `0.0156` to `0.0228`, and the layer
+  residual rises with it (below). The band holds that level from `10 M` to
+  `20 M` (growth `1.00–1.02`). It dominates the global norm, whose order is
+  `1.2` (`ℋ` `−0.2`). The aligned `9/8` band is `2.2×` larger in L2 and
+  `4.9×` in L∞ at `1/72`, and converges at `5.7` to `1/96`. `1/72 → 1/80` is a pair `1.11×` apart, so
+  each order here is uncertain by a few tenths.
+- **At `a = 9/10` at rest the error grows by `1.21`, `1.23` and `1.41`** over
+  `[10, 20] M` at `1/72`, `1/80` and `1/96`. Those are the aligned `r` rows'
+  `1.22` and `1.43`: the same layer, and the linear growth the resting
+  campaign measured.
+
+**The horizon (measured 2026-10-25)**, at the finest `h`; the drift is the
+slope over `[10, 20] M` with its order against the next coarser `h`:
+
+| `a` | `v` | `h` | `ΔM_irr` `20 M` | `|J| − a` `20 M` (aligned) | `d|J|/dt` (order) (aligned at the same `h`) |
+|---|---|---|---|---|---|
+| `0` | `1/2` | `1/32` | `2.09e−7` | `2.1e−9` (`7.9e−10`) | — |
+| `1/2` | `0` | `1/40` | `3.19e−8` | `4.09e−7` (`4.09e−7`) | `1.74e−8` (`3.98`) (`1.75e−8`) |
+| `1/2` | `1/5` | `1/32` | `6.78e−8` | `1.30e−6` (`1.04e−6`) | `5.19e−8` (`3.77`) (`4.32e−8`) |
+| `1/2` | `1/2` | `1/32` | `2.91e−7` | `2.17e−6` (`1.71e−6`) | `1.00e−7` (`6.47`) (`4.48e−8`) |
+| `9/10` | `0` | `1/96` | `1.85e−7` | `7.18e−6` (`7.19e−6`) | `2.07e−8` (`4.03`) (`2.15e−8`) |
+| `9/10` | `1/5` | `1/96` | `1.68e−7` | `7.84e−6` (`1.10e−5`) | `1.25e−8` (`4.03`) (`1.90e−8`) |
+| `9/10` | `1/2` | `1/80` | `4.17e−7` | `6.08e−6` (`1.64e−4` at `1/72`, `9/8`) | `5.14e−8` (—) |
+
+- **At `a = 1/2` the drift of `J` is the excess again.** It is the aligned
+  row's at rest, `1.2×` at `v = 1/5` and `2.2×` at `v = 1/2` at `1/32`. At
+  `1/24` and `v = 1/2` it ran the other way, `−6.4·10⁻⁷/M`, `|J| − a`
+  reaching `−2.1·10⁻⁵` by `20 M`; at `1/32` it is `+1.0·10⁻⁷/M`.
+- **Across the spin the finder's offset does not grow with the speed.** At
+  `a = 9/10`, `v = 1/2` `|J| − a` is `1.9·10⁻⁶` at `1/72` and `6.1·10⁻⁶` at
+  `1/80`. That is the resting hole's `7.2–8.0·10⁻⁶` and `27×` below the
+  aligned row's `1.6·10⁻⁴`, and `M_irr`'s offset is `4–6·10⁻⁷` against
+  `6.9·10⁻⁶`. The previous section's guess was a less round horizon on the
+  finder's `N_ah = 12` grid. These rows narrow it: across the spin the
+  contraction acts on the equator, which is already the longer axis, and the
+  offset stays the resting hole's. Along the spin it shortens the pole.
+- At `a = 9/10`, `v = 1/2` `J`'s drift has no order (`−1.9·10⁻⁸` and
+  `+5.1·10⁻⁸/M` at `1/72` and `1/80`). At rest and at `v = 1/5` it converges
+  at order four, as along the spin.
+
+The **layer residual** at `20 M` at each spacing, with the aligned rows':
+
+| `a` | `v = 0` | `v = 1/5` | `v = 1/2` |
+|---|---|---|---|
+| `0` | `0.319`, `0.189`, `0.101` | `0.403`, `0.365`, `0.279` | `2.56`, `1.75`, `1.25` |
+| `1/2` | `0.373`, `0.218`, `0.146` | `0.452`, `0.259` (aligned `0.357`, `0.202`) | `0.971`, `0.998` (aligned `0.364`, `0.263`) |
+| `9/10` | `2.51`, `2.08`, `1.50` | `2.40`, `1.58` (aligned `1.60`, `0.955`) | `4.37`, `6.20` at `1/72`, `1/80` (aligned `9/8`: `4.67` at `1/72`) |
+
+- At `a = 0` and at rest these are the aligned rows' to three digits.
+- **At `v = 1/2` across the spin the residual does not fall**: at `a = 1/2`
+  it is `0.97` and `1.00` at `1/24` and `1/32`, `4×` the aligned row's, and
+  at `a = 9/10` it rises `1.4×` from `1/72` to `1/80`. At `v = 1/5` it
+  converges at order `1.9` (`a = 1/2`) and `1.5` (`a = 9/10`), from
+  `1.3–1.5×` the aligned rows'. The previous section traced the residual at
+  `v = 1/2` to the point the moving core has just released on its trailing
+  side. Across the spin the ring lies in the plane of the motion and is
+  contracted along it, which the core's target sees and the aligned core's
+  does not. That this is the cause is a guess. The trailing/leading split
+  (`split=1`) is the measurement that would test it.
+
+**What a run costs** (measured 2026-10-25) on one H200, `chunk = M`, no
+split; `s/M` over `[10, 20] M`:
+
+| row | points | steps per `M` | `s/M` | `20 M` | GPU memory | ns per point and step |
+|---|---|---|---|---|---|---|
+| `a = 0`, `v = 0`, `1/32` | `43.3 M` | `111` | `139` | `0.80 h` | `71 GiB` | `29` |
+| `a = 0`, `v = 1/2`, `1/32` | `59.8 M` | `112` | `195` | `1.08 h` | `93 GiB` | `29` |
+| `a = 1/2`, `v = 0`, `1/40` | `84.5 M` | `139` | `307` | `1.88 h` | `122 GiB` | `26` |
+| `a = 1/2`, `v = 1/2`, `1/32` | `59.8 M` | `112` | `201` | `1.11 h` | `93 GiB` | `30` |
+| `a = 9/10`, `v = 0`, `1/96` | `53.5 M` | `333` | `482` | `2.66 h` | `88 GiB` | `27` |
+| `a = 9/10`, `v = 1/5`, `1/96` | `89.1 M` | `336` | `870` | `4.85 h` | `136 GiB` | `29` |
+| `a = 9/10`, `v = 1/2`, `1/80` | `80.9 M` | `280` | `688` | `3.83 h` | `129 GiB` | `30` |
+
+A point and step cost `26–39 ns` from `1/24` on and `53–56 ns` at `1/16`.
+That is the aligned rows' cost per point, and a row costs about twice the
+aligned row of the same `a`, `v` and `h` because the bitant has twice the
+points.
+
+**What it says.** A spinning hole moving across its spin, with the analytic
+layer at the default `4/M`, the target's rate and the core at its transit
+rate, holds every cell that fits one H200 to `20 M` without growth, and its
+error outside the horizon converges at order four. At `a = 1/2`, `v = 1/2`
+the finest pair is not yet in that regime. Across the spin one layer serves
+every speed at every spin, including `r_1 = 5/4` at `a = 9/10`, which along
+the spin cannot run at `v = 1/2`. What the motion across the spin adds is a
+term near the horizon that is large at the coarser spacings. At `1/24` it is
+`4–8×` the aligned hole's error there at `a = 1/2`, and it falls at order
+`7–8`, to `1.6–2.5×` at `1/32`. With it come a layer residual that does not
+fall at `v = 1/2`, and at `a = 9/10`, `v = 1/2` a band inside the horizon
+that holds steady but does not converge. The finder's offset across the spin
+is the resting hole's.
+
+**What is open** (2026-10-25):
+
+- **Whether the excess at `a = 1/2` is gone at `1/40`.** `a = 1/2` at
+  `v = 1/5` and `1/2` at `1/40` (`102 M` and `117 M` points) need two H200s
+  each (`test/octant_runs.jl mpi=true`). So does `a = 9/10`, `v = 1/2` at
+  `1/96` (`140 M`), the only way to a second pair for that cell and a test of
+  its band inside the horizon.
+- **Where the excess comes from.** Run the trailing/leading split on
+  `a = 1/2`, `v = 1/2` at `1/24`. That says whether the residual sits at the
+  released point, as along the spin. A core target that matches
+  `∂_r u_exact` at `r_0`, `CODE.md`'s untried remedy for the first-order
+  residual, would be tested on these rows too.
+- **G5's case itself**, the harmonic chart with `:fitted`, is unchanged.
+  These rows show that the Kerr-Schild chart's analytic layer holds the same
+  geometry.
+- **Circular orbits**; unchanged.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 
