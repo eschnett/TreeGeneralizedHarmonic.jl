@@ -26,6 +26,12 @@ first, before excision" (proposed in step 8′) awaiting Erik's decision.
 Step 9 (G6), which does not depend on it, is running (started
 2026-09-25).**
 
+**Steps B1–B9 (added 2026-10-25) are proposed and not started**: binary
+black holes, toward `CODE.md`'s milestones G7 and G8, which go beyond the
+proof of concept. The design is `CODE.md`, "Binary black holes", and Erik
+decides the gauge and interior pairing after B1 and B2. This file stays
+until G8 is done.
+
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
 is a brief a single agent with a fresh context can carry. The order is
@@ -1259,4 +1265,365 @@ the H200 rows are in.
 Read `CODE.md` against the code once more. Mark G0–G6 *(Done.)*; update
 `README.md`'s status and `CLAUDE.md`'s "Current state" and "Commands";
 move anything still marked **(predicted)** to measured or to "Possible
-extensions"; delete this file.
+extensions"; delete this file. **(Amended 2026-10-25:** keep it, and the
+binary steps below, until G8 is *(Done.)*.**)**
+
+## Steps B1–B9 — Binary black holes (added 2026-10-25)
+
+These take the package past the proof of concept, to two holes that merge
+and the waves they emit: `CODE.md`'s milestones G7 (a head-on collision)
+and G8 (an equal-mass inspiral). **The design is `CODE.md`, "Binary black
+holes"; read it in full first.** Nothing here is started. The steps are a
+proposal for Erik's review, and the section's "What this asks Erik to
+decide" lists what he settles first.
+
+**Order:**
+
+- **B1 and B2** are single-hole screens and may run as two agents at once.
+- **Erik decides** the gauge–interior pairing, (α) or (β), from their
+  reports before **B3** starts.
+- **B5 and B6** need no hole. They may run beside B1–B4, B5 first, since B6
+  uses B5's wave.
+- **B3, B4, B7** then follow in order.
+- **B8** follows B3, and uses B1's `gauge_consistent_momentum`.
+- **B9** follows B7 and B8.
+
+Each runs from a green suite on the merged branch and ends with the report
+under "Running a step as an agent". Branches are named
+`claude/step-B<n>-<slug>`.
+
+**What the single holes hand over.** Read `CODE.md`, "What the single holes
+hand over" and "Single black holes: recommended settings". Three of those
+findings set the steps below:
+
+- **The moving `:damped` layer is the accurate one.** With its target's
+  rate and a core that follows, it holds a boosted Kerr-Schild hole at the
+  resting hole's level.
+- **`:fitted` holds every moving hole but is the weaker interior.**
+  `13–176×` the constraint violation just outside the horizon, and no
+  convergence at a margin fixed in cells.
+- **`HorizonTrack` predicts along a line.** That is enough at `d = 10 M`
+  and four cells off at `d = 3 M` at `h = 1/64`.
+
+### Sharp edges for steps B1–B9
+
+- **Units.** The total mass is `M = 1` and each hole of an equal-mass pair
+  is `M_A = 1/2`. Every single-hole setting scales by `M_A`: the moving
+  `:damped` pair `1/24`, `1/32` is `1/48`, `1/64` here, and
+  `ρ_max = 4/M_A = 8/M`. `hole_mass(case.background)` is the wrong mass
+  for a binary: read each hole's own.
+- **The background becomes data.** Everything that reads
+  `case.background` or `case.center` as the truth needs a per-hole or a
+  data replacement: the hook, the error norms, the target, the radius
+  checks, the seed, the damping profile, the refinement centroid.
+  `grep -n 'background\|case.center' src/` before designing anything.
+- **Everything that relaxes toward something that moves needs that
+  thing's rate**, in every region it relaxes in, the core included
+  (`CLAUDE.md`). A tracked target and a tracked source are such things.
+- **A gauge source's `∂_t H` must be its own time derivative**, including
+  the parts that come from the tracks. If it is not, `C_a` grows and no
+  `H` explains it.
+- **The tuple of interiors is a kernel argument.**
+  - `K` is a type parameter, unrolled by `@ntuple`/`@nexprs`, with no
+    closures (on a device a closure is a call).
+  - It is `isbits`.
+  - It is built once per chunk or piece, with its `Val`s.
+  - On the CPU it runs on SIMD lanes, so the composition uses `_select`,
+    not `if`, on computed values.
+- **Over MPI the finds, the fits and the extraction are rank 0's.** A new
+  collective inside them goes through `fill_state!`/`interpolate_state`,
+  or a new request kind in `serve_requests`.
+- **Anything the loop carries goes into the run state**: the tracks, the
+  common track, the handover, the predictions' history and the
+  extraction's integrals. The checkpoint chains are what notice when
+  something is missing.
+- **`diag` slots are appended, never inserted.**
+- **A moving pair's symmetric domain matches the box only to the target
+  rate's amplified roundoff.** Bound it as `boosted_tests.jl` does.
+- **Price every test.** Two holes are two layers, two finds and a larger
+  mesh. Runs longer than a minute go into a script (`test/octant_runs.jl`'s
+  options, or a `test/binary_runs.jl` beside it), and long runs to
+  Symmetry as job chains with their own remote directories.
+- **No downloads without asking.** SXS waveforms and any data from outside
+  the machine are Erik's to supply.
+
+## Step B1 — Two gauge sources and the initial momentum
+
+`CODE.md`: "The gauge" (under "Binary black holes"); "Gauge and constraint
+damping" (the algebraic source); "Open questions", "Gauge sources that know
+less about the hole". **One hole only**: the binary case is B3's.
+
+**Changes**, all in `src/gauge.jl`, evaluated in the kernels as
+`KerrSchildSource` is, generic in the number type for the SIMD lanes and
+closure-free for a device:
+
+- **The composite tracked Kerr-Schild source**, `K` holes: each hole's
+  `M_A` and `S_A`, the piece's line `c_A(t)`, `u_A(t)` and `du_A/dt`, and
+  the partition of unity with `p = 4`. `∂_a H_b` includes `∂w_A` and the
+  `du_A/dt` term.
+- **The damped harmonic source** in SpECTRE's form (`A_L1`, `A_L2`, `A_S`,
+  `e`, `σ_r`).
+- **The roll-on** `f(t) H_from + (1 − f(t)) H_to`, with
+  `f = e^{−((t − t_0)/σ_g)⁴}` and its `∂_t f`.
+- **`gauge_consistent_momentum`**: `∂_t α` and `∂_t β^i` from
+  `C_a = 0`, given `(γ, K, α, β)`, their spatial derivatives and the
+  source.
+- **`test/octant_runs.jl` options** for the source and the roll-on.
+
+**Accept:**
+
+- The composite with one hole is `KerrSchildSource` bit for bit: the
+  right-hand side of the moving quadrant hole.
+- `H` and `∂H` of each new source agree with forward-mode differentiation
+  of its closed form, at random states near Kerr-Schild, to roundoff.
+- `gauge_consistent_momentum` returns a boosted Kerr-Schild hole's
+  analytic `Π` under its own source to roundoff, and gives `C_a = 0` at
+  `t = 0` for a perturbed lapse.
+- **The damped harmonic gauge rolled on**, on the boosted `a = 0` hole on
+  the quadrant (`v = 1/5`, `:fitted`, `1/24` and `1/32` in `M_A`) to
+  `40 M`, against the same hole in its own Kerr-Schild gauge. Record:
+  - `ℋ` and `C_a` just outside the horizon;
+  - the horizon's `M_irr`;
+  - the hole's coordinate trajectory;
+  - the static hole too, which Lindblom and Szilágyi saw settle.
+- The kernel's cost per point with each source.
+- The runs in `SINGULARITY_HANDLING.md` under a section of their own, and
+  summarised under `CODE.md`'s "The gauge".
+
+## Step B2 — The tracked analytic target
+
+`CODE.md`: "One interior per hole", "The tracks"; "The interior" (step 8c's
+rule, the moving `:damped` layer, `core_follows`). **One hole only.**
+
+**Changes:**
+
+- **`src/tracking.jl`:**
+  - the quadratic prediction, a least-squares fit in time over the last
+    four finds (today's line until there are four);
+  - its blend into the previous prediction over the next interval;
+  - the center-jump check, the found origin within `G h/2` of the
+    prediction;
+  - the find interval from the predicted acceleration, `a Δt² ≤ G h/4`;
+  - the prediction's error in the record.
+- **`src/interior.jl` and `src/driver.jl`:** a `:damped` interior whose
+  target and center come from a track. The target is the boosted,
+  translated Kerr-Schild hole with the hole's `M_A` and `S_A` on the
+  piece's line, rebuilt every piece, with the core following its target
+  and the target's rate along the line.
+- **`test/octant_runs.jl`:** the tracked target, and knobs that perturb its
+  mass, velocity and center.
+
+**Accept:**
+
+- **The prediction on synthetic finds** on a circle at `d = 10` and
+  `d = 3`, a host test: its error under `G h/4` at the proposed cadence.
+- **On the moving `a = 0` hole** on the quadrant (`v = 1/5`, `1/24` and
+  `1/32` in `M_A`) to `40 M`, the tracked target:
+  - `ℋ` just outside the horizon within `1.5×` the analytic `:damped`
+    layer's;
+  - order four between the two spacings.
+- **The sensitivity**, recorded for each perturbation: `ℋ` and the error
+  outside the horizon, and the layer residual.
+  - the target's mass off by `±1 %`;
+  - its velocity off by `±0.02`;
+  - its center off by `±1` cell.
+- **Recovery:** a track started with a velocity off by `0.05` recovers
+  within a few finds, with no refusal.
+- **The report** says, beside B1's, which pairing its numbers favour.
+
+## Step B3 — Several holes in one case
+
+`CODE.md`: "A case without a background", "One interior per hole",
+"Refinement for two holes", "The record", "Initial data" (item 1). **Starts
+after Erik's decision on the pairing.**
+
+**Changes:**
+
+- **The case:** `HoleSpec`, and `GHCase(…; holes)` with the background as
+  data. A `binary_case` constructor on the full box.
+- **The data:** an `isbits` superposition with the optional attenuation,
+  here, unless Erik takes it to `SpacetimeMetrics` first.
+- **The kernel:** the interior a tuple with the composition rule, built
+  from B2's tracked target or `:fitted` per hole. The composite mask, used
+  by every norm, the indicator, the projection's gate and the finder's
+  guard. `γ0` as three Gaussians, and `ε_KO` per hole.
+- **The driver:** per-hole tracks and finds in `evolve!`, and the gauge
+  source of the chosen pairing fed by the tracks. Per-hole level floors,
+  their union taken. Per-hole record rows, and the separation and phase.
+- **The run state:** the `K` tracks in the checkpoint.
+- **MPI:** the `K` finds in rank 0's analysis.
+
+**Accept:**
+
+- **One hole is the old case:** `holes = (spec,)` bit for bit, `u` after
+  two chunks and the record. Run on the suite's fixture and on the moving
+  quadrant hole, at one thread and at four.
+- **The composition is local:** the composite right-hand side equals the
+  single-hole kernel of the nearer hole at every point where only one
+  layer acts. Compared point by point on a two-hole mesh.
+- **A head-on pair** from rest at `d = 8 M` on the box, `h = 1/24` at the
+  holes, to `2 M`:
+  - every find succeeds and no assertion fires;
+  - the separation falls as free fall predicts, to the finder's accuracy;
+  - the constraints stay bounded;
+  - the cost is recorded.
+- **Restarts:** that run's checkpoint chain is the uninterrupted run, bit
+  for bit.
+
+## Step B4 — The symmetric domains and the half turn
+
+`CODE.md`: "The symmetric domains"; "Reflecting faces", "The rotating
+octant"; TreeAMR's `CODE.md` on the half turn (M14).
+
+**Changes:**
+
+- **The half turn:** `GHCase(; halfturn)` beside `rotating`, and
+  `state_halfturn` with the `G = 0` sets' identity map at every `FieldSet`
+  site. `gh_forest` takes the half turn and the brick `(r, 2r, r)`.
+- **`binary_case(; symmetry)`**, one of `:octant`, `:rotating_octant`,
+  `:halfturn`, `:bitant` or `:none`. Each refuses a pair its symmetry does
+  not hold, and says why.
+- **The image geometry** under the half turn, and the single track.
+- **`add_noise!`** leaves the seam plane alone.
+- **The checkpoint's recipe** carries the half turn.
+
+**Accept:**
+
+- **On uniform meshes:**
+  - the head-on octant is the box;
+  - the half-turn quarter is the box for a pair in circular motion over
+    16 steps, to the moving holes' roundoff bound.
+- **Across the seam:** a find of hole 1 at `x < 0` agrees with the box's
+  find to the finder's tolerance.
+- **Every refusal** fires with its reason.
+- **A hole crosses the seam:** tracked through the crossing, with no
+  refusal and no failed find.
+
+## Step B5 — The far boundary, the wave zone and a Teukolsky wave
+
+`CODE.md`: "The outer boundary and the wave zone", "Refinement for two
+holes". **No hole.**
+
+**Changes:**
+
+- **The Teukolsky wave:** the linearised even-parity `ℓ = 2`, `m = 0`
+  quadrupole wave (Teukolsky 1982) as an `isbits` `AbstractMetric`,
+  `η + ε h`.
+- **The boundary choice:** the frozen hook (the data at `t = 0`) and the
+  relative hook beside the analytic one.
+- **The wave-zone floor** in `Refinement`.
+- **`test/octant_runs.jl` options** for all three.
+
+**Accept:**
+
+- **The wave converges** at order `q` with the analytic hook, on the
+  octant its symmetry allows, at an amplitude where `ε²` is below
+  truncation.
+- **Each hook's reflection** is recorded, for two box sizes: the error
+  against the analytic wave inside the box after the wave meets the
+  boundary.
+- **The floor holds the wave:** the indicator does not coarsen the wave
+  zone while the wave crosses it.
+- **The outer levels' cost** is recorded.
+
+## Step B6 — `Ψ₄` and the extraction
+
+`CODE.md`: "The waveform". **No hole.** Uses B5's wave.
+
+**Changes:**
+
+- **`src/weyl.jl`:** the pointwise `γ`, `K`, `∂K`, the spatial Ricci
+  tensor, `E` and `B`, the radial tetrad and `Ψ₄`, from interpolated
+  values.
+- **`src/extraction.jl`:**
+  - the spheres on `AbstractSphericalHarmonics` grids;
+  - the interpolation with second derivatives through `interpolate_state`
+    (a new request kind if it does not carry them);
+  - the spin `−2` transform;
+  - the ADM surface integrals;
+  - the radiated energy, momentum and angular momentum;
+  - the CSV;
+  - the cadence at piece boundaries.
+- **`evolve!(; extract)`.**
+- **`test/weyl_tests.jl` and `test/extraction_tests.jl`.**
+
+**Accept:**
+
+- **`Ψ₄` pointwise** against `SpacetimeMetrics`' `RiemannTensor`,
+  contracted with the same tetrad, on boosted Kerr and on the Teukolsky
+  metric, to roundoff of the scale.
+- **The convention:** the sign and the normalisation, from the Teukolsky
+  wave's analytic strain, written into `CODE.md`.
+- **The Teukolsky wave's `(2, 0)` mode** converges at order `q` in
+  amplitude and phase on a small box. The other modes sit at truncation.
+- **The ADM mass** of a static and a boosted Kerr-Schild hole at radius
+  `R`, with its `1/R` approach recorded.
+- **The extraction's cost** against a right-hand side.
+- **MPI:** the same modes at one and three ranks (the MPI workload).
+
+## Step B7 — Merger: the common horizon and the handover (G7)
+
+`CODE.md`: "The common horizon and the handover", milestone G7.
+
+**Changes:**
+
+- **The common finder:** its seed, its `lmax`, and its cadence below
+  `d_c`. Failures are recorded, not thrown.
+- **Formation** by the proposed criterion.
+- **The handover:** the common `:fitted` layer added, the individual
+  layers dropped and their tracks retired.
+- **The remnant's** source and target.
+- **The record's common rows**, and the handover state in the run state.
+- **The head-on runs** as a script, with their batch jobs.
+
+**Accept:** G7 as `CODE.md` states it. Also record:
+
+- the gap between the individual and the common core surfaces at
+  formation;
+- how long the handover waited;
+- whether the remnant's `:damped` switch helped.
+
+## Step B8 — Constraint-satisfying data from XCTS
+
+`CODE.md`: "Initial data" (item 2). Uses B1's `gauge_consistent_momentum`
+and B3's case.
+
+**Changes:**
+
+- **A host tool**, a script run from an environment with `XCTS` added
+  beside the package (never in the package's own `Project.toml`). It
+  solves or loads XCTS's solution, evaluates it at TreeAMR's points on the
+  mesh chosen from the superposed data, and writes the forest and the
+  state through TreeIOHDF5.
+- **`evolve!` starts from such a file.**
+- **The excision:** XCTS's default inner condition (`horizon_bc = false`,
+  Dirichlet to the free data) on spheres inside each core. If XCTS does
+  not converge with spheres that deep, describe exactly what fails and
+  report it, and use the isolated-horizon data extended inward by a fit
+  meanwhile.
+- **`Π`** through `gauge_consistent_momentum`.
+
+**Accept:**
+
+- **A single boosted Kerr-Schild hole through XCTS:** the state on the
+  grid is the analytic one to XCTS's accuracy, and the run is
+  indistinguishable from the analytic run.
+- **The head-on pair from XCTS data** against the same pair from
+  superposed data: the junk and the constraints, at `t = 0` and after.
+- **The quasi-circular pair at `d = 10`:** the data's constraints, the
+  ADM quantities, and the horizons' masses and spins at `t = 0`.
+
+## Step B9 — The inspiral (G8)
+
+`CODE.md`: milestone G8, "What it costs".
+
+**Changes:**
+
+- **The run scripts and batch jobs:** job chains with SimWatch, at
+  `1/48`, `1/64` and `1/80` on the half-turn quarter.
+- **The analysis scripts:** extrapolation in radius, the strain by
+  fixed-frequency integration, and the comparison with an SXS waveform
+  that Erik supplies.
+
+**Accept:** G8 as `CODE.md` states it. Record the cost per `M` and per run
+beside the prediction under "What it costs".
