@@ -20,6 +20,7 @@ here; links have been pointed at the right file.
 - [A spinning hole along its axis (2026-10-21)](#a-spinning-hole-along-its-axis-2026-10-21)
 - [Aligned spin and velocity: which holes the algorithm holds (2026-10-22)](#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22)
 - [Spin across the motion: the bitant (2026-10-24)](#spin-across-the-motion-the-bitant-2026-10-24)
+- [The damped harmonic gauge rolled on (step B1, 2026-10-25)](#the-damped-harmonic-gauge-rolled-on-step-b1-2026-10-25)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -3546,6 +3547,183 @@ is the resting hole's.
   These rows show that the Kerr-Schild chart's analytic layer holds the same
   geometry.
 - **Circular orbits**; unchanged.
+
+## The damped harmonic gauge rolled on (step B1, 2026-10-25)
+
+`PLAN.md`'s step B1 and `CODE.md`'s [The gauge](CODE.md#the-gauge): the damped
+harmonic gauge of Szilágyi, Lindblom and Scheel in SpECTRE's form, rolled on from
+the hole's own Kerr-Schild source, on the boosted `a = 0` hole of [the boosted
+Kerr-Schild hole at binary
+speed](#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20) and on the same hole
+at rest, against both in their own Kerr-Schild gauge. It is pairing (β)'s first
+run: the gauge with `:fitted`, because once the gauge has moved the analytic
+`:damped` target is in the wrong one. Single holes only; the binary is step B3's.
+
+**The setup** (commit `a22122e`, `test/octant_runs.jl gauge=dh`):
+
+- **The gauge.** `RolledGaugeSource(KerrSchildSource, DampedHarmonicSource(σ_r = 32,
+  A_L1 = A_S = 1, A_L2 = 0, e = 2); σ_g = 10, t_0 = 0)` **(proposed in step B1:**
+  SpEC rolls on over `15–25 M`; `10 M` leaves half of a `40 M` run with the roll-on
+  done, `f(15) = 0.006` and `f(20) = 1.1·10⁻⁷`**)**. `f` underflows only at `52 M`,
+  so these runs evaluate both sources to the end.
+- **Everything else is `bf24n`'s** (the `:fitted` row of the boosted hole without
+  `trail_ramp`): Kerr-Schild `a = 0`, at `x = −4 + t/5` or at rest at `x = −4`, on
+  the quadrant `[−64, 64] × [0, 64]²` and its capsule of radii `32, 16, 8, 4` swept
+  along `x ∈ [−4, 4]` (856 blocks; `N = 24, 32`: `h = 1/24, 1/32` at the hole,
+  `11.83 M` and `28.05 M` points); `:fitted` with `m = 16`, `n_L = 20`,
+  `fit_cont = 2`, `lmax_fit = 8`; `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, the Gaussian
+  `γ0`; the finder every chunk; to `40 M`. **New:** `chunk = M` with the split
+  (the folds of 2026-10-23 made it cheap), `checkpoint_every = 4`.
+- **The runs**, one H200 each, in `step-B1-gauge` on Symmetry (TreeAMR 0.2.6, CUDA
+  added): `b1dm24` (damped harmonic, moving), `b1ds24`, `b1ds32` (damped
+  harmonic, at rest), `b1km24`, `b1km32`, `b1ks24`, `b1ks32` (Kerr-Schild, the
+  controls), and `b1dm24t`, `b1dm32t`, the moving damped harmonic rows again
+  with the shells about the tracked horizon (`shell_center=track`, below) — jobs
+  582577 (`b1km32`), 582578 (`b1ds32`), 582579 (`b1ks32`), 582580 (`b1dm24`),
+  582581 (`b1km24`), 582582 and 582643 (`b1ds24`, pre-empted at its start and
+  resubmitted), 582583 (`b1ks24`), 582625 (`b1dm24t`), 582624, 582634 and 582663
+  (`b1dm32t`, pre-empted twice and continued from its checkpoints), all on
+  `h200preq`; `b1dm32` (582574, 582585) was pre-empted at its start and then
+  cancelled for `b1dm32t`. The CSVs and logs are in `.claude/data/step-B1`, and `julia
+  test/gauge_study.jl dir=.claude/data/step-B1` prints every table below.
+
+The norms are point-weighted L2 in shells — `[2, 2.25)` just outside the
+horizon, `[3, 5)`, `[5, 8)` — about the analytic center `c(t)`, or, in
+`b1dm24t` and `b1dm32t`, about the tracked horizon's; `C_a` is the largest
+component's. Under the damped harmonic gauge the analytic center is the
+Kerr-Schild hole's, not the evolved hole's: the gauge moves the coordinates, and
+the found horizon's origin is the hole's position.
+
+**Every run reached `40 M`, every find succeeded, and the range projection never
+fired.** On one H200 at `chunk = M` with the split: `32–37 s/M` at `1/24` and
+`72–81 s/M` at `1/32` — the damped harmonic rows about `12 %` dearer than the
+Kerr-Schild ones (`37` against `33 s/M` moving at `1/24`, `81` against `72` at
+rest at `1/32`), the roll-on evaluating both sources to the end. A `40 M` row is
+`22–25 min` at `1/24` and `48–55 min` at `1/32` on one H200, uninterrupted.
+
+**The gauge moves the hole, and grows its horizon in coordinates.** The horizon's
+least coordinate radius about its own origin goes from `2.00` (at rest) and `1.96`
+(moving, the boost's contraction) to `2.06` in both by `20 M`, and its mean radius
+to `2.07`: under this gauge the moving hole's horizon is no longer contracted
+(least over mean `0.995` against Kerr-Schild's `0.985`). The moving hole falls
+behind the analytic center `c(t) = −4 + t/5`, by `0.11`, `0.34`, `0.44` and
+`0.49 M` at `10`, `20`, `30` and `40 M`, its coordinate speed back to `0.196` at
+the end; the hole at rest drifts `+0.010 M` along `x`, towards the Gaussian's
+center at the origin, slowing (`0.0069`, `0.0092`, `0.0099` at `20`, `30`, `40 M`).
+So two things in the record are not what they were for the Kerr-Schild runs:
+
+- a shell about `c(t)` is not about the moving hole — `b1dm24`, with the shells
+  about `c(t)`, read `ℋ` `1.2·10⁻²` in `[2, 2.25)` at `40 M` against `2.4·10⁻³`
+  about the hole (`b1dm24t`, `shell_center=track`; the evolution is the same bit
+  for bit, the record's `M_irr` and positions agree to every digit) — and
+- `[2, 2.25)` straddles the horizon at `2.06`, a quarter of it inside, so its
+  norms mix the horizon's inside with its outside. `[3, 5)` and `[5, 8)` are
+  outside it in either gauge, and are what the comparisons below read.
+
+**The hole at rest settles, at the Kerr-Schild hole's level outside `r = 3`.**
+Damped harmonic over Kerr-Schild at `1/32`, the hole at rest:
+
+| shell | `ℋ` at `10, 20, 30, 40 M` | `C_a` at `10, 20, 30, 40 M` |
+|---|---|---|
+| `[2, 2.25)` (straddling) | `1.23`, `3.52`, `3.27`, `3.26` | `1.32`, `2.90`, `2.74`, `2.76` |
+| `[3, 5)` | `1.24`, `1.59`, `1.60`, `1.60` | `1.07`, `1.31`, `1.32`, `1.29` |
+| `[5, 8)` | `1.09`, `1.17`, `1.19`, `1.18` | `1.01`, `1.25`, `1.26`, `1.30` |
+
+- Every ratio is flat from `20 M` on, and the state's distance from the
+  Kerr-Schild solution in `[2, 2.25)` is `0.343`, `0.333`, `0.339`, `0.338` at
+  `15`, `20`, `30`, `40 M`: the solution has moved to another gauge and stopped
+  there — the time-independent state Lindblom and Szilágyi saw a hole reach.
+- `M_irr − 1` is `1.73·10⁻⁷` at `40 M` against the Kerr-Schild hole's
+  `1.46·10⁻⁷`: the horizon is the same hole.
+- At `1/24` the ratios are the same (`[3, 5)` `1.63` and `1.23`, `[5, 8)` `1.20`
+  and `1.25` at `40 M`), and from `1/24` to `1/32` `ℋ` converges at order
+  `3.96–4.04` in `[3, 5)` and `[5, 8)`, as the Kerr-Schild hole's does
+  (`3.97–4.03`): the excess is the new chart's own truncation error, not a
+  transient. The drift, `+0.00995 M` at both spacings, is the gauge's, and
+  `M_irr` converges at order `3.8` (`1 + 5.2·10⁻⁷` at `1/24`). Just outside the
+  horizon, in the straddling `[2, 2.25)`, neither gauge converges (`0.5–0.8`),
+  the `:fitted` layer's known floor at `m = 16`.
+
+**The moving hole does not, at `1/24`.** Damped harmonic (`b1dm24t`) over
+Kerr-Schild (`b1km24`), the moving hole, the shells about the hole:
+
+| shell | `ℋ` at `10, 20, 30, 40 M` | `C_a` at `10, 20, 30, 40 M` |
+|---|---|---|
+| `[2, 2.25)` (straddling) | `0.78`, `28`, `40`, `44` | `1.2`, `49`, `86`, `100` |
+| `[3, 5)` | `1.0`, `1.7`, `61`, `118` | `1.0`, `1.4`, `55`, `195` |
+| `[5, 8)` | `0.92`, `1.0`, `13`, `72` | `1.0`, `1.2`, `7.4`, `69` |
+
+- It starts when the roll-on ends: the ratios are about one to `10 M`, and from
+  `15 M` (`f = 0.006`) the excess grows at the horizon and travels out, reaching
+  `[5, 8)` by `30 M`, still growing at `40 M`.
+- `M_irr − 1` is `+2.2·10⁻⁷` at `15 M`, `−4.8·10⁻⁶` at `20 M` and `−1.3·10⁻⁵` at
+  `40 M`, against the Kerr-Schild hole's `+4.5·10⁻⁷`: the horizon itself is
+  `30×` worse, and that does not depend on where a shell is.
+- **At `1/32` the excess is much smaller, and falls faster than the scheme's
+  order.** Damped harmonic over Kerr-Schild at `1/32` (`b1dm32t` over `b1km32`),
+  at `20`, `30`, `40 M`: `ℋ` in `[3, 5)` `1.16`, `6.7`, `6.3` and `C_a` `1.26`,
+  `9.7`, `15`; `ℋ` in `[5, 8)` `1.03`, `1.7`, `9.9` and `C_a` `1.03`, `1.9`, `31`;
+  in the straddling `[2, 2.25)` `7.8`, `12`, `13`. From `1/24` to `1/32`, from
+  `30 M` on, `ℋ` falls at order `7.8–10` in `[3, 5)` and `5.5–7.6` in `[5, 8)`
+  (`3.2–3.6` in `[2, 2.25)`), and `M_irr − 1` is `−1.0·10⁻⁶` at `40 M` against
+  `−1.3·10⁻⁵`: an under-resolved feature of the moving hole under the new gauge,
+  not a gauge that fails. The lag is the same at both spacings to every printed
+  digit, so it is the gauge's, as the resting hole's drift is. Whether `1/48`
+  puts the moving hole at the Kerr-Schild hole's level is the next measurement;
+  on this capsule it does not fit one H200 with `:fitted` (about `171 GB`,
+  `CODE.md`'s recommended settings), so it needs `mpi=true` or a mesh that
+  follows the hole.
+
+**The faces: the harmonic far field against Kerr-Schild Dirichlet data.** `C_a`
+in the blocks touching an outer face is `2.0·10⁻⁵`, `9.5·10⁻⁵`, `1.6·10⁻⁴`,
+`2.4·10⁻⁴` at `10`, `20`, `30`, `40 M` under the damped harmonic gauge, at rest and
+moving alike, against `10⁻¹¹` under Kerr-Schild's (`ℋ` there `5·10⁻⁵` against
+`4·10⁻¹²`), still growing linearly at `40 M`; over the whole evolved region the
+faces are most of the damped harmonic runs' `C_a` (`7.4·10⁻⁵` at rest at `40 M`).
+`2M/r²` is `4.9·10⁻⁴` at `64 M` ([What step B1 built and
+measured](CODE.md#what-step-b1-built-and-measured-2026-10-25)). It does not reach
+the shells about the hole by `40 M`.
+
+**What this says about the pairings** (`CODE.md`, "The gauge"): the damped harmonic
+gauge with `:fitted` holds a hole at rest at the Kerr-Schild level outside
+`r = 3` — `1.2–1.6×`, converging at order four — and its horizon at the
+Kerr-Schild hole's `M_irr`. A moving hole it holds less well: from the end of
+the roll-on its constraints grow, `70–200×` the same hole's in its own gauge by
+`40 M` at `1/24` and `6–31×` at `1/32`, falling with `h` faster than the
+scheme's order. The analytic `:damped` layer does not survive the gauge moving
+at all (the smoke runs below). Pairing (α) — the tracked Kerr-Schild source with
+`:damped` — is the accurate one on everything measured here; (β) needs a finer
+moving hole than one H200 holds on this capsule to show whether it reaches the
+same level, and a boundary condition of its own.
+
+
+**The local smoke runs (2026-10-25, the development machine, six threads).** The
+moving and the resting hole at `h = 1/16` on a quadrant of half-width `16`
+(`radii = 8,6,4,3`), with the `:damped` layer that is the production layer at that
+spacing (`r_0 = 5/8`, `r_1 = 23/16`, `4/M` with the target's rate), a fast roll-on
+(`σ_g = 1`), to `4 M`:
+
+| run | `ℋ` `[2, 2.25)` at `1, 2, 3, 4 M` | `C_a` `[2, 2.25)` | `C_a` at the faces |
+|---|---|---|---|
+| Kerr-Schild, moving | `6.2·10⁻⁶`, `8.6·10⁻⁶`, `1.5·10⁻⁵`, `1.9·10⁻⁵` | `2.0·10⁻⁶` … `4.3·10⁻⁶` | `2.8·10⁻⁹` |
+| damped harmonic, at rest | `6.5·10⁻⁶`, `1.5·10⁻⁵`, `1.3·10⁻⁴`, `2.7·10⁻⁴` | `1.8·10⁻⁶` … `2.7·10⁻⁵` | `1.3·10⁻⁴` … `1.4·10⁻³` |
+| damped harmonic, moving | `6.5·10⁻⁶`, `8.3·10⁻⁵`, `5.3·10⁻⁴`, — | `1.9·10⁻⁶` … `9.8·10⁻⁵` | `1.3·10⁻⁴` … `1.1·10⁻³` |
+
+- **The analytic `:damped` layer does not survive the gauge moving.** The moving
+  hole's layer residual — its distance from the Kerr-Schild target it relaxes to —
+  went `0.73`, `6.7`, `36`, `100`, `350`, `1616` at `t = 1/2 … 3`, and a `sqrt` of a
+  negative number ended it after `3 M`. At rest the residual rose to `14` by `3 M`
+  and stayed there (the Kerr-Schild hole's: `0.12–0.21`), and `ℋ` just outside the
+  horizon was `15×` the Kerr-Schild hole's at `4 M`. The layer
+  holds the interior in Kerr-Schild's gauge while the source moves the exterior
+  out of it. That is `CODE.md`'s reason to pair this gauge with `:fitted`, measured.
+- **The faces' `C_a` is the gauge's far field**, `10⁵×` the Kerr-Schild run's:
+  the harmonic far field against Kerr-Schild Dirichlet data, `2M/r²` at a box of
+  `16 M` ([What step B1 built and
+  measured](CODE.md#what-step-b1-built-and-measured-2026-10-25)).
+- A `:fitted` smoke run (`h = 1/24` on a box of `8 M`, `m = 16`, `n_L = 20`,
+  `σ_g = 1`, moving) reached `2 M`, the found center `0.074 M` behind the analytic
+  one.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 

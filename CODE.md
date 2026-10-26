@@ -109,6 +109,7 @@ research project; the inherited documents live in `notes/`.
   - [What the single holes hand over](#what-the-single-holes-hand-over)
   - [A case without a background](#a-case-without-a-background)
   - [The gauge](#the-gauge)
+    - [What step B1 built and measured (2026-10-25)](#what-step-b1-built-and-measured-2026-10-25)
   - [One interior per hole](#one-interior-per-hole)
   - [The tracks](#the-tracks)
   - [The common horizon and the handover](#the-common-horizon-and-the-handover)
@@ -1061,6 +1062,14 @@ sampled source does — masked error `1.44·10⁻⁵` against `1.11·10⁻⁵`, 
 `1.81·10⁻⁵` against `1.93·10⁻⁵`, `C_a` `3.87·10⁻⁶` against `3.96·10⁻⁶` — in
 `62 s` against `90 s`; `cfl = 1/2` reproduces `cfl = 1/4` to six digits at
 every row to `4 M`.
+
+**(Amended in step B1.)** `KerrSchildSource` is one `AlgebraicGaugeSource`
+among four: the kernels now evaluate `algebraic_gauge_source(src, x, t, h,
+∂ₜh, ∂h)` with the point's position and the time, which the tracked composite,
+the damped harmonic gauge and the roll-on read, and every launch is handed
+`effective_source(src, t)`. `KerrSchildSource`'s arithmetic, and the sampled
+source's, are what they were, bit for bit — [What step B1 built and
+measured](#what-step-b1-built-and-measured-2026-10-25).
 
 **Constraint damping** (decided): the Gundlach–Pretorius term `Z_ab`,
 with `γ0(x)` a *function of position* — a Gaussian of width a few `M`
@@ -4525,7 +4534,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
 | `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the **six** `Val`s (the SIMD width the sixth, from 2026-10-05) and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. Step 5 split the streaming body out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and added `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
 | `src/lanes.jl` | the right-hand-side kernel's SIMD lanes on the CPU (added 2026-10-05): `default_simd_width` and `check_simd_width`, `Lanes` (an array read and written `W` consecutive elements at a time, with the `Const` wrapper unwrapped), `is_lane_leader` (every `W`-th item, and the overlapping last group of a row), and the `Vec` methods of `pointwise.jl`'s `_anynonzero` and `_select`; the kernel's group is `evolution.jl`'s `gh_rhs_lanes!` |
-| `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c) |
+| `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c); the algebraic sources — `KerrSchildSource` (2026-10-02), and from step B1 `CompositeKerrSchildSource` of `TrackedHole`s, `DampedHarmonicSource`, `RolledGaugeSource`, `effective_source` — and `gauge_consistent_momentum` |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook, and the declarations TreeAMR's symmetries ask of every field set: the parities of the reflecting faces (`state_parity`, `even_parity`, added 2026-10-02) and the signed maps of the rotating seam (`state_rotation`, `identity_rotation`, added 2026-10-04) |
 | `src/bounds.jl` | the range projection (added in step 8b): `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
 | `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii and the hole's mass (`hole_mass`, added in step 8c′), and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes. **Step 8d adds the tracked geometry's kernel side**: the real harmonics (`real_harmonic_index`, `real_from_complex`/`complex_from_real`, the recurrence `shape_series`, `shape_bounds`), the analytic horizon of the seed (`analytic_horizon_radius`), `FittedSpec` — what a case holds — and `FittedInterior` — the kernel argument — with `interior_point`, `fitted_geometry`, `core_position`, `ShapeMask`, `ShapeBand`, `geometry_spacing` and its `check_interior_radii`; and the protocol both geometries speak (`in_layer(int, t, x)`, `interior_point`, `is_outside`, `geometry_radii`, `layer_radii`, `layer_mask`, `shell_mask`) |
@@ -6935,9 +6944,174 @@ data are `(γ_ij, K_ij)` with a lapse and a shift, and `Π` needs `∂_t α` and
 `∂_t β^i` as well. Those two are free. Choosing them so that
 `C_a = H_a + Γ_a = 0` at `t = 0` is four linear equations per point:
 `Γ_a` is linear in `∂_t g_tb`, with `g^{tt} = −1/α²` on the diagonal
-(**proposed**: `gauge_consistent_momentum`). For one boosted Kerr-Schild
+(**proposed**: `gauge_consistent_momentum`, built in step B1). For one boosted Kerr-Schild
 hole under its own source the result must be the analytic `Π` to roundoff,
 and that is its test.
+
+#### What step B1 built and measured (2026-10-25)
+
+Everything above in this section is built in `src/gauge.jl`, on one hole (the
+binary case is step B3's):
+
+- **The interface.** Every closed-form source is an `AlgebraicGaugeSource`
+  behind the kernels' existing `Val(:algebraic)`, evaluated as
+  `algebraic_gauge_source(src, x, t, h, ∂ₜh, ∂h)`. The kernels now pass the
+  point's position and the time (the right-hand side, the gauge constraint and
+  the ADM monitor; on SIMD lanes the position is one `Vec` per axis), and a
+  source that reads neither is compiled without them. **(Measured in step
+  B1:)** the right-hand side, both monitors' `diag` and both kernel widths are
+  bit for bit what they were for the sampled source (the step-5 fixture), no
+  source (the gauge wave), and `KerrSchildSource` at rest (the octant) and
+  moving (the quadrant).
+- **`effective_source(src, t)`** is what every launch is handed, chosen on the
+  host from that launch's `t` **(proposed in step B1)**: a roll-on's `from` up
+  to `t_0`, its `to` once its weight has underflowed, and the blend between;
+  and a one-hole composite without acceleration is its `KerrSchildSource`. So
+  those stretches are their sources' kernels bit for bit, and a kernel carries
+  nothing it does not evaluate. The composite's own kernel forms the same
+  arithmetic, but LLVM contracts that specialisation into fused multiply-adds
+  differently: on the moving quadrant hole its right-hand side differed from
+  the Kerr-Schild kernel's in a third of the entries, by at most `6·10⁻¹³`
+  against terms of `800` **(measured in step B1)**.
+- **The composite**, `CompositeKerrSchildSource(holes::TrackedHole...)`, with
+  `p = 4`. A `TrackedHole` is one hole on one piece of its track: the center to
+  second order about the piece's `t_p`, `c(t) = c₀ + v₀ τ + ½ a τ²`, and the
+  4-velocity and spin 4-vector to first order, `u = u₀ + u̇ τ`, `S = S₀ + Ṡ τ`,
+  with `u̇` and `Ṡ` the rates of `γ(1, v⃗)` and of the boosted rest-frame spin
+  under the acceleration **(proposed in step B1:** first order is what a piece
+  of `h/(4|v|)` needs, and keeps the rate a constant of the piece; the spin is
+  held fixed in the rest frame, no Thomas precession**)**. `∂_a H_b` carries
+  the weights' gradients in space and in time (through each `ċ`) and each
+  hole's `(∂H/∂u) u̇ + (∂H/∂S) Ṡ`. `K` is a type parameter; the sum is a
+  generated, closure-free block per hole.
+- **The damped harmonic gauge**, `DampedHarmonicSource(; σ_r, A_L1 = 1,
+  A_L2 = 0, A_S = 1, e_L1 = e_L2 = e_S = 2, center)`, exactly SpECTRE's form:
+  `μ_L2` carries `log(1/α)^{e_L2}` (the open question's `L^{e_X}` holds for
+  `μ_L1` and `μ_S`), and the Gaussian is about a fixed `center`. **How the sign
+  was fixed:** SpECTRE's gauge constraint is `C_a = H_a + Γ_a` (its
+  documentation of `gauge_constraint` and `trace_christoffel`), which is the
+  package's, so its `H_a` is used unchanged. On flat space with `β = 0` and
+  `K = 0`, `C_t = 0` is `∂_t L = −α (μ_L1 L + μ_L2 log(1/α))` and `C_i = 0` is
+  `∂_t β^i = −α μ_S β^i`: `L = log(√γ/α)`, a perturbed lapse and the shift are
+  driven back. `test/gauge_source_tests.jl` checks both through
+  `gauge_consistent_momentum` to `10⁻¹³`, and on a mesh a lapse perturbation
+  of flat space (`e = 0`, a linear rate) is halved by `t = 2` while the
+  harmonic gauge keeps it (`|h_tt|` `0.107` against `0.210`).
+- **The roll-on**, `RolledGaugeSource(from, to; σ_g, t_0 = 0)`: `f = 1` up to
+  `t_0` (SpECTRE's `R(t) = 0` before its `t_0`) and `e^{−((t − t_0)/σ_g)⁴}`
+  after, `C³` at `t_0`, and `∂_t H` carries `∂_t f (H_from − H_to)`. `GHCase`
+  checks a source at `t = 0`, so a roll-on from the hole's own source passes and
+  the damped harmonic gauge alone is refused on a hole, by name.
+- **`gauge_consistent_momentum(src, x, t, γ, K, α, β, ∂γ, ∂α, ∂β)`** returns
+  `Π`, `∂_t α` and `∂_t β^i` from `C_a = 0`, any source or a given `H_a`. A host
+  function; step B8 calls it.
+- **Run options.** `hole_case(; gauge_source = :composite)` is the one-hole
+  composite; `test/octant_runs.jl` takes `source=composite` and `gauge=dh`
+  with `sigma_g`, `t0`, `sigma_r`, the amplitudes and the exponents.
+
+**(Measured in step B1)** each source's `H` and `∂_a H_b` against ForwardDiff's
+derivative of its closed form, written out apart from the kernel's spelling, at
+random metrics near the holes and random times: one accelerating hole
+`1.8·10⁻¹⁶`, two holes `2.2·10⁻¹⁶`, the damped harmonic gauge `9.6·10⁻¹⁶`
+(`7.2·10⁻¹⁶` at `e = 0`), the roll-on half way `1.6·10⁻¹⁵`, all of the
+source's size. `gauge_consistent_momentum` returns the boosted, spinning,
+translated hole's `Π` under its own source to `7.0·10⁻¹⁵` of `Π`, and gives
+`C_a` of `5.7·10⁻¹⁶` of `H_a` and `∂_t h` for a perturbed lapse under every
+source. On SIMD lanes the
+new sources are the scalar ones to `16 ε` lane by lane, and the roll-on's
+kernel to `19 ε` of the terms on the moving quadrant hole (the lanes' `log` is
+LLVM's, the scalar one Julia's).
+
+**A miscompile, and the rule it leaves (found in step B1).** Written as an
+early `return` of the Kerr-Schild closed form at `u₀` before a second call at
+`u(t)`, the tracked source, inlined into a function that also took ForwardDiff
+Jacobians, came out of Julia 1.13.2 on aarch64 with `∂_x H` off by `10⁻³` of
+the source for an accelerating hole: at `-O2` and `-O3`, not at `-O1`, not
+with the call out of line, not on Julia 1.14.0-alpha1, and unchanged by
+`--check-bounds=yes`. The source now evaluates the closed form once and
+branches on its inputs, and the roll-on's ends are chosen on the host
+(`effective_source`) so that no kernel merges two inlined sources through an
+early return. `test/gauge_source_tests.jl`'s closed-form testset calls the
+sources in that shape, and failed before.
+
+**The far field is harmonic, and the Dirichlet data are not (found in step
+B1).** `μ_X ∝ L^e` with `e = 2`, and `L ≈ 2M/r` far from a Kerr-Schild hole,
+so the damped harmonic gauge is the harmonic gauge out there whatever `σ_r`
+is, while the outer boundary's Dirichlet data stay the Kerr-Schild solution,
+whose `Γ_a` is `−H^{KS}_a ≈ 2M/r²`: `5·10⁻⁴` at `64 M`. **(Measured in step
+B1:)** `C_a` in the blocks touching an outer face rose to `2.4·10⁻⁴` by `40 M`
+and was still growing linearly (`10⁻¹¹` in the Kerr-Schild gauge); travelling
+inward at most at the speed of light, it came no nearer than `24 M` to the hole
+in those runs. Step B5's frozen data at a far boundary meets the same mismatch;
+the damped harmonic gauge needs a boundary condition of its own there, or the
+third pairing's Kerr-Schild weight far away.
+
+**What a source costs (measured in step B1**, `bench/gauge_source_cost.jl`: one
+launch of the right-hand-side kernel on a filled working array, the
+Kerr-Schild exterior `[2, 6]³` with no interior, uniform, `q = 4`, `Float64`;
+on an H200 `N = 32` and 64 blocks, `2.1 M` points, the best of 20; on one core
+of an EPYC 7543 `N = 16` and 64 blocks, the best of 10; in ns per point**)**:
+
+| source | H200 | EPYC, scalar | EPYC, four lanes |
+|---|---|---|---|
+| none (`H ≡ 0`) | `1.05` | `994` | `467` |
+| sampled `Hsrc` | `1.48` | `1206` | `536` |
+| `KerrSchildSource` | `1.29` | `1206` | `477` |
+| one hole, accelerating | `1.20` | `1176` | `459` |
+| two holes | `1.56` | `1448` | `565` |
+| damped harmonic | `1.40` | `1346` | `621` |
+| roll-on, half way (both) | `1.74` | `1351` | `593` |
+
+A closed form adds a fifth to a half to the kernel without a source; the
+roll-on, which evaluates both of its ends while it rolls, adds two thirds on an
+H200 (`1.35×` the Kerr-Schild source's kernel), and costs one end's before
+`t_0` and after `f` has underflowed (`5.2 σ_g` after `t_0`). The one-hole rows
+within `0.1 ns` of each other are the measurement's resolution.
+
+**The damped harmonic gauge rolled on, on one hole (measured in step B1;**
+[`SINGULARITY_HANDLING.md`, "The damped harmonic gauge rolled
+on"](SINGULARITY_HANDLING.md#the-damped-harmonic-gauge-rolled-on-step-b1-2026-10-25)**).**
+The roll-on from the hole's own source over `σ_g = 10 M` **(proposed in step
+B1**, the low side of SpEC's `15–25 M` so that half of a `40 M` run is the
+gauge itself**)**, `σ_r = 32`, `A_L1 = A_S = 1/M`, `A_L2 = 0`, `e = 2`, on the
+boosted `a = 0` hole at `v = 1/5` on the quadrant and on the same hole at rest,
+`:fitted` (`m = 16`, `n_L = 20`, `fit_cont = 2`), `1/24` and `1/32`, to `40 M`,
+one H200 a run, against the same holes in their own Kerr-Schild gauge:
+
+- **The hole at rest settles.** From `20 M` its state's distance from the
+  Kerr-Schild solution is constant (`0.34` just outside the horizon), the horizon
+  has grown in coordinates from `2.00` to `2.06`, `ℋ` and `C_a` are `1.6×` and
+  `1.3×` the Kerr-Schild hole's in `[3, 5)` and `1.2×` and `1.3×` in `[5, 8)`,
+  flat, and `M_irr` is the Kerr-Schild hole's (`1 + 1.7·10⁻⁷` against
+  `1 + 1.5·10⁻⁷`).
+- **The moving hole does not.** It falls `0.49 M` behind the boosted hole's
+  center by `40 M` and its horizon loses the boost's contraction; from the end of
+  the roll-on its constraints grow at the horizon and travel out, `118×` and `72×`
+  the Kerr-Schild hole's `ℋ` in `[3, 5)` and `[5, 8)` at `40 M` at `1/24`, and its
+  `M_irr` is off by `−1.3·10⁻⁵` (Kerr-Schild: `+4.5·10⁻⁷`). At `1/32` the
+  excess outside `r = 3` is `6–31×` at `40 M` and `M_irr` is off by
+  `−1.0·10⁻⁶`, falling from `1/24` at order `5.5–10`: an under-resolved feature
+  of the moving hole under the new gauge, which `1/48` would test and which on
+  this capsule does not fit one H200. The lag is the same at both spacings: the
+  gauge's.
+- **The analytic `:damped` layer does not survive the gauge moving** (local smoke
+  runs at `1/16`): it holds the interior in Kerr-Schild's gauge while the source
+  moves the exterior, and the moving hole's run ended after `3 M`. So the pairing
+  is forced as this section says: the damped harmonic gauge goes with `:fitted`.
+- **Measure about the hole.** Under this gauge the hole is not at the analytic
+  center, and a shell about that center cut through the horizon
+  (`test/octant_runs.jl shell_center=track`); and `[2, 2.25)` straddles the grown
+  horizon, so `[3, 5)` and `[5, 8)` are the comparisons.
+- **The faces** take the far field's mismatch with the Kerr-Schild Dirichlet data
+  (above): `C_a` there `2.4·10⁻⁴` at `40 M`, growing, against `10⁻¹¹`.
+
+**What it says about the decision** ([What this asks Erik to
+decide](#what-this-asks-erik-to-decide)): on one hole, pairing (α)'s source is the
+accurate one. (β) holds a resting hole at the Kerr-Schild level outside the
+horizon and a moving one `6–31×` above it at `1/32` — the binary's case —
+improving fast with `h`. Before (β) is a candidate: the moving hole under the
+gauge at `1/48` (several GPUs on this capsule), or with a longer roll-on or
+another `:fitted` depth, and a boundary for its far field.
 
 ### One interior per hole
 
@@ -7714,3 +7888,9 @@ rate](SINGULARITY_HANDLING.md#the-moving-damped-layers-target-rate-2026-10-21)).
 It was not compared with G5's rows, which differ in chart, speed (`0.3`),
 order (`q = 2`) and spin. A moving spinning Kerr-Schild hole, `a = 9/10`
 above all, is still open.
+
+**Built (2026-10-25, step B1)**: the damped harmonic gauge of the second item,
+in SpECTRE's form (where `μ_L2` carries `log(1/α)^{e_L2}`, not `L^{e_L2}`),
+rolled on from the hole's own source, and run on the boosted and the resting
+`a = 0` hole on the quadrant — [What step B1 built and
+measured](#what-step-b1-built-and-measured-2026-10-25).

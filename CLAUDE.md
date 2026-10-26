@@ -571,6 +571,27 @@ not converge. The finder's `J` offset is the resting hole's
 (`SINGULARITY_HANDLING.md`, "Spin across the motion"). `1/40` at `a = 1/2`
 and `1/96` at `a = 9/10`, `v = 1/2` need several GPUs.
 
+From 2026-10-25 (step B1) there are **more algebraic gauge sources**, all
+behind `Val(:algebraic)` as `AlgebraicGaugeSource`s evaluated as
+`algebraic_gauge_source(src, x, t, h, ∂ₜh, ∂h)` — the kernels pass the point's
+position and the time now: `CompositeKerrSchildSource` of `K` `TrackedHole`s
+(each hole's line on a piece, the partition of unity at `p = 4`), the damped
+harmonic gauge `DampedHarmonicSource` in SpECTRE's form, and the roll-on
+`RolledGaugeSource(from, to; σ_g, t_0)`. Every launch is handed
+`effective_source(src, t)`: a roll-on's `from` before `t_0` and its `to` once
+it is done, and a steady one-hole composite's `KerrSchildSource`, so those are
+their sources' kernels bit for bit. `gauge_consistent_momentum` gives `Π` from
+`C_a = 0` (step B8's). `hole_case(; gauge_source = :composite)`;
+`test/octant_runs.jl` takes `source=composite` and `gauge=dh`;
+`bench/gauge_source_cost.jl` times the kernel per source (`CODE.md`, "What step
+B1 built and measured"). Its runs, the damped harmonic gauge rolled on over
+`10 M` on the boosted and the resting `a = 0` hole on the quadrant with
+`:fitted` to `40 M` (`SINGULARITY_HANDLING.md`, "The damped harmonic gauge
+rolled on"): the resting hole settles at the Kerr-Schild level outside `r = 3`
+(`1.2–1.6×`, order four); the moving hole falls `0.49 M` behind `c(t)` and is
+`6–31×` the Kerr-Schild hole's at `1/32` (`70–200×` at `1/24`); the analytic
+`:damped` layer does not survive the gauge moving.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -641,7 +662,18 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5664 assertions in 14m12** at four threads after the bitant
+The suite is **5737 assertions in 17m01** at four threads after step B1, rebased
+on the bitant (2026-10-26, TreeAMR 0.2.6, on a development machine loaded 7–9
+by other work): its 73 new claims are
+`gauge_source_tests.jl`'s step-B1 testset (64, `29.5 s` at one thread — the
+closed forms against ForwardDiff, `gauge_consistent_momentum`, the flat-space
+damped gauge on a mesh, the composite and the roll-on bit for bit on the
+moving quadrant) and `simd_tests.jl`'s roll-on kernel row and lane-by-lane
+sources (9, `19.9 s`). Before the rebase, on the tree without the bitant, it
+was **5690 in 16m11** at four threads and **5682 in 26m47** at one (2026-10-25,
+on a development machine loaded 12–18 by the step's own smoke runs and MPI job;
+that tree before step B1 measured 5617 in 16m37 and 5609 in 20m04 the same
+afternoon). It was **5664 assertions in 14m12** at four threads after the bitant
 (2026-10-24, TreeAMR 0.2.6): its 47 new claims are `boosted_tests.jl`'s four
 bitant testsets (the domain and its refusals, the exact least radius against
 the sampled surface, the source of a hole moving across its spin, and the
@@ -1154,6 +1186,19 @@ and the verdict matrix. It needs no package, so it runs without `--project`:
 ```bash
 julia --project=. test/octant_runs.jl backend=cuda case=ks octant=rotating_quadrant a=9/10 v=1/2 x0=-2 path=10 L=64 roots=4 radii=32,16,8,4,3,2 N=24 t_end=20 chunk=1 split=0 cfl=1/2 amplitude=0 r_0=19/20 r_1=9/8 group=aligned out=out/a9v5h96 checkpoint=out/a9v5h96/ck checkpoint_every=4 walltime=40000
 julia test/aligned_study.jl
+```
+
+From 2026-10-25 (step B1) `gauge=dh` rolls the damped harmonic gauge on from
+the hole's own source (`sigma_g=10 t0=0 sigma_r=32 A_L1=1 A_L2=0 A_S=1 e=2`
+are the defaults), and `source=composite` is the one-hole composite. The
+first line is a local smoke run, the second step B1's `1/32` row (job 582574
+in `step-B1-gauge`, one H200), the third the kernel's cost per point with each
+source (`backend=cuda` on an H200, from a copy with `CUDA` added):
+
+```bash
+julia --project=. --threads=6 test/octant_runs.jl case=ks octant=quadrant L=16 N=16 roots=1 radii=8,6,4,3 r_0=5/8 r_1=23/16 t_end=4 chunk=1/2 cfl=1/2 amplitude=0 x0=-1 path=4/5 v=1/5 gauge=dh sigma_g=1 out=out/s16dm
+julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=32 t_end=40 chunk=1 split=1 cfl=1/2 amplitude=0 interior=fitted margin=16 n_L=20 fit_cont=2 lmax_fit=8 v=1/5 x0=-4 path=8 gauge=dh sigma_g=10 sigma_r=32 group=step-B1 out=out/b1dm32 checkpoint=out/b1dm32/ck checkpoint_every=4 walltime=40000
+julia --project=. -t 1 bench/gauge_source_cost.jl N=16 roots=4
 ```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
@@ -1859,6 +1904,41 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   about `z` reverses its velocity. Its domain is the bitant, at twice the
   quadrants' points. The half turn is for a pair of holes, each the other's
   image.
+- **Do not merge two inlined copies of a source through an early return**
+  (found in step B1). Julia 1.13.2 on aarch64 compiled the tracked source —
+  `if steady; return closed_form(u₀); end; …; return closed_form(u(t)) + rate`
+  — inlined into a function that also took ForwardDiff Jacobians, into code
+  whose `∂_x H` was off by `10⁻³` of the source: at `-O2` and `-O3`, not at
+  `-O1`, not out of line, not on 1.14.0-alpha1, unchanged by
+  `--check-bounds=yes`. Evaluate the closed form once and branch on its
+  inputs, and choose between whole sources on the host
+  (`effective_source(src, t)`, which is how the roll-on's two ends reach the
+  kernels). The symptom is an error of the size of a term in one row of
+  `∂_a H_b` that comes and goes with unrelated code around the call;
+  `test/gauge_source_tests.jl`'s closed-form testset calls the sources in that
+  shape.
+- **A gauge source is checked at `t = 0`, and must be exact there**
+  (step B1). `GHCase` evaluates `effective_source(src, 0)` against the
+  background's `−Γ_a`, so a `RolledGaugeSource` from the hole's own source with
+  `t_0 ≥ 0` passes and a bare `DampedHarmonicSource` on a hole is refused, as is
+  a composite with an acceleration (its `∂_t H` is not the background's). A
+  test that needs such a source in a kernel builds a case without the check
+  (`bench/gauge_source_cost.jl`'s `carrying`) or evaluates it pointwise.
+- **The damped harmonic gauge is harmonic far away, and the Dirichlet data are
+  Kerr-Schild** (step B1). `μ ∝ L²` with `L ≈ 2M/r`, so after the roll-on the
+  faces' data violate `C_a` by Kerr-Schild's `2M/r²` (`5·10⁻⁴` at `64 M`),
+  whatever `σ_r` is. Read the shells about the hole, not the global `C_a`, of a
+  `gauge=dh` run, and see `CODE.md`, "What step B1 built and measured".
+- **Under a gauge that moves the hole, measure about the hole** (step B1).
+  `test/octant_runs.jl`'s shells and split are about the analytic `c(t)` by
+  default; under the damped harmonic gauge the moving hole fell `0.49 M` behind
+  it, and a shell about `c(t)` read the horizon's inside (`ℋ` `5×` too large).
+  Pass `shell_center=track` (a `:fitted` hole), and remember that the gauge also
+  grows the horizon's coordinate radius (`2.00` → `2.06`), so `[2, 2.25)`
+  straddles it.
+- **The lanes' `log` and `exp` are LLVM's, the scalar ones Julia's** (step
+  B1). The damped harmonic gauge's kernel on lanes is the scalar one to `19 ε`
+  of the terms, not the `1–2 ε` of the other sources.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
   dissipation", — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in

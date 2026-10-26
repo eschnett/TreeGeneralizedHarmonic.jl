@@ -26,7 +26,8 @@ first, before excision" (proposed in step 8′) awaiting Erik's decision.
 Step 9 (G6), which does not depend on it, is running (started
 2026-09-25).**
 
-**Steps B1–B9 (added 2026-10-25) are proposed and not started**: binary
+**Steps B1–B9 (added 2026-10-25) are proposed; B1 ran on 2026-10-25** (branch
+`claude/step-B1-gauge-sources`, awaiting review; B2–B9 not started): binary
 black holes, toward `CODE.md`'s milestones G7 and G8, which go beyond the
 proof of concept. The design is `CODE.md`, "Binary black holes", and Erik
 decides the gauge and interior pairing after B1 and B2. This file stays
