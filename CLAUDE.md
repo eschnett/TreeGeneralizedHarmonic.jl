@@ -1191,13 +1191,14 @@ julia test/aligned_study.jl
 From 2026-10-25 (step B1) `gauge=dh` rolls the damped harmonic gauge on from
 the hole's own source (`sigma_g=10 t0=0 sigma_r=32 A_L1=1 A_L2=0 A_S=1 e=2`
 are the defaults), and `source=composite` is the one-hole composite. The
-first line is a local smoke run, the second step B1's `1/32` row (job 582574
+first line is a local smoke run, the second step B1's moving `1/32` row with
+its shells about the tracked horizon (`b1dm32t`, jobs 582624, 582634 and 582663
 in `step-B1-gauge`, one H200), the third the kernel's cost per point with each
 source (`backend=cuda` on an H200, from a copy with `CUDA` added):
 
 ```bash
 julia --project=. --threads=6 test/octant_runs.jl case=ks octant=quadrant L=16 N=16 roots=1 radii=8,6,4,3 r_0=5/8 r_1=23/16 t_end=4 chunk=1/2 cfl=1/2 amplitude=0 x0=-1 path=4/5 v=1/5 gauge=dh sigma_g=1 out=out/s16dm
-julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=32 t_end=40 chunk=1 split=1 cfl=1/2 amplitude=0 interior=fitted margin=16 n_L=20 fit_cont=2 lmax_fit=8 v=1/5 x0=-4 path=8 gauge=dh sigma_g=10 sigma_r=32 group=step-B1 out=out/b1dm32 checkpoint=out/b1dm32/ck checkpoint_every=4 walltime=40000
+julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=32 t_end=40 chunk=1 split=1 cfl=1/2 amplitude=0 interior=fitted margin=16 n_L=20 fit_cont=2 lmax_fit=8 v=1/5 x0=-4 path=8 gauge=dh sigma_g=10 sigma_r=32 shell_center=track group=step-B1 out=out/b1dm32t checkpoint=out/b1dm32t/ck checkpoint_every=4 walltime=40000
 julia --project=. -t 1 bench/gauge_source_cost.jl N=16 roots=4
 ```
 
