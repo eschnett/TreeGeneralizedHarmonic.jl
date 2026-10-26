@@ -7345,9 +7345,9 @@ on the same commit and cadence:
   mass row's scale, about `15×` just outside each horizon unless the target learns
   the tidal field **(predicted)**.
 - **The recovery**: a track seeded `0.05` too fast puts the target `1.2` cells ahead
-  at its first find (accepted: the check is `1.5` cells at `1/24`), has the hole's
-  velocity from the second and is the tracked target's track from then on, with no
-  refusal; the layer residual is the exact target's from `4 M`, and the transient
+  at its second find, at `1 M` (accepted: the check is `1.5` cells at `1/24`) — the
+  first, at `t = 0`, keeps the seed's velocity — whose chord is the hole's velocity,
+  and is the tracked target's track from `2 M` on, with no refusal; the layer residual is the exact target's from `4 M`, and the transient
   the first `2 M` sent out (`ℋ` `36×` just outside the horizon at `4 M`) has left
   every shell by `40 M`.
 

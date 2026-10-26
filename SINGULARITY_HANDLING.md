@@ -3841,11 +3841,11 @@ analytic ones at `1, 2, 4, 8, 16, 24, 32, 40 M`, in the shells just outside the 
   hole") — is at `d = 10` a twentieth of the `1 %` the mass row carries, and at
   `d = 3` twice it.
 - **The recovery is the track's, in one find, and the run's, in one crossing.** The
-  seed carries the target `0.05 M` ahead of the hole by the first find at `1 M` —
-  `1.2` cells, inside the check's `1.5` at `1/24` — which keeps the seed's velocity;
-  the second, at `2 M`, is the chord, `0.2000`, and from then on the track is the
-  tracked target's — `10⁻⁶–10⁻⁵` cells off the analytic center to `16 M`, `1.2·10⁻⁴`
-  at `40 M` — and its predictions within `7·10⁻⁶` cells of the finds. The layer
+  first find, at `t = 0`, keeps the seed's velocity, which carries the target
+  `0.05 M` ahead of the hole by the second, at `1 M` — `1.2` cells, inside the
+  check's `1.5` at `1/24` — and that find's chord is the hole's `0.2000`; from
+  `2 M` on the track is the tracked target's — `10⁻⁶–10⁻⁵` cells off the analytic
+  center to `16 M`, `1.2·10⁻⁴` at `40 M` — and its predictions within `7·10⁻⁶` cells of the finds. The layer
   residual is `8.2` and `5.0` at `1` and `2 M` and the exact target's from `4 M`. What the first two `M` left in the layer travels out — `ℋ`
   `36×` just outside the horizon at `4 M`, `14.5×` in `[3, 5)` at `8 M`, `14×` in
   `[5, 8)` at `16 M` — and leaves: by `40 M` every shell and the evolved region are
@@ -3853,21 +3853,6 @@ analytic ones at `1, 2, 4, 8, 16, 24, 32, 40 M`, in the shells just outside the 
   `M_irr` is its to two digits (`4.30·10⁻⁷` against `4.28·10⁻⁷`). No refusal; the
   row was pre-empted twice (above) and continued from its checkpoints at `4` and
   `16 M`.
-
-**What it says.** The tracked analytic target is the accurate moving `:damped` layer
-without the analytic background: on one hole in its own gauge it is the analytic layer
-to the tracking, `10⁻³` and order four at both spacings, at the analytic layer's cost,
-and a track started wrong recovers in two finds without a refusal. A target whose
-parameters are wrong is the layer's business and the band's just outside the horizon:
-`1 %` of mass costs `7.5×` there, `0.02` of velocity `18×`, a cell of center `16–26×`,
-steadily, and nothing from `r = 3` out once the start's transient has passed. For
-pairing (α) that puts the open question where `CODE.md`'s "One interior per hole"
-put it — whether a target without the companion's tidal field is good enough late
-in the inspiral — with a scale: at `d = 10` its error is a twentieth of the mass
-row's, at `d = 3` twice it. Beside step B1's (β), `6–31×` the Kerr-Schild hole outside
-`r = 3` at `1/32` and still growing, the numbers favour (α).
-
-## The interior's questions, opened in step 5 and closed through step 8′
 
 **The local smoke runs (2026-10-26, the development machine, three threads each,
 loaded 13–28 by other work).** B1's smoke setup — the moving hole at `h = 1/16` on a
@@ -3894,12 +3879,25 @@ over the analytic layer at `1, 2, 3, 4 M`:
   `10×` the analytic layer's after `2 M`, and on its way out by `4 M`. The tracked
   center is good to `10⁻⁵` cells; a cell is the scale of a find that has converged
   to the wrong surface, which the center-jump check refuses.
-- **The recovery is the track's, in two finds**: the first find, at `t = 1/2`,
-  predicts `0.025 M` (`0.4` cells) off, the chord of the first two gives the hole's
-  `0.2000`, and from `t = 1` the track is within `3·10⁻⁵` cells, the residual the
-  analytic layer's from `3 M`. What the half `M` of a target running ahead left in
+- **The recovery is the track's, in two finds**: the first, at `t = 0`, keeps the
+  seed's velocity, the second, at `t = 1/2`, finds the hole `0.025 M` (`0.4` cells)
+  off the prediction, and the chord of the two is the hole's `0.2000`; from `t = 1`
+  the track is within `3·10⁻⁵` cells, the residual the analytic layer's from `3 M`. What the half `M` of a target running ahead left in
   the layer travels out — `ℋ` in `[3, 5)` `5.4×` at `4 M` — which the `40 M` row
   follows.
+
+**What it says.** The tracked analytic target is the accurate moving `:damped` layer
+without the analytic background: on one hole in its own gauge it is the analytic layer
+to the tracking, `10⁻³` and order four at both spacings, at the analytic layer's cost,
+and a track started wrong recovers in two finds without a refusal. A target whose
+parameters are wrong is the layer's business and the band's just outside the horizon:
+`1 %` of mass costs `7.5×` there, `0.02` of velocity `18×`, a cell of center `16–26×`,
+steadily, and nothing from `r = 3` out once the start's transient has passed. For
+pairing (α) that puts the open question where `CODE.md`'s "One interior per hole"
+put it — whether a target without the companion's tidal field is good enough late
+in the inspiral — with a scale: at `d = 10` its error is a twentieth of the mass
+row's, at `d = 3` twice it. Beside step B1's (β), `6–31×` the Kerr-Schild hole outside
+`r = 3` at `1/32` and still growing, the numbers favour (α).
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 
