@@ -133,6 +133,17 @@ export fit_track_quadratic, find_count, find_interval, tracked_interior
 export real_shape, analytic_shape, fitted_interior, surface_shift
 export axis_dispersion, margin_efolds
 
+# Several holes in one case (step B3): the hole, the superposed data, the
+# composite interior and its masks, the per-hole profiles, and the builders that
+# feed them from the tracks
+export HoleSpec, scaled_spec, initial_line, hole_metric, kerr_schild_on_line
+export SuperposedMetric, superposed_kerr_schild, HolesSpec, HoleInteriors
+export layer_coordinate, acting_interior, outside_all, HolesMask, AnyMask
+export HolesDamping, holes_damping, holes_center, HolesDissipation
+export binary_case, head_on_holes, holes_source, check_holes_source, holes_forest
+export seed_tracks, holes_interior, holes_source_at, holes_seed_source_at, holes_case_at
+export with_case, gauge_consistent_state
+
 # The fitted target (step 8e): the fit's variables, the solid harmonics, the
 # samplers, the fit, its sweep and its evaluator
 export fit_variables, state_from_fit, real_solid_harmonics, fit_directions
@@ -206,6 +217,9 @@ include("interior.jl")
 # `diag` slots and `point_position`, which are resolved when they compile.
 include("bounds.jl")
 include("gauge.jl")
+# After `interior.jl` and `gauge.jl`, whose layers and profiles it composes, and
+# before `initialdata.jl`, whose `GHCase` holds the holes (added in step B3).
+include("holes.jl")
 include("initialdata.jl")
 include("boundaries.jl")
 # Before `evolution.jl`, whose kernel evaluates `W` points at a time through it

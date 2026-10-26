@@ -901,3 +901,169 @@ function margin_efolds(background, int::FittedInterior{T}, q::Integer; t,
     finite = filter(isfinite, out)
     return (min=isempty(finite) ? NaN : minimum(finite), per_direction=out)
 end
+
+# --- several holes (step B3) ----------------------------------------------------
+#
+# `CODE.md`, "One interior per hole" and "The tracks": one track per hole, and
+# from the `K` tracks, once per piece of a chunk, the composite interior — each
+# hole's tracked target on its own track's line — and the case's profiles and
+# gauge source, which follow the tracks too (pairing (α), decided by Erik
+# 2026-10-26). Everything here is host-side and per piece.
+
+"""
+    seed_tracks(case::GHCase, t) -> Vector{HorizonTrack}
+
+The tracks of a case of several holes before anything has been found (added in
+step B3): one per hole, each from its [`HoleSpec`](@ref) — the center, velocity
+and acceleration carried to `t` along the hole's initial quadratic, the velocity
+plus its spec's `seed_velocity_offset`, the radii and the shape of the hole's own
+metric ([`hole_metric`](@ref)), `source = :analytic` — and predicting along the
+quadratic with the seed's acceleration, which is what step B2 found a binary's
+first find needs.
+"""
+function seed_tracks(case::GHCase{T}, t) where {T}
+    case.interior isa HolesSpec || throw(ArgumentError(
+        "seed_tracks seeds a case of several holes; this case's interior is a " *
+        "$(typeof(case.interior)) (seed_track is one hole's)."))
+    return HorizonTrack{T}[seed_hole_track(h, T(t)) for h in case.holes]
+end
+
+function seed_hole_track(h::HoleSpec{T}, t) where {T}
+    spec = h.interior
+    lmax = spec.lmax_shape
+    bg = hole_metric(h)
+    tt = T(t)
+    c = h.center + tt * h.velocity + (tt * tt / 2) * h.acceleration
+    v = h.velocity + tt * h.acceleration + spec.seed_velocity_offset
+    tr = HorizonTrack{T}(tt, c, v, T(_seed_r_min(bg, lmax)), T(horizon_max_radius(bg)),
+                         analytic_shape(bg, lmax), Int(lmax), nothing, nothing,
+                         :analytic, 0, 0)
+    spec.quadratic || return tr
+    l = TrackLine{T}(tt, c, v, h.acceleration)
+    return _with_prediction(tr; quadratic=true, pred=l, prev=l, t_blend=tt, blend=zero(T))
+end
+
+"""
+    holes_interior(case::GHCase, tracks, t; ρ_max = 0) -> HoleInteriors
+
+The composite interior of a case of several holes at time `t` (added in step B3):
+each hole's step-B2 tracked target ([`tracked_interior`](@ref)) about its own
+track's line at `t`, with its own mass and spin, relaxing toward the
+superposition of every hole on its track's line — the data's own form, with the
+data's two attenuations — or, with the case's `hole_target = :own`, toward its own
+hole alone ([`HolesSpec`](@ref)). `own` holds each hole's own target, which the
+checks read. `ρ_max` is a placeholder, as in every interior a case builds; the
+driver sets the chunk's.
+"""
+function holes_interior(case::GHCase{T}, tracks, t; ρ_max=zero(T)) where {T}
+    spec = case.interior
+    spec isa HolesSpec || throw(ArgumentError(
+        "holes_interior builds the composite of a case of several holes; this case's " *
+        "interior is a $(typeof(spec))."))
+    holes = case.holes
+    K = length(holes)
+    length(tracks) == K || throw(ArgumentError(
+        "a case of $K holes takes $K tracks, got $(length(tracks))."))
+    tt = T(t)
+    own = ntuple(A -> tracked_interior(holes[A].interior, tracks[A], tt;
+                                       mass=holes[A].mass, spin=holes[A].spin[3],
+                                       ρ_max=ρ_max), Val(K))
+    targets = ntuple(A -> own[A].target, Val(K))
+    spec.superposed || return HoleInteriors(own, targets)
+    bg = case.background
+    ℓ = bg isa SuperposedMetric ? bg.ℓ : ntuple(_ -> T(Inf), Val(K))
+    λ = bg isa SuperposedMetric ? bg.λ : ntuple(_ -> zero(T), Val(K))
+    sup = SuperposedMetric{T,K,eltype(targets)}(targets,
+                                                ntuple(A -> own[A].center, Val(K)), ℓ,
+                                                λ)
+    ints = ntuple(Val(K)) do A
+        o = own[A]
+        Interior(T; center=o.center, r_0=o.r_0, r_1=o.r_1, ρ_max=o.ρ_max,
+                 variant=:damped, w_ramp=o.w_ramp, ρ_ramp=o.ρ_ramp, margin=o.margin,
+                 target=sup)
+    end
+    return HoleInteriors(ints, targets)
+end
+
+"""
+    holes_source_at(case::GHCase, tracks, t) -> CompositeKerrSchildSource
+
+The composite tracked Kerr-Schild source of the holes for the piece about `t`
+(added in step B3; `CODE.md`, "The gauge", pairing (α)): each hole a
+[`TrackedHole`](@ref) of its mass and spin on its track's state at `t` —
+[`track_state`](@ref)'s center, velocity and acceleration, so that the piece's
+center is the track's to second order about `t_p = t` and `∂_t H` carries the
+acceleration (`TrackedHole`'s `(∂H/∂u) u̇ + (∂H/∂S) Ṡ`) as well as the weights'
+motion.
+"""
+function holes_source_at(case::GHCase{T}, tracks, t) where {T}
+    holes = case.holes
+    K = length(holes)
+    tt = T(t)
+    return CompositeKerrSchildSource(ntuple(Val(K)) do A
+        c, ċ, c̈ = track_state(tracks[A], tt)
+        TrackedHole(T; M=holes[A].mass, spin=holes[A].spin, center=c, velocity=ċ,
+                    acceleration=c̈, t_p=tt)
+    end...)
+end
+
+"""
+    holes_seed_source_at(case::GHCase, t) -> CompositeKerrSchildSource
+
+The composite source of the holes on their seeds' quadratics, for the piece about
+`t` (added in step B3; `source_feed = :seed`): each hole's [`HoleSpec`](@ref)
+center, velocity and acceleration carried to `t`, `c₀ + v₀ t + ½ a t²` — for a
+head-on pair from rest, Newtonian free fall at the initial separation's
+acceleration — as a [`TrackedHole`](@ref) about `t_p = t`.
+"""
+function holes_seed_source_at(case::GHCase{T}, t) where {T}
+    holes = case.holes
+    K = length(holes)
+    tt = T(t)
+    return CompositeKerrSchildSource(ntuple(Val(K)) do A
+        h = holes[A]
+        TrackedHole(T; M=h.mass, spin=h.spin,
+                    center=h.center + tt * h.velocity + (tt * tt / 2) * h.acceleration,
+                    velocity=h.velocity + tt * h.acceleration, acceleration=h.acceleration,
+                    t_p=tt)
+    end...)
+end
+
+"""
+    holes_case_at(case::GHCase, tracks, t) -> GHCase
+
+The case of several holes as the piece about `t` runs it (added in step B3): its
+gauge source fed by the tracks ([`holes_source_at`](@ref)) — or by the seeds'
+quadratics, `source_feed = :seed` ([`holes_seed_source_at`](@ref)) — and the holes'
+Gaussians of `γ0` and their `ε_KO` profiles moved onto the tracks' lines at `t`
+([`track_center`](@ref)`(tr, t)`) — the remnant's Gaussian stays on the center of
+mass. Everything else is the case's; the type is the case's, so the kernels it is
+handed to are the ones already compiled ([`with_case`](@ref)).
+"""
+function holes_case_at(case::GHCase{T}, tracks, t) where {T}
+    K = length(case.holes)
+    lines = ntuple(A -> track_center(tracks[A], T(t)), Val(K))
+    src = case.interior.feed_source ? holes_source_at(case, tracks, t) :
+          holes_seed_source_at(case, t)
+    return GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
+                  typeof(case.refinement),typeof(case.horizon),typeof(case.bounds),
+                  typeof(case.ε_KO),typeof(src),typeof(case.holes)}(
+        case.background, case.box, case.periodic, case.reflecting, case.rotating,
+        _on_lines(case.ε_KO, lines), _on_lines(case.γ0, lines), case.γ2, case.center,
+        case.interior, case.refinement, case.horizon, case.bounds, case.chunk, src,
+        case.holes)
+end
+
+# A profile's hole terms on the tracks' lines; a constant, or another profile,
+# stays as it is.
+_on_lines(x, lines) = x
+_on_lines(d::HolesDamping{T,K}, lines) where {T,K} =
+    HolesDamping{T,K}(ntuple(A -> GaussianDamping{T}(d.holes[A].near, d.holes[A].far,
+                                                     d.holes[A].width, lines[A]), Val(K)),
+                      d.remnant, d.far)
+_on_lines(d::HolesDissipation{T,K}, lines) where {T,K} =
+    HolesDissipation{T,K}(ntuple(A -> HorizonDissipation{T}(d.profiles[A].ε_out,
+                                                            d.profiles[A].ε_in,
+                                                            d.profiles[A].r_1,
+                                                            d.profiles[A].r_h, lines[A]),
+                                 Val(K)))

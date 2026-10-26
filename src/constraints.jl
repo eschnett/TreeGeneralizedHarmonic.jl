@@ -339,6 +339,27 @@ singular inside the offset surface **(proposed in step 8e)**.
         diag[inner..., DIAG_ERR, b] = keep ? e : zero(T)
         diag[inner..., DIAG_RES, b] = lay ? ef : zero(T)
         diag[inner..., DIAG_DRIFT, b] = inshell ? d1 : zero(T)
+    elseif interior isa HoleInteriors
+        # Several holes (step B3): no reference — a superposition is not a
+        # solution, and the background is only the data — so the error and the
+        # drift are zero, and the residual is the acting hole's layer's distance
+        # from its own target (`acting_interior`). Names of their own, for the
+        # reason the branch above gives.
+        ih = acting_interior(interior, t, x)
+        kh = is_evolved(mask, x)
+        lh = in_layer(ih, t, x)
+        rh = zero(T)
+        if lh
+            vhole = case_state_tuple(layer_target(ih, bg), ih, t, x)
+            rh = sqrt(_fold(ntuple(Val(2 * NC)) do v
+                d = work[c..., v, b] - vhole[v]
+                d * d
+            end))
+        end
+        diag[inner..., DIAG_MASK, b] = kh ? one(T) : zero(T)
+        diag[inner..., DIAG_ERR, b] = zero(T)
+        diag[inner..., DIAG_RES, b] = lh ? rh : zero(T)
+        diag[inner..., DIAG_DRIFT, b] = zero(T)
     else
     vals = case_state_tuple(bg, interior, t, x)
     # A fold rather than an accumulator: a kernel body may not close over a
@@ -571,6 +592,13 @@ until then). The residual and the drift live where the mask is zero, so the
 fold reads every owned point and does not gate on it, as the reductions did.
 """
 function error_norms(p::GHProblem{T}) where {T}
+    # A case of several holes has no exact solution to measure an error
+    # against (step B3; `CODE.md`, "A case without a background").
+    p.interior isa HoleInteriors && throw(ArgumentError(
+        "this problem's case has several holes, and its background is the data — a " *
+        "superposition, which is not a solution — so there is no error to measure: " *
+        "judge it by its constraints, its self-convergence and its horizons. The " *
+        "layers' residual against their targets is the record's `residual`."))
     return _error_rows(diag_norms(p, DIAG_MASK:DIAG_DRIFT))
 end
 

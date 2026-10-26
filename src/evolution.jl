@@ -468,13 +468,20 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
         gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, x, t, var, st, sv, inv_h,
                       γ0, γ2, εh, Val(q), Val(HASH), Val(DISS))
     else
+        # The one hole that acts here (step B3): for several holes the hole
+        # deepest in its own layer — `CODE.md`'s composition, `w = min w_A`,
+        # `ρ = max ρ_A`, the union of the cores, the target of the largest
+        # `ρ_A` — and for one interior that interior itself, so that every
+        # branch below is the single-hole arithmetic of the hole it names
+        # ([`acting_interior`](@ref)). Its own name, assigned once.
+        ia = acting_interior(interior, t, x)
         # The interior's view of the point (step 8d): the radius for step
         # 5's sphere, and for the tracked geometry the radius with the two
         # surfaces' radii along the ray — `interior_point`, which evaluates
         # the shape's series only between its bounding spheres. The three
         # branches below are the same for both.
-        g = interior_point(interior, t, x)
-        if is_frozen(interior, g)
+        g = interior_point(ia, t, x)
+        if is_frozen(ia, g)
             # `F` is not evaluated: this is the branch `CLAUDE.md` says must
             # come before the stencils. `du = 0` for the analytic variants
             # of a hole at rest; the `:damped` core of a *moving* analytic
@@ -483,7 +490,7 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
             if INT === :fitted && (fitp !== nothing || !iszero(trail))
                 # Step 8′'s levers (the side-dependent ramp does not touch
                 # the core, where `ρ = ρ_max` already; the exact target does).
-                ρk = interior.ρ_max
+                ρk = ia.ρ_max
                 tk = _lever_target(tw, inner, b, t, t_f, fitp, x)
                 ntuple(Val(2 * NC)) do v
                     du[inner..., v, b] = (rate ? _cached_rate(tw, inner, b, v) :
@@ -492,7 +499,7 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                     nothing
                 end
             elseif INT === :fitted
-                ρc = interior.ρ_max
+                ρc = ia.ρ_max
                 # With the target's rate (step 8) the core follows the moving
                 # target instead of lagging it by `|∂_t u_fit|/ρ_max`: `du =
                 # ∂_t u_fit − ρ_max (u − u_fit)`, `∂_t u_fit` the cache's slope.
@@ -512,7 +519,7 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                         nothing
                     end
                 end
-            elseif INT === :damped && core_follows(interior)
+            elseif INT === :damped && core_follows(ia)
                 # A moving hole's analytic core (amended 2026-10-20): frozen,
                 # it would keep its `t = 0` data — the solution about `c(0)` —
                 # and release them into the layer on its trailing side, a
@@ -534,11 +541,11 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                 # the target jumps where the center's path crosses a point, and
                 # at `ρ_max` a fast hole released that jump into the layer.
                 # (Its own names: `ρc` is the fitted core's, captured above.)
-                ρd = core_rate(interior)
-                tgd = layer_target(interior, bg)
-                hd, Πd, _ = background_state(tgd, t, core_position(interior, t, x))
-                ∂ₜhd, ∂ₜΠd = core_target_rate(interior, tgd, t, x,
-                                              layer_rate_step(interior))
+                ρd = core_rate(ia)
+                tgd = layer_target(ia, bg)
+                hd, Πd, _ = background_state(tgd, t, core_position(ia, t, x))
+                ∂ₜhd, ∂ₜΠd = core_target_rate(ia, tgd, t, x,
+                                              layer_rate_step(ia))
                 hud = SVector{NC,T}(@ntuple 10 v -> work[var + (v - 1) * sv])
                 dhd = core_relaxation_rate(hud, SVector{NC,T}(hd), ρd, ∂ₜhd)
                 ntuple(Val(NC)) do v
@@ -557,7 +564,7 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
             ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, x, t, var, st, sv,
                                        inv_h, γ0, γ2, εh, Val(q), Val(HASH),
                                        Val(DISS))
-            if is_outside(interior, g)
+            if is_outside(ia, g)
                 ntuple(Val(NC)) do v
                     du[inner..., v, b] = ∂ₜh[v]
                     du[inner..., NC + v, b] = ∂ₜΠ[v]
@@ -567,8 +574,8 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                 # Step 8′'s levers in the layer: the ramp narrowed on the
                 # trailing side (`trail`), the target the latest fit carried
                 # by its center to `t` exactly (`fitp`), or both.
-                wl, ρl = iszero(trail) ? interior_profiles(interior, g) :
-                         _trail_profiles(interior, g, t, x, trail)
+                wl, ρl = iszero(trail) ? interior_profiles(ia, g) :
+                         _trail_profiles(ia, g, t, x, trail)
                 tg = _lever_target(tw, inner, b, t, t_f, fitp, x)
                 ol = one(T) - wl
                 ntuple(Val(NC)) do v
@@ -588,7 +595,7 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                 # variable and no evaluation of the fit here.
                 # (Its own names: `w` and `ρ` are captured below, and a
                 # captured variable assigned twice in one function is boxed.)
-                wf, ρf = interior_profiles(interior, g)
+                wf, ρf = interior_profiles(ia, g)
                 if rate
                     # The target's rate where `F` is switched off (step 8):
                     # `(1 − w) ∂_t u_fit`, so that a target that is the moving
@@ -617,7 +624,7 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                         nothing
                     end
                 end
-            elseif INT === :damped && core_follows(interior)
+            elseif INT === :damped && core_follows(ia)
                 # The layer of a moving analytic sphere (amended 2026-10-20):
                 # the target's rate where `F` is switched off, `(1 − w) ∂_t
                 # u_exact` — the `:fitted` layer's `target_rate` — so that the
@@ -629,9 +636,9 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                 # ([`background_state_rate`](@ref)). A hole at rest takes the
                 # branch below, bit for bit.
                 # (Its own names: `w`, `ρ`, `he`, `Πe` are the branch below's.)
-                wm, ρm = interior_profiles(interior, g)
+                wm, ρm = interior_profiles(ia, g)
                 hm, Πm, ∂ₜhm, ∂ₜΠm = background_state_rate(
-                    layer_target(interior, bg), t, x, layer_rate_step(interior))
+                    layer_target(ia, bg), t, x, layer_rate_step(ia))
                 om = one(T) - wm
                 ntuple(Val(NC)) do v
                     du[inner..., v, b] =
@@ -643,10 +650,10 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
                     nothing
                 end
             else
-                w, ρ = interior_profiles(interior, g)
+                w, ρ = interior_profiles(ia, g)
                 # `u_exact` is the layer's *target* (step 8c): the case's
                 # background unless the interior names another metric.
-                he, Πe, _ = background_state(layer_target(interior, bg), t, x)
+                he, Πe, _ = background_state(layer_target(ia, bg), t, x)
                 ntuple(Val(NC)) do v
                     du[inner..., v, b] =
                         w * ∂ₜh[v] - ρ * (work[var + (v - 1) * sv] - he[v])
@@ -716,8 +723,7 @@ speed check read it.
     if INT === :none
         gh_rhs_store!(dl, o, sd, V, wl, Hl, inner, b, xv, t, var, st, sv, inv_h, γ0,
                       V(γ2), εh, Val(q), Val(HASH), Val(DISS))
-    elseif all(ntuple(l -> is_outside(interior, interior_point(interior, t, xs[l])),
-                      Val(W)))
+    elseif all(ntuple(l -> outside_all(interior, t, xs[l]), Val(W)))
         ∂ₜh, ∂ₜΠ = gh_rhs_at_point(V, wl, Hl, inner, b, xv, t, var, st, sv, inv_h, γ0,
                                    V(γ2), εh, Val(q), Val(HASH), Val(DISS))
         @nexprs 10 v -> (dl[o + (v - 1) * sd] = ∂ₜh[v])
@@ -1020,6 +1026,11 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         "problem needs the geometry itself: pass `interior = " *
         "fitted_interior(spec, track, forest, G; t, n_L)`, which is what " *
         "evolve! does at every chunk (CODE.md, \"The tracked geometry\")."))
+    interior isa HolesSpec && throw(ArgumentError(
+        "this case's interior is a HolesSpec — the rule several holes' composite " *
+        "is built by, once per piece, from their tracks — and a problem needs the " *
+        "composite itself: pass `interior = holes_interior(case, tracks, t)`, which " *
+        "is what evolve! does (step B3)."))
     interior isa TrackedSpec && throw(ArgumentError(
         "this case's interior is a TrackedSpec — the rule the tracked analytic " *
         "target is built by, once per piece, from the horizon track — and a " *
@@ -1131,6 +1142,38 @@ function with_interior(p::GHProblem{T,G,q,HASH,DISS,INT0,W}, interior;
         interior, p.accounting, target, fits, T(t_target), target_rate,
         T(trail), target_exact, p.hasdirichlet,
         p.valG, p.valq, p.valH, p.valdiss, Val(INT), p.valsimd)
+end
+
+"""
+    with_case(p::GHProblem, case; interior = p.interior) -> GHProblem
+
+The same problem with another case of the same type, and with the case's own
+algebraic gauge source as the kernels' (added in step B3): what the driver builds
+every piece of a chunk for several holes, whose gauge source and whose `γ0` and
+`ε_KO` follow the tracks ([`holes_case_at`](@ref)). It shares the field sets,
+the schedule and the uploaded geometry, as [`with_interior`](@ref) does, and
+refuses a case of another type, which would be another kernel.
+"""
+function with_case(p::GHProblem{T,G,q,HASH,DISS,INT,W}, case::GHCase{T};
+                   interior=p.interior) where {T,G,q,HASH,DISS,INT,W}
+    typeof(case) === typeof(p.case) || throw(ArgumentError(
+        "with_case replaces a problem's case by one of the same type, got a " *
+        "$(typeof(case)) for a $(typeof(p.case)): another type is another kernel, " *
+        "built by GHProblem."))
+    has_dissipation(case.ε_KO) == DISS || throw(ArgumentError(
+        "the new case's dissipation is $(has_dissipation(case.ε_KO) ? "on" : "off") " *
+        "and the problem's kernel was built with it $(DISS ? "on" : "off")."))
+    Hsrc = HASH === :algebraic ? case.gauge : p.Hsrc
+    q2 = with_interior(p, interior)
+    return GHProblem{T,G,q,HASH,DISS,interior_variant(interior),W,typeof(q2.U),
+                     typeof(q2.schedule),typeof(Hsrc),typeof(q2.diag),
+                     typeof(q2.origins),typeof(q2.spacings),typeof(case),
+                     typeof(interior),typeof(q2.accounting),typeof(q2.target),
+                     typeof(q2.fits)}(
+        q2.U, q2.schedule, Hsrc, q2.diag, q2.origins, q2.spacings, case, interior,
+        q2.accounting, q2.target, q2.fits, q2.t_target, q2.target_rate, q2.trail,
+        q2.target_exact, q2.hasdirichlet, q2.valG, q2.valq, q2.valH, q2.valdiss,
+        q2.valint, q2.valsimd)
 end
 
 """
