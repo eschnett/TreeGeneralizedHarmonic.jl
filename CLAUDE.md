@@ -440,8 +440,7 @@ hole's next lever. Devices run the `W = 1` kernel at PR #4's speed.
 
 From 2026-10-09 the package is on **TreeAMR 0.2.0**, whose one break is that
 the checkpoint functions and TreeAMR's HDF5 extension `TreeAMRHDF5Ext` moved
-into the companion package **TreeIOHDF5** (unregistered, pinned to GitHub
-`main` by `[sources]`, `[compat]` `0.1.0`), with the same names, signatures
+into the companion package **TreeIOHDF5** (registered, `[compat]` `0.1.0`), with the same names, signatures
 and file format. TreeIOHDF5 replaces HDF5 as the hard dependency (`src/` used
 HDF5 for nothing else), and `prerequisite_tests.jl` asserts that
 `save_checkpoint` and `load_checkpoint` are TreeIOHDF5's and not TreeAMR's.
@@ -1200,7 +1199,7 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
 - **Most `[sources]` pins are necessary, not chosen.** (The section needs
   Julia 1.11, which no longer constrains anything: the floor is 1.13.) A
   pin goes only when its package is in General at the bound asked for:
-  `KorzynskiSpin` and `TreeIOHDF5` are not registered at all, and
+  `KorzynskiSpin` is not registered at all, and
   `ApparentHorizonFinder` **2.1** is not released (General carries
   `2.0.0`, and `[compat]` here asks for `2.1`). `SpacetimeMetrics` is
   registered at the bound this package asks for, so its pin is a choice

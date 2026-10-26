@@ -4542,8 +4542,8 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. Step 8c adds the E3 target `CurvatureTarget` to `evolution_cases.jl`, its claims to `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. Step 8d adds `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and makes `evolution_cases.jl`'s shell norms the interior's own `shell_mask`. Step 8e adds `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and, for 8e-ii, the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and moves `fitted_fixture` into `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` gains a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`) |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
-Dependencies: `TreeAMR` and `SpacetimeMetrics` (both unregistered, both
-pinned to GitHub `main` by `[sources]`, which needs Julia 1.11),
+Dependencies: `TreeAMR` (registered) and `SpacetimeMetrics` (pinned to
+GitHub `main` by `[sources]`),
 `KernelAbstractions`, `StaticArrays`
 (kernel-safe, and what `SpacetimeMetrics` speaks),
 `IMEXRungeKutta` (unregistered, pinned to GitHub `main` by `[sources]`; it
@@ -4552,12 +4552,12 @@ neither is a dependency of the package or of its tests since), `LinearAlgebra` (
 and `tr` on `StaticArrays`, which the pointwise algebra uses; a standard
 library, added in step 1 and not listed when `PLAN.md` enumerated step 0's
 `Project.toml` **(proposed in step 1)**), `TreeIOHDF5` (**from
-2026-10-09**, TreeAMR's companion package for checkpoints, unregistered and
-pinned to GitHub `main` by `[sources]`, `[compat]` `0.1.0`; it replaced `HDF5`,
+2026-10-09**, TreeAMR's companion package for checkpoints, registered,
+`[compat]` `0.1.0`; it replaced `HDF5`,
 a hard dependency from 2026-10-01 to load TreeAMR's HDF5 extension, when
 TreeAMR 0.2.0 moved the checkpoint functions there),
 `ApparentHorizonFinder` and `KorzynskiSpin` (from G4, added in step 7,
-both pinned to GitHub `main` by `[sources]` like the first two and both
+both pinned to GitHub `main` by `[sources]` like `SpacetimeMetrics` and both
 listed in `test/Project.toml` as well, because `prerequisite_tests.jl`
 holds them to the same standard: a moving `main` that dropped a name must
 fail at the top of the suite). **`KorzynskiSpin` is pinned over `ssh`,
