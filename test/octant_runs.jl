@@ -146,6 +146,11 @@
 #   rho=                            a fixed ρ_max in 1/M (default: 4/M)
 #   finder=1                        find the horizon every chunk (0: never; :fitted
 #                                   always does)
+#   shell_center=analytic|track     (added in step B1) the shells and the split about
+#                                   the analytic center c(t), or about the tracked
+#                                   horizon's center (interior=fitted): under a gauge
+#                                   that moves the hole off c(t) (gauge=dh) a shell
+#                                   about c(t) cuts through the horizon
 #   shells=2,9/4,3,5,8              radii of the shells outside the horizon whose
 #                                   norms the CSV carries (and one beyond the last;
 #                                   and the evolved band inside the horizon). The
@@ -286,6 +291,9 @@ abs(v_hole) < 1 || error("v = $v_hole is the hole's speed in units of c, and mus
 # CSV columns, so on by default only for the quadrant, which has no older CSVs
 # to match. `v̂` is `+x` for a hole at rest.
 split_on = hole && opt("split", moving_domain ? "1" : "0") in ("1", "true")
+shell_track = opt("shell_center", "analytic") == "track"
+opt("shell_center", "analytic") in ("analytic", "track") ||
+    error("shell_center is analytic or track, got $(opt("shell_center", ""))")
 v_dir = v_hole < 0 ? -one(T) : one(T)
 contraction_expected = sqrt(1 - T(v_hole)^2)
 # The Kerr-Schild horizon (`M = 1`): `r₊` at the poles and `√(r₊² + a²) = √(2 r₊)`
@@ -692,6 +700,7 @@ if hole
     else
         setup["gauge"] = "Kerr-Schild"
     end
+    setup["shell_center"] = shell_track ? "track" : "analytic"
     case.interior isa FittedSpec ? (setup["margin_cells"] = case.interior.margin) :
                                    (setup["r_0"] = Float64(case.interior.r_0);
                                     setup["r_1"] = Float64(case.interior.r_1))
@@ -765,7 +774,12 @@ function observe(p, t, u, rec)
     vol = record_norms(p)
     # The shells about the hole: about its analytic center `c(t)`, the origin
     # for a hole at rest there (amended 2026-10-20: the origin always).
-    c_t = hole ? SVector{3,T}(center_at(case.center, T(t))) : zero(SVector{3,T})
+    # About the tracked horizon's center with `shell_center=track` (added in step
+    # B1), the analytic one otherwise.
+    c_t = !hole ? zero(SVector{3,T}) :
+          shell_track && p.interior isa FittedInterior ?
+          SVector{3,T}(center_at(p.interior.center, T(t))) :
+          SVector{3,T}(center_at(case.center, T(t)))
     edges = if hole
         r_in = case.interior isa FittedSpec ?
                shell_r[1] - case.interior.margin * minimum_spacing(T, p.U.forest) :
