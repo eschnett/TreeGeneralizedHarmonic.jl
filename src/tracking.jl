@@ -40,6 +40,17 @@
 #     measured them from the analytic center, which is what a diagnostic of
 #     the analytic hole wants; the track is the surface's own geometry, and
 #     `find_gh_horizon` now reports both.
+#
+# **From step B2 a track may predict along a quadratic** (`quadratic = true`,
+# a [`TrackedSpec`](@ref)'s default; a [`FittedSpec`](@ref)'s track keeps the
+# line, bit for bit): the least-squares quadratic in time through the last four
+# finds, blended `C¹` into the previous prediction over the next find interval,
+# with the found origin refused beyond `G h/2` of the prediction and the
+# interval chosen so that `|a| Δt² ≤ G h/4` ([`track_state`](@ref),
+# [`find_interval`](@ref); `CODE.md`, "The tracks"). The same file builds the
+# **tracked analytic target** from it, [`tracked_interior`](@ref): step 5's
+# sphere about the track, relaxing toward a boosted Kerr-Schild hole on the
+# track's line.
 
 # --- the conversions ---------------------------------------------------------
 
@@ -100,6 +111,34 @@ end
 # --- the track ---------------------------------------------------------------
 
 """
+    TrackLine{T}(t0, c, v, a)
+
+One prediction of a track's center (added in step B2): the quadratic in time
+about `t0`, `c(t) = c + v τ + ½ a τ²` with `τ = t − t0`. `a = 0` is a line.
+"""
+struct TrackLine{T}
+    t0::T
+    c::SVector{3,T}
+    v::SVector{3,T}
+    a::SVector{3,T}
+end
+
+# The prediction and its first two derivatives at `t`.
+@inline function line_at(l::TrackLine{T}, t) where {T}
+    τ = T(t) - l.t0
+    return (l.c + τ * l.v + (τ * τ / 2) * l.a, l.v + τ * l.a, l.a)
+end
+
+"""
+    TRACK_FIT_FINDS = 4
+
+How many of the latest finds the quadratic prediction is fitted to, by least
+squares in time (`CODE.md`, "The tracks", proposed 2026-10-25 and built in step
+B2). With fewer the track predicts along the chord of the last two.
+"""
+const TRACK_FIT_FINDS = 4
+
+"""
     HorizonTrack{T}
 
 The tracked horizon, host-side: what the last successful find said and how
@@ -117,9 +156,21 @@ the track has fared since.
   `:coasting` (it did not, and the geometry is the last one carried along
   `v_est`); `misses` — consecutive failed finds; `nfinds` — successful ones.
 
+**The quadratic prediction (added in step B2)**, used where `quadratic` is
+`true` and ignored where it is `false` — a [`FittedSpec`](@ref)'s track, which
+carries the center along the line `c_find + v_est (t − t_find)` as it did:
+
+- `history`, `nhist` — the times and origins `(t, x, y, z)` of the last
+  `nhist ≤ TRACK_FIT_FINDS` finds, oldest first, packed four reals a find;
+- `pred` — the prediction made at the last find ([`TrackLine`](@ref));
+- `prev`, `t_blend`, `blend` — the prediction in use before it, as its
+  quadratic Taylor polynomial about `t_blend`, and the interval `blend` over
+  which `pred` takes over from it (`0`: none).
+
 A plain immutable struct, and [`update_track`](@ref) returns a new one: the
 track is data the driver passes along, never a field that changes under a
-kernel. [`track_center`](@ref) is what a kernel sees of it.
+kernel. [`track_center`](@ref) and [`track_state`](@ref) are what the driver
+reads of it.
 """
 struct HorizonTrack{T}
     t_find::T
@@ -134,7 +185,173 @@ struct HorizonTrack{T}
     source::Symbol
     misses::Int
     nfinds::Int
+    quadratic::Bool
+    history::SVector{16,T}
+    nhist::Int
+    pred::TrackLine{T}
+    prev::TrackLine{T}
+    t_blend::T
+    blend::T
 end
+
+# The track of step 8d: the line, with no quadratic state (`quadratic =
+# false`), from the twelve fields it had.
+function HorizonTrack{T}(t_find, c_find, v_est, r_min, r_max, shape, lmax, hlm,
+                         grid, source, misses, nfinds) where {T}
+    l = TrackLine{T}(T(t_find), SVector{3,T}(c_find), SVector{3,T}(v_est),
+                     zero(SVector{3,T}))
+    return HorizonTrack{T}(T(t_find), c_find, v_est, r_min, r_max, shape, lmax, hlm,
+                           grid, source, misses, nfinds, false,
+                           zero(SVector{16,T}), 0, l, l, T(t_find), zero(T))
+end
+
+# The same track with the quadratic fields replaced.
+function _with_prediction(tr::HorizonTrack{T}; quadratic=tr.quadratic,
+                          history=tr.history, nhist=tr.nhist, pred=tr.pred,
+                          prev=tr.prev, t_blend=tr.t_blend,
+                          blend=tr.blend) where {T}
+    return HorizonTrack{T}(tr.t_find, tr.c_find, tr.v_est, tr.r_min, tr.r_max,
+                           tr.shape, tr.lmax, tr.hlm, tr.grid, tr.source,
+                           tr.misses, tr.nfinds, quadratic, history, nhist, pred,
+                           prev, t_blend, blend)
+end
+
+# The `C²` weight the blend turns over with, and its first two derivatives in
+# `s`: the quintic smoothstep, `0` at `s ≤ 0` and `1` at `s ≥ 1`, with both
+# derivatives zero at either end — so the blended prediction and its velocity
+# are continuous where the blend starts and where it ends.
+@inline function _blend_weight(s::T) where {T}
+    s ≤ 0 && return (zero(T), zero(T), zero(T))
+    s ≥ 1 && return (one(T), zero(T), zero(T))
+    σ = s * s * s * (10 + s * (6 * s - 15))
+    σ′ = 30 * s * s * (1 - s) * (1 - s)
+    σ″ = 60 * s * (1 - s) * (1 - 2 * s)
+    return (σ, σ′, σ″)
+end
+
+"""
+    track_state(tr::HorizonTrack, t) -> (c, ċ, c̈)
+
+Where the track puts the hole's center at `t`, and its velocity and
+acceleration there (added in step B2).
+
+For a track that predicts along a line (`quadratic = false`, every
+[`FittedSpec`](@ref)'s) this is `c_find + v_est (t − t_find)` exactly as
+[`track_center`](@ref) evaluates it, `v_est` and zero. For a quadratic track
+it is the prediction `pred` of the last find, blended into the prediction in
+use before it, `prev`, over `[t_blend, t_blend + blend]`:
+
+    c(t) = c_prev(t) + σ(s) (c_pred(t) − c_prev(t)),    s = (t − t_blend)/blend,
+
+`σ` the quintic smoothstep, with the velocity and acceleration of that
+expression — so that `c` and `ċ` are continuous at every find, which the
+target and the gauge source read (`CODE.md`, "The tracks": continuity in time).
+"""
+function track_state(tr::HorizonTrack{T}, t) where {T}
+    tt = T(t)
+    if !tr.quadratic
+        return (center_at(track_center(tr), tt), tr.v_est, zero(SVector{3,T}))
+    end
+    cn, vn, an = line_at(tr.pred, tt)
+    tr.blend > 0 || return (cn, vn, an)
+    s = (tt - tr.t_blend) / tr.blend
+    s ≥ 1 && return (cn, vn, an)
+    co, vo, ao = line_at(tr.prev, tt)
+    σ, σ′, σ″ = _blend_weight(s)
+    Δ = tr.blend
+    dc, dv, da = cn - co, vn - vo, an - ao
+    c = co + σ * dc
+    ċ = vo + σ * dv + (σ′ / Δ) * dc
+    c̈ = ao + σ * da + (2 * σ′ / Δ) * dv + (σ″ / (Δ * Δ)) * dc
+    return (c, ċ, c̈)
+end
+
+"""
+    track_position(tr::HorizonTrack, t) -> c
+
+The center the track predicts at `t`: [`track_state`](@ref)'s first value, and
+for a track along a line `center_at(track_center(tr), t)`, bit for bit.
+"""
+track_position(tr::HorizonTrack, t) = first(track_state(tr, t))
+
+# The packed history's `k`-th find, `(t, x⃗)`.
+@inline _hist_find(h::SVector{16,T}, k) where {T} =
+    (h[4k - 3], SVector{3,T}(h[4k - 2], h[4k - 1], h[4k]))
+
+# The history with the find `(t, x⃗)` appended and the oldest dropped beyond
+# `TRACK_FIT_FINDS`.
+function _push_find(h::SVector{16,T}, n::Int, t, x) where {T}
+    rows = [_hist_find(h, k) for k in 1:n]
+    push!(rows, (T(t), SVector{3,T}(x)))
+    length(rows) > TRACK_FIT_FINDS && popfirst!(rows)
+    m = length(rows)
+    v = zeros(T, 16)
+    for (k, (tk, xk)) in enumerate(rows)
+        v[4k - 3] = tk
+        v[(4k - 2):(4k)] .= xk
+    end
+    return SVector{16,T}(v), m
+end
+
+"""
+    fit_track_quadratic(ts, xs, t0) -> TrackLine
+
+The least-squares quadratic `c + v τ + ½ a τ²`, `τ = t − t0`, through the
+finds `(ts[k], xs[k])`, one fit per axis (added in step B2): the normal
+equations of the `n × 3` design matrix in `τ` scaled by the finds' span, so
+that their condition does not depend on the cadence. Needs three distinct
+times; `TRACK_FIT_FINDS = 4` is what the track gives it.
+"""
+function fit_track_quadratic(ts::AbstractVector{T}, xs::AbstractVector{SVector{3,T}},
+                             t0) where {T}
+    n = length(ts)
+    n ≥ 3 || throw(ArgumentError(
+        "a quadratic in time needs at least three finds, got $n."))
+    span = maximum(ts) - minimum(ts)
+    span > 0 || throw(ArgumentError(
+        "the finds a quadratic is fitted to are all at t = $(ts[1])."))
+    A = zeros(T, n, 3)
+    for k in 1:n
+        s = (ts[k] - T(t0)) / span
+        A[k, 1] = one(T)
+        A[k, 2] = s
+        A[k, 3] = s * s / 2
+    end
+    N = SMatrix{3,3,T}(A' * A)
+    coef = ntuple(3) do d
+        b = SVector{3,T}(A' * [xs[k][d] for k in 1:n])
+        N \ b
+    end
+    c = SVector{3,T}(coef[1][1], coef[2][1], coef[3][1])
+    v = SVector{3,T}(coef[1][2], coef[2][2], coef[3][2]) / span
+    a = SVector{3,T}(coef[1][3], coef[2][3], coef[3][3]) / (span * span)
+    return TrackLine{T}(T(t0), c, v, a)
+end
+
+"""
+    find_count(a, G, h, interval) -> n
+
+How many finds an interval of length `interval` is divided into so that the
+prediction's error at each, `|a| Δt²` for the acceleration `a` it predicts with,
+stays at or below a quarter of a stencil's reach, `G h/4` (`CODE.md`, "The
+tracks": a find cadence set by the predicted error; added in step B2): `1` for
+`a = 0`, and otherwise `⌈interval / √(G h/(4|a|))⌉`.
+"""
+function find_count(a, G::Integer, h, interval)
+    na = sqrt(sum(abs2, a))
+    iszero(na) && return 1
+    Δ = sqrt(G * h / (4 * na))
+    return max(1, ceil(Int, interval / Δ - sqrt(eps(float(one(Δ))))))
+end
+
+"""
+    find_interval(a, G, h; max) -> Δt
+
+The find interval of [`find_count`](@ref): `max` divided into that many equal
+intervals, so that the finds a chunk makes fall on its pieces and its last is
+the record's (added in step B2).
+"""
+find_interval(a, G::Integer, h; max) = max / find_count(a, G, h, max)
 
 """
     TrackLostError(msg, track, records = [])
@@ -157,8 +374,9 @@ TrackLostError(msg, track) = TrackLostError(msg, track, Any[])
 
 Base.showerror(io::IO, e::TrackLostError) = print(io, "TrackLostError: ", e.msg)
 
-# The lmax a case's track is kept at: the spec's, for a fitted case.
-_track_lmax(case) = case.interior isa FittedSpec ? case.interior.lmax_shape : 4
+# The lmax a case's track is kept at: the spec's, for a tracked case.
+_track_lmax(case) = case.interior isa Union{FittedSpec,TrackedSpec} ?
+                    case.interior.lmax_shape : 4
 
 """
     seed_track(case::GHCase, t; lmax = the case's lmax_shape) -> HorizonTrack
@@ -187,13 +405,52 @@ It is what the first chunk's geometry — and the initial data's core rule —
 is built from, and what the first find is judged against: a first find
 whose smallest radius is more than half a stencil from the analytic one is
 refused like any other jump.
+
+**A [`TrackedSpec`](@ref)'s seed predicts along a quadratic (added in step
+B2)**, from the analytic center, the analytic velocity plus the spec's
+`seed_velocity_offset` (zero but for the recovery study) and `acceleration`
+(zero for one hole; what a binary's seed knows from its orbit), and a
+[`FittedSpec`](@ref)'s along the line it always did. `quadratic` overrides it.
 """
-function seed_track(case::GHCase{T}, t; lmax::Integer=_track_lmax(case)) where {T}
+function seed_track(case::GHCase{T}, t; lmax::Integer=_track_lmax(case),
+                    quadratic::Bool=case.interior isa TrackedSpec && case.interior.quadratic,
+                    acceleration=zero(SVector{3,T})) where {T}
     bg = case.background
     c = center_at(case.center, T(t))
-    return HorizonTrack{T}(T(t), c, case.center.v, _seed_r_min(bg, lmax),
-                           T(horizon_max_radius(bg)), analytic_shape(bg, lmax),
-                           Int(lmax), nothing, nothing, :analytic, 0, 0)
+    v = case.interior isa TrackedSpec ?
+        case.center.v + case.interior.seed_velocity_offset : case.center.v
+    tr = HorizonTrack{T}(T(t), c, v, _seed_r_min(bg, lmax),
+                         T(horizon_max_radius(bg)), analytic_shape(bg, lmax),
+                         Int(lmax), nothing, nothing, :analytic, 0, 0)
+    quadratic || return tr
+    l = TrackLine{T}(T(t), c, v, SVector{3,T}(acceleration))
+    return _with_prediction(tr; quadratic=true, pred=l, prev=l, t_blend=T(t),
+                            blend=zero(T))
+end
+
+"""
+    seeded_track(T; t, center, velocity, acceleration = 0, r_min, r_max = r_min,
+                 shape = sphere, lmax = 4, quadratic = true) -> HorizonTrack
+
+A track seeded from numbers rather than a case (added in step B2): a hole at
+`center` at time `t`, moving at `velocity` with `acceleration`, whose horizon is
+the sphere of radius `r_min` unless a `shape` is given. What a test of the
+prediction on synthetic finds needs, and a binary's seed will.
+"""
+function seeded_track(::Type{T}; t, center, velocity, acceleration=(0, 0, 0),
+                      r_min, r_max=r_min, shape=nothing, lmax::Integer=4,
+                      quadratic::Bool=true) where {T}
+    c, v, a = SVector{3,T}(center...), SVector{3,T}(velocity...),
+              SVector{3,T}(acceleration...)
+    sh = shape === nothing ?
+         [i == 1 ? Float64(r_min) * sqrt(4π) : 0.0 for i in 1:((lmax + 1)^2)] :
+         collect(Float64, shape)
+    tr = HorizonTrack{T}(T(t), c, v, T(r_min), T(r_max), sh, Int(lmax), nothing,
+                         nothing, :analytic, 0, 0)
+    quadratic || return tr
+    l = TrackLine{T}(T(t), c, v, a)
+    return _with_prediction(tr; quadratic=true, pred=l, prev=l, t_blend=T(t),
+                            blend=zero(T))
 end
 
 function _seed_r_min(bg, lmax)
@@ -215,6 +472,20 @@ gate, `core_position` — works on the tracked one without knowing it is.
 """
 track_center(tr::HorizonTrack{T}) where {T} =
     HoleCenter{T}(tr.c_find - tr.v_est * tr.t_find, tr.v_est)
+
+"""
+    track_center(tr::HorizonTrack, t) -> HoleCenter
+
+The line the track holds the center on near `t` (added in step B2): for a
+track along a line, [`track_center`](@ref)`(tr)` itself; for a quadratic one,
+the tangent at `t` of [`track_state`](@ref)'s curve, `HoleCenter(c(t) − ċ(t) t,
+ċ(t))`, which is what a piece of a chunk carries the target and its layer along.
+"""
+function track_center(tr::HorizonTrack{T}, t) where {T}
+    tr.quadratic || return track_center(tr)
+    c, ċ, _ = track_state(tr, t)
+    return HoleCenter{T}(c - ċ * T(t), ċ)
+end
 
 """
     update_track(tr, hz, t; max_misses = 3, G, h, lmax = tr.lmax) -> HorizonTrack
@@ -244,9 +515,29 @@ offsets of this one, so a jump of the smallest radius moves the core and
 the layer by as much — exposing, on the side it moves away from, points
 that no layer ever relaxed and that the frozen core held stale — and a real
 horizon does not do that between two finds (proposed in step 8d).
+
+**A quadratic track (added in step B2)** also refuses a find whose **origin**
+lies more than `G h/2` from where the track predicted it ([`track_position`](@ref)
+at `t`), with an `ArgumentError` naming both — the center jump `CODE.md`'s
+"The tracks" adds beside the radius one, since the layer and the gauge source
+move with the center — and then predicts:
+
+- after the first find, from the found origin along the velocity and
+  acceleration the last prediction gives there (the seed's);
+- after the second and third, along the chord of the last two finds, its
+  velocity carried to the newer one by the last prediction's acceleration,
+  which it keeps (today's line where that is zero);
+- from the fourth on, along the least-squares quadratic in time through the
+  last [`TRACK_FIT_FINDS`](@ref) ([`fit_track_quadratic`](@ref)).
+
+The new prediction takes over from the one in use over `interval` — by default
+[`find_interval`](@ref) of its acceleration capped at `max_interval`, the next
+find's distance — so that the center and its velocity are continuous at the
+find. `v_est` is the new prediction's velocity at `t`.
 """
 function update_track(tr::HorizonTrack{T}, hz, t; max_misses::Integer=3,
-                      G::Integer, h, lmax::Integer=tr.lmax) where {T}
+                      G::Integer, h, lmax::Integer=tr.lmax, interval=nothing,
+                      max_interval=one(T)) where {T}
     success = hz.success
     success === nothing && return tr
     tt = T(t)
@@ -265,6 +556,10 @@ function update_track(tr::HorizonTrack{T}, hz, t; max_misses::Integer=3,
             "and exposes points no layer has treated. A horizon does not jump " *
             "between two finds; a finder that converged to another surface " *
             "does — check horizon_note and the seed before loosening this."))
+        tr.quadratic && return _update_quadratic(tr, hz, tt, origin, rmin, rmax,
+                                                 tol; G=G, h=h, lmax=lmax,
+                                                 interval=interval,
+                                                 max_interval=max_interval)
         v = if tr.nfinds ≥ 1 && tr.source !== :analytic && tt > tr.t_find
             (origin - tr.c_find) / (tt - tr.t_find)
         else
@@ -275,9 +570,13 @@ function update_track(tr::HorizonTrack{T}, hz, t; max_misses::Integer=3,
                                Vector{ComplexF64}(hz.hlm), hz.grid, :found, 0,
                                tr.nfinds + 1)
     end
-    new = HorizonTrack{T}(tr.t_find, tr.c_find, tr.v_est, tr.r_min, tr.r_max,
-                          tr.shape, tr.lmax, tr.hlm, tr.grid, :coasting,
-                          tr.misses + 1, tr.nfinds)
+    new = _with_prediction(HorizonTrack{T}(tr.t_find, tr.c_find, tr.v_est, tr.r_min,
+                                           tr.r_max, tr.shape, tr.lmax, tr.hlm,
+                                           tr.grid, :coasting, tr.misses + 1,
+                                           tr.nfinds);
+                           quadratic=tr.quadratic, history=tr.history,
+                           nhist=tr.nhist, pred=tr.pred, prev=tr.prev,
+                           t_blend=tr.t_blend, blend=tr.blend)
     if new.misses ≥ max_misses
         note = hasproperty(hz, :note) && hz.note !== nothing ?
                " The last find said: $(hz.note)" : ""
@@ -291,6 +590,94 @@ function update_track(tr::HorizonTrack{T}, hz, t; max_misses::Integer=3,
             new))
     end
     return new
+end
+
+# A quadratic track's successful find (step B2): the center jump refused, the
+# find appended to the history, the new prediction, and the blend from the
+# prediction in use — its Taylor polynomial at `t`, which matches it in value,
+# velocity and acceleration there whatever it was (a blend itself, if a find
+# came before the last blend ended).
+function _update_quadratic(tr::HorizonTrack{T}, hz, tt, origin, rmin, rmax, tol;
+                           G, h, lmax, interval, max_interval) where {T}
+    c_now, v_now, a_now = track_state(tr, tt)
+    δ = sqrt(sum(abs2, origin - c_now))
+    δ ≤ tol || throw(ArgumentError(
+        "the horizon found at t = $tt has its origin at $(Tuple(origin)), and the " *
+        "track predicted the center at $(Tuple(c_now)) (from the " *
+        "$(tr.source === :analytic ? "analytic seed" : "find at t = $(tr.t_find)")): " *
+        "a jump of $δ, more than half a stencil reach G h/2 = $tol at G = $G, " *
+        "h = $h. The layer, its target and the gauge source all move with the " *
+        "tracked center, so a jump moves them by as much (CODE.md, \"The " *
+        "tracks\": the center-jump check). A hole does not jump between two " *
+        "finds; a prediction that is off is a find cadence too long for the " *
+        "acceleration, or a seed velocity that is wrong — shorten the interval " *
+        "(max_interval) before loosening this."))
+    hist, n = _push_find(tr.history, tr.nhist, tt, origin)
+    # Before the fourth find the acceleration is the last prediction's own —
+    # the seed's, or zero — and not the blend's, whose `c̈` carries the
+    # turnover from one prediction to the next.
+    _, v_pred, a_pred = line_at(tr.pred, tt)
+    pred = if n ≥ TRACK_FIT_FINDS
+        finds = [_hist_find(hist, k) for k in 1:n]
+        fit_track_quadratic(first.(finds), last.(finds), tt)
+    elseif n ≥ 2
+        t1, x1 = _hist_find(hist, n - 1)
+        Δt = tt - t1
+        v = (origin - x1) / Δt + (Δt / 2) * a_pred
+        TrackLine{T}(tt, origin, v, a_pred)
+    else
+        TrackLine{T}(tt, origin, v_pred, a_pred)
+    end
+    prev = TrackLine{T}(tt, c_now, v_now, a_now)
+    Δ = interval === nothing ?
+        T(find_interval(pred.a, G, T(h); max=T(max_interval))) : T(interval)
+    base = HorizonTrack{T}(tt, origin, pred.v, rmin, rmax,
+                           real_shape(hz.hlm, hz.grid, lmax), Int(lmax),
+                           Vector{ComplexF64}(hz.hlm), hz.grid, :found, 0,
+                           tr.nfinds + 1)
+    return _with_prediction(base; quadratic=true, history=hist, nhist=n, pred=pred,
+                            prev=prev, t_blend=tt, blend=Δ)
+end
+
+"""
+    tracked_interior(spec::TrackedSpec, tr::HorizonTrack, t; mass, spin,
+                     ρ_max = 0) -> Interior
+
+The **tracked analytic target** at time `t` (added in step B2): step 5's
+`:damped` sphere of `spec`'s radii about the track's line at `t`
+([`track_center`](@ref)`(tr, t)`), relaxing toward the boosted, translated
+Kerr-Schild hole of mass `mass · spec.mass_factor` and spin `spin` along `z` on
+that line — the hole the track says is there, as an `isbits` target metric
+([`layer_target`](@ref)). The perturbations of step B2's sensitivity study move
+the target and its sphere together: `center_offset` is added to the line's
+center and `velocity_offset` to its velocity, the line then passing through
+the offset center at `t`.
+
+The driver builds one per piece of a chunk at the piece's midpoint, so that
+the target follows the track as a moving `:fitted` target is refilled
+([`evolve!`](@ref)); it is an `Interior` like any other, so its core follows
+its target with the target's rate ([`core_follows`](@ref)) and its layer
+carries `(1 − w) ∂_t u_target` ([`background_state_rate`](@ref)), the target's
+own rate along its line. A track seeded from the analytic answer, at the
+seed's time and unperturbed, gives the case's own sphere and background, value
+for value.
+"""
+function tracked_interior(spec::TrackedSpec{T}, tr::HorizonTrack, t; mass, spin,
+                          ρ_max=zero(T)) where {T}
+    tt = T(t)
+    line = track_center(tr, tt)
+    c = center_at(line, tt) + spec.center_offset
+    v = line.v + spec.velocity_offset
+    center = HoleCenter{T}(c - v * tt, v)
+    ks = KerrSchild(T(mass) * spec.mass_factor, T(spin))
+    # `0 − v`, not `−v`: a zero component stays `+0`, as the case's own
+    # `boost(…, (−v, 0, 0))` has it, so that the seed's target is the
+    # background's bits (a `−0` turns the sign of zeros in the boost's matrix).
+    target = SpacetimeMetrics.translate(SpacetimeMetrics.boost(ks, zero(v) - v),
+                                        SVector{4,T}(zero(T), (c - v * tt)...))
+    return Interior(T; center=center, r_0=spec.r_0, r_1=spec.r_1, ρ_max=ρ_max,
+                    variant=:damped, w_ramp=spec.w_ramp, ρ_ramp=spec.ρ_ramp,
+                    margin=spec.margin, target=target)
 end
 
 # --- the geometry from a track ------------------------------------------------
@@ -398,6 +785,14 @@ function surface_shift(a::FittedInterior{T}, b::FittedInterior{T}, t) where {T}
         worst = max(worst, abs(ra - rb))
     end
     return worst + δc
+end
+
+# Two spheres (step B2): their core radii's difference and their centers'
+# distance at `t` — the tracked analytic target's spheres move with the track
+# and keep their radii.
+function surface_shift(a::Interior{T}, b::Interior{T}, t) where {T}
+    δc = sqrt(sum(abs2, center_at(a.center, T(t)) - center_at(b.center, T(t))))
+    return abs(a.r_0 - b.r_0) + δc
 end
 
 # --- what the margin buys: step 8a's leakage, along the geometry --------------

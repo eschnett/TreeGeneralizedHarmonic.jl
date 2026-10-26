@@ -1020,6 +1020,11 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         "problem needs the geometry itself: pass `interior = " *
         "fitted_interior(spec, track, forest, G; t, n_L)`, which is what " *
         "evolve! does at every chunk (CODE.md, \"The tracked geometry\")."))
+    interior isa TrackedSpec && throw(ArgumentError(
+        "this case's interior is a TrackedSpec — the rule the tracked analytic " *
+        "target is built by, once per piece, from the horizon track — and a " *
+        "problem needs the sphere itself: pass `interior = tracked_interior(spec, " *
+        "track, t; mass, spin)`, which is what evolve! does (step B2)."))
     backend = get_backend(U.work)
     # The mirrors are the forest's and the hook's faces the case's (added
     # 2026-10-02): a face the case calls reflecting and the mesh does not

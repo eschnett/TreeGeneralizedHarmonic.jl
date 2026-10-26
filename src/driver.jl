@@ -129,6 +129,14 @@ end
 horizon_shell(case::GHCase, int::FittedInterior) =
     (int.r_in, int.r_out + int.thickness)
 
+# The tracked analytic target's sphere (step B2) has step 5's band: its radii
+# are the spec's and the horizon's are the background's.
+function horizon_shell(case::GHCase{T}, spec::TrackedSpec) where {T}
+    lo = T(horizon_min_radius(case.background))
+    hi = T(horizon_max_radius(case.background)) + (spec.r_1 - spec.r_0)
+    return (lo, hi)
+end
+
 horizon_shell(case::GHCase, ::FittedSpec) = throw(ArgumentError(
     "a tracked case's drift shell is stated about its geometry, which is " *
     "built from the track once per chunk: pass the geometry, " *
@@ -474,10 +482,17 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # The tracked geometry (step 8d) is built from the horizon that was found,
     # so a case that asks for it must carry the finder's parameters.
     fitted = case.interior isa FittedSpec
-    fitted && (case.horizon === nothing || case.horizon.every < 1) &&
+    # The tracked analytic target (step B2): step 5's sphere about the track,
+    # relaxing toward the Kerr-Schild hole on the track's line, rebuilt every
+    # piece. It shares the track, its record rows and its checkpoint with the
+    # fitted geometry (`tracked`), and nothing of the fit.
+    targeted = case.interior isa TrackedSpec
+    tracked = fitted || targeted
+    tracked && (case.horizon === nothing || case.horizon.every < 1) &&
         throw(ArgumentError(
             "this case's layer follows the tracked horizon (its interior is a " *
-            "FittedSpec) but it carries no horizon finder to track it with" *
+            "$(nameof(typeof(case.interior)))) but it carries no horizon finder " *
+            "to track it with" *
             (case.horizon === nothing ? "" : " (its Horizon has every = 0, " *
                                              "which is never)") *
             ": the geometry is rebuilt from each find, and a track that is " *
@@ -624,19 +639,39 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # 8c's rule at this scheme's `G` and this run's rate (the default `4/M`
     # where the rate is the grid's, whose value changes per chunk; proposed
     # in step 8d).
-    spec = fitted ? case.interior : nothing
-    tr = !fitted ? nothing :
+    spec = tracked ? case.interior : nothing
+    tr = !tracked ? nothing :
          saved === nothing ? seed_track(case, zero(T)) :
          from_plain(HorizonTrack{T}, saved.track; path="run.track")
     n_L = !fitted ? 0 :
           spec.n_L > 0 ? spec.n_L :
           layer_cells(G, ρ_max_fixed === nothing ? default_relaxation_rate(case) :
                          ρ_max_fixed, hole_mass(case.background))
-    geometry(f, t, track) = fitted_interior(spec, track, f, G; t=T(t), n_L=n_L)
+    # The tracked analytic target's hole (step B2): the background's mass and
+    # spin, which `GHCase` checked is a Kerr-Schild hole's.
+    ks_mass, ks_spin = targeted ? _kerr_schild_parameters(case.background)[1:2] :
+                       (zero(T), zero(T))
+    geometry(f, t, track) = fitted ?
+                            fitted_interior(spec, track, f, G; t=T(t), n_L=n_L) :
+                            tracked_interior(spec, track, T(t); mass=ks_mass,
+                                             spin=ks_spin)
     # On a restart, the geometry the next chunk runs on: `record!`'s
     # `track!` built it from the updated track at the checkpoint's time, on
     # the mesh the checkpoint holds, which is the one the file has.
-    geom = fitted ? geometry(forest, t_saved, tr) : case.interior
+    geom = tracked ? geometry(forest, t_saved, tr) : case.interior
+    # The spacing a geometry's lengths and its checks are stated in: the
+    # fitted geometry carries it, and the sphere's is read off the mesh where
+    # its `r_1` lies (`layer_spacing`, step 5's).
+    geom_h(g, f, t) = g isa FittedInterior ? g.h : first(layer_spacing(f, g, T(t)))
+    # The find cadence of the tracked analytic target (step B2): as often as
+    # `|a| Δt² ≤ G h/4` asks and at least once a chunk, capped by the spec's
+    # `max_interval` — `chunk_finds(track, h, span)` finds over a span, at the
+    # pieces' boundaries, the last of them the record's.
+    interval_cap = targeted && spec.max_interval > 0 ? min(spec.max_interval, chunk) :
+                   chunk
+    chunk_finds(track, h, span) =
+        max(find_count(track.pred.a, G, h, span),
+            ceil(Int, span / interval_cap - sqrt(eps(T))))
 
     # The fitted target (step 8e). Its ranges come from the seed's analytic
     # data on the offset surface unless the spec states them, and the first
@@ -748,7 +783,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                                             G; t=zero(T), center=case.center)
             criterion(fs) = indicator_flags(fs, case, zero(T); G=G,
                                             buffer=bufferwidth, travel=travel,
-                                            interior=fitted ?
+                                            interior=tracked ?
                                                      acycle(geometry(fs.forest,
                                                                      zero(T), tr)) :
                                                      case.interior).flags
@@ -769,7 +804,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             # a tracked geometry is rebuilt on the mesh it settled at, and the
             # data re-evaluated with its core rule — re-evaluated, not
             # interpolated, for the cycle's own reason.
-            if fitted
+            if tracked
                 geom = geometry(forest, zero(T), tr)
                 (fitmode && handover_t == 0) ||
                     fill_exact!(U, case, zero(T); interior=kgeom(geom, zero(T)))
@@ -864,21 +899,25 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                 fit_from_plain(T, saved.fits[2]; backend=backend, path="run.fits[2]"))
         u = ck.u
         sample_t = from_plain(T, saved.sample_t)
-        sample_track = fitted ? from_plain(HorizonTrack{T}, saved.sample_track;
-                                           path="run.sample_track") : nothing
-        geom_sampled = fitted ? geometry(forest, sample_t, sample_track) : geom
+        sample_track = tracked ? from_plain(HorizonTrack{T}, saved.sample_track;
+                                            path="run.sample_track") : nothing
+        geom_sampled = tracked ? geometry(forest, sample_t, sample_track) : geom
         nresamples = saved.nresamples
         t_chunk = from_plain(T, saved.t_chunk)
         ρ_chunk = from_plain(T, saved.rho_chunk)
+        # A tracked analytic target's record ran on the sphere at the chunk's
+        # end, built from the track before the row's find, which is what the
+        # checkpoint's `track_chunk` holds for it (step B2); the fitted
+        # geometry is the chunk's own, from the chunk's start.
         int_chunk = case.interior === nothing ? nothing :
-                    with_ρ_max(fitted ?
-                               kgeom(geometry(forest, t_chunk,
+                    with_ρ_max(tracked ?
+                               kgeom(geometry(forest, targeted ? t_saved : t_chunk,
                                               from_plain(HorizonTrack{T},
                                                          saved.track_chunk;
                                                          path="run.track_chunk")),
                                      t_chunk) : case.interior, ρ_chunk)
         p0 = GHProblem(U, schedule, case; q=q, t=sample_t,
-                       interior=fitted ? kgeom(geom_sampled, sample_t) : geom,
+                       interior=tracked ? kgeom(geom_sampled, sample_t) : geom,
                        accounting=acc, target=fitmode ? target_cache(U) : nothing,
                        fits=fits, t_target=t_saved, target_rate=rate_on,
                        trail=trail_on, target_exact=exact_on, simd_width=simd_width)
@@ -918,7 +957,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # three finds fail is lost. On a spherical horizon the two seeds are the
     # same surface.
     hlm_seed = saved !== nothing ? saved.hlm_seed :
-               fitted && case.horizon !== nothing ?
+               tracked && case.horizon !== nothing ?
                complex_from_real(tr.shape, case.horizon.N - 1) : nothing
     # The lapse-collapse trigger (step 8d): set by a row whose evolved region
     # has `min α` below the spec's `α_trigger`, it forces a find at the next
@@ -937,6 +976,16 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                 track_trigger=nothing, margin_efolds=nothing, layer_h=nothing,
                 layer_offset=nothing, layer_thickness=nothing,
                 layer_r_in=nothing, layer_r_out=nothing)
+    # The quadratic track's rows (step B2), `nothing` on every other run: the
+    # finds this chunk made (the record's and the ones at its pieces'
+    # boundaries), the largest prediction error among them in cells of the
+    # finest spacing, the acceleration the track now predicts with, and the
+    # find interval it asks for.
+    no_cadence = (track_finds=nothing, track_prediction_max=nothing,
+                  track_acceleration=nothing, track_interval=nothing)
+    # What the finds between two rows saw (step B2): reset by every row.
+    piece_finds = Ref(0)
+    piece_prediction = Ref(0.0)
     no_fit = (fit_valid=nothing, fit_residual=nothing, fit_min_detγ=nothing,
               fit_min_α=nothing, fit_min_λ=nothing, fit_hits=nothing,
               fit_refills=nothing)
@@ -1012,7 +1061,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # It returns the updated track and geometry rather than assigning them
     # (amended 2026-10-19): over MPI it runs on rank 0 inside the row's
     # analysis, and every rank adopts what it returns.
-    function track!(t, hz, c_pred, forced)
+    function track!(t, hz, c_pred, forced; span=chunk)
         mesh = U.forest
         h_fine = minimum_spacing(T, mesh)
         prediction = hz.success === true ?
@@ -1020,9 +1069,16 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                        h_fine) : nothing
         lost = nothing
         tr′, geom′ = tr, geom
+        h_geom = geom_h(geom, mesh, t)
         try
             tr′ = update_track(tr, hz, t; max_misses=spec.max_misses, G=G,
-                               h=geom.h)
+                               h=h_geom)
+            # A quadratic track's new prediction takes over over the interval
+            # to the next find (step B2): the cadence its own acceleration asks
+            # for over `span`, the chunk the next finds divide.
+            if tr′.quadratic && hz.success === true
+                tr′ = _with_prediction(tr′; blend=span / chunk_finds(tr′, h_geom, span))
+            end
         catch e
             e isa TrackLostError || rethrow()
             lost = e
@@ -1034,21 +1090,26 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                                  t=T(t), center=case.center)
             check_bounds_gate(mesh, geom′, case.bounds, q; t=T(t))
         end
-        ct = center_at(track_center(tr′), T(t))
+        ct = track_position(tr′, T(t))
         ca = center_at(case.center, T(t))
         leaf_h(x) = (b = locate_point(mesh, x);
                      b === nothing ? h_fine : spacing(T, mesh, mesh.leaves[b]))
-        efolds = margin_efolds(case.background, geom′, q; t=T(t),
+        efolds = targeted ? nothing :
+                 margin_efolds(case.background, geom′, q; t=T(t),
                                ε_KO=case.ε_KO, spacing=leaf_h).min
+        layer = targeted ?
+                (layer_h=R(geom_h(geom′, mesh, t)), layer_offset=nothing,
+                 layer_thickness=R(geom′.r_1 - geom′.r_0), layer_r_in=R(geom′.r_0),
+                 layer_r_out=R(geom′.r_1)) :
+                (layer_h=R(geom′.h), layer_offset=R(geom′.offset),
+                 layer_thickness=R(geom′.thickness), layer_r_in=R(geom′.r_in),
+                 layer_r_out=R(geom′.r_out))
         rows = (track_source=tr′.source, track_center=ntuple(d -> R(ct[d]), 3),
                 track_velocity=ntuple(d -> R(tr′.v_est[d]), 3),
                 track_r_min=R(tr′.r_min), track_r_max=R(tr′.r_max),
                 track_offset=R(sqrt(sum(abs2, ct - ca)) / h_fine),
                 track_misses=tr′.misses, track_prediction=prediction,
-                track_trigger=forced, margin_efolds=efolds,
-                layer_h=R(geom′.h), layer_offset=R(geom′.offset),
-                layer_thickness=R(geom′.thickness), layer_r_in=R(geom′.r_in),
-                layer_r_out=R(geom′.r_out))
+                track_trigger=forced, margin_efolds=efolds, layer...)
         return (rows=rows, lost=lost, tr=tr′, geom=geom′)
     end
 
@@ -1078,27 +1139,43 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # forces the find whatever the cadence (step 8d).
         forced = fitted && trigger_pending
         trigger_pending = false
-        c_pred = fitted ? center_at(track_center(tr), T(t)) : nothing
+        c_pred = tracked ? track_position(tr, T(t)) : nothing
+        # The tracked analytic target finds at every row whatever the cadence
+        # (proposed in step B2): the row's find is the last of the chunk's,
+        # which the cadence between rows divides the chunk for.
         # **The find, the track and the fit run on rank 0 (decided
         # 2026-10-19)**, the other ranks serving its ghost fills and
         # interpolations, and every rank adopts what it returns — so the
         # track, the geometry and the fits are rank 0's bits everywhere
         # (`on_root`, `src/distributed.jl`). Serially this is the three calls.
         an = on_root(comm; serve=(p, u)) do
-            found = horizon_row(p, u, t, hlm_seed, length(records); force=forced,
-                                origin=c_pred, center=c_pred, find=find)
-            tk = fitted ? track!(t, found, c_pred, forced) : nothing
+            found = horizon_row(p, u, t, hlm_seed, length(records);
+                                force=forced || targeted, origin=c_pred,
+                                center=c_pred, find=find)
+            tk = tracked ? track!(t, found, c_pred, forced) : nothing
             fs = fitmode && tk.lost === nothing ? refit!(p, u, t, tk.geom) : nothing
             (hz=found, tk=tk, fs=fs)
         end
         hz = an.hz
         hz.hlm === nothing || (hlm_seed = hz.hlm)
-        trk, lost = if fitted
+        trk, lost = if tracked
             tr, geom = an.tk.tr, an.tk.geom
             an.tk.rows, an.tk.lost
         else
             no_track, nothing
         end
+        cad = if targeted
+            nf = piece_finds[] + (hz.success === nothing ? 0 : 1)
+            pm = trk.track_prediction === nothing ? piece_prediction[] :
+                 max(piece_prediction[], trk.track_prediction)
+            (track_finds=nf, track_prediction_max=nf == 0 ? nothing : pm,
+             track_acceleration=R(sqrt(sum(abs2, tr.pred.a))),
+             track_interval=R(tr.blend))
+        else
+            no_cadence
+        end
+        piece_finds[] = 0
+        piece_prediction[] = 0.0
         fr = an.fs === nothing ? no_fit : adopt_fit!(an.fs)
         # The indicator last, and only where the case refines: it writes
         # `DIAG_TAU` and reads nothing the norms above left behind, and the
@@ -1140,7 +1217,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                centroid_offset=centroid === nothing ? nothing :
                                R(centroid_offset(case, t, ind.centroid)),
                bounds_hits=bh.hits, bounds_nonfinite=bh.nonfinite,
-               bounds_r_max=bh.r_max, val..., trk..., fr...,
+               bounds_r_max=bh.r_max, val..., trk..., cad..., fr...,
                nblocks=nleaves(mesh), levels=forest_levels(mesh),
                h=R(minimum_spacing(T, mesh)),
                finite=nonfinite == 0)
@@ -1224,12 +1301,12 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # A tracked geometry is rebuilt on the new mesh from the same track —
         # its offset and ramp are stated in the mesh's spacings — and the
         # problem's constructor asserts it, as it asserts the sphere (step 8d).
-        g = fitted ? geometry(mesh, stop, tr) : geom
+        g = tracked ? geometry(mesh, stop, tr) : geom
         # A fitted run's cache is made anew on the new mesh and filled at the
         # next chunk's start from the same fits — a fit is a polynomial in `x`
         # and does not know the mesh (proposed in step 8e).
         p = GHProblem(U, schedule, case; q=q, t=stop,
-                      interior=fitted ? kgeom(g, stop) : g, accounting=acc,
+                      interior=tracked ? kgeom(g, stop) : g, accounting=acc,
                       target=fitmode ? target_cache(U) : nothing, fits=fits,
                       t_target=stop, target_rate=rate_on, trail=trail_on,
                       target_exact=exact_on, simd_width=simd_width)
@@ -1258,7 +1335,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         if rg.moved
             nregrids += 1
             p, u, schedule, geom = rg.p, rg.u, rg.schedule, rg.geom
-            fitted && ((geom_sampled, sample_t, sample_track) = (geom, t_saved, tr))
+            tracked && ((geom_sampled, sample_t, sample_track) = (geom, t_saved, tr))
         end
     end
 
@@ -1289,9 +1366,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # while the surface has moved by a small fraction of a cell, and
         # re-sampled, by rebuilding the problem, once it has moved half of
         # one (proposed in step 8d).
-        if fitted
+        if tracked
             if p.Hsrc isa FieldSet &&
-               surface_shift(geom_sampled, geom, tstart) > geom.h / 2
+               surface_shift(geom_sampled, geom, tstart) > geom_h(geom, U.forest, tstart) / 2
                 p = GHProblem(U, schedule, case; q=q, t=tstart,
                               interior=kgeom(geom, tstart), accounting=acc,
                               target=p.target, fits=p.fits,
@@ -1315,7 +1392,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         p = with_interior(p, chunk_interior(case, dt_used, ρ_max_factor,
                                             ρ_max_fixed;
                                             default=ρ_max_default,
-                                            interior=fitted ? kgeom(geom, tstart) :
+                                            interior=tracked ? kgeom(geom, tstart) :
                                                      geom))
         # The fitted target for this chunk (step 8e): the cache refilled from
         # the fits the last row built, at the chunk's start — and, for a
@@ -1334,6 +1411,27 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                                     (refill_frac == T(1 // 4) ? geom.h / 4 :
                                      geom.h * refill_frac)), 1, steps) : 1
         end
+        # The tracked analytic target's pieces (step B2): the target and its
+        # sphere rebuilt from the track at each piece's midpoint — pieces of
+        # at most `h/(4|v|)`, as a moving `:fitted` target is refilled — and
+        # the chunk's finds, as many as the cadence asks (`chunk_finds`), at
+        # the pieces' boundaries; the last of them is the row's.
+        nfinds = 1
+        piece_interior(t) = chunk_interior(case, dt_used, ρ_max_factor, ρ_max_fixed;
+                                           default=ρ_max_default,
+                                           interior=geometry(U.forest, t, tr))
+        piece_end(k) = tstart + ((steps * k) ÷ npieces) * dt_used
+        if targeted
+            h_g = geom_h(geom, U.forest, tstart)
+            speed = sqrt(sum(abs2, track_state(tr, tstart)[2]))
+            nmove = speed > 0 ? ceilint(speed * (stop - tstart) / (h_g / 4)) : 1
+            nfinds = chunk_finds(tr, h_g, stop - tstart)
+            npieces = clamp(nfinds * cld(nmove, nfinds), 1, steps)
+            p = with_interior(p, piece_interior((tstart + piece_end(1)) / 2))
+        end
+        # Whether the piece `k` starts with a find: where `⌊(k − 1) nfinds/npieces⌋`
+        # steps up, so that `nfinds − 1` finds fall evenly between the rows.
+        find_before(k) = k > 1 && fld((k - 1) * nfinds, npieces) > fld((k - 2) * nfinds, npieces)
 
         # The steps, through IMEXRungeKutta's RK4 by block owner
         # (`gh_integrator`; amended 2026-09-26, replacing OrdinaryDiffEq's
@@ -1359,7 +1457,32 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             "the one the CFL check and the relaxation rate were computed for.")
         for piece in 1:npieces
             nk = (steps * piece) ÷ npieces - (steps * (piece - 1)) ÷ npieces
-            if piece > 1
+            if piece > 1 && targeted
+                if find_before(piece)
+                    # A find at the piece's boundary (step B2), without the
+                    # analysis row: the finder and the track on rank 0, as the
+                    # row's, every rank adopting the result.
+                    t_f = integ.t
+                    c_f = track_position(tr, t_f)
+                    span = stop - tstart
+                    pf = on_root(comm; serve=(p, integ.u)) do
+                        found = horizon_row(p, integ.u, t_f, hlm_seed, length(records);
+                                            force=true, origin=c_f, center=c_f,
+                                            find=find)
+                        (hz=found, tk=track!(t_f, found, c_f, false; span=span))
+                    end
+                    pf.hz.hlm === nothing || (hlm_seed = pf.hz.hlm)
+                    tr, geom = pf.tk.tr, pf.tk.geom
+                    piece_finds[] += 1
+                    pr = pf.tk.rows.track_prediction
+                    pr === nothing || (piece_prediction[] = max(piece_prediction[], pr))
+                    pf.tk.lost === nothing ||
+                        throw(TrackLostError(pf.tk.lost.msg, pf.tk.lost.track,
+                                             Any[records...]))
+                end
+                p = with_interior(p, piece_interior((integ.t + piece_end(piece)) / 2))
+                integ.p.p = p
+            elseif piece > 1
                 p = refill(p, integ.t, u)
                 integ.p.p = p
                 fitcost.nrefills[] += 1
@@ -1374,6 +1497,14 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             "not at the chunk's end $stop.")
         u = integ.u
         nsteps += steps
+        # The tracked analytic target's row runs on the sphere at the chunk's
+        # end, from the track before the row's find — which is what a restart
+        # rebuilds it from, so that track is the checkpoint's `track_chunk`
+        # (step B2).
+        if targeted
+            tr_chunk = tr
+            p = with_interior(p, piece_interior(stop))
+        end
 
         # (2) the recheck. It throws, and it is meant to.
         λ_end = max_speed_of(p, u, stop)
@@ -1453,7 +1584,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                 nregrids += 1
                 integ_prev = nothing        # its scratch is the old mesh's
                 p, u, schedule, geom = rg.p, rg.u, rg.schedule, rg.geom
-                fitted && ((geom_sampled, sample_t, sample_track) = (geom, stop, tr))
+                tracked && ((geom_sampled, sample_t, sample_track) = (geom, stop, tr))
             end
         end
         chunk_max = max(chunk_max, time() - chunk_start)
@@ -1466,7 +1597,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             λ_initial=R(λ_initial), h=R(minimum_spacing(T, forest)),
             nblocks=nleaves(forest), levels=forest_levels(forest),
             interior=p.interior, problem=p, U=U, u=u, forest=forest,
-            track=tr, geometry=fitted ? geom : nothing, n_L=n_L,
+            track=tr, geometry=tracked ? geom : nothing, n_L=n_L,
             nresamples=nresamples, fits=fits, fit_initial=fit_initial,
             target_bounds=tbounds, handover=R(handover_t),
             target_source=target_source, finished=finished, t=t_done,
@@ -1724,7 +1855,7 @@ default_relaxation_rate(case::GHCase{T}) where {T} =
 
 # A tracked case may state its own default rate (step 8d); `0` is the rule.
 _spec_rate(int, ::Type{T}) where {T} = zero(T)
-_spec_rate(spec::FittedSpec, ::Type{T}) where {T} = T(spec.ρ_max)
+_spec_rate(spec::Union{FittedSpec,TrackedSpec}, ::Type{T}) where {T} = T(spec.ρ_max)
 
 # The interior the kernel sees this chunk: the case's radii and variant at
 # `ρ_max = factor/dt`, or at the fixed rate where one is given — the
@@ -1812,9 +1943,10 @@ this runs on the initial data, before the integrator exists.
 function discrete_gradient_momentum!(U::FieldSet{T,3}, case::GHCase{T}, t,
                                      q::Integer, schedule;
                                      interior=case.interior) where {T}
-    interior isa FittedSpec && throw(ArgumentError(
+    interior isa Union{FittedSpec,TrackedSpec} && throw(ArgumentError(
         "the Π post-pass applies the core rule, which on a tracked case needs " *
-        "the geometry: pass `interior = fitted_interior(…)` (step 8d)."))
+        "the geometry: pass `interior = fitted_interior(…)` (step 8d) or " *
+        "`tracked_interior(…)` (step B2)."))
     boundary = dirichlet(case, t)
     if boundary === nothing
         fill_ghosts!(U, schedule)

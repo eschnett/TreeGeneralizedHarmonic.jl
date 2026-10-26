@@ -605,3 +605,210 @@ end
         @info "the tracked hole against the analytic one at t = 0.15 M (step 8d)" err_l2 = (rf.err_l2, rs.err_l2) shell_gauge_l2 = (sf.gauge_l2, ss.gauge_l2) residual = (rf.residual, rs.residual) track_offset = maximum(r -> r.track_offset, out.records) prediction = [r.track_prediction for r in out.records] margin_efolds = out.records[end].margin_efolds
     end
 end
+
+# The quadratic track and the tracked analytic target (step B2): `CODE.md`, "The
+# tracks" and "One interior per hole". Host-side, a fraction of a second:
+# synthetic finds on a binary's circular orbits, the prediction's algebra, and
+# the target a track gives. The runs are `tracked_target_tests.jl`'s.
+@testset verbose = true "The quadratic track (step B2)" begin
+    T = Float64
+    G, h = 3, T(1 // 64)            # `q = 4`, the binary's planned spacing
+    tol = G * h / 4
+    # A sphere's shape as the finder reports it, for synthetic finds.
+    L = 4
+    probe = seeded_track(T; t=0, center=(0, 0, 0), velocity=(0, 0, 0), r_min=1 // 2)
+    hlm = complex_from_real(probe.shape, L)
+    grid = ASH.EquiangularGrid(L)
+    find_at(t, x) = (success=true, origin=Tuple(x), origin_r_min=1 / 2,
+                     origin_r_max=1 / 2, hlm=hlm, grid=grid)
+
+    # Guards the cadence `CODE.md` proposes for a binary: the chord of today's
+    # track lags an orbit by `a Δt²` — four cells at `d = 3` and `h = 1/64` with a
+    # find per `M` — and nothing would refuse it. The quadratic through the last
+    # four finds is left with the jerk, and a cadence of `|a| Δt² ≤ G h/4` keeps
+    # even the line near the check. A wrong sign in the fit's `τ`, a fit about
+    # the wrong time or a blend that never ends shows here as an error of the
+    # orbit's own size.
+    @testset "the quadratic prediction holds a binary's hole under G h/4 at its cadence (d = $d)" for d in (10, 3)
+        # Holes at `d/2` from the origin, `M = 1` in total, Keplerian.
+        Ω = sqrt(1 / T(d)^3)
+        R = T(d) / 2
+        pos(t) = SVector{3,T}(R * cos(Ω * t), R * sin(Ω * t), 0)
+        vel(t) = SVector{3,T}(-R * Ω * sin(Ω * t), R * Ω * cos(Ω * t), 0)
+        acc(t) = -Ω^2 * pos(t)
+        # The cadence for this orbit: one find a chunk of `M` at `d = 10`,
+        # three at `d = 3` (`a = 0.0556`, `√(G h/(4a)) = 0.46`).
+        @test find_count(acc(0), G, h, 1) == (d == 10 ? 1 : 3)
+        @test find_interval(acc(0), G, h; max=1) ≈ (d == 10 ? 1 : 1 / 3)
+        worst = Dict{Symbol,T}()
+        for mode in (:quadratic, :line)
+            # The seed knows the orbit's acceleration, as a binary's will from
+            # its initial data; the line cannot use it.
+            tr = seeded_track(T; t=0, center=pos(0), velocity=vel(0),
+                              acceleration=acc(0), r_min=1 // 2,
+                              quadratic=mode === :quadratic)
+            Δ = find_interval(acc(0), G, h; max=1)
+            tr = update_track(tr, find_at(0, pos(0)), 0; G=G, h=h, max_interval=1)
+            t, e_find, e_any, n = zero(T), zero(T), zero(T), 0
+            # Fifteen orbital periods at `d = 3`, two at `d = 10`.
+            while t < 2π / Ω * (d == 3 ? 15 : 2)
+                for s in range(t, t + Δ; length=9)
+                    e_any = max(e_any, sqrt(sum(abs2, track_position(tr, s) - pos(s))))
+                end
+                t += Δ
+                n += 1
+                n > TRACK_FIT_FINDS &&
+                    (e_find = max(e_find, sqrt(sum(abs2, track_position(tr, t) - pos(t)))))
+                # The line is the comparison, not the claim, and has no
+                # center check to fail.
+                tr = update_track(tr, find_at(t, pos(t)), t; G=G, h=h, max_interval=1)
+            end
+            worst[mode] = e_find
+            if mode === :quadratic
+                @test tr.nhist == TRACK_FIT_FINDS
+                @test e_find < tol              # measured 0.024 and 0.059 G h/4
+                @test e_any < tol               # between finds, the blend included
+                # The fit's acceleration is the window's mean, `Ω · 1.5 Δt` of
+                # `|a|` behind the orbit's (5 % at `d = 10`, 10 % at `d = 3`):
+                # a factor two in the `½ a τ²` term, or its sign, is not.
+                @test sqrt(sum(abs2, tr.pred.a - acc(t))) < Ω^2 * R / 4
+            end
+        end
+        @info "the prediction on a circle at d = $d, h = 1/64, G = 3 (step B2)" interval = find_interval(acc(0), G, h; max=1) quadratic_over_Gh4 = worst[:quadratic] / tol line_over_Gh4 = worst[:line] / tol
+        @test worst[:quadratic] < worst[:line] / 5
+    end
+
+    # Guards the prediction's algebra: the order of the fit's coefficients, the
+    # blend's continuity (a jump in `c` or `ċ` at a find is a jump of the layer,
+    # its target and the gauge source, which the blend exists to avoid), the
+    # chord until the fourth find, and the center-jump refusal.
+    @testset "the track is continuous at a find, and fits a quadratic from the fourth" begin
+        a = SVector{3,T}(1 // 50, 0, 0)
+        v0 = SVector{3,T}(1 // 5, 0, 0)
+        x(t) = v0 * t + a * t^2 / 2
+        tr = seeded_track(T; t=0, center=(0, 0, 0), velocity=v0, r_min=1 // 2)
+        @test tr.quadratic && tr.nhist == 0 && iszero(tr.blend)
+        let s = track_state(tr, T(1 // 3))
+            @test s[1] ≈ v0 / 3 && s[2] == v0 && iszero(s[3])
+        end
+        ts = T[0, 1 // 2, 1, 3 // 2, 2]
+        for (k, t) in enumerate(ts)
+            before = track_state(tr, t)
+            tr′ = update_track(tr, find_at(t, x(t)), t; G=G, h=h, max_interval=1)
+            after = track_state(tr′, t)
+            # Continuous in value and velocity where the new prediction starts.
+            @test maximum(abs, after[1] - before[1]) ≤ 8eps(T)
+            @test maximum(abs, after[2] - before[2]) ≤ 8eps(T)
+            @test tr′.t_blend == t && tr′.blend > 0 && tr′.nhist == min(k, 4)
+            # And the new prediction alone once the blend is over.
+            tl = t + tr′.blend + T(1 // 10)
+            @test track_state(tr′, tl)[1] ==
+                  first(TreeGeneralizedHarmonic.line_at(tr′.pred, tl))
+            if k == 1
+                @test tr′.pred.v == v0 && iszero(tr′.pred.a)     # the seed's
+            elseif k < TRACK_FIT_FINDS
+                # The chord of the last two, its acceleration the seed's zero.
+                @test tr′.pred.v ≈ (x(t) - x(ts[k - 1])) / (t - ts[k - 1]) rtol = 1e-14
+                @test iszero(tr′.pred.a)
+            else
+                # Four finds on a parabola: the parabola, to roundoff.
+                @test tr′.pred.a ≈ a rtol = 1e-10
+                @test tr′.pred.v ≈ v0 + a * t rtol = 1e-12
+                @test tr′.pred.c ≈ x(t) rtol = 1e-12
+            end
+            tr = tr′
+        end
+        # The center jump: refused beyond half a stencil's reach of the
+        # prediction, accepted inside it.
+        t = T(5 // 2)
+        p = track_position(tr, t)
+        far = find_at(t, p + SVector{3,T}(0, G * h * 6 // 10, 0))
+        near = find_at(t, p + SVector{3,T}(0, G * h * 4 // 10, 0))
+        @test_throws "G h/2" update_track(tr, far, t; G=G, h=h)
+        @test update_track(tr, near, t; G=G, h=h).source === :found
+        # A miss coasts on the prediction, unchanged.
+        miss = update_track(tr, (success=false,), t; G=G, h=h)
+        @test miss.source === :coasting && miss.pred == tr.pred &&
+              track_position(miss, t) == p
+    end
+
+    # Guards the bit-for-bit claim for every track that is not a tracked analytic
+    # target's: a `FittedSpec`'s track predicts along step 8d's line, and its
+    # position is `center_at(track_center(tr), t)` — the same expression, the
+    # same bits.
+    @testset "a fitted case's track is step 8d's line, bit for bit" begin
+        fcase = kerr_schild_case(T; v=1 // 5, x0=-1 // 4, halfwidth=T(5 // 2),
+                                 chunk=T(1 // 10), gauge_source=:algebraic,
+                                 interior=FittedSpec(T; margin=4, n_L=6),
+                                 horizon=Horizon(T; every=1, N=12, spin=false))
+        tr = seed_track(fcase, 0)
+        @test !tr.quadratic
+        for t in T[0, 1 // 7, 3]
+            @test track_position(tr, t) === center_at(track_center(tr), t)
+            @test track_center(tr, t) === track_center(tr)
+        end
+    end
+
+    # Guards the target a track gives: the sign of the boost (`boost(m, u)`
+    # moves the hole at `−u`, so a target built with `+v` runs away from its
+    # sphere), the translation's time (the hole on the line at the piece's
+    # time, not at `t = 0`), and the perturbations reaching the target and its
+    # sphere together.
+    @testset "the tracked target is the hole on the track's line" begin
+        kw = (; v=1 // 5, x0=-1 // 4, halfwidth=T(5 // 2), chunk=T(1 // 10),
+              gauge_source=:algebraic, octant=:quadrant,
+              horizon=Horizon(T; every=1, N=12, spin=false))
+        spec = TrackedSpec(T; r_0=T(2 // 5), r_1=T(11 // 10))
+        case = kerr_schild_case(T; kw..., interior=spec)
+        ana = kerr_schild_case(T; kw..., r_0=T(2 // 5), r_1=T(11 // 10))
+        tr = seed_track(case, 0)
+        @test tr.quadratic && tr.pred.v == SVector{3,T}(1 // 5, 0, 0)
+        int = tracked_interior(spec, tr, 0; mass=1, spin=0)
+        @test int isa Interior && interior_variant(int) === :damped
+        @test int.target == ana.background                 # bit for bit
+        @test center_at(int.center, 0) == center_at(ana.center, 0)
+        @test int.center.v == SVector{3,T}(1 // 5, 0, 0)
+        @test (int.r_0, int.r_1) == (ana.interior.r_0, ana.interior.r_1)
+        # Later, on the line: the target is the moving hole there, to roundoff.
+        t = T(7 // 3)
+        int = tracked_interior(spec, tr, t; mass=1, spin=0)
+        @test hole_velocity(int.target) ≈ int.center.v
+        @test center_at(int.center, t) ≈ center_at(ana.center, t)
+        for x in (center_at(ana.center, t) + SVector{3,T}(1, 1 // 2, 1 // 3),
+                  center_at(ana.center, t) - SVector{3,T}(1 // 2, 0, 1 // 4))
+            @test SVector(state_tuple(int.target, t, x)) ≈
+                  SVector(state_tuple(ana.background, t, x)) rtol = 1e-12
+        end
+        # The perturbations: the target and its sphere move together.
+        δx = SVector{3,T}(1 // 24, 0, 0)
+        δv = SVector{3,T}(1 // 50, 0, 0)
+        pert = TrackedSpec(T; r_0=T(2 // 5), r_1=T(11 // 10), mass_factor=T(101 // 100),
+                           velocity_offset=δv, center_offset=δx)
+        ip = tracked_interior(pert, tr, t; mass=1, spin=0)
+        @test hole_mass(ip.target) == T(101 // 100)
+        @test center_at(ip.center, t) ≈ center_at(int.center, t) + δx
+        @test ip.center.v ≈ int.center.v + δv
+        @test hole_velocity(ip.target) ≈ ip.center.v
+        moved = kerr_schild_case(T; M=T(101 // 100), v=1 // 5 + 1 // 50,
+                                 x0=center_at(ip.center, 0)[1],
+                                 halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=T(11 // 10),
+                                 chunk=T(1 // 10), gauge_source=:algebraic)
+        x = center_at(ip.center, t) + SVector{3,T}(1, 1 // 2, 1 // 3)
+        @test SVector(state_tuple(ip.target, t, x)) ≈
+              SVector(state_tuple(moved.background, t, x)) rtol = 1e-12
+        # A seed off by `seed_velocity_offset` predicts with it.
+        off = kerr_schild_case(T; kw...,
+                               interior=TrackedSpec(T; r_0=T(2 // 5), r_1=T(11 // 10),
+                                                    seed_velocity_offset=(1 // 20, 0, 0)))
+        @test seed_track(off, 0).pred.v ≈ SVector{3,T}(1 // 4, 0, 0)
+        # Refused: the target needs a Kerr-Schild hole, and the sphere's radii
+        # are the spec's.
+        @test_throws ArgumentError hole_case(T, SM.Harmonic(one(T), zero(T));
+                                             halfwidth=T(5 // 2), chunk=T(1 // 10),
+                                             interior=spec)
+        @test_throws "carries its own radii" kerr_schild_case(T; kw..., interior=spec,
+                                                              r_0=T(2 // 5))
+        @test_throws ArgumentError TrackedSpec(T; r_0=1, r_1=1 // 2)
+        @test horizon_shell(case) == horizon_shell(ana)
+    end
+end

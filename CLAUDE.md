@@ -592,6 +592,29 @@ rolled on"): the resting hole settles at the Kerr-Schild level outside `r = 3`
 `6–31×` the Kerr-Schild hole's at `1/32` (`70–200×` at `1/24`); the analytic
 `:damped` layer does not survive the gauge moving.
 
+From 2026-10-26 (step B2) a `:damped` layer can take its **target and its
+center from the horizon track**: `hole_case(; interior = TrackedSpec(T; r_0,
+r_1, …))` runs step 5's sphere about the track, relaxing toward the boosted
+Kerr-Schild hole of the background's mass and spin on the track's line,
+rebuilt at every piece's midpoint (`tracked_interior`; pieces of `h/(4|v|)` as
+for a moving `:fitted` target), its core following that target with the
+target's rate — an `Interior` with a `target`, so nothing in the kernel is new.
+Its track predicts along the **quadratic** of its last four finds
+(`TRACK_FIT_FINDS`, `fit_track_quadratic`), the chord before that, blended `C¹`
+into the previous prediction over the next find interval (`track_state`,
+`track_position`, `track_center(tr, t)`), refuses a found origin more than
+`G h/2` from the prediction, and finds `find_count(a, G, h, chunk)` times a
+chunk (`|a| Δt² ≤ G h/4`, capped by `max_interval`) at the pieces' boundaries,
+the last at the row, which always finds. A `FittedSpec`'s track keeps step 8d's
+line bit for bit (`quadratic = false`). The record has `track_finds`,
+`track_prediction_max`, `track_acceleration` and `track_interval`; the spec's
+`mass_factor`, `velocity_offset`, `center_offset` and `seed_velocity_offset`
+are the sensitivity study's perturbations (`test/octant_runs.jl
+interior=tracked`). `test/tracked_target_tests.jl` is its file; the synthetic
+orbits are `tracking_tests.jl`'s and the chain `checkpoint_tests.jl`'s
+(`CODE.md`, "What step B2 built and measured"; `SINGULARITY_HANDLING.md`, "The
+tracked analytic target").
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -1200,6 +1223,21 @@ source (`backend=cuda` on an H200, from a copy with `CUDA` added):
 julia --project=. --threads=6 test/octant_runs.jl case=ks octant=quadrant L=16 N=16 roots=1 radii=8,6,4,3 r_0=5/8 r_1=23/16 t_end=4 chunk=1/2 cfl=1/2 amplitude=0 x0=-1 path=4/5 v=1/5 gauge=dh sigma_g=1 out=out/s16dm
 julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=32 t_end=40 chunk=1 split=1 cfl=1/2 amplitude=0 interior=fitted margin=16 n_L=20 fit_cont=2 lmax_fit=8 v=1/5 x0=-4 path=8 gauge=dh sigma_g=10 sigma_r=32 shell_center=track group=step-B1 out=out/b1dm32t checkpoint=out/b1dm32t/ck checkpoint_every=4 walltime=40000
 julia --project=. -t 1 bench/gauge_source_cost.jl N=16 roots=4
+```
+
+From 2026-10-26 (step B2) `interior=tracked` is the tracked analytic target
+(`r_0=`, `r_1=` as for `damped`), with `prediction=quadratic|line`,
+`find_interval=` (the cap, in `M`) and the sensitivity study's perturbations
+along the motion axis: `target_mass=` (the target's mass factor), `target_dv=`
+(added to its velocity), `target_dx=` (added to its center, in finest cells)
+and `seed_dv=` (added to the seed track's velocity); `shell_center=track` reads
+the track's center there. `records.csv` adds the track's prediction, cadence,
+center and velocity. The first line is a local smoke run, the second the
+production tracked row at `1/24` (jobs in `step-B2-tracked`, one H200):
+
+```bash
+julia --project=. --threads=3 test/octant_runs.jl case=ks octant=quadrant L=16 N=16 roots=1 radii=8,6,4,3 r_0=5/8 r_1=23/16 t_end=4 chunk=1/2 cfl=1/2 amplitude=0 x0=-1 path=4/5 v=1/5 interior=tracked out=out/s16t
+julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=24 t_end=40 chunk=1 split=0 cfl=1/2 amplitude=0 r_0=5/8 r_1=23/16 v=1/5 x0=-4 path=8 interior=tracked group=step-B2 out=out/b2t24 checkpoint=out/b2t24/ck checkpoint_every=4 walltime=40000
 ```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
@@ -1940,6 +1978,28 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
 - **The lanes' `log` and `exp` are LLVM's, the scalar ones Julia's** (step
   B1). The damped harmonic gauge's kernel on lanes is the scalar one to `19 ε`
   of the terms, not the `1–2 ε` of the other sources.
+- **Two kinds of track, and only one predicts along a quadratic** (step B2).
+  `HorizonTrack.quadratic` is a `TrackedSpec`'s; a `FittedSpec`'s track is step
+  8d's line, and every `:fitted` run is bit for bit what it was because its
+  position is still `center_at(track_center(tr), t)`. Read a track's center
+  through `track_position(tr, t)` or `track_center(tr, t)`, never through
+  `c_find + v_est (t − t_find)` written out: on a quadratic track that is the
+  new prediction alone, without the blend that keeps the center `C¹` at a find.
+- **A binary's seed must know its acceleration** (step B2). The center-jump
+  check refuses a find more than `G h/2` off the prediction, and a seed with a
+  position and a velocity only predicts a `d = 3` orbit `2.4 G h/4` off at its
+  first find a chunk later — refused. Pass `seed_track(…; acceleration)` from
+  the orbit, or a short `max_interval` until four finds exist.
+- **The tracked target's row runs on the sphere at the chunk's end** (step
+  B2), built from the track before the row's find, and the checkpoint's
+  `track_chunk` holds that track for it; a fitted run's holds the chunk's
+  start. A change to when the row's sphere is built has to change both, or a
+  restart is no longer the run (`checkpoint_tests.jl`'s tracked chain notices).
+- **Negate a velocity as `zero(v) − v`, not `−v`, where bits matter** (step
+  B2). `−v` turns a zero component into `−0.0`, which `boost` carries into the
+  signs of its matrix's zero entries; the tracked target built from the seed is
+  the case's background bit for bit only with `0 − v`, as the case's own
+  `(−v, 0, 0)` is.
 - **`Val`s once per chunk.** `G`, `q`, "has gauge source", "has
   dissipation", — from step 5 — the interior *variant* (`:none`,
   `:damped`, `:pasted`, `:frozen`, which is "has interior" and *which* in

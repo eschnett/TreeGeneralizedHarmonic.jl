@@ -57,6 +57,7 @@ end
 # then written as the identity rather than computed.
 boundary_interior(int) = int
 boundary_interior(::FittedSpec) = nothing
+boundary_interior(::TrackedSpec) = nothing
 
 """
     has_outer_face(case::GHCase) -> Bool

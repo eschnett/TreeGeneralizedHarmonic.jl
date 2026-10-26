@@ -266,4 +266,24 @@ const TGHc = TreeGeneralizedHarmonic
         @test jobs == 3
         test_same(out, ref)
     end
+
+    # The tracked analytic target (step B2): the track with its four finds and
+    # its blend, the finds at the pieces' boundaries between two rows, and the
+    # sphere the row ran on — built at the chunk's end from the track before the
+    # row's find, which is what the restart rebuilds it from.
+    @testset "a chain on the tracked analytic target is the run" begin
+        case = kerr_schild_case(T; halfwidth=T(5 // 2), chunk=T(1 // 20), x0=-1 // 4,
+                                v=1 // 5, gauge_source=:algebraic, octant=:quadrant,
+                                horizon=Horizon(T; every=1, N=12, spin=false),
+                                interior=TrackedSpec(T; r_0=T(2 // 5), r_1=T(11 // 10),
+                                                     max_interval=T(1 // 40)))
+        forest = gh_forest(T, case; N=12, roots=(4, 2, 2))
+        ref = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                      t_end=T(3 // 20))
+        @test [r.track_finds for r in ref.records] == [1, 2, 2, 2]
+        @test ref.track.nhist == TRACK_FIT_FINDS
+        out, jobs, _ = chain(case, forest, T(3 // 20))
+        @test jobs == 3
+        test_same(out, ref)
+    end
 end

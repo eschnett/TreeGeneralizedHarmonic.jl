@@ -508,7 +508,7 @@ function level_bounds(case::GHCase{T}, forest::Forest{3}, t,
         "…)`. CODE.md's driver flags with the masked Löhner verdict and with " *
         "nothing else."))
     int = interior
-    int isa FittedSpec && throw(ArgumentError(
+    int isa Union{FittedSpec,TrackedSpec} && throw(ArgumentError(
         "the level bounds of a tracked case are stated about its geometry, " *
         "which is built from the track once per chunk: pass `interior = " *
         "fitted_interior(…)` (the driver does)."))

@@ -241,6 +241,20 @@ function GHCase(::Type{T}, background; box, periodic,
             "a tracked case's layer target is the FittedSpec's own `target`; " *
             "the case's `target` keyword is for step 5's sphere."))
         interior
+    elseif interior isa TrackedSpec
+        # The tracked analytic target (step B2): the case holds the rule, and
+        # the sphere and its target are built from the track once per piece.
+        # The target is a Kerr-Schild hole with this background's mass and
+        # spin, so the background must be one.
+        interior isa TrackedSpec{T} || throw(ArgumentError(
+            "a case's TrackedSpec is stated in the case's own type $T, got a " *
+            "$(typeof(interior))."))
+        target === nothing || throw(ArgumentError(
+            "a tracked analytic target is the Kerr-Schild hole on the track's " *
+            "line, built every piece (tracked_interior); the case's `target` " *
+            "keyword is for step 5's sphere."))
+        _kerr_schild_parameters(background)
+        interior
     else
         Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
                  margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp, target=target)
@@ -358,6 +372,20 @@ check_case_bounds(::Nothing, int, ::Type) = nothing
 # A tracked case has no radius to hold the gate against until its geometry is
 # built; `check_bounds_gate` asserts it against each one (step 8d).
 check_case_bounds(::Nothing, ::FittedSpec, ::Type) = nothing
+check_case_bounds(::Nothing, ::TrackedSpec, ::Type) = nothing
+
+# The tracked analytic target's sphere has its radii (step B2): the gate
+# inside `r_1`, as for step 5's.
+function check_case_bounds(bd, spec::TrackedSpec, ::Type{T}) where {T}
+    bd isa StateBounds{T} || throw(ArgumentError(
+        "a case's bounds are a StateBounds{$T} or `nothing`, got a " *
+        "$(typeof(bd))."))
+    bd.r_gate ≤ spec.r_1 || throw(ArgumentError(
+        "the range projection's gate r_gate = $(bd.r_gate) lies outside the " *
+        "layer's outer radius r_1 = $(spec.r_1): it would project evolved " *
+        "points."))
+    return nothing
+end
 
 function check_case_bounds(bd, ::FittedSpec, ::Type{T}) where {T}
     bd isa StateBounds{T} || throw(ArgumentError(
@@ -506,7 +534,7 @@ function horizon_dissipation(case::GHCase{T}; ε_in, ε_out=case.ε_KO) where {T
     case.interior === nothing && throw(ArgumentError(
         "the dissipation profile rises from the horizon to the layer's outer " *
         "radius r_1, and this case has no interior, so no r_1."))
-    case.interior isa FittedSpec && throw(ArgumentError(
+    case.interior isa Union{FittedSpec,TrackedSpec} && throw(ArgumentError(
         "the dissipation profile is a function of the radius about the " *
         "analytic center, and a tracked case's layer follows a surface: step " *
         "8c measured the profile off for a smooth target, and a tracked one " *
@@ -721,6 +749,11 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
             "a tracked case derives its layer's radii from the found horizon " *
             "(offset = m h and thickness = n_L h below it), so it takes no " *
             "r_0 or r_1; got r_0 = $r_0, r_1 = $r_1."))
+    elseif interior isa TrackedSpec
+        (r_0 === nothing && r_1 === nothing) || throw(ArgumentError(
+            "a tracked analytic target's sphere carries its own radii " *
+            "(TrackedSpec(T; r_0, r_1, …)), so the case takes no r_0 or r_1 " *
+            "beside it; got r_0 = $r_0, r_1 = $r_1."))
     elseif interior !== nothing
         (r_0 === nothing || r_1 === nothing) && throw(ArgumentError(
             "a :$interior layer needs its two radii, r_0 (the frozen core) and " *
@@ -1379,11 +1412,11 @@ reference at the end of a chunk, the Dirichlet data at every ghost fill
 function state_callback(case::GHCase{T}, t; interior=case.interior) where {T}
     bg = case.background
     int = interior
-    int isa FittedSpec && throw(ArgumentError(
-        "this case's interior is a FittedSpec, the rule a tracked geometry is " *
-        "built by: the core rule needs the geometry itself — pass `interior " *
-        "= fitted_interior(…)`, which is what evolve! does for the initial " *
-        "data (step 8d)."))
+    int isa Union{FittedSpec,TrackedSpec} && throw(ArgumentError(
+        "this case's interior is a $(nameof(typeof(int))), the rule a tracked " *
+        "geometry is built by: the core rule needs the geometry itself — pass " *
+        "`interior = fitted_interior(…)` or `tracked_interior(…)`, which is " *
+        "what evolve! does for the initial data (steps 8d and B2)."))
     interior_variant(int) === :fitted && throw(ArgumentError(
         "a :fitted interior's initial data is the analytic solution outside " *
         "the offset surface and the fit of it inside, read from the target " *

@@ -124,10 +124,12 @@ export geometry_radii, layer_radii
 # masks and its checks — and, in `tracking.jl`, the track it is built from
 export real_harmonic_index, real_from_complex, complex_from_real
 export shape_series, shape_bounds, shape_sample_directions
-export analytic_horizon_radius, FittedSpec, layer_cells
+export analytic_horizon_radius, FittedSpec, TrackedSpec, layer_cells
 export FittedInterior, shape_radius, interior_point, fitted_geometry
 export ShapeMask, ShapeBand, geometry_spacing
 export HorizonTrack, TrackLostError, seed_track, update_track, track_center
+export TrackLine, TRACK_FIT_FINDS, track_state, track_position, seeded_track
+export fit_track_quadratic, find_count, find_interval, tracked_interior
 export real_shape, analytic_shape, fitted_interior, surface_shift
 export axis_dispersion, margin_efolds
 

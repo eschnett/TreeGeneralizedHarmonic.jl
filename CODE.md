@@ -112,6 +112,7 @@ research project; the inherited documents live in `notes/`.
     - [What step B1 built and measured (2026-10-25)](#what-step-b1-built-and-measured-2026-10-25)
   - [One interior per hole](#one-interior-per-hole)
   - [The tracks](#the-tracks)
+    - [What step B2 built and measured (2026-10-26)](#what-step-b2-built-and-measured-2026-10-26)
   - [The common horizon and the handover](#the-common-horizon-and-the-handover)
   - [Initial data](#initial-data)
   - [The outer boundary and the wave zone](#the-outer-boundary-and-the-wave-zone)
@@ -3461,7 +3462,7 @@ the tests assert on them.
 | mesh statistics | leaf count per level, finest spacing, the indicator's `τ_max`, the refinement centroid against the analytic center | every chunk |
 | range projection | `bounds_hits` (points moved, summed over every stage-limiter call of the chunk), `bounds_nonfinite` (of those, points with a non-finite component), `bounds_r_max` (the outermost radius it fired at, `−1` where it did not); `nothing` for a case without bounds (added in step 8b) | every chunk |
 | validity monitor | over the layer `r_0 ≤ r < r_1` and over the `G` points outside it: `min_detγ`, `min_α` (the *signed* lapse, negative where `g^{tt} > 0`), `max_h`, `max_Π` (the largest component magnitudes) — `min_detγ_layer` … `max_Π_shell` (added in step 8b); and over the whole evolved region, `min_detγ_evolved`, `min_α_evolved` — the lapse-collapse trigger's input (added in step 8d). On the tracked geometry the two bands are its own (`layer_mask`, `shell_mask`) | every chunk |
-| horizon track | for a case whose interior is a `FittedSpec` (added in step 8d; `nothing` otherwise): `track_source` (`:found`, `:coasting`), `track_center` and `track_velocity` (the tracked trajectory after this row's find), `track_r_min`, `track_r_max` (the found surface's radii about its own origin), **`track_offset`** (the tracked center's distance from the analytic one, in cells of the finest spacing — the number "good to about a cell" is read from), `track_misses`, `track_prediction` (the found origin's distance from where the track predicted it, in cells; `nothing` without a find), `track_trigger` (this row's find was forced by the lapse trigger) | every chunk, the find every `k`-th or when triggered |
+| horizon track | for a case whose interior is a `FittedSpec` (added in step 8d; `nothing` otherwise): `track_source` (`:found`, `:coasting`), `track_center` and `track_velocity` (the tracked trajectory after this row's find), `track_r_min`, `track_r_max` (the found surface's radii about its own origin), **`track_offset`** (the tracked center's distance from the analytic one, in cells of the finest spacing — the number "good to about a cell" is read from), `track_misses`, `track_prediction` (the found origin's distance from where the track predicted it, in cells; `nothing` without a find), `track_trigger` (this row's find was forced by the lapse trigger); for a `TrackedSpec`'s quadratic track (added in step B2; `nothing` otherwise) also `track_finds` (the finds this chunk made, those at its pieces' boundaries and the row's), `track_prediction_max` (the largest prediction error among them, in cells), `track_acceleration` (`|a|` of the prediction) and `track_interval` (the find interval it asks for), with `track_center` the track's position at the row | every chunk, the find every `k`-th or when triggered (every row for a tracked analytic target) |
 | tracked layer | the geometry the next chunk runs on: `layer_h` (the spacing its offset and ramp are stated in), `layer_offset = m h`, `layer_thickness = n_L h`, `layer_r_in`, `layer_r_out` (the shape's bounding radii), and `margin_efolds` — step 8a's leakage e-folds across the margin, the least of the six grid axes (added in step 8d) | every chunk |
 | fitted target | for a `:fitted` case (added in step 8e; `nothing` otherwise), of the fit built from this row's state: **`fit_valid`** (every point of the fit's validity sweep a Lorentzian metric — `fit_valid(fit)`; a fit that is not does not become the target), **`fit_residual`** (`fit_residual(fit).overall`, the fit's worst relative residual block by block against the data it was fitted to), and beside them the sweep's worst **`fit_min_detγ`**, `fit_min_α`, `fit_min_λ`, `fit_hits` (swept points the target's ranges would move) and `fit_refills` (the cache's mid-chunk refills in the chunk this row ends) **(proposed in step 8e)**; for `:fitted` the row `residual` is the layer's distance from its target (the cache), not from the analytic solution | every chunk |
 
@@ -4317,8 +4318,9 @@ the layer and the hook depend on `(x, t)` only" — was no longer true:
 **Reals are stored exactly**: TreeAMR's plain data refuse a MultiFloat
 scalar, so `plain_reals` stores a native float as itself and any `isbits`
 real made of one native float throughout as its limbs (TreeHydro's rule).
-**The run state's structs** (`HorizonTrack`, `FitParams`, `StateBounds`,
-`BoundsAccounting`, …) are stored field by field and rebuilt from their
+**The run state's structs** (`HorizonTrack` — from step B2 with its
+`TrackLine`s and the packed history of its last four finds — `FitParams`,
+`StateBounds`, `BoundsAccounting`, …) are stored field by field and rebuilt from their
 declared field types, so that an `SVector{3,T}` comes back as one and not as
 the `Vector{Float64}` a plain read gives; only this package's own structs
 are taken apart, and anything else is refused with its field's path. The
@@ -4542,7 +4544,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
 | `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate step 5's interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` (added in step 4) |
 | `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`; **amended 2026-09-26**: `gh_interpolate`/`gh_interpolate_grad` over TreeAMR's `interpolate`, and the guard as the `Region` `UnevolvedRegion`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
-| `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl` |
+| `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl`; from step B2 the quadratic prediction (`TrackLine`, `track_state`, `track_position`, `fit_track_quadratic`, `find_count`, `find_interval`, `seeded_track`) and the tracked analytic target's `tracked_interior` |
 | `src/fit.jl` | the fitted target (added in step 8e, after `tracking.jl` and before `driver.jl`): the fit's variables (`fit_variables`, `state_from_fit`), the real solid harmonics (`_solid_harmonic_fold`, `real_solid_harmonics`, `fit_directions`), the two samplers (`state_sampler`, `analytic_sampler`), the least squares (`solve_fit`, `fit_row_weights`), the validity sweep (`fit_sweep`), `FitParams` and `InteriorFit` with `build_fit`, `fit_residual` and `fit_valid`, the kernel-callable evaluator `fit_variables_at`/`fit_state`, and the kernel half (8e-ii): `derive_target_bounds`, the 40-variable cache (`target_cache`, `fit_target_kernel!`, `fill_target!`) and the initial data's `fitted_state_kernel!`. The variant's branch is in `evolution.jl` (`GHProblem`'s `target`/`fits`/`t_target`, `refill_target`), its residual in `constraints.jl`'s error kernel, its flow in `driver.jl` (`refit!`, the refill and the pieces of a moving chunk) |
 | `src/checkpoint.jl` | checkpoint and restart (added 2026-10-01, after `fit.jl` and before `driver.jl`): the file names and their rotation and `latest_checkpoint` (TreeHydro's), `plain_reals` for exact reals, `to_plain`/`from_plain` for the run state's own structs and `fit_from_plain` for an `InteriorFit`, `run_recipe` and `run_criterion`, `check_recipe`, `save_run`/`load_run` over TreeIOHDF5's `save_checkpoint`/`load_checkpoint`, and `check_checkpoint_keywords`. `evolve!` writes and reads through it; `test/checkpoint_tests.jl` is its file |
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written (added in step 8c′) — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
@@ -6793,8 +6795,12 @@ inferred from the native code and the clock.
 
 ## Binary black holes (proposed 2026-10-25)
 
-*Status: a design for review. Nothing in this section is built or
-measured.* It extends the proof of concept to two black holes that orbit,
+*Status: a design for review.* Steps B1 and B2 have built and measured
+their single-hole parts — the gauge sources ([What step B1 built and
+measured](#what-step-b1-built-and-measured-2026-10-25)) and the tracks and the
+tracked analytic target ([What step B2 built and
+measured](#what-step-b2-built-and-measured-2026-10-26)) — and nothing of the
+binary is built yet **(amended in step B2)**. It extends the proof of concept to two black holes that orbit,
 merge and ring down, with the gravitational waves they emit as the result.
 `PLAN.md`'s steps B1–B9 are the work breakdown, and the two milestones are
 under [Milestones G7 and G8](#milestones-g7-and-g8): two holes colliding
@@ -7158,6 +7164,10 @@ holes need.)
   enough: a smooth layer at `4/M` with a ramp of at least `4G` cells holds
   an inexact target and leaves the exterior what the exact one leaves.
   Step B2 measures it.
+
+  **(Built in step B2** for one hole, as `TrackedSpec` and
+  `tracked_interior`: [What step B2 built and
+  measured](#what-step-b2-built-and-measured-2026-10-26)**.)**
 - **`:fitted`.** Nothing is new but the composition and the tracks; each
   fit is one hole's own.
 
@@ -7197,6 +7207,112 @@ moves.
 **One track per hole.** Under the half turn there is one track, and its
 image is the other hole ([The symmetric
 domains](#the-symmetric-domains)).
+
+**(Built in step B2**, for one hole: [What step B2 built and
+measured](#what-step-b2-built-and-measured-2026-10-26)**.)**
+
+#### What step B2 built and measured (2026-10-26)
+
+Everything the two subsections above propose for one hole is built: the
+quadratic track in `src/tracking.jl`, and the tracked analytic target in
+`src/interior.jl`, `src/tracking.jl` and `src/driver.jl`. The binary's tuple of
+interiors and its gauge source fed by the tracks are step B3's.
+
+**The quadratic track.** A [`HorizonTrack`] carries, beside step 8d's line,
+the times and origins of its last four finds, the prediction made at the last
+one (`TrackLine`, a quadratic in time about the find) and the prediction in use
+before it, which the new one takes over from (`track_state`, `track_position`,
+`track_center(tr, t)`):
+
+- **Which tracks predict along it (proposed in step B2).** A
+  `TrackedSpec`'s, by default (`quadratic = true`). A `FittedSpec`'s track
+  keeps step 8d's line, and its position is `center_at(track_center(tr), t)` —
+  the same expression — so every `:fitted` run is the run it was, bit for bit
+  (`tracking_tests.jl`, "a fitted case's track is step 8d's line"). Step B3
+  decides whether the binary's `:fitted` holes take the quadratic too; the
+  fitted geometry reads `track_center(tr)`, a line, and would read
+  `track_center(tr, t)` instead.
+- **The prediction (proposed in step B2).** After the first find: the found
+  origin, carried along the velocity and acceleration the previous prediction
+  gives there — the seed's. After the second and third: the chord of the last
+  two finds, its velocity carried to the newer one by the previous
+  prediction's acceleration, which it keeps — step 8d's line where that is
+  zero. From the fourth: the least-squares quadratic in time through the last
+  four (`fit_track_quadratic`, the normal equations in time scaled by the
+  finds' span). The acceleration before the fourth find is the previous
+  prediction's own and not the blend's, whose `c̈` carries the turnover from
+  one prediction to the next.
+- **The blend (proposed in step B2).** The new prediction takes over from the
+  one in use with the quintic smoothstep over the next find interval. "The one
+  in use" is its quadratic Taylor polynomial at the find, so that the center
+  and its velocity are continuous at every find — `C²`, in fact — even where a
+  find comes before the previous blend has ended.
+- **The cadence (proposed in step B2).** `find_count(a, G, h, chunk) =
+  ⌈chunk / √(G h/(4|a|))⌉` finds a chunk, equally spaced, the last of them the
+  record row's: the chunk divided rather than an interval laid end to end, so
+  that the finds fall on the pieces' boundaries and the row still finds.
+  `TrackedSpec(; max_interval)` caps the interval. The finds between two rows
+  run at the pieces' boundaries, on rank 0 inside `on_root` like the row's,
+  without the row; the tracked target finds at **every** row, whatever the
+  `Horizon`'s cadence.
+- **The center-jump check**, a quadratic track's only: a find whose origin
+  is more than `G h/2` from `track_position(tr, t)` is refused by name, as a
+  jump of `r_min` always was.
+- **The record** (`no_cadence` elsewhere): `track_finds` (the finds the chunk
+  made), `track_prediction_max` (the largest prediction error among them, in
+  finest cells), `track_acceleration` and `track_interval`; `track_center` is
+  `track_position` at the row's time.
+- **The run state.** The track's new fields are in the checkpoint with it;
+  the tracked target's row runs on the sphere built at the chunk's **end** from
+  the track before the row's find, and that track is what `track_chunk` holds
+  for it, so that a restart rebuilds the row's sphere (a fitted run's
+  `track_chunk` is the chunk's start, as before).
+
+**(Measured in step B2)** on synthetic finds on a Keplerian circle — holes of
+a binary of total mass `1` at `d/2` from the origin, `Ω = √(1/d³)`, `G = 3`,
+`h = 1/64`, the seed knowing the orbit's acceleration — over two orbits at
+`d = 10` and fifteen at `d = 3` (`tracking_tests.jl`):
+
+| `d` | `|a|` | cadence | quadratic at a find | between finds | the line at a find |
+|---|---|---|---|---|---|
+| `10` | `0.0050` | `1` a chunk of `M` | `0.024 G h/4` | `0.036 G h/4` | `0.43 G h/4` |
+| `3` | `0.056` | `3` a chunk (`Δt = M/3`) | `0.059 G h/4` | `0.091 G h/4` | `0.53 G h/4` |
+
+The cadence alone keeps even the line under the check; the quadratic is
+`9–18×` better and leaves the jerk, `Ω · 1.5 Δt` of the acceleration behind the
+orbit's. **A binary's seed must know its acceleration** (found in step B2):
+seeded with its position and velocity alone at `d = 3`, the first interval is
+a whole chunk, the prediction at `1 M` is `2.4 G h/4` off — over the check's
+`2 G h/4` — and the find is refused. Step B3's seed takes the orbit's
+acceleration from the initial data (`seed_track(…; acceleration)`), or starts
+with a short `max_interval`.
+
+**The tracked analytic target.** A case whose `interior` is a
+`TrackedSpec(T; r_0, r_1, …)` runs step 5's `:damped` sphere of those radii
+about the track, relaxing toward the boosted, translated Kerr-Schild hole of the
+background's mass and spin on the track's line — the `isbits` target metric an
+`Interior` already carries — rebuilt at every piece's midpoint by
+`tracked_interior(spec, track, t; mass, spin)`, on pieces of at most `h/(4|v|)`
+(proposed in step B2). Being an `Interior`, its core follows its target with the
+target's rate and its layer carries `(1 − w) ∂_t u_target`, the rate of the
+target along its own line: nothing in the kernel is new.
+
+- **Bit for bit where it should be (measured in step B2).** The target built
+  from the analytic seed at `t = 0` is the case's background bit for bit —
+  `boost(…, 0 − v)`, not `−v`, keeps a zero component `+0` as the case's own
+  `(−v, 0, 0)` has it — and the right-hand side on it is the analytic layer's
+  bit for bit (`tracked_target_tests.jl`). Every run that does not ask for the
+  tracked target computes what it did before step B2 bit for bit: the analytic
+  `:damped` quadrant with its finds, a moving `:fitted` hole with step 8′'s
+  ramp and the resting hole with the sampled source, digests of `u` and of
+  every record row against `2bdb584`.
+- **The perturbations** of the sensitivity study are the spec's:
+  `mass_factor`, `velocity_offset` and `center_offset` move the target and its
+  sphere together, the track unchanged, and `seed_velocity_offset` starts the
+  track off the hole's velocity (`test/octant_runs.jl interior=tracked
+  target_mass= target_dv= target_dx= seed_dv=`).
+- **Refused:** a `TrackedSpec` on a background that is not a translated,
+  boosted Kerr-Schild hole, and `r_0`/`r_1` beside one.
 
 ### The common horizon and the handover
 
