@@ -613,7 +613,14 @@ are the sensitivity study's perturbations (`test/octant_runs.jl
 interior=tracked`). `test/tracked_target_tests.jl` is its file; the synthetic
 orbits are `tracking_tests.jl`'s and the chain `checkpoint_tests.jl`'s
 (`CODE.md`, "What step B2 built and measured"; `SINGULARITY_HANDLING.md`, "The
-tracked analytic target").
+tracked analytic target"). Its runs, the boosted `a = 0` hole on the quadrant at
+`1/24` and `1/32` to `40 M` on one H200 a row (`step-B2-tracked`): the tracked
+target is the analytic `:damped` layer to `10⁻³` in every shell, at order four
+and at its cost (`38` and `88 s/M`); a target off by `1 %` in mass, `0.02` in
+velocity or a cell in center holds `ℋ` just outside the horizon at a steady
+`7.5×`, `18×` and `16–26×` and leaves `r ≥ 3` as it was once the start's
+transient has passed; a track seeded `0.05` too fast recovers in two finds with
+no refusal. The numbers favour pairing (α).
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
@@ -685,7 +692,15 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5737 assertions in 17m01** at four threads after step B1, rebased
+The suite is **5849 assertions in 24m40** at four threads and **5841 in 21m02**
+at one after step B2 (2026-10-26, the two run side by side on a development
+machine loaded 5–28 by them, two smoke runs and other work — read the times
+against that): its 112 new claims are `tracking_tests.jl`'s quadratic track (77,
+`1.6 s` at one thread: the Keplerian orbits, the blend, the line kept for a
+fitted case, the target a track gives), `tracked_target_tests.jl` (25, `6.5 s`:
+the seed's target bit for bit, the tracked target against the analytic layer
+on the `q = 2` quadrant, the recovery) and `checkpoint_tests.jl`'s tracked chain
+(10, `16.4 s`). It was **5737 assertions in 17m01** at four threads after step B1, rebased
 on the bitant (2026-10-26, TreeAMR 0.2.6, on a development machine loaded 7–9
 by other work): its 73 new claims are
 `gauge_source_tests.jl`'s step-B1 testset (64, `29.5 s` at one thread — the
@@ -1233,11 +1248,14 @@ along the motion axis: `target_mass=` (the target's mass factor), `target_dv=`
 and `seed_dv=` (added to the seed track's velocity); `shell_center=track` reads
 the track's center there. `records.csv` adds the track's prediction, cadence,
 center and velocity. The first line is a local smoke run, the second the
-production tracked row at `1/24` (jobs in `step-B2-tracked`, one H200):
+production tracked row at `1/24` (`b2t24`, job 582988 in `step-B2-tracked`, one
+H200, `25 min`), the third prints `SINGULARITY_HANDLING.md`'s "The tracked
+analytic target" from the campaign's data (no package needed):
 
 ```bash
 julia --project=. --threads=3 test/octant_runs.jl case=ks octant=quadrant L=16 N=16 roots=1 radii=8,6,4,3 r_0=5/8 r_1=23/16 t_end=4 chunk=1/2 cfl=1/2 amplitude=0 x0=-1 path=4/5 v=1/5 interior=tracked out=out/s16t
 julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=24 t_end=40 chunk=1 split=0 cfl=1/2 amplitude=0 r_0=5/8 r_1=23/16 v=1/5 x0=-4 path=8 interior=tracked group=step-B2 out=out/b2t24 checkpoint=out/b2t24/ck checkpoint_every=4 walltime=40000
+julia test/tracked_study.jl dir=.claude/data/step-B2 times=1,2,4,8,16,24,32,40
 ```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
@@ -2133,6 +2151,13 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   before trusting a "failed" status. Correct the status by hand
   (`status = "finished"` and a `message` saying what happened), and keep the
   peak memory and wall time elsewhere, since the log is gone.
+- **A pre-empted `h200preq` job can end `FAILED`, not requeued** (step B2,
+  2026-10-26). Two rows (jobs 583003, 583004) got `SIGTERM` after `8–9 min`,
+  their `srun` exited `143`, and the jobs ended `FAILED 15:0` with nothing
+  requeued. Step B1's batch scripts resubmit themselves on `143` for this
+  reason; a script without that branch has to be resubmitted by hand, and the
+  row then continues from its last checkpoint. Read `sacct` for a job that
+  vanished from `squeue` before its `40 M`.
 
 ## Conventions
 

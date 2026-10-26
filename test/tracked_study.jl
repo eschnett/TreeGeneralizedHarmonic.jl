@@ -48,6 +48,7 @@ isempty(runs) && error("no runs with an octant.csv under $dir")
 at(r, col, t) = (i = findfirst(x -> abs(x - t) < 1e-9, r["t"]);
                  i === nothing || !haskey(r, col) ? NaN : r[col][i])
 fmt(x) = isnan(x) ? "—" : @sprintf("%.3g", x)
+fmt4(x) = isnan(x) ? "—" : @sprintf("%.4g", x)      # a ratio near one
 row(cells) = println("| ", join(cells, " | "), " |")
 sep(n) = println("|", repeat("---|", n))
 names_in(pre) = sort(filter(n -> startswith(n, pre), collect(keys(runs))))
@@ -59,8 +60,8 @@ for name in sort(collect(keys(runs)))
     r = runs[name]
     t, w = r["t"][end], r["wall"][end]
     rc = get(recs, name, nothing)
-    nf = rc === nothing || !haskey(rc, "track_finds") ? NaN :
-         sum(x -> isnan(x) ? 0.0 : x, rc["track_finds"])
+    nf = rc === nothing || !haskey(rc, "track_finds") || all(isnan, rc["track_finds"]) ?
+         NaN : sum(x -> isnan(x) ? 0.0 : x, rc["track_finds"])
     hits = rc === nothing ? NaN : sum(x -> isnan(x) ? 0.0 : x, rc["bounds_hits"])
     row([name, fmt(t), @sprintf("%.0f s", w), t > 0 ? @sprintf("%.0f", w / t) : "—",
          fmt(nf), fmt(hits)])
@@ -81,7 +82,7 @@ function ratio_table(title, col, pairs)
     sep(length(times) + 1)
     for (a, b) in pairs
         (haskey(runs, a) && haskey(runs, b)) || continue
-        row(vcat(["$a / $b"], [fmt(at(runs[a], col, t) / at(runs[b], col, t)) for t in times]))
+        row(vcat(["$a / $b"], [fmt4(at(runs[a], col, t) / at(runs[b], col, t)) for t in times]))
     end
 end
 function order_table(title, col)

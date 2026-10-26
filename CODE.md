@@ -5938,6 +5938,7 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 | 0 | `:fitted` | `1/24` (`1/24`, `1/32`) | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured: `ℋ` outside `1.6×` `:damped`'s, the error `1.1×` |
 | 0, *moving* (`v = 1/5` along `x`) | `:damped` (with the target's rate, 2026-10-21) | `1/16` (`1/24`, `1/32`) | `r_0 = 5/8`, `r_1 = 23/16` (`8.4` cells inside the contracted horizon at `1/16`) | measured to `40 M` at `4/M`: from `1/24` on `ℋ` just outside the horizon `1.00–1.03×` the resting hole's and the error there `1.26–1.36×` to `16 M`; order 4 in every shell from `1/24` to `1/32`; at `1/16` `ℋ` there `1.4–1.6×` (`8/M`: `1.03–1.09×` its own resting hole, which `8/M` lowers too) |
 | 0, *moving* (`v = 1/5` along `x`) | `:fitted` | `1/24` | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured to `40 M`: stable, the error just outside the horizon `:damped`'s at `4/M`, `ℋ` there `13–15×` `:damped`'s at `8/M`; `ℋ` there does not converge to `1/32` at `m = 16`, even at rest; `trail_ramp = 9/10` raised the error there `1.5–2.4×` and lowered it over the evolved region to `0.72–0.91×` |
+| 0, *moving* (`v = 1/5` along `x`) | `:damped` on the tracked target (`TrackedSpec`, step B2) | `1/24` (`1/24`, `1/32`) | `r_0 = 5/8`, `r_1 = 23/16`, the quadratic track, a find a chunk | measured to `40 M`: the analytic `:damped` layer's `ℋ` and error in every shell to `10⁻³` and its order four; a target `1 %` off in mass, `0.02` in velocity or a cell in center holds `ℋ` just outside the horizon at `7.5×`, `18×`, `16–26×` and leaves `r ≥ 3` as it was |
 | 0, *along `z`* (`v = 1/5`, `1/2`) | `:damped` (the core at `max(ρ_max, 12 |v|/r_0)`, 2026-10-22) | `1/16`; `1/24` at `v = 1/2` (`1/16`, `1/24`, `1/32`) | `r_0 = 1/2`, `r_1 = 19/16` (`8.7` cells inside the contracted pole `1.732` at `v = 1/2` and `1/16`; the ramp `11` cells) | measured to `20 M`: order 4 in the error outside the horizon; moving over resting in `[3, 5)` `1.38×` at `1/5` and `4.9×` at `1/2`, the same at every `h` (the moving solution and its position); `ℋ` `0.8–2.0×` at `1/2`, `0.65–1.01×` at `1/5` |
 | 0.3 | `:damped` | `1/16` (`1/16`, `1/24`) | `r_0 = 3/4`, `r_1 = 3/2` | the rules |
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:damped` (with the target's rate) | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 23/16` (`9.4` cells inside the contracted pole `r₊ √(1 − v²) = 1.828` at `1/24`) | measured to `40 M` at `4/M`, with `1/40`: `ℋ` `0.81–1.08×` the resting hole's in every shell at every `h` and time, the error `1.1–1.6×` (the hole's position, late); order 4 outside the horizon in both pairs; `J − a` drifts at the resting hole's rate, order 4 |
@@ -7218,7 +7219,7 @@ quadratic track in `src/tracking.jl`, and the tracked analytic target in
 `src/interior.jl`, `src/tracking.jl` and `src/driver.jl`. The binary's tuple of
 interiors and its gauge source fed by the tracks are step B3's.
 
-**The quadratic track.** A [`HorizonTrack`] carries, beside step 8d's line,
+**The quadratic track.** A `HorizonTrack` carries, beside step 8d's line,
 the times and origins of its last four finds, the prediction made at the last
 one (`TrackLine`, a quadratic in time about the find) and the prediction in use
 before it, which the new one takes over from (`track_state`, `track_position`,
@@ -7313,6 +7314,42 @@ target along its own line: nothing in the kernel is new.
   target_mass= target_dv= target_dx= seed_dv=`).
 - **Refused:** a `TrackedSpec` on a background that is not a translated,
   boosted Kerr-Schild hole, and `r_0`/`r_1` beside one.
+
+**The moving hole on the tracked target (measured in step B2**;
+[`SINGULARITY_HANDLING.md`, "The tracked analytic
+target"](SINGULARITY_HANDLING.md#the-tracked-analytic-target-step-b2-2026-10-26)**).**
+The boosted Kerr-Schild `a = 0` hole at `v = 1/5` on the quadrant, the production
+`:damped` layer (`r_0 = 5/8`, `r_1 = 23/16`, `4/M` with the target's rate), `1/24`
+and `1/32`, to `40 M`, `chunk = M`, one H200 a row, against the analytic layer rerun
+on the same commit and cadence:
+
+- **The tracked target is the analytic layer to the tracking.** `ℋ` just outside the
+  horizon is the analytic layer's to `0.9992–1.0009` at `1/24` and to `10⁻⁴` at
+  `1/32` at every time — the acceptance's "within `1.5×`" by three orders — and
+  every shell from `r = 3` out to `10⁻⁴`; both converge at order four, `4.01–4.15` in
+  `ℋ` and `3.97–4.05` in the error just outside the horizon, `4.00–4.04` farther out.
+  The track is `1.2·10⁻⁴` and `5.2·10⁻⁵` cells off the analytic center at `40 M`,
+  every prediction within `6·10⁻⁷` cells of its find, and the row costs what the
+  analytic one does (`38` and `88 s/M`).
+- **The sensitivity** at `1/24`: a target wrong by `1 %` in mass, `0.02` in velocity
+  or a cell (`0.042 M`) in center holds the band between the layer and the horizon at
+  a steady `7.4–7.9×`, `17–20×` and `16–26×` (a cell ahead, a cell behind) the exact
+  target's `ℋ` from `4 M` to `40 M`, its layer residual `7–8×`, `14–17×` and
+  `53–84×`; the exterior from `r = 3` out sees one transient pulse (`1.2–3.1×` at
+  `8 M` in `[3, 5)`) and is back at the exact target's `0.96–1.25×` by `24–40 M`.
+  Step 8c's rule holds from `r = 3` out, and not between the layer and the horizon. **What a binary's target misses** — the
+  companion's tidal field over the layer, `5·10⁻⁴` of the metric at `d = 10` and
+  `0.02` at `d = 3`, and the orbit's acceleration across it — is a twentieth of the
+  mass row's `1 %` at `d = 10` and twice it at `d = 3`: at `d = 10` the tracked target
+  should be the exact one's to tens of per cent, and late in the inspiral, by the
+  mass row's scale, about `15×` just outside each horizon unless the target learns
+  the tidal field **(predicted)**.
+- **The recovery**: a track seeded `0.05` too fast puts the target `1.2` cells ahead
+  at its first find (accepted: the check is `1.5` cells at `1/24`), has the hole's
+  velocity from the second and is the tracked target's track from then on, with no
+  refusal; the layer residual is the exact target's from `4 M`, and the transient
+  the first `2 M` sent out (`ℋ` `36×` just outside the horizon at `4 M`) has left
+  every shell by `40 M`.
 
 ### The common horizon and the handover
 
@@ -7662,7 +7699,13 @@ hours on one H200.
 1. **The gauge and the interior together**: (α) the tracked Kerr-Schild
    source with `:damped` per hole, built first, or (β) the damped harmonic
    gauge with `:fitted`. Steps B1 and B2 measure both on one moving hole
-   before step B3 commits the composition.
+   before step B3 commits the composition. **(Measured in steps B1 and B2.)**
+   On one hole moving at `v = 1/5`, (β) is `6–31×` the Kerr-Schild hole's `ℋ`
+   and `C_a` outside `r = 3` at `1/32` and still growing at `40 M` (B1), and
+   (α)'s tracked target is the analytic layer to `4·10⁻³` everywhere and order four
+   (B2): a target wrong by `1 %` in mass costs `7.5×` just outside the horizon and
+   nothing from `r = 3` out ([What step B2 built and
+   measured](#what-step-b2-built-and-measured-2026-10-26)).
 2. **The case**: `GHCase` with `holes` and the background demoted to data,
    or a separate `BinaryCase`. The first keeps one driver and makes the
    single hole a binary with one hole.
