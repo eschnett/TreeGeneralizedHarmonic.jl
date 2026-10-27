@@ -622,6 +622,46 @@ velocity or a cell in center holds `ℋ` just outside the horizon at a steady
 transient has passed; a track seeded `0.05` too fast recovers in two finds with
 no refusal. The numbers favour pairing (α).
 
+From 2026-10-26 (step B3) a case may hold **several holes** — Erik's three
+decisions of that day: pairing (α), `GHCase(…; holes)` with the background
+demoted to data, and the superposition kept here. `src/holes.jl` has
+`HoleSpec` (mass, spin along `z`, center, velocity, the seed's acceleration,
+a `TrackedSpec`), `SuperposedMetric` (`η + Σ w_A (g_A − η)`, `isbits`, XCTS's
+own attenuation and the companions' `1 − e^{−r_B²/λ_B²}`), `HolesSpec` (the
+case's rule for `K ≥ 2`, with `hole_target`, `source_feed` and `momentum`),
+`HoleInteriors` (the kernel's tuple, composed by `acting_interior`: the hole of
+the smallest layer coordinate runs its own single-hole arithmetic), the
+composite masks `HolesMask`/`AnyMask`, `HolesDamping` (three Gaussians) and
+`HolesDissipation`. `initialdata.jl` has the `holes` keyword (`case_holes`),
+`binary_case`, `head_on_holes`, `holes_forest`, `holes_source`,
+`check_holes_source` (the `t = 0` check of several holes: the source's holes
+are the specs', each hole's own source exact on its own hole) and
+`gauge_consistent_state`. `tracking.jl` has `seed_tracks`, `holes_interior`,
+`holes_source_at`, `holes_seed_source_at` and `holes_case_at` — the composite,
+the source and the profiles rebuilt from the tracks every piece — and
+`driver.jl` the loop's branch (`binary`): the tracks a vector, `reseed_holes!`
+(each hole found once on the data; its **horizon offset** corrects every later
+find), `holes_track!`, the holes finding together, the per-hole record rows
+(`holes`, `separation`, `phase`) and the run state; `evolution.jl` has
+`with_case`, `refinement.jl` `UnionLevelBounds`, `horizon.jl` the union guard.
+One hole is the case it was: `holes = (spec,)` runs the single-hole path bit
+for bit. `test/holes_tests.jl` is its file and `test/binary_runs.jl` its script;
+`mpi_workload.jl` has a pair (`CODE.md`, "What step B3 built and measured").
+Its runs, the head-on pair from rest at `d = 8 M` on `[−32, 32]³` to `2 M`, one
+H200 a row (`step-B3-holes`): `1/48` at the holes (`1/24` in `M_A`, the validated
+spacing; `63.6 M` points, `104 GB`, `362 s/M`; `1/24` is `7.9 M`, `29 GB`, `61
+s/M`, and `1/64` does not fit one H200). **The source fed by the tracks — (α) as
+decided — ended every row within `1 M`** on the track's own center or radius
+refusals (a feedback: the source carries the holes where the tracks say); **fed by
+the holes' Newtonian seeds (`source_feed = :seed`) both momenta ran to `2 M`**,
+every find successful, the constraints bounded and, with `momentum = :gauge`,
+falling (`C_a` from `1.6·10⁻⁸`, the areas `+0.7 %`; the superposition's `Π` grows
+them `18 %`). The tracks' separation falls `1.78×` (gauge `Π`) and `3.6×`
+(superposition `Π`) Newtonian free fall, the same at `1/24` and `1/48` to six
+digits: the horizons' coordinate motion under the junk, not the finder's
+accuracy (`CODE.md`, "What step B3 built and measured", and item 7 of "What this
+asks Erik to decide").
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -692,7 +732,14 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5849 assertions in 24m40** at four threads and **5841 in 21m02**
+The suite is **5952 assertions in 17m19** at four threads and **5944 in 19m58**
+at one after step B3 (2026-10-26, a development machine loaded 4–9 by other
+work): its 103 new claims are `holes_tests.jl` (72, `49.0 s` at four threads and
+`1m07` at one — the pair's pieces host-side, the composite against the nearer
+hole's kernel point by point on a 288-block mesh (`17.6 s`), the one-hole case
+against the case it was on two of step B2's runs (`12.9 s`), and the pair's run
+and its chain (`16.7 s`)) and the MPI comparison's 31 lines of the pair (294, the
+workload `5m29` on its own). It was **5849 assertions in 24m40** at four threads and **5841 in 21m02**
 at one after step B2 (2026-10-26, the two run side by side on a development
 machine loaded 5–28 by them, two smoke runs and other work — read the times
 against that): its 112 new claims are `tracking_tests.jl`'s quadratic track (77,
@@ -1257,6 +1304,26 @@ julia --project=. --threads=3 test/octant_runs.jl case=ks octant=quadrant L=16 N
 julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=24 t_end=40 chunk=1 split=0 cfl=1/2 amplitude=0 r_0=5/8 r_1=23/16 v=1/5 x0=-4 path=8 interior=tracked group=step-B2 out=out/b2t24 checkpoint=out/b2t24/ck checkpoint_every=4 walltime=40000
 julia test/tracked_study.jl dir=.claude/data/step-B2 times=1,2,4,8,16,24,32,40
 ```
+
+From 2026-10-26 (step B3) `test/binary_runs.jl` runs a pair of holes
+(`head_on_holes`, `binary_case`, `holes_forest`), one run per call, `key=value`
+options in its header: the separation and the box, each hole's layer for a hole of
+mass one (scaled by `M_A`), `target=superposed|own`, `feed=tracks|seed`,
+`momentum=superposition|gauge`, `companion=`, `adm=`, `backend=cuda`, `mpi=true`,
+`checkpoint=` and `walltime=`. Its CSV has the constraints over the evolved
+region and in bands about the nearer hole's track, each hole's track and horizon,
+the separations (tracks, found origins, Newtonian free fall) and the cost. The
+first line is a local smoke run (`q = 2`, `h = 1/16`, six minutes at four
+threads), the second step B3's head-on row (`b3sg48`, job 583289 in
+`step-B3-holes`, `27 min` on one H200, from a copy with `CUDA` added):
+
+```bash
+julia --project=. --threads=4 test/binary_runs.jl d=8 L=8 N=8 roots=4 radii=2,3/2,5/4 q=2 r_0=3/5 r_1=7/5 margin=4 t_end=1 chunk=1/10 finder_N=12 spin=0 adm=0 feed=seed momentum=gauge out=out/pair
+julia --project=. test/binary_runs.jl backend=cuda d=8 L=32 roots=8 radii=16,8,4,2 N=24 t_end=2 chunk=1/4 cfl=1/2 feed=seed momentum=gauge out=out/b3sg48 checkpoint=out/b3sg48/ck walltime=12000
+julia test/binary_study.jl dir=.claude/data/step-B3 runs=b3s48,b3sg48
+```
+
+The third prints the rows' tables from their CSVs (no package needed).
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
@@ -2151,6 +2218,45 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   before trusting a "failed" status. Correct the status by hand
   (`status = "finished"` and a `message` saying what happened), and keep the
   peak memory and wall time elsewhere, since the log is gone.
+- **The plain superposition of two Kerr-Schild holes is not a 3+1 metric
+  inside the horizons** (found in step B3). On the side of each hole that faces
+  its companion the two shifts `2H l_i` cancel and `α² = −g_tt + β_i β^i < 0`: for
+  an equal pair of total mass one at `d = 8` out to `0.52 M` from the hole's
+  center, through the core sphere and half the layer. `binary_case` turns each
+  hole's companions off within `4 M_B` of it (`companion = 4`, the default); with
+  `companion = 0` the initial data's `sqrt` throws a `DomainError`. Check `α²` on
+  the core sphere before trusting another superposition.
+- **A hole's horizon is not centred on the hole in superposed data** (step B3).
+  The companion displaces it toward itself (`0.022 M` at `d = 8`), and a track
+  that reads the found origin as the hole's center moves its target off the
+  data's hole, or turns the offset into a velocity through the blend
+  (`σ′ δ/Δt`). `evolve!` measures each hole's offset on the initial data
+  (`reseed_holes!`) and corrects every find by it; the record's `holes[A]` has
+  `origin` (the find's) and `track_center` (the hole's). Compare separations of
+  the tracks, not of the found origins.
+- **A case of one hole is not run through the path of several** (step B3).
+  `holes = (spec,)` is the single-hole case, bit for bit — its analytic source,
+  its record — and the vector of tracks, the per-hole rows and the track-fed
+  source start at `K = 2` (`case.interior isa HolesSpec`). A test of the K-hole
+  path needs two holes.
+- **`hole_mass(case.background)` throws on a superposition** (step B3, by
+  design: `PLAN.md`'s units edge). Read each hole's `HoleSpec.mass`; the default
+  rate of several holes is `4/M_A` of the lightest (`_case_mass`).
+- **The composite kernel is the nearer hole's kernel bit for bit, and must
+  stay so** (step B3): `acting_interior` returns one hole's whole interior by
+  `ifelse`, and every branch of `gh_rhs_point!` then runs on it (`ia`). A
+  composition that mixes two holes' numbers at a point — `min`, `max` of
+  profiles — would break `holes_tests.jl`'s point-by-point claim and the
+  single-hole arithmetic every hole was validated with; before merger the
+  layers are disjoint and nothing needs mixing.
+- **The composite source fed by the tracks runs away on a pair** (found in step
+  B3). The source carries each hole at its track's velocity, the coordinates
+  follow, and the track follows a horizon centroid that the data's junk moves: on
+  the head-on pair every `source_feed = :tracks` row ended within `1 M` on the
+  track's own refusals (`1/48` and `1/24`, either momentum), the predictions
+  growing to `0.4–0.9` cells first. `source_feed = :seed` (the holes' Newtonian
+  quadratics) holds it. It is the default `:tracks` because it is what Erik
+  decided; a run that must reach its end today passes `:seed`.
 - **A pre-empted `h200preq` job can end `FAILED`, not requeued** (step B2,
   2026-10-26). Two rows (jobs 583003, 583004) got `SIGTERM` after `8–9 min`,
   their `srun` exited `143`, and the jobs ended `FAILED 15:0` with nothing

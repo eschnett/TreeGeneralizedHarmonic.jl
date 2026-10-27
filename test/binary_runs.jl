@@ -111,8 +111,11 @@ comm = use_mpi ? communicator(MPI.COMM_WORLD;
 # The device's memory in use, in GB, or `NaN` on the host.
 function device_gb()
     ondevice || return NaN
+    # `CUDA.memory_info()` is `(free, total)` in bytes; the job log's `nvidia-smi`
+    # lines are the fallback where this CUDA.jl has another name for it.
     try
-        return Base.invokelatest(() -> (CUDA.total_memory() - CUDA.available_memory()) / 1e9)
+        free, total = Base.invokelatest(() -> CUDA.memory_info())
+        return (total - free) / 1e9
     catch
         return NaN
     end

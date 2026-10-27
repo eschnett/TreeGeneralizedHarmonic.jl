@@ -108,6 +108,7 @@ research project; the inherited documents live in `notes/`.
 - [Binary black holes (proposed 2026-10-25)](#binary-black-holes-proposed-2026-10-25)
   - [What the single holes hand over](#what-the-single-holes-hand-over)
   - [A case without a background](#a-case-without-a-background)
+    - [What step B3 built and measured (2026-10-26)](#what-step-b3-built-and-measured-2026-10-26)
   - [The gauge](#the-gauge)
     - [What step B1 built and measured (2026-10-25)](#what-step-b1-built-and-measured-2026-10-25)
   - [One interior per hole](#one-interior-per-hole)
@@ -6800,8 +6801,11 @@ inferred from the native code and the clock.
 their single-hole parts — the gauge sources ([What step B1 built and
 measured](#what-step-b1-built-and-measured-2026-10-25)) and the tracks and the
 tracked analytic target ([What step B2 built and
-measured](#what-step-b2-built-and-measured-2026-10-26)) — and nothing of the
-binary is built yet **(amended in step B2)**. It extends the proof of concept to two black holes that orbit,
+measured](#what-step-b2-built-and-measured-2026-10-26)) — and step B3 the case
+of several holes on Erik's decisions of 2026-10-26, run on a head-on pair from
+rest to `2 M` ([What step B3 built and
+measured](#what-step-b3-built-and-measured-2026-10-26)) **(amended in steps B2
+and B3)**. It extends the proof of concept to two black holes that orbit,
 merge and ring down, with the gravitational waves they emit as the result.
 `PLAN.md`'s steps B1–B9 are the work breakdown, and the two milestones are
 under [Milestones G7 and G8](#milestones-g7-and-g8): two holes colliding
@@ -6873,7 +6877,183 @@ becomes: the *data*, read at `t = 0` and by the frozen boundary hook, and
 never as the truth. A single-hole case is `holes = (spec,)`, built from its
 background as now, and is the case it was **bit for bit**: that is the first
 claim of step B3. `error_norms` refuses a case whose data are not a
-solution, and says why.
+solution, and says why. **(Built in step B3**, `GHCase(…; holes)` decided by Erik
+2026-10-26: [What step B3 built and
+measured](#what-step-b3-built-and-measured-2026-10-26)**.)**
+
+#### What step B3 built and measured (2026-10-26)
+
+Everything this section proposes for a case of several holes is built —
+`src/holes.jl`, the holes in `GHCase` (`src/initialdata.jl`), the tracks' builders
+(`src/tracking.jl`) and the loop (`src/driver.jl`) — on Erik's three decisions of
+2026-10-26: pairing (α), `GHCase(…; holes)`, and the superposition kept here.
+
+**The case.** `HoleSpec(T; mass, spin, center, velocity, acceleration,
+interior)`, `isbits`: the spin along `z` (the tracked target is an unrotated
+Kerr-Schild hole boosted along the track; a tilted spin is refused), the
+acceleration the seed's (B2's hand-over), the interior step B2's `TrackedSpec`
+(a `FittedSpec` is refused: not built). `GHCase(T, data; holes)` refuses an
+`interior`, radii, a target, a center or a velocity beside the holes.
+
+- **One hole is the case it was (decided by Erik 2026-10-26).** `holes =
+  (spec,)` is built from the hole's own background, whose mass, spin and velocity
+  must be the spec's; the case's interior is the spec's `TrackedSpec`, its center
+  the spec's line, and `evolve!` runs it as it ran the case built with `interior =
+  TrackedSpec(…)` **(measured in step B3:** bit for bit, the state after two
+  chunks and every record row, on the suite's static fixture with its sampled
+  source and on step B2's moving quadrant hole, at one thread and at four;
+  `holes_tests.jl`**)**. The path of several holes is taken from `K = 2`
+  **(proposed in step B3)**: a case of one hole keeps its analytic source and its
+  record's rows, which the path of several feeds from the tracks and splits by
+  hole.
+- **Several holes.** `binary_case(T; holes, halfwidth, chunk, horizon, …)` on the
+  full box: the data `superposed_kerr_schild` of the holes, the case's interior a
+  `HolesSpec` (the holes' rules and three switches), its center the holes' center
+  of mass (`holes_center`, proposed in step B3: the remnant's Gaussian and the
+  refinement centroid's reference), its source the composite of the holes
+  (`holes_source`), `γ0` the three Gaussians (`holes_damping`). `head_on_holes(T;
+  d, masses, interior)` is a pair at rest on an axis about the origin, each with
+  its Newtonian acceleration and its interior stated for a hole of mass one times
+  its own mass (`scaled_spec`; `CODE.md`'s units).
+
+**What each reader of the background reads for several holes:**
+
+| reader | one hole | several holes (step B3) |
+|---|---|---|
+| initial data | `state(background, 0, x)`, core rule | the superposition at `t = 0`, the acting hole's core rule; `Π` the data's own or from `C_a = 0` (`momentum = :gauge`) |
+| Dirichlet hook | `state(background, t, x)` | the data at `t = 0`, frozen, with the initial `Π`'s rule |
+| gauge source | `−Γ_a` sampled, or algebraic | the composite of the holes, rebuilt every piece from the tracks (`source_feed = :tracks`, pairing (α)) or from the seeds' quadratics (`:seed`) |
+| layer target | `u_exact` | each hole's tracked target: the superposition of the holes on their tracks' lines (`hole_target = :superposed`, the default), or the hole's own (`:own`) |
+| error reference | `u_exact` | none: `err_*` and `drift` are `nothing`, `error_norms` refuses; the residual is each layer's distance from its own target |
+| center | `HoleCenter` | each hole's track; `case.center` the center of mass |
+| radii, seed | `horizon_min_radius`, `analytic_horizon_radius` | each hole's own boosted Kerr-Schild metric on its line (`HoleSpec`, then its track's: `HoleInteriors.own`); the seeds `seed_tracks`, then a find on the data (below) |
+| `γ0`, `ε_KO` | about the analytic center | the holes' Gaussians and profiles on the tracks' lines every piece (`HolesDamping`, `HolesDissipation`), the remnant's on the center of mass |
+| level floor | the hole's shell | one per hole, their union (`UnionLevelBounds`) |
+| refinement centroid | against `c(t)` | against the center of mass |
+| default rate | `4/M` | `4/M_A` of the lightest hole, `8/M` for an equal pair (per-hole rates for unequal masses not built) |
+
+**The composition is a selection, and it is the rule (proposed in step B3).** The
+kernel takes a `HoleInteriors` — the `K` holes' interiors, one type, `isbits`, `K`
+a type parameter — and at each point runs the arithmetic of the hole deepest in
+its own layer, `acting_interior`: the smallest `s_A = (r_A − r_0,A)/(r_1,A −
+r_0,A)`, chosen by `ifelse` over whole interiors, unrolled over `K` with no
+closure and no runtime index. Every profile is a monotone function of `s`, so with
+the holes' ramps alike this is `w = min_A w_A`, `ρ = max_A ρ_A`, the union of the
+cores and the target of the largest `ρ_A`; before merger the layers are disjoint
+and it decides nothing. On SIMD lanes a group goes on lanes when every point of it
+is outside every layer (`outside_all`), and point by point otherwise, as for one
+hole. **(Measured in step B3:)** the composite right-hand side is the single-hole
+kernel of the nearer hole, the same case and state, at every owned point of a
+two-hole mesh, bit for bit, on four lanes and on the scalar kernel
+(`holes_tests.jl`). The composite masks: `HolesMask` (evolved outside every layer)
+for every norm, the speed, the indicator and the finder's footprint guard — whose
+`stencil_hits` is the union of each hole's exact method, checked against
+TreeAMR's enumeration — and `AnyMask` for the layer's and the shell's bands of the
+validity monitor; the range projection is gated about the nearest hole's center
+and its gate checked against every hole's layer.
+
+**The tracks (proposed in step B3).**
+
+- **One per hole, finding together**: every hole at every row and as often between
+  rows as the hole that asks most often (`find_count` at its own layer's spacing),
+  at the pieces' boundaries; the pieces are `h/(4|v|)` of the fastest hole.
+- **The seeds know their acceleration**: `seed_tracks` carries each `HoleSpec`'s
+  center, velocity and acceleration along its quadratic.
+- **A hole's horizon is not centred on the hole.** The companion's field displaces
+  the superposed data's horizon toward it — `0.022 M` at `d = 8`, `0.35` cells at
+  `h = 1/16` — and the first find, `0.35` cells off its seed, was read as motion:
+  blended into the seed's prediction over a find interval of `M/50` it was a
+  velocity of `2`, and a track moved onto the found origin put the target off the
+  data's hole (a layer residual of `12.7` at `t = 0`). So `evolve!` finds each hole
+  once on the initial data (`reseed_holes!`), keeps the track on the hole with the
+  found surface's radii and shape, and corrects every later find's origin by that
+  **horizon offset** before it updates the track; the record carries it.
+
+**The record.** A row of several holes keeps every single-hole field — the horizon
+fields `nothing` but `horizon_success`, every hole's — and adds `holes`, one row
+per hole (the find's numbers, the track's center, velocity, radii, misses,
+prediction, finds, acceleration and interval, the horizon offset and the layer's
+spacing), `separation` (between the tracks' centers) and `phase` (of `c_2 − c_1`
+in the plane `z = 0`). A run of one hole writes exactly the rows it did. **The run
+state** carries the `K` tracks, the chunk's tracks, the finder's `K` seeds and the
+horizon offsets; a chain of restarts of the suite's pair is the uninterrupted run
+bit for bit. **Over MPI** the `K` finds and the re-seeding find run on rank 0
+inside the row's analysis, through `fill_state!` and `interpolate_state` alone
+(the composite mask goes over in the interpolation request), and the
+`mpi_workload.jl` pair is the serial run at one, two and three ranks.
+
+**The head-on pair (measured in step B3**; `test/binary_runs.jl`, one H200 a row,
+jobs 583285–583290 in `step-B3-holes`, data in `.claude/data/step-B3`**).** Two
+Kerr-Schild holes of `M_A = 1/2` from rest at `d = 8 M` on the full box `[−32,
+32]³`: `holes_forest`'s balls `16, 8, 4, 2` about each hole (`h = 1/3` at the
+boundary), each hole's layer step B2's production sphere times `M_A` (`r_0 =
+5/16`, `r_1 = 23/32`, `m = 8`), `q = 4`, `cfl = 1/2`, `chunk = M/4`, `ρ_max =
+8/M`, `ε_KO = 1/2`, the three Gaussians, `λ_B = 4 M_B`, both holes found with the
+spin at every row (`N = 16`) and the ADM monitor at every row, to `2 M`.
+
+- **Which `1/24` (proposed in step B3): `1/24` in `M_A`, `1/48` in `M`.** It is
+  the validated single-hole `:damped` spacing, and step B2's production layer fits
+  it; `1/24` in `M` is `1/12` in `M_A`, under the validated range, where that layer
+  is refused (`r_1 = 23/32` is `6.75` cells inside the horizon against `m = 8`),
+  and its row ran with `r_1 = 13/20`. Priced on one H200 (the evolution and the
+  rows, the ADM monitor and two finds with the spin every `M/4`):
+
+  | at the holes | blocks | owned points | state | device memory | wall per `M` | first row |
+  |---|---|---|---|---|---|---|
+  | `1/24` (`1/12` in `M_A`) | 4600 | `7.95 M` | `1.3 GB` | `28.8 GB` | `61 s` | `524 s` |
+  | `1/48` (`1/24` in `M_A`) | 4600 | `63.6 M` | `10.2 GB` | `103.8 GB` | `362 s` | `540 s` |
+  | `1/64` (`1/32` in `M_A`) | 4600 | `151 M` | `24 GB` | `≈ 250 GB` (predicted) | — | — |
+
+  `1/64` does not fit one H200 (`141 GB`); it needs two, over MPI. The first row
+  is compilation, the initial data and the re-seeding finds; a `10 GB` checkpoint
+  costs `126 s`. A run to `2 M` at `1/48` is `25–27 min`.
+- **The source fed by the tracks — pairing (α) as decided — does not hold the pair
+  (found in step B3).** Every row with `source_feed = :tracks` ended within `1 M`
+  on the track's own refusals: `1/48` with the superposition's `Π` at `0.75 M`
+  (a center jump: found at `x = −3.9812`, predicted `−3.9348`), `1/48` with `Π`
+  from `C_a = 0` at `1.0 M` (a center jump), `1/24` at `1.0 M` (an `r_min` jump),
+  with the layer residual at `7.6–26` and the predictions at `0.15–0.9` cells
+  before the end, against `0.0005–0.1` cells after the first chunk on the
+  seed-fed rows (the first chunk runs on the seeds in every row). The same
+  happened on the `q = 2` smoke pair at `h = 1/16` with either momentum, by
+  `0.4 M`, and not with the seed-fed source. The mechanism is a loop: the
+  composite source carries each hole at its track's velocity and the coordinates
+  follow it, the track follows the horizons' centroids, which the data's junk
+  moves (below), and the next piece's source carries the holes further.
+- **The source on the seeds' Newtonian quadratics holds it** (`source_feed =
+  :seed`, proposed in step B3 as the head-on's), with the tracks feeding the
+  targets alone, as step B2's single hole's analytic source did:
+
+  | row | `Π` | reached | `C_a` L2 (`t = 0` → `2 M`) | `ℋ` L2 | area of hole 1 (`t = 0` → `2 M`) | separation of the tracks at `2 M` | free fall |
+  |---|---|---|---|---|---|---|---|
+  | `b3s48` | the superposition's | `2 M` | `6.8·10⁻³ → 2.2·10⁻³` | `1.41 → 2.19 ·10⁻³` | `13.455 → 15.905` (`+18 %`) | `7.8870` (`Δ = −0.113`) | `7.9687` (`−0.031`) |
+  | `b3sg48` | from `C_a = 0` | `2 M` | `1.6·10⁻⁸ → 3.4·10⁻⁴` (peak `5.0·10⁻⁴` at `1 M`) | `1.41 → 1.47 ·10⁻³` | `13.455 → 13.553` (`+0.7 %`, peak `13.619` at `1 M`) | `7.9444` (`Δ = −0.056`) | `7.9687` |
+
+  Every find of both holes succeeded at every row, no assertion fired, and the
+  constraints stay bounded — falling, with the gauge-consistent `Π`. The layers'
+  residual against their targets is `0.4–4.5` (`b3sg48`), the single moving hole's
+  order at this spacing.
+- **The separation does not fall as free fall predicts (measured in step B3).**
+  The tracks' separation falls `1.78×` Newtonian free fall from rest over `2 M`
+  with the gauge-consistent `Π` and `3.6×` with the superposition's, steadily
+  from the first chunk, while the finds' predictions are `3·10⁻³` cells off at
+  `2 M`: the finder is a hundred times better than the discrepancy. It is the
+  continuum solution's, not the mesh's: at `M/4` the `1/24` and `1/48` rows agree
+  on the found separation to six digits (`7.938328`) and on the area to
+  `10⁻⁶`. The horizons' coordinate centroids move in this gauge as the data's
+  junk settles — most where the junk is largest: with the superposition's `Π` the
+  horizons grow `18 %` in area in `2 M` and the centroids move `3.6×` free fall,
+  with `C_a = 0` at the start `0.7 %` and `1.78×`. A coordinate separation is not
+  a gauge-invariant measure of the fall; the separation along the axis between
+  the two horizons' proper distance, or the fall against a longer baseline once
+  the junk has gone, is what B7 should read.
+- **Restarts:** the suite's pair as a chain of one-chunk jobs is the uninterrupted
+  run bit for bit — the state, every record row, both tracks with their
+  histories, the horizon offsets and the finder's seeds (`holes_tests.jl`). The
+  head-on row's chain, `b3sg48` continued from its `1 M` checkpoint to `2 M` as job
+  583463 (`b3sg48r`), was submitted and had not been read back when this was written (the
+  tunnel to Symmetry was down): its rows from `1.25 M` on are to be compared with
+  the uninterrupted row's to the CSV's digits, as step B2's were.
 
 ### The gauge
 
@@ -6941,6 +7121,12 @@ questions](#open-questions):
 Step B1 builds both sources and runs each on a single moving hole. Step B7's
 head-on collision is the first test of either through a merger.
 **(Proposed:)** build (α) first, and keep (β) as the measured alternative.
+**(Decided by Erik 2026-10-26: (α).** Built in step B3, which found that the
+composite's holes fed by the tracks do not hold a head-on pair from rest — the
+source carries the holes where the tracks say, the tracks follow horizons the
+junk moves, and every such row ended within `1 M` — and that the same source on
+the holes' Newtonian seeds does: [What step B3 built and
+measured](#what-step-b3-built-and-measured-2026-10-26)**.)**
 
 A third pairing is noted and not planned: a Kerr-Schild source near each
 hole, with the damped harmonic gauge between and beyond the holes. It is the
@@ -7207,7 +7393,11 @@ moves.
 
 **One track per hole.** Under the half turn there is one track, and its
 image is the other hole ([The symmetric
-domains](#the-symmetric-domains)).
+domains](#the-symmetric-domains)). **(Built in step B3** for the full box: the
+holes find together, their seeds know their accelerations, and each hole's
+horizon offset from its center, measured on the initial data, corrects every
+find — [What step B3 built and
+measured](#what-step-b3-built-and-measured-2026-10-26)**.)**
 
 **(Built in step B2**, for one hole: [What step B2 built and
 measured](#what-step-b2-built-and-measured-2026-10-26)**.)**
@@ -7420,7 +7610,25 @@ Three sources, in the order the steps use them.
 - **(Proposed:)** an `isbits` superposition belongs in `SpacetimeMetrics`
   upstream, where the backgrounds live. Until then it is written here, with
   the attenuation option `w_A = exp(−|x − c_A|²/ℓ²)` that XCTS's free data
-  use.
+  use. **(Decided by Erik 2026-10-26: here**, `SuperposedMetric` in
+  `src/holes.jl`, built in step B3**.)**
+- **The plain sum is not a 3+1 metric inside the horizons (found in step
+  B3).** `α² = −g_tt + β_i β^i` is negative on the side of each hole that faces
+  its companion, where the two Kerr-Schild shifts `2H l_i` cancel: for an
+  equal-mass pair of total mass `1` at `d = 8` out to `0.52 M` from the hole's
+  center (`−0.154` on the sphere `5/16`, the single hole's core radius times
+  `M_A`), at `d = 10` to `0.40`, at `d = 12` to `0.35`, and through the whole
+  horizon at `d = 4`. A layer or a core cannot be put there. **(Proposed in step
+  B3:)** turn each hole's companions off near it, `w_A = Π_{B≠A}(1 −
+  e^{−r_B²/λ_B²})`, `λ_B = 4 M_B` (`binary_case(; companion = 4)`, the
+  default): the least `α²` is then within `0.01` of the single hole's from the
+  core radius out at `d = 8`, and the companion keeps `98 %` of its field at the
+  midpoint. XCTS's own attenuation is kept beside it (`attenuation`).
+- **Both momenta are built (step B3):** `binary_case(; momentum =
+  :superposition)`, the data's own `∂_t g`, the default, and `:gauge`, `∂_t g_tb`
+  from `C_a = 0` at `t = 0` under the holes' source (`gauge_consistent_state`,
+  the four equations of `gauge_consistent_momentum` on the data's `g` and `∂g`),
+  which the Dirichlet hook writes too.
 
 **2. XCTS** (step B8, for the inspiral). It solves the five XCTS fields on
 superposed Kerr-Schild free data (SpEC's direct-K variant), compactified to
@@ -7555,6 +7763,16 @@ A regrid moves a block by at most one level, and near merger a hole moves
 `0.3 M` a chunk, 19 cells at `h = 1/64`. The travel margin has to carry the
 finest level ahead of the hole, as it does for a single hole.
 
+**(Built in step B3:** the per-hole floors and their union (`UnionLevelBounds`),
+the indicator on the composite mask, the travel from the holes' seeds — `|v_A| +
+|a_A| · chunk`, the fastest hole's (proposed in step B3) — and `holes_forest`,
+the frozen hierarchy about every hole. On a pair of unit holes at `d = 8` in the box
+`[−16, 16]³` (`q = 2`, cap at `h = 1/8`) the initial-data cycle converges in five
+passes at `1800` blocks, both holes found at every row of a `0.2 M` regridding
+run (a local smoke run, not in the suite); the head-on runs are on a frozen
+hierarchy. The wave zone's and the common geometry's floors are
+steps B5's and B7's.**)**
+
 ### The waveform
 
 **`Ψ₄` at the extraction points, not on the mesh** **(proposed)**.
@@ -7604,6 +7822,11 @@ for step 9's viewers.
 **The checkpoint** carries everything the loop now carries: the tracks,
 the common track, the handover state, the predictions' history and the
 extraction's running integrals.
+
+**(Built in step B3** for the holes: the per-hole rows, the separation and the
+phase, the constraints under the composite mask, and the tracks with their
+histories, the horizon offsets and the finder's seeds in the checkpoint — [What
+step B3 built and measured](#what-step-b3-built-and-measured-2026-10-26)**.)**
 
 ### What it costs (predicted)
 
@@ -7699,7 +7922,13 @@ hours on one H200.
 1. **The gauge and the interior together**: (α) the tracked Kerr-Schild
    source with `:damped` per hole, built first, or (β) the damped harmonic
    gauge with `:fitted`. Steps B1 and B2 measure both on one moving hole
-   before step B3 commits the composition. **(Measured in steps B1 and B2.)**
+   before step B3 commits the composition. **(Decided by Erik 2026-10-26: (α)**
+   — the composite tracked Kerr-Schild source of B1's `TrackedHole`s, fed by
+   the per-hole tracks, with B2's tracked `:damped` target per hole; (β) is not
+   built into the binary, and the per-hole interior is kept abstract enough for
+   a `:fitted` hole to be added later. Built in step B3: [What step B3 built and
+   measured](#what-step-b3-built-and-measured-2026-10-26).**)** **(Measured in
+   steps B1 and B2.)**
    On one hole moving at `v = 1/5`, (β) is `6–31×` the Kerr-Schild hole's `ℋ`
    and `C_a` outside `r = 3` at `1/32` and still growing at `40 M` (B1), and
    (α)'s tracked target is the analytic layer to `4·10⁻³` everywhere and order four
@@ -7708,9 +7937,12 @@ hours on one H200.
    measured](#what-step-b2-built-and-measured-2026-10-26)).
 2. **The case**: `GHCase` with `holes` and the background demoted to data,
    or a separate `BinaryCase`. The first keeps one driver and makes the
-   single hole a binary with one hole.
+   single hole a binary with one hole. **(Decided by Erik 2026-10-26:
+   `GHCase(…; holes)`**, one driver, no `BinaryCase`; built in step B3**.)**
 3. **The superposed metric**: upstream in `SpacetimeMetrics` (not yet
-   requested), or kept here.
+   requested), or kept here. **(Decided by Erik 2026-10-26: kept here**, an
+   `isbits` superposition with the optional attenuation, `SuperposedMetric` in
+   `src/holes.jl`; built in step B3**.)**
 4. **XCTS**: its default Dirichlet inner boundary on spheres inside the
    cores, or its isolated-horizon data extended inward. And the file
    handoff from a host tool.
@@ -7718,6 +7950,15 @@ hours on one H200.
    hook at a smaller `L` if step B5 shows its reflection is small enough.
 6. **Subcycling in TreeAMR**: the largest cost lever, about `4×`, and not
    needed for G7 or G8.
+7. **What feeds the composite source (raised in step B3).** Fed by the tracks,
+   as decided in item 1, it did not hold a head-on pair past `1 M` at `1/48` or
+   `1/24`, with either initial momentum; fed by the holes' Newtonian seeds it ran
+   every row to `2 M`. A seed's quadratic is enough for a head-on fall over a few
+   `M` and not for an orbit: the choices are an integrated trajectory — a
+   Newtonian or post-Newtonian orbit of the holes, corrected slowly by the finds
+   — that the source follows and the tracks only check, or (β), whose gauge knows
+   no trajectory. **(Proposed in step B3:** the seeds for the head-on of B3; the
+   integrated trajectory for B4 onward, before (β).**)**
 
 ## Possible extensions
 
