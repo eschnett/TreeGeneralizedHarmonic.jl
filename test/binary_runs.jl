@@ -32,8 +32,11 @@
 #                                  hole of mass one, in M (0: the chunk)
 #   target=superposed|own          each layer relaxes toward the superposition of
 #                                  the holes on their tracks, or toward its own hole
-#   feed=tracks|seed               the gauge source's holes follow the tracks
-#                                  (pairing (α)), or their seeds' Newtonian quadratics
+#   feed=tracks|seed|controlled    the gauge source's holes follow the tracks
+#                                  (pairing (α)), their seeds' Newtonian quadratics,
+#                                  or (added in step B3) the controlled source lines
+#   control_time=10                feed=controlled only: the loop's time for a hole
+#                                  of mass one, in M (each hole takes it times M_A)
 #   momentum=superposition|gauge   the initial Π: the data's own, or from C_a = 0
 #   companion=4 attenuation=       the data's companion attenuation λ_B/M_B (0:
 #                                  none) and XCTS's own one (a length; none)
@@ -124,7 +127,10 @@ end
 # The pair: each hole's layer stated for a hole of mass one and scaled by its own.
 unit = TrackedSpec(T; r_0=T(rat(opt("r_0", "5/8"))), r_1=T(rat(opt("r_1", "23/16"))),
                    margin=parse(Int, opt("margin", "8")),
-                   max_interval=T(rat(opt("find_interval", "0"))))
+                   max_interval=T(rat(opt("find_interval", "0"))),
+                   control_time=opt("feed", "tracks") != "controlled" ? zero(T) :
+                                lowercase(opt("control_time", "10")) == "inf" ? T(Inf) :
+                                T(rat(opt("control_time", "10"))))
 holes = head_on_holes(T; d=d_sep, interior=unit)
 companion = rat(opt("companion", "4"))
 attenuation = haskey(OPTIONS, "attenuation") ? T(rat(OPTIONS["attenuation"])) : nothing
@@ -214,7 +220,7 @@ end
 
 csv = joinpath(outdir, "binary.csv")
 hcols = ["succ", "cx", "cy", "cz", "vx", "ox", "rmin", "rmax", "area", "Mirr", "J", "Mch",
-         "pred", "finds", "offx"]
+         "pred", "finds", "offx", "srcx", "srcvx", "srcax"]
 bcols = [("h$(A)_" * b * "_" * f) for A in 1:2 for b in ("r$(BANDS[k])" for k in 1:NBAND)
          for f in ("ham_l2", "gauge_l2")]
 header = vcat(["t", "wall", "steps", "dt", "nblocks", "points", "gauge_l2", "gauge_linf",
@@ -245,7 +251,9 @@ function observe(p, t, u, rec)
         append!(row, (h.success === true ? 1 : 0, h.track_center..., h.track_velocity[1],
                       h.origin === nothing ? NaN : h.origin[1], num(h.track_r_min),
                       num(h.track_r_max), num(h.area), num(h.M_irr), num(h.J), num(h.M_ch),
-                      num(h.track_prediction_max), h.track_finds, h.horizon_offset[1]))
+                      num(h.track_prediction_max), h.track_finds, h.horizon_offset[1],
+                      h.source_center[1], h.source_velocity[1],
+                      h.source_acceleration[1]))
     end
     append!(row, (rec.separation, sep_found, newton_separation(d_sep, M, rec.t),
                   device_gb(), Sys.maxrss() / 1e9))

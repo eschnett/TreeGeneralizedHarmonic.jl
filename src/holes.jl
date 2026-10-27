@@ -111,8 +111,9 @@ end
 
 The tracked target's rule for a hole of mass `M` from the rule stated for a hole
 of mass one (added in step B3; `CODE.md`, "Binary black holes", units): the radii,
-the find interval and the target's center offset times `M`, a stated rate over
-`M`; the margin, the ramps, the shape's degree and the velocities unchanged.
+the find interval, the target's center offset and the source line's control time
+times `M`, a stated rate over `M`; the margin, the ramps, the shape's degree, the
+velocities and the feed unchanged.
 """
 function scaled_spec(spec::TrackedSpec{T}, M) where {T}
     m = T(M)
@@ -123,7 +124,9 @@ function scaled_spec(spec::TrackedSpec{T}, M) where {T}
                        mass_factor=spec.mass_factor,
                        velocity_offset=spec.velocity_offset,
                        center_offset=spec.center_offset * m,
-                       seed_velocity_offset=spec.seed_velocity_offset)
+                       seed_velocity_offset=spec.seed_velocity_offset,
+                       source_feed=feed_name(spec.source_feed),
+                       control_time=spec.control_time * m)
 end
 
 """
@@ -298,7 +301,7 @@ hole_mass(m::SuperposedMetric) = throw(ArgumentError(
 # --- the case's rule -------------------------------------------------------------
 
 """
-    HolesSpec{K,S}(specs, superposed, feed_source, gauge_momentum)
+    HolesSpec{K,S}(specs, superposed, feed, gauge_momentum)
 
 What a [`GHCase`](@ref) of `K ≥ 2` holes holds as its `interior` (added in step
 B3): not a layer but the rule the composite is built by, once per piece of a
@@ -324,12 +327,15 @@ removes most of it).
 
 Two more switches, each a choice of the step-B3 screen:
 
-- `feed_source = true` (Erik's pairing (α), decided 2026-10-26): the composite
-  gauge source's holes follow the tracks every piece ([`holes_source_at`](@ref));
-  `false`: they follow their seeds' quadratics — the `HoleSpec`'s initial center,
-  velocity and acceleration, Newtonian free fall from rest for a head-on pair —
-  and the tracks feed the targets alone, as step B2's single hole's analytic
-  source did.
+- `feed`, the code of the case's `source_feed`: `FEED_TRACKS` (Erik's pairing
+  (α), decided 2026-10-26), the composite gauge source's holes on the tracks
+  every piece ([`holes_source_at`](@ref)); `FEED_SEED`, on their seeds'
+  quadratics — the `HoleSpec`'s initial center, velocity and acceleration,
+  Newtonian free fall from rest for a head-on pair — with the tracks feeding the
+  targets alone, as step B2's single hole's analytic source did; or (added in
+  step B3, Erik's decision of 2026-10-26 on `CODE.md`'s item 7)
+  `FEED_CONTROLLED`, on the controlled source lines ([`SourceLine`](@ref)),
+  each with its own spec's `control_time`.
 - `gauge_momentum = false`: the initial `Π` is the superposition's own, from its
   `∂_t g`; `true`: from `C_a = 0` at `t = 0` under the case's source, `∂_t g_tb`
   solved for as [`gauge_consistent_momentum`](@ref) does
@@ -341,7 +347,7 @@ Two more switches, each a choice of the step-B3 screen:
 struct HolesSpec{K,S}
     specs::NTuple{K,S}
     superposed::Bool
-    feed_source::Bool
+    feed::Int
     gauge_momentum::Bool
 end
 

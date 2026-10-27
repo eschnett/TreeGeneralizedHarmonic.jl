@@ -74,6 +74,7 @@ start_mpi_job!()
     include("boosted_tests.jl")     # 2026-10-20: a moving hole on the quadrant
     include("tracked_target_tests.jl")  # step B2: the tracked analytic target
     include("holes_tests.jl")       # step B3: several holes in one case
+    include("source_line_tests.jl")  # step B3: the controlled source line
     include("simwatch_tests.jl")    # 2026-10-02: SimWatch status files
     include("type_tests.jl")
     include("threading_tests.jl")

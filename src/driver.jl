@@ -500,6 +500,15 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     binary = case.interior isa HolesSpec
     nhole = binary ? length(case.holes) : 1
     tracked = fitted || targeted || binary
+    # What the gauge source rides on (step B3): the case's own source, or — for a
+    # case of several holes always, and for one tracked hole whose spec asks for
+    # it — a source rebuilt every piece on the seeds, the tracks or the controlled
+    # source lines (Erik's decision of 2026-10-26 on `CODE.md`'s item 7: a slow
+    # control law for the track-fed source, tested on one hole fed by its own
+    # track first).
+    feed = binary ? case.interior.feed : targeted ? case.interior.source_feed : FEED_OWN
+    fed = targeted && feed != FEED_OWN
+    controlled = feed == FEED_CONTROLLED
     tracked && (case.horizon === nothing || case.horizon.every < 1) &&
         throw(ArgumentError(
             "this case's layer follows the tracked horizon (its interior is a " *
@@ -672,6 +681,29 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # spin, which `GHCase` checked is a Kerr-Schild hole's.
     ks_mass, ks_spin = targeted ? _kerr_schild_parameters(case.background)[1:2] :
                        (zero(T), zero(T))
+    # The controlled source lines (step B3): one per hole, started on the case's
+    # own source — the data's gauge — carried forward by every piece's source and
+    # stored by the checkpoint; the model's masses are the holes' own, the loops'
+    # times their specs'.
+    line_masses = binary ? T[h.mass for h in case.holes] : T[ks_mass]
+    line_τs = binary ? T[h.interior.control_time for h in case.holes] :
+              targeted ? T[spec.control_time] : T[]
+    source_lines = !controlled ? nothing :
+                   saved === nothing ? seed_source_lines(case) :
+                   from_plain(Vector{SourceLine{T}}, saved.source_lines;
+                              path="run.source_lines")
+    # The case a piece about `t` runs, its source on the feed: the controlled
+    # lines carried to `t` first, with the track `track` as the loop's input.
+    function case_at(t, track)
+        if controlled
+            source_lines = advance_source_lines(source_lines,
+                                                track_input(binary ? track : [track]),
+                                                line_masses, line_τs, T(t);
+                                                newton=binary)
+        end
+        return binary ? holes_case_at(case, track, T(t); source_lines=source_lines) :
+               fed_case_at(case, track, T(t); source_lines=source_lines)
+    end
     geometry(f, t, track) = fitted ?
                             fitted_interior(spec, track, f, G; t=T(t), n_L=n_L) :
                             binary ? holes_interior(case, track, T(t)) :
@@ -927,6 +959,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                        target=target0, fits=fits, target_rate=rate_on,
                        trail=trail_on, target_exact=exact_on,
                        simd_width=simd_width)
+        # A fed or controlled source (step B3) is on its line from the start: the
+        # initial row's `C_a` reads it.
+        (fed || controlled) && (p0 = with_case(p0, case_at(zero(T), tr)))
         # The geometry the gauge source was sampled with (step 8d): the sample
         # applies the core rule, so a tracked core that moves far from it asks
         # for a fresh sample — see the chunk loop.
@@ -980,8 +1015,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                        trail=trail_on, target_exact=exact_on, simd_width=simd_width)
         # Several holes (step B3): the row's case as well — its source and its
         # profiles on the tracks the row's composite was built from.
-        p0 = binary ? with_case(p0, holes_case_at(case, track_chunk, t_saved);
-                                interior=int_chunk) :
+        p0 = binary || fed ? with_case(p0, case_at(t_saved, track_chunk);
+                                       interior=int_chunk) :
              with_interior(p0, int_chunk)
     end
     # **The record is `Float64` whatever the run computes in.** That is
@@ -1312,7 +1347,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  note=f.note, an.tk.rows[A]..., track_finds=nf,
                  track_prediction_max=nf == 0 ? nothing : pm,
                  track_acceleration=R(sqrt(sum(abs2, trA.pred.a))),
-                 track_interval=R(trA.blend))
+                 track_interval=R(trA.blend), source_rows(p.case.gauge.holes[A])...)
             end
             fill!(hole_finds, 0)
             fill!(hole_prediction, 0.0)
@@ -1395,6 +1430,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # Several holes (step B3; `CODE.md`, "The record"): each hole's rows, and
         # the pair's separation and orbital phase — the angle of `c_2 − c_1` in
         # the plane `z = 0` — from the tracks.
+        # A fed source's line at the row (step B3), as the piece about the row's
+        # time carries it.
+        fed && (rec = (; rec..., source_rows(only(p.case.gauge.holes))...))
         if binary
             c1 = SVector{3,Float64}(hole_rows[1].track_center)
             c2 = SVector{3,Float64}(hole_rows[2].track_center)
@@ -1562,9 +1600,10 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                 sample_t, sample_track = tstart, tr
                 nresamples += 1
             end
-            p = binary ?
-                with_case(p, holes_case_at(case, tr, tstart);
-                          interior=with_ρ_max(geom, interior_ρ_max(p.interior))) :
+            p = binary || fed ?
+                with_case(p, case_at(tstart, tr);
+                          interior=with_ρ_max(kgeom(geom, tstart),
+                                              interior_ρ_max(p.interior))) :
                 with_interior(p, with_ρ_max(kgeom(geom, tstart),
                                             interior_ρ_max(p.interior)))
         end
@@ -1612,8 +1651,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # at most `h/(4|v|)` for the fastest hole and its finest spacing, and the
         # holes' common finds at the pieces' boundaries, the last the row's — step
         # B2's schedule over every hole.
-        piece_problem(p, t) = with_case(p, holes_case_at(case, tr, t);
-                                        interior=piece_interior(t))
+        piece_problem(p, t) = binary || fed ?
+                              with_case(p, case_at(t, tr); interior=piece_interior(t)) :
+                              with_interior(p, piece_interior(t))
         if binary
             hs_g = hole_spacings(geom, U.forest, tstart)
             speed = maximum(A -> sqrt(sum(abs2, track_state(tr[A], tstart)[2])), 1:nhole)
@@ -1628,7 +1668,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             nmove = speed > 0 ? ceilint(speed * (stop - tstart) / (h_g / 4)) : 1
             nfinds = chunk_finds(tr, h_g, stop - tstart)
             npieces = clamp(nfinds * cld(nmove, nfinds), 1, steps)
-            p = with_interior(p, piece_interior((tstart + piece_end(1)) / 2))
+            p = piece_problem(p, (tstart + piece_end(1)) / 2)
         end
         # Whether the piece `k` starts with a find: where `⌊(k − 1) nfinds/npieces⌋`
         # steps up, so that `nfinds − 1` finds fall evenly between the rows.
@@ -1708,7 +1748,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                         throw(TrackLostError(pf.tk.lost.msg, pf.tk.lost.track,
                                              Any[records...]))
                 end
-                p = with_interior(p, piece_interior((integ.t + piece_end(piece)) / 2))
+                p = piece_problem(p, (integ.t + piece_end(piece)) / 2)
                 integ.p.p = p
             elseif piece > 1
                 p = refill(p, integ.t, u)
@@ -1731,7 +1771,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # (step B2).
         if targeted
             tr_chunk = tr
-            p = with_interior(p, piece_interior(stop))
+            p = piece_problem(p, stop)
         elseif binary
             # And for several holes the row's source and profiles too (step B3).
             tr_chunk = tr
@@ -1789,6 +1829,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                          fit_initial=to_plain(fit_initial; path="run.fit_initial"),
                          hlm_seed=binary ? Tuple(hlm_seed) : hlm_seed, trigger_pending,
                          (binary ? (; hole_offsets=Tuple(to_plain(δ) for δ in hole_offsets)) :
+                          (;))...,
+                         (controlled ? (; source_lines=to_plain(source_lines;
+                                                                 path="run.source_lines")) :
                           (;))...,
                          bounds=to_plain(acc; path="run.bounds"),
                          fit_cost=agreed_fit_cost(), records=Tuple(records))

@@ -144,6 +144,17 @@
 #                                   along the motion axis, the track unchanged;
 #                                   and the seed track's velocity plus seed_dv
 #                                   along it (the recovery run)
+#   feed=own control_time=0         interior=tracked only (added in step B3): what
+#                                   the gauge source rides on — own (the case's
+#                                   analytic source), seed (the analytic line,
+#                                   rebuilt every piece), tracks (the track's state
+#                                   every piece, unfiltered) or controlled (the
+#                                   controlled source line, a critically damped
+#                                   loop of time control_time in M onto the track);
+#                                   every feed but own needs source=composite. The
+#                                   CSV then ends with the track's and the source
+#                                   line's center and velocity along the motion
+#                                   axis and the line's acceleration
 #   margin=8                        cells from the horizon to the layer's outer edge
 #                                   (:damped: the check on r_1; :fitted: the offset)
 #   n_L=0 lmax_fit=8                :fitted only: the ramp in cells (0: step 8c's
@@ -373,9 +384,11 @@ case = if hole
         error("interior is damped, fitted or tracked, got $interior_kind")
     interior_kind == "tracked" || !any(k -> haskey(OPTIONS, k),
                                        ("prediction", "find_interval", "target_mass",
-                                        "target_dv", "target_dx", "seed_dv")) ||
-        error("prediction=, find_interval=, target_mass=, target_dv=, target_dx= " *
-              "and seed_dv= are the tracked analytic target's (interior = tracked)")
+                                        "target_dv", "target_dx", "seed_dv", "feed",
+                                        "control_time")) ||
+        error("prediction=, find_interval=, target_mass=, target_dv=, target_dx=, " *
+              "seed_dv=, feed= and control_time= are the tracked analytic target's " *
+              "(interior = tracked)")
     build_case(gs) = if interior_kind == "fitted"
         m = parse(Int, opt("margin", "8"))
         spec = FittedSpec(T; variant=Symbol(opt("variant", "fitted")), margin=m,
@@ -412,7 +425,13 @@ case = if hole
                            mass_factor=T(rat(opt("target_mass", "1"))),
                            velocity_offset=along(rat(opt("target_dv", "0"))),
                            center_offset=along(rat(opt("target_dx", "0")) * hfine),
-                           seed_velocity_offset=along(rat(opt("seed_dv", "0"))))
+                           seed_velocity_offset=along(rat(opt("seed_dv", "0"))),
+                           source_feed=Symbol(opt("feed", "own")),
+                           control_time=lowercase(opt("control_time", "0")) == "inf" ?
+                                        T(Inf) : T(rat(opt("control_time", "0"))))
+        spec.source_feed == TreeGeneralizedHarmonic.FEED_OWN || gs === :composite ||
+            error("feed=$(opt("feed", "own")) rebuilds the one-hole composite source " *
+                  "every piece, and needs source=composite")
         kerr_schild_case(T; a=a_spin, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
                          octant=Symbol(symmetry), motion..., gauge_source=gs,
                          interior=spec, horizon=Horizon(T; every=1, N=12, spin=true))
@@ -538,6 +557,28 @@ if split_on
     end
     append!(cols, ["c_$axname", "hz_found", "hz_$axname", "hz_M_irr", "hz_J", "hz_dx",
                    "hz_dy", "hz_dz", "hz_ratio"])
+end
+# A fed source (added in step B3): the track's and the source line's center and
+# velocity along the motion axis, and the line's acceleration.
+fed_cols = hole && case.interior isa TrackedSpec &&
+           case.interior.source_feed != TreeGeneralizedHarmonic.FEED_OWN
+fed_cols && append!(cols, ["track_c", "track_v", "src_c", "src_v", "src_a", "err_l2_trk",
+                            "err_linf_trk", "res_trk"])
+# The error against the hole on the track's line, and the layer's residual
+# against its own target (added in step B3): a fed source moves the hole off
+# the analytic line, so `err_*` and `residual` measure the move as well. The
+# error kernel again, with the piece's target as the background it measures
+# against; it overwrites `diag`'s error slots, so it runs after every fold that
+# reads them.
+function target_norms(p, u, t)
+    TG = TreeGeneralizedHarmonic
+    int = p.interior
+    tgt = TG.layer_target(int, p.case.background)
+    scatter!(p.U, u)
+    map_blocks!(TG.gh_error_kernel!, p.U, p.diag.work, p.U.work, p.origins, p.spacings,
+                tgt, int, interior_mask(int, T(t)), T(t), zero(T), -one(T),
+                TG.target_work(p.target), p.t_target, p.valG)
+    return TG._error_rows(TG.diag_norms(p, TG.DIAG_MASK:TG.DIAG_DRIFT))
 end
 isrank0 && !isfile(csvpath) && open(io -> println(io, join(cols, ',')), csvpath, "w")
 
@@ -965,6 +1006,21 @@ function observe(p, t, u, rec)
                       rec.origin === nothing ? NaN : Float64(rec.origin[axis]),
                       something(rec.M_irr, NaN), hz_J, ext..., hz_ratio))
     end
+    fed_note = ""
+    if fed_cols
+        get_ax(x) = x === nothing ? NaN : Float64(x[axis])
+        append!(row, (get_ax(get(rec, :track_center, nothing)),
+                      get_ax(get(rec, :track_velocity, nothing)),
+                      get_ax(rec.source_center), get_ax(rec.source_velocity),
+                      get_ax(rec.source_acceleration)))
+        tn = target_norms(p, u, t)
+        append!(row, (tn.err_l2, tn.err_linf, tn.residual))
+        fed_note = @sprintf("   track %.6f/%.6f  src %.6f/%.6f/%.3e  err_trk %.3e  res_trk %.3e",
+                           get_ax(get(rec, :track_center, nothing)),
+                           get_ax(get(rec, :track_velocity, nothing)),
+                           get_ax(rec.source_center), get_ax(rec.source_velocity),
+                           get_ax(rec.source_acceleration), tn.err_l2, tn.residual)
+    end
     isrank0 && open(csvpath, "a") do io
         println(io, join((x isa Real ? @sprintf("%.10g", x) : string(x) for x in row), ','))
     end
@@ -984,6 +1040,7 @@ function observe(p, t, u, rec)
     split_on && (rquadrant || bitant) && isrank0 &&
         @printf("  M_irr %.6f (%.6f)  J_z %.6f (%s)", something(rec.M_irr, NaN),
                 M_irr_kerr, hz_J, a_spin)
+    isrank0 && print(fed_note)
     isrank0 && println()
     flush(stdout)
 

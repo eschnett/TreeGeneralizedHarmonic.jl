@@ -249,8 +249,9 @@ end
 function to_plain(x::Array{R,3}; path="run") where {R<:AbstractFloat}
     return (; size=collect(Int, size(x)), values=plain_reals(vec(x)))
 end
-# Several holes' tracks (step B3): one plain track each, as a tuple.
-to_plain(x::Vector{HorizonTrack{T}}; path="run") where {T} =
+# Several holes' tracks and the holes' controlled source lines (step B3): one
+# plain struct each, as a tuple.
+to_plain(x::Vector{S}; path="run") where {S<:Union{HorizonTrack,SourceLine}} =
     Tuple(to_plain(x[A]; path="$path[$A]") for A in eachindex(x))
 # The finder's grid, carried by a coasting track and read by nobody: the one
 # kind `find_horizon` makes.
@@ -301,7 +302,7 @@ function from_plain(::Type{F}, v; path="run") where {F}
         v isa AbstractVector{eltype(F)} || _plain_refusal(F, v, path)
         return collect(eltype(F), v)
     end
-    if F <: Vector && eltype(F) <: HorizonTrack
+    if F <: Vector && eltype(F) <: Union{HorizonTrack,SourceLine}
         v isa Union{Tuple,AbstractVector} || _plain_refusal(F, v, path)
         return eltype(F)[from_plain(eltype(F), v[A]; path="$path[$A]") for A in eachindex(v)]
     end

@@ -1030,21 +1030,28 @@ function holes_seed_source_at(case::GHCase{T}, t) where {T}
 end
 
 """
-    holes_case_at(case::GHCase, tracks, t) -> GHCase
+    holes_case_at(case::GHCase, tracks, t; source_lines = nothing) -> GHCase
 
 The case of several holes as the piece about `t` runs it (added in step B3): its
 gauge source fed by the tracks ([`holes_source_at`](@ref)) — or by the seeds'
-quadratics, `source_feed = :seed` ([`holes_seed_source_at`](@ref)) — and the holes'
+quadratics, `source_feed = :seed` ([`holes_seed_source_at`](@ref)), or by the
+controlled source lines `source_lines` at `t`, `source_feed = :controlled`
+([`lines_source_at`](@ref)) — and the holes'
 Gaussians of `γ0` and their `ε_KO` profiles moved onto the tracks' lines at `t`
 ([`track_center`](@ref)`(tr, t)`) — the remnant's Gaussian stays on the center of
 mass. Everything else is the case's; the type is the case's, so the kernels it is
 handed to are the ones already compiled ([`with_case`](@ref)).
 """
-function holes_case_at(case::GHCase{T}, tracks, t) where {T}
+function holes_case_at(case::GHCase{T}, tracks, t; source_lines=nothing) where {T}
     K = length(case.holes)
     lines = ntuple(A -> track_center(tracks[A], T(t)), Val(K))
-    src = case.interior.feed_source ? holes_source_at(case, tracks, t) :
-          holes_seed_source_at(case, t)
+    feed = case.interior.feed
+    src = feed == FEED_TRACKS ? holes_source_at(case, tracks, t) :
+          feed == FEED_SEED ? holes_seed_source_at(case, t) :
+          source_lines === nothing ? throw(ArgumentError(
+              "this case's source follows the controlled source lines (source_feed " *
+              "= :controlled), and holes_case_at was given none.")) :
+          lines_source_at(case, source_lines, tracks, T(t))
     return GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
                   typeof(case.refinement),typeof(case.horizon),typeof(case.bounds),
                   typeof(case.ε_KO),typeof(src),typeof(case.holes)}(
@@ -1067,3 +1074,257 @@ _on_lines(d::HolesDissipation{T,K}, lines) where {T,K} =
                                                             d.profiles[A].r_1,
                                                             d.profiles[A].r_h, lines[A]),
                                  Val(K)))
+
+# --- the controlled source line (step B3) -----------------------------------------
+#
+# Erik's decision of 2026-10-26 on `CODE.md`'s item 7 ("What feeds the composite
+# source"): a slow control law for the track-fed source, designed and tested on
+# one moving hole fed by its own track first. The design, its time scale and its
+# measurements are `CODE.md`'s "The controlled source line"; what is here is the
+# arithmetic.
+
+"""
+    SourceLine{T}(t, c, v)
+
+Where the gauge source carries one hole at time `t` (added in step B3): the
+center `c` and the velocity `v` of the **controlled source line**, the state of
+the loop [`advance_source_lines`](@ref) integrates,
+
+    c̈ = a_N(c) + ω² (c_tr(t) − c) + 2ω (ċ_tr(t) − ċ),    ω = 1/τ,
+
+a critically damped second-order loop of time `τ` (the hole's spec's
+`control_time`) pulling the line onto its track's position `c_tr` and velocity
+`ċ_tr` ([`track_state`](@ref)), with the Newtonian acceleration `a_N` from the
+other holes on their lines as its model (zero for one hole). The line is `C²` in
+time wherever the track is `C¹`, which [`track_state`](@ref)'s blend makes it,
+and its acceleration is the law's right-hand side at `t`
+([`source_line_states`](@ref)), which the piece's [`TrackedHole`](@ref) carries
+into `∂_t H`. A plain immutable struct, carried by the run and its checkpoint.
+"""
+struct SourceLine{T}
+    t::T
+    c::SVector{3,T}
+    v::SVector{3,T}
+end
+
+"""
+    seed_source_lines(case::GHCase) -> Vector{SourceLine}
+
+Each hole's controlled source line at `t = 0`, started where the case's own
+source puts the hole — the initial data's gauge (added in step B3): for several
+holes each [`HoleSpec`](@ref)'s center and velocity, the composite
+[`holes_source`](@ref) is built on; for one hole the line of its one-hole
+[`CompositeKerrSchildSource`](@ref). **Not on the track's seed (proposed in step
+B3):** a source on another line than the data's violates `C_a` at `t = 0` by the
+difference, and the track's seed is a guess the finds correct (step B2's
+recovery seed is `0.05` off) — the line follows the track from there, through
+the loop.
+"""
+function seed_source_lines(case::GHCase{T}) where {T}
+    if case.interior isa HolesSpec
+        return [SourceLine{T}(zero(T), h.center, h.velocity) for h in case.holes]
+    end
+    case.gauge isa CompositeKerrSchildSource{T,1} || throw(ArgumentError(
+        "a controlled source line starts on the case's one-hole composite source " *
+        "(gauge_source = :composite), and this case's source is a " *
+        "$(typeof(case.gauge))."))
+    h = only(case.gauge.holes)
+    c, v = _hole_line(h, zero(T))
+    return [SourceLine{T}(zero(T), c, v)]
+end
+
+"""
+    seed_source_lines(tracks, t) -> Vector{SourceLine}
+
+Lines started on tracks at `t`: each track's center and velocity there.
+"""
+function seed_source_lines(tracks::AbstractVector{HorizonTrack{T}}, t) where {T}
+    tt = T(t)
+    return [(s = track_state(tr, tt); SourceLine{T}(tt, s[1], s[2])) for tr in tracks]
+end
+
+# The loop's acceleration of every line at `t`, from the lines' centers `xs` and
+# velocities `vs` and the inputs' `(c, ċ)`: the law above, the model's Newtonian
+# pull of the other holes first. `ω = 0` (`τ = Inf`) is the model alone, exactly:
+# `0 · (c_tr − c)` is zero.
+function _line_accelerations(xs, vs, cs, ċs, masses, ωs, newton::Bool)
+    K = length(xs)
+    T = eltype(eltype(xs))
+    return [begin
+                a = zero(SVector{3,T})
+                if newton
+                    for B in 1:K
+                        B == A && continue
+                        d = xs[B] - xs[A]
+                        r = sqrt(sum(abs2, d))
+                        a = a + (T(masses[B]) / (r * r * r)) * d
+                    end
+                end
+                ω = ωs[A]
+                a + (ω * ω) * (cs[A] - xs[A]) + (2 * ω) * (ċs[A] - vs[A])
+            end for A in 1:K]
+end
+
+_omegas(::Type{T}, τs) where {T} = [isinf(T(τ)) ? zero(T) : 1 / T(τ) for τ in τs]
+
+"""
+    advance_source_lines(lines, input, masses, τs, t; newton = length(lines) > 1)
+        -> Vector{SourceLine}
+
+The controlled source lines carried from their time to `t` (added in step B3):
+the loop of [`SourceLine`](@ref) integrated by classical RK4 in steps of at most
+`τ_min/64`, reading the inputs `input(A, s) -> (c, ċ)` — the tracks' position and
+velocity, `s -> track_state(tracks[A], s)` — at each stage's time. `masses` are
+the model's (the holes' own); `τs` the holes' loop times, `Inf` for none (the
+line is then the model's trajectory from its start, a straight line for one
+hole). The same calls in the same order give the same lines, which is what a
+restart relies on; a `t` before the lines' time is refused.
+"""
+function advance_source_lines(lines::AbstractVector{SourceLine{T}}, input, masses, τs,
+                              t; newton::Bool=length(lines) > 1) where {T}
+    K = length(lines)
+    (K ≥ 1 && length(masses) == K && length(τs) == K) || throw(ArgumentError(
+        "advance_source_lines takes one mass and one loop time per line, got " *
+        "$(length(masses)) and $(length(τs)) for $K lines."))
+    t0 = lines[1].t
+    all(l -> l.t == t0, lines) || throw(ArgumentError(
+        "the source lines are carried together and must all be at one time, got " *
+        "$(Tuple(l.t for l in lines))."))
+    t1 = T(t)
+    t1 == t0 && return collect(lines)
+    t1 > t0 || throw(ArgumentError(
+        "the source lines are at t = $t0 and cannot be carried back to t = $t1: the " *
+        "loop is integrated forward, once, as the run goes."))
+    ωs = _omegas(T, τs)
+    ωmax = maximum(ωs)
+    n = ωmax > 0 ? max(1, ceil(Int, (t1 - t0) * ωmax * 64)) : 1
+    dt = (t1 - t0) / n
+    xs = [l.c for l in lines]
+    vs = [l.v for l in lines]
+    acc(s, x, v) = begin
+        inp = [input(A, s) for A in 1:K]
+        _line_accelerations(x, v, [i[1] for i in inp], [i[2] for i in inp], masses,
+                            ωs, newton)
+    end
+    for k in 1:n
+        s = t0 + (k - 1) * dt
+        k1x, k1v = vs, acc(s, xs, vs)
+        x2, v2 = xs .+ (dt / 2) .* k1x, vs .+ (dt / 2) .* k1v
+        k2x, k2v = v2, acc(s + dt / 2, x2, v2)
+        x3, v3 = xs .+ (dt / 2) .* k2x, vs .+ (dt / 2) .* k2v
+        k3x, k3v = v3, acc(s + dt / 2, x3, v3)
+        x4, v4 = xs .+ dt .* k3x, vs .+ dt .* k3v
+        k4x, k4v = v4, acc(s + dt, x4, v4)
+        xs = xs .+ (dt / 6) .* (k1x .+ 2 .* k2x .+ 2 .* k3x .+ k4x)
+        vs = vs .+ (dt / 6) .* (k1v .+ 2 .* k2v .+ 2 .* k3v .+ k4v)
+    end
+    return [SourceLine{T}(t1, xs[A], vs[A]) for A in 1:K]
+end
+
+"""
+    source_line_states(lines, input, masses, τs; newton = length(lines) > 1)
+        -> Vector{NTuple{3,SVector{3}}}
+
+Each controlled source line's center, velocity and acceleration at the lines'
+time (added in step B3): the acceleration is the loop's right-hand side there,
+so that a piece's [`TrackedHole`](@ref) about that time is the line to second
+order and its `∂_t H` the derivative of the `H` it carries.
+"""
+function source_line_states(lines::AbstractVector{SourceLine{T}}, input, masses, τs;
+                            newton::Bool=length(lines) > 1) where {T}
+    K = length(lines)
+    t = lines[1].t
+    inp = [input(A, t) for A in 1:K]
+    as = _line_accelerations([l.c for l in lines], [l.v for l in lines],
+                             [i[1] for i in inp], [i[2] for i in inp], masses,
+                             _omegas(T, τs), newton)
+    return [(lines[A].c, lines[A].v, as[A]) for A in 1:K]
+end
+
+# The tracks as the loop's input: their position and velocity at `s`.
+track_input(tracks) = (A, s) -> (st = track_state(tracks[A], s); (st[1], st[2]))
+
+"""
+    lines_source_at(case::GHCase, lines, tracks, t) -> CompositeKerrSchildSource
+
+The composite source of a case of several holes on the controlled source lines at
+`t` (added in step B3; `source_feed = :controlled`): each hole a
+[`TrackedHole`](@ref) of its mass and spin about `t_p = t` with its line's center,
+velocity and acceleration ([`source_line_states`](@ref)), the loop's input the
+holes' tracks.
+"""
+function lines_source_at(case::GHCase{T}, lines, tracks, t) where {T}
+    holes = case.holes
+    K = length(holes)
+    T(t) == lines[1].t || throw(ArgumentError(
+        "the source lines are at t = $(lines[1].t), and the piece's source is asked " *
+        "for at t = $t: carry them there first (advance_source_lines)."))
+    st = source_line_states(lines, track_input(tracks), [h.mass for h in holes],
+                            [h.interior.control_time for h in holes])
+    return CompositeKerrSchildSource(ntuple(Val(K)) do A
+        c, v, a = st[A]
+        TrackedHole(T; M=holes[A].mass, spin=holes[A].spin, center=c, velocity=v,
+                    acceleration=a, t_p=T(t))
+    end...)
+end
+
+"""
+    fed_case_at(case::GHCase, track, t; source_lines = nothing) -> GHCase
+
+A case of one tracked hole whose source is fed (added in step B3; its
+[`TrackedSpec`](@ref)'s `source_feed` other than `:own`): the case with its
+one-hole [`CompositeKerrSchildSource`](@ref) replaced by the hole on the seed's
+line (`:seed`, the case's own center), on the track's state at `t` (`:tracks`), or
+on the controlled source line at `t` (`:controlled`, `source_lines`), as a
+[`TrackedHole`](@ref) about `t_p = t` with the hole's mass and spin. Everything
+else is the case's, so the kernels are the ones built ([`with_case`](@ref)). On
+the seed's line, or on a controlled line that is never corrected (`control_time =
+Inf`), the source is the case's own bit for bit: one hole's source does not read
+its center, and a line without acceleration is [`KerrSchildSource`](@ref)'s
+arithmetic.
+"""
+function fed_case_at(case::GHCase{T}, tr::HorizonTrack, t; source_lines=nothing) where {T}
+    spec = case.interior
+    spec isa TrackedSpec || throw(ArgumentError(
+        "fed_case_at feeds the source of a case of one tracked hole; this case's " *
+        "interior is a $(typeof(spec))."))
+    case.gauge isa CompositeKerrSchildSource{T,1} || throw(ArgumentError(
+        "a fed source (source_feed = :$(feed_name(spec.source_feed))) replaces the " *
+        "case's one-hole composite source every piece, and this case's source is a " *
+        "$(typeof(case.gauge)): build it with gauge_source = :composite."))
+    tt = T(t)
+    M, a, _ = _kerr_schild_parameters(case.background)
+    feed = spec.source_feed
+    c, v, acc = if feed == FEED_SEED
+        (center_at(case.center, tt), case.center.v, zero(SVector{3,T}))
+    elseif feed == FEED_TRACKS
+        track_state(tr, tt)
+    elseif feed == FEED_CONTROLLED
+        source_lines === nothing && throw(ArgumentError(
+            "this case's source follows the controlled source line (source_feed = " *
+            ":controlled), and fed_case_at was given none."))
+        tt == source_lines[1].t || throw(ArgumentError(
+            "the source line is at t = $(source_lines[1].t), and the piece's source " *
+            "is asked for at t = $t: carry it there first (advance_source_lines)."))
+        only(source_line_states(source_lines, track_input([tr]), [M],
+                                [spec.control_time]; newton=false))
+    else
+        throw(ArgumentError("fed_case_at was asked for a case whose source is its " *
+                            "own (source_feed = :own)."))
+    end
+    src = CompositeKerrSchildSource(TrackedHole(T; M=M, spin=(0, 0, a), center=c,
+                                                velocity=v, acceleration=acc, t_p=tt))
+    return GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
+                  typeof(case.refinement),typeof(case.horizon),typeof(case.bounds),
+                  typeof(case.ε_KO),typeof(src),typeof(case.holes)}(
+        case.background, case.box, case.periodic, case.reflecting, case.rotating,
+        case.ε_KO, case.γ0, case.γ2, case.center, case.interior, case.refinement,
+        case.horizon, case.bounds, case.chunk, src, case.holes)
+end
+
+# The record's rows of a piece's source hole (step B3): its line's center,
+# velocity and acceleration about the piece's time, in `Float64`.
+source_rows(h::TrackedHole) =
+    (source_center=ntuple(d -> tofloat64(h.c0[d]), 3),
+     source_velocity=ntuple(d -> tofloat64(h.v0[d]), 3),
+     source_acceleration=ntuple(d -> tofloat64(h.acc[d]), 3))

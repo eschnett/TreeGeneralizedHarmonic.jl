@@ -1611,7 +1611,8 @@ end
     TrackedSpec(T = Float64; r_0, r_1, w_ramp = 1//2, ρ_ramp = 1//2, margin = 8,
                 ρ_max = 0, max_misses = 3, lmax_shape = 4, quadratic = true,
                 max_interval = 0, mass_factor = 1, velocity_offset = (0, 0, 0),
-                center_offset = (0, 0, 0), seed_velocity_offset = (0, 0, 0))
+                center_offset = (0, 0, 0), seed_velocity_offset = (0, 0, 0),
+                source_feed = :own, control_time = 0)
 
 What a [`GHCase`](@ref) holds as its `interior` for the **tracked analytic
 target** (added in step B2; `CODE.md`, "One interior per hole" — "Tracked
@@ -1639,6 +1640,21 @@ background, which a binary will not have.
   sphere together, the track unchanged — and the seed's velocity plus
   `seed_velocity_offset`, which the track itself must recover from.
 
+- `source_feed` and `control_time` (added in step B3): what the case's gauge
+  source rides on. `:own` — the default, and what every run before them did —
+  is the case's own source, the analytic hole's; `:seed` is the seed's line, a
+  [`CompositeKerrSchildSource`](@ref) of one [`TrackedHole`](@ref) on it
+  rebuilt every piece; `:tracks` is the track's state at each piece, step B3's
+  pairing (α) as decided; `:controlled` is the **controlled source line**
+  ([`SourceLine`](@ref), [`advance_source_lines`](@ref)): a critically damped
+  second-order loop of time `control_time` — in units of the hole's mass, as
+  the radii are — driven by the track's position and velocity. Every feed but
+  `:own` needs the case's source to be the one-hole composite (`gauge_source =
+  :composite`); a case of several holes takes its feed from the case
+  ([`binary_case`](@ref)'s `source_feed`), its holes' specs staying at `:own`,
+  and the time from its holes' specs, so `control_time` is read only where the
+  line is controlled.
+
 `isbits`, as a case's interior must be; every "use the rule" value is spelled
 `0`.
 """
@@ -1657,7 +1673,20 @@ struct TrackedSpec{T}
     velocity_offset::SVector{3,T}
     center_offset::SVector{3,T}
     seed_velocity_offset::SVector{3,T}
+    source_feed::Int
+    control_time::T
 end
+
+# The codes of a tracked hole's source feed (step B3), `isbits` where a symbol is
+# not.
+const FEED_OWN = 0
+const FEED_SEED = 1
+const FEED_TRACKS = 2
+const FEED_CONTROLLED = 3
+const FEED_NAMES = (:own, :seed, :tracks, :controlled)
+feed_code(s::Symbol) = (k = findfirst(==(s), FEED_NAMES); k === nothing ?
+    throw(ArgumentError("source_feed is one of $(FEED_NAMES), got :$s.")) : k - 1)
+feed_name(k::Integer) = FEED_NAMES[k + 1]
 
 function TrackedSpec(::Type{T}=Float64; r_0, r_1, w_ramp=T(1 // 2),
                      ρ_ramp=T(1 // 2), margin::Integer=8, ρ_max=zero(T),
@@ -1665,7 +1694,8 @@ function TrackedSpec(::Type{T}=Float64; r_0, r_1, w_ramp=T(1 // 2),
                      quadratic::Bool=true, max_interval=zero(T),
                      mass_factor=one(T), velocity_offset=(0, 0, 0),
                      center_offset=(0, 0, 0),
-                     seed_velocity_offset=(0, 0, 0)) where {T}
+                     seed_velocity_offset=(0, 0, 0), source_feed::Symbol=:own,
+                     control_time=zero(T)) where {T}
     # The sphere's own refusals, once, here rather than at the first piece.
     Interior(T; center=(0, 0, 0), r_0=r_0, r_1=r_1, ρ_max=ρ_max, w_ramp=w_ramp,
              ρ_ramp=ρ_ramp, margin=margin)
@@ -1682,12 +1712,19 @@ function TrackedSpec(::Type{T}=Float64; r_0, r_1, w_ramp=T(1 // 2),
         "$mass_factor."))
     vec3(x, what) = (length(x) == 3 || throw(ArgumentError(
         "$what is a 3-vector, got $x.")); SVector{3,T}(T(x[1]), T(x[2]), T(x[3])))
+    feed = feed_code(source_feed)
+    τ = T(control_time)
+    (τ ≥ 0 && (feed != FEED_CONTROLLED || τ > 0)) || throw(ArgumentError(
+        "the controlled source line follows the track through a loop of time " *
+        "control_time, which must be positive for source_feed = :controlled " *
+        "(Inf: the seed's line, never corrected) and is not negative otherwise, " *
+        "got $control_time."))
     return TrackedSpec{T}(T(r_0), T(r_1), T(w_ramp), T(ρ_ramp), Int(margin),
                           T(ρ_max), Int(max_misses), Int(lmax_shape), quadratic,
                           T(max_interval), T(mass_factor),
                           vec3(velocity_offset, "velocity_offset"),
                           vec3(center_offset, "center_offset"),
-                          vec3(seed_velocity_offset, "seed_velocity_offset"))
+                          vec3(seed_velocity_offset, "seed_velocity_offset"), feed, τ)
 end
 
 interior_variant(::TrackedSpec) = :damped

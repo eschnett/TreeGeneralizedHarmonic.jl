@@ -333,10 +333,11 @@ function case_holes(::Type{T}, background, holes; interior, r_0, r_1, target, ce
         "hole_target is :superposed (each layer relaxes toward the superposition of " *
         "all the holes on their tracks) or :own (toward its own hole's), got " *
         ":$hole_target."))
-    source_feed in (:tracks, :seed) || throw(ArgumentError(
+    source_feed in (:tracks, :seed, :controlled) || throw(ArgumentError(
         "source_feed is :tracks (the composite source's holes follow the tracks, " *
-        "pairing (α)) or :seed (they follow their HoleSpecs' quadratics), got " *
-        ":$source_feed."))
+        "pairing (α)), :seed (they follow their HoleSpecs' quadratics) or " *
+        ":controlled (they follow the controlled source lines, each with its own " *
+        "TrackedSpec's control_time), got :$source_feed."))
     momentum in (:superposition, :gauge) || throw(ArgumentError(
         "momentum is :superposition (the data's own ∂_t g) or :gauge (∂_t g_tb from " *
         "C_a = 0 at t = 0), got :$momentum."))
@@ -344,7 +345,8 @@ function case_holes(::Type{T}, background, holes; interior, r_0, r_1, target, ce
     if K == 1
         (source_feed === :tracks && momentum === :superposition) || throw(ArgumentError(
             "source_feed and momentum are several holes' switches; a case of one hole " *
-            "is the case it was built from, and takes neither."))
+            "is the case it was built from, and takes neither: its feed is its " *
+            "TrackedSpec's own source_feed."))
         h = holes[1]
         M, a, v = _kerr_schild_parameters(background)
         (T(M) == h.mass && T(a) == h.spin[3] &&
@@ -358,12 +360,24 @@ function case_holes(::Type{T}, background, holes; interior, r_0, r_1, target, ce
         return (holes=holes, interior=h.interior, center=h.center, velocity=h.velocity)
     end
     hs = ntuple(A -> holes[A], Val(K))
+    for A in 1:K
+        hs[A].interior.source_feed == FEED_OWN || throw(ArgumentError(
+            "a case of several holes takes its source feed from the case " *
+            "(source_feed = :$source_feed), and hole $A's TrackedSpec asks for " *
+            ":$(feed_name(hs[A].interior.source_feed)): leave the specs' at :own, " *
+            "and give the controlled feed's time as each spec's control_time."))
+    end
+    source_feed === :controlled &&
+        any(A -> !(hs[A].interior.control_time > 0), 1:K) && throw(ArgumentError(
+            "source_feed = :controlled follows each hole's track through a loop of " *
+            "its own TrackedSpec's control_time, which must be positive; got " *
+            "$(Tuple(hs[A].interior.control_time for A in 1:K))."))
     c = holes_center(hs)
     return (holes=hs,
             interior=HolesSpec{K,typeof(hs[1].interior)}(ntuple(A -> hs[A].interior,
                                                                 Val(K)),
                                                          hole_target === :superposed,
-                                                         source_feed === :tracks,
+                                                         feed_code(source_feed),
                                                          momentum === :gauge),
             center=c.c0, velocity=c.v)
 end
