@@ -7030,30 +7030,75 @@ spin at every row (`N = 16`) and the ADM monitor at every row, to `2 M`.
   | `b3sg48` | from `C_a = 0` | `2 M` | `1.6·10⁻⁸ → 3.4·10⁻⁴` (peak `5.0·10⁻⁴` at `1 M`) | `1.41 → 1.47 ·10⁻³` | `13.455 → 13.553` (`+0.7 %`, peak `13.619` at `1 M`) | `7.9444` (`Δ = −0.056`) | `7.9687` |
 
   Every find of both holes succeeded at every row, no assertion fired, and the
-  constraints stay bounded — falling, with the gauge-consistent `Π`. The layers'
-  residual against their targets is `0.4–4.5` (`b3sg48`), the single moving hole's
-  order at this spacing.
-- **The separation does not fall as free fall predicts (measured in step B3).**
-  The tracks' separation falls `1.78×` Newtonian free fall from rest over `2 M`
-  with the gauge-consistent `Π` and `3.6×` with the superposition's, steadily
-  from the first chunk, while the finds' predictions are `3·10⁻³` cells off at
-  `2 M`: the finder is a hundred times better than the discrepancy. It is the
-  continuum solution's, not the mesh's: at `M/4` the `1/24` and `1/48` rows agree
-  on the found separation to six digits (`7.938328`) and on the area to
-  `10⁻⁶`. The horizons' coordinate centroids move in this gauge as the data's
-  junk settles — most where the junk is largest: with the superposition's `Π` the
-  horizons grow `18 %` in area in `2 M` and the centroids move `3.6×` free fall,
-  with `C_a = 0` at the start `0.7 %` and `1.78×`. A coordinate separation is not
-  a gauge-invariant measure of the fall; the separation along the axis between
-  the two horizons' proper distance, or the fall against a longer baseline once
-  the junk has gone, is what B7 should read.
+  constraints stay bounded — falling, with the gauge-consistent `Π`.
+- **The layers' residual grows, and is not a single hole's (measured in step B3;
+  corrected in its review, 2026-10-26).** It is the L∞ over both layers of
+  `|u − u_target|` — the Euclidean norm of the twenty components, against each
+  hole's own target, the superposition on the tracks — and it rises from `0.41`
+  at `M/4` to `4.49` at `2 M` (`b3sg48`; `0.44` to `4.52` in `b3s48`), still
+  rising. **Its units:** `Π` carries `1/M` and dominates. A boosted Kerr-Schild
+  hole and the same hole one cell along the boost differ in the layer by `8.3` at
+  `M = 1`, `h = 1/24` (step B2's runs with a target one cell off held `7.8–10.1`)
+  and by `16.6` at `M = 1/2`, `h = 1/48`, `98 %` of it in `Π` (evaluated from the
+  analytic metrics, `r ∈ [5/8, 23/16] M`, `v = 1/5`). So step B2's single hole,
+  `0.12–0.15` at its `1/24`, is at most `0.25–0.30` at `M_A = 1/2` — a run with
+  every length, time and rate scaled by the mass has `h` unchanged and `Π` over
+  `M` — and the pair's `4.5` is `15–18×` that: the distance of a target a quarter
+  of a cell off, or of one whose velocity is `0.02` off (step B2's `±1/50` held
+  `2.0–2.2` at `M = 1`). **The lines:** each target rides its track, and the
+  source carries its hole on the seed's quadratic, `c₀ ± ½ (M_B/d²) t²`. At
+  `1/48`, hole 1 (hole 2's are equal and opposite to the digits shown):
+
+  | t | 0.25 | 0.5 | 0.75 | 1.0 | 1.25 | 1.5 | 1.75 | 2.0 |
+  |---|---|---|---|---|---|---|---|---|
+  | `b3sg48` track − seed (cells) | 0.00 | 0.30 | 0.55 | 0.76 | 0.80 | 0.80 | 0.73 | 0.58 |
+  | `b3sg48` track's velocity − seed's | `+0.0126` | `+0.0166` | `+0.0173` | `+0.0113` | `+0.0050` | `−0.0015` | `−0.0080` | `−0.0143` |
+  | `b3sg48` residual | 0.41 | 2.81 | 1.31 | 1.45 | 2.52 | 3.42 | 3.98 | 4.49 |
+  | `b3s48` track − seed (cells) | 0.00 | 0.83 | 1.34 | 1.72 | 1.88 | 2.00 | 2.02 | 1.96 |
+  | `b3s48` track's velocity − seed's | `+0.0347` | `+0.0384` | `+0.0357` | `+0.0251` | `+0.0159` | `+0.0074` | `−0.0009` | `−0.0090` |
+  | `b3s48` residual | 0.44 | 8.67 | 3.05 | 1.30 | 2.30 | 3.05 | 3.80 | 4.52 |
+
+  The track's distance from its seed peaks at `0.80` cells at `1.25–1.5 M` in
+  `b3sg48` and falls, while the residual keeps rising; and the two rows end at the
+  same residual with their tracks `0.58` and `1.96` cells off the seeds and their
+  velocities `0.014` and `0.009` off. Neither the position nor the velocity of
+  the target's line against the source's accounts for the growth alone. What else
+  separates these rows from step B2's single hole is the target: the superposition
+  is not a solution, and where `ρ` is small the evolved state leaves it at the rate
+  the equations move the data, which these rows cannot separate from the lines'
+  mismatch. The controlled feed removes the mismatch; its row is the test ([The
+  controlled source line](#the-controlled-source-line)).
+- **The found separation does not fall as free fall predicts, and the junk moves
+  it first (measured in step B3; corrected in its review, 2026-10-26).** Its drop
+  over each `M/4` against Newtonian free fall from rest over the same interval:
+
+  | interval ending at | 0.25 | 0.5 | 0.75 | 1.0 | 1.25 | 1.5 | 1.75 | 2.0 |
+  |---|---|---|---|---|---|---|---|---|
+  | `b3sg48` found | 0.0068 | 0.0098 | 0.0102 | 0.0094 | 0.0078 | 0.0059 | 0.0038 | 0.0017 |
+  | `b3s48` found | 0.0178 | 0.0207 | 0.0196 | 0.0171 | 0.0141 | 0.0110 | 0.0079 | 0.0048 |
+  | free fall | 0.0005 | 0.0015 | 0.0024 | 0.0034 | 0.0044 | 0.0054 | 0.0064 | 0.0073 |
+
+  The holes start toward each other at once, fastest over `0.5–0.75 M`, and
+  decelerate while free fall accelerates: over the last interval the separation
+  falls at `0.23×` free fall's rate with the gauge-consistent `Π` and `0.66×` with
+  the superposition's, whose junk is larger. It is a gauge transient that
+  decelerates — the track's velocity against the seed's swings from `+0.017` at
+  `0.75 M` through zero near `1.45 M` to `−0.014` at `2 M` (`b3sg48`), a period of
+  about `3–4 M` (`7 M_A`) — not a fall, and no ratio over the window is its rate.
+  The finder is not the cause: its predictions are `3·10⁻³` cells off at `2 M`,
+  and at `M/4` the `1/24` and `1/48` rows agree on the found separation to six
+  digits (`7.938328`) and on the area to `10⁻⁶`, so the motion is the continuum
+  solution's. A coordinate separation is not a gauge-invariant measure of the
+  fall, and a fall read off this one waits for the transient to end; the proper
+  distance between the two horizons along the axis is what B7 should read.
 - **Restarts:** the suite's pair as a chain of one-chunk jobs is the uninterrupted
   run bit for bit — the state, every record row, both tracks with their
-  histories, the horizon offsets and the finder's seeds (`holes_tests.jl`). The
-  head-on row's chain, `b3sg48` continued from its `1 M` checkpoint to `2 M` as job
-  583463 (`b3sg48r`), was submitted and had not been read back when this was written (the
-  tunnel to Symmetry was down): its rows from `1.25 M` on are to be compared with
-  the uninterrupted row's to the CSV's digits, as step B2's were.
+  histories, the horizon offsets and the finder's seeds (`holes_tests.jl`). **On
+  an H200 too (measured 2026-10-26):** the head-on row's chain, `b3sg48` continued
+  from its `1 M` checkpoint to `2 M` as job 583463 (`b3sg48r`), is the
+  uninterrupted row — its rows at `1.25`, `1.5`, `1.75` and `2 M` equal
+  `b3sg48`'s in all 64 columns but the wall time, the device memory and the
+  host's resident set, as step B2's chains did.
 
 ### The gauge
 

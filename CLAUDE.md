@@ -656,11 +656,19 @@ refusals (a feedback: the source carries the holes where the tracks say); **fed 
 the holes' Newtonian seeds (`source_feed = :seed`) both momenta ran to `2 M`**,
 every find successful, the constraints bounded and, with `momentum = :gauge`,
 falling (`C_a` from `1.6·10⁻⁸`, the areas `+0.7 %`; the superposition's `Π` grows
-them `18 %`). The tracks' separation falls `1.78×` (gauge `Π`) and `3.6×`
-(superposition `Π`) Newtonian free fall, the same at `1/24` and `1/48` to six
-digits: the horizons' coordinate motion under the junk, not the finder's
-accuracy (`CODE.md`, "What step B3 built and measured", and item 7 of "What this
-asks Erik to decide").
+them `18 %`). **The found separation's fall is a gauge transient that decelerates**
+(corrected in the review): its drop per `M/4` is `0.0068, 0.0098, 0.0102, 0.0094,
+0.0078, 0.0059, 0.0038, 0.0017` against free fall's `0.0005` to `0.0073`
+(`b3sg48`), so by `2 M` it falls at `0.23×` free fall's rate (`0.66×` with the
+superposition's `Π`) — the same at `1/24` and `1/48` to six digits, the
+continuum solution's coordinate motion under the junk, not the finder's accuracy;
+read no ratio over a window as a rate. **The layers' residual grows** from `0.41`
+to `4.49` over `2 M`, still rising, `15–18×` step B2's single hole scaled to
+`M_A = 1/2` (`Π` carries `1/M`: B2's `0.12–0.15` is at most `0.25–0.30` there);
+each track is `0.3–0.8` cells off the seed the source carries its hole on, but
+the residual follows neither that nor the velocity mismatch alone (`CODE.md`,
+"What step B3 built and measured", and item 7 of "What this asks Erik to
+decide").
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
