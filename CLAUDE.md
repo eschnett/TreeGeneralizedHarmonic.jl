@@ -670,6 +670,36 @@ the residual follows neither that nor the velocity mismatch alone (`CODE.md`,
 "What step B3 built and measured", and item 7 of "What this asks Erik to
 decide").
 
+From 2026-10-26/27 (step B3's review) a tracked hole's gauge source may ride a
+**controlled source line** — Erik's decision on `CODE.md`'s item 7: a slow
+control law for the track-fed source, tested on one moving hole fed by its own
+track first (`CODE.md`, "The controlled source line"). `src/tracking.jl` has
+`SourceLine` (a hole's line, `c̈ = a_N + ω² (c_tr − c) + 2ω (ċ_tr − ċ)`, `ω = 1/τ`:
+a critically damped loop onto the track's position and velocity, the Newtonian
+pull of the other holes as its model), `seed_source_lines` (on the case's own
+source, the data's gauge), `advance_source_lines` (RK4 in steps of `τ/64`),
+`source_line_states`, `lines_source_at` and `fed_case_at` (one hole's one-hole
+composite rebuilt every piece). A `TrackedSpec` takes `source_feed = :own`
+(default: every earlier run, bit for bit) `| :seed | :tracks | :controlled` and
+`control_time` (in the hole's mass; `Inf` is the model alone); `binary_case(;
+source_feed = :controlled)` reads each hole's spec's time. The driver carries the
+lines (`case_at`), the checkpoint stores them, and the record has each piece's
+`source_center`, `source_velocity`, `source_acceleration` (per hole for a pair).
+**Measured:** on step B2's production hole at `1/24` to `20 M` every feed — raw,
+`τ = 10 M`, `τ = 4 M` — is `b2t24` to `0.15 %` in `ℋ`; from B2's recovery seed the
+controlled line reproduces `b2r24`'s `ℋ` and settles back onto the hole's motion,
+`0.014` cells off the analytic line at `τ = 10 M` (the loop's neutral mode). On the
+head-on pair at `1/48` the controlled line (`τ = 10 M_A`, and `4 M_A`) runs to
+`6 M` where the raw feed died by `1 M`: every find, `C_a` bounded, the residual
+saturating (`7.1` and `6.4` at their peaks, against `8.45` and rising on the
+seeds; to `2 M` it is `4.5–4.7` on every feed, the superposed target's part).
+`τ = 4 M_A` is the pair's better time and is proposed for B4. The holes'
+coordinate motion is the gauge's and barely the line's: in every row, the
+seed-fed one included, they fall faster than free fall for `2 M`, stop near
+`2.2–2.4 M` and recede, `6.6–8.3` cells off the Newtonian seed by `6 M`. `test/source_line_tests.jl` is its file;
+`test/octant_runs.jl feed=` and `test/binary_runs.jl feed=controlled` its runs,
+`test/fed_study.jl` and `test/binary_study.jl` their tables.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -740,7 +770,14 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5952 assertions in 17m19** at four threads and **5944 in 19m58**
+The suite is **5992 assertions in 15m17** at four threads and **5984 in 18m58**
+at one after step B3's review (2026-10-26/27, the controlled source line): its 40
+new claims are `source_line_tests.jl`'s, `12.9 s` at four threads and `15.7 s` at
+one inside the suite (the loop against the filter's closed form, on synthetic
+finds, the model's free fall and the source's `∂_t H`, host-side; one moving hole
+fed on its seed's line and on a line never corrected against the analytic run bit
+for bit, and a chain of a controlled run, on `tracked_target_tests.jl`'s
+kernels). It was **5952 assertions in 17m19** at four threads and **5944 in 19m58**
 at one after step B3 (2026-10-26, a development machine loaded 4–9 by other
 work): its 103 new claims are `holes_tests.jl` (72, `49.0 s` at four threads and
 `1m07` at one — the pair's pieces host-side, the composite against the nearer
@@ -1332,6 +1369,24 @@ julia test/binary_study.jl dir=.claude/data/step-B3 runs=b3s48,b3sg48
 ```
 
 The third prints the rows' tables from their CSVs (no package needed).
+
+From 2026-10-26/27 (step B3's review) the gauge source may be fed: on one tracked
+hole `test/octant_runs.jl interior=tracked source=composite feed=own|seed|tracks|controlled
+control_time=<τ in M>` (the CSV then ends with the track's and the line's center,
+velocity and acceleration, the error against the hole on the track's line and the
+residual against the layer's own target; use `shell_center=track`), and on a pair
+`test/binary_runs.jl feed=controlled control_time=<τ for a hole of mass one>`. The
+first line is one of the review's screens (`b3fb24`, job 583736, `15 min` on one
+H200), the second its pair at `τ = 10 M_A` (`b3cg48`, jobs 583932 and 584024, two
+`h200debugq` links of under an hour, `walltime=3000`), the third and fourth their
+tables (no package needed; `base=` is step B2's data):
+
+```bash
+julia --project=. test/octant_runs.jl backend=cuda case=ks octant=quadrant L=64 roots=4 radii=32,16,8,4 N=24 t_end=20 chunk=1 split=0 cfl=1/2 amplitude=0 r_0=5/8 r_1=23/16 v=1/5 x0=-4 path=8 interior=tracked source=composite feed=controlled control_time=10 shell_center=track group=step-B3 out=out/b3fb24 checkpoint=out/b3fb24/ck checkpoint_every=4 walltime=12000
+julia --project=. test/binary_runs.jl backend=cuda d=8 L=32 roots=8 radii=16,8,4,2 N=24 t_end=6 chunk=1/4 cfl=1/2 momentum=gauge feed=controlled control_time=10 out=out/b3cg48 checkpoint=out/b3cg48/ck checkpoint_every=4 walltime=3000
+julia test/fed_study.jl dir=.claude/data/step-B3 base=<B2's .claude/data/step-B2>/b2t24 runs=b3fa24,b3fb24,b3fd24,b3fc24,b3fe24
+julia test/binary_study.jl dir=.claude/data/step-B3 runs=b3sl48,b3cg48,b3cd48
+```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
@@ -2263,8 +2318,24 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   the head-on pair every `source_feed = :tracks` row ended within `1 M` on the
   track's own refusals (`1/48` and `1/24`, either momentum), the predictions
   growing to `0.4–0.9` cells first. `source_feed = :seed` (the holes' Newtonian
-  quadratics) holds it. It is the default `:tracks` because it is what Erik
-  decided; a run that must reach its end today passes `:seed`.
+  quadratics) holds it, and so does `:controlled` (step B3's review, to `6 M`).
+  It is the default `:tracks` because it is what Erik decided; a run that must
+  reach its end passes `:controlled` (with each spec's `control_time`) or `:seed`.
+  The raw feed's harm is its lead — the track's quadratic carries the last finds'
+  acceleration into the source — which amplified the junk's swing until a
+  prediction failed the center-jump check; do not feed a source the track's
+  acceleration.
+- **A controlled source line starts on the data's gauge, not on the track's
+  seed** (step B3's review). A source on another line than the data's violates
+  `C_a` at `t = 0` by the difference (`10⁴×` for a seed `0.05` off), and a line and
+  target started on step B2's recovery seed carried the hole at the seed's speed.
+  `seed_source_lines(case)` reads the case's own source; keep it so.
+- **The track–line loop has no reference but the track** (step B3's review): its
+  gain is one at zero frequency, so a displacement the line once caused stays —
+  `0.014` cells on step B2's hole after a recovery at `τ = 10 M`. And on the pair
+  the holes' coordinate motion is the gauge's, the same within `10–20 %` with the
+  line on the Newtonian seeds or on the tracks: read no fall off a coordinate
+  separation in this gauge, and no physics off the line's position.
 - **A pre-empted `h200preq` job can end `FAILED`, not requeued** (step B2,
   2026-10-26). Two rows (jobs 583003, 583004) got `SIGTERM` after `8–9 min`,
   their `srun` exited `143`, and the jobs ended `FAILED 15:0` with nothing

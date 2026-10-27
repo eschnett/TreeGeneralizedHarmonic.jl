@@ -270,10 +270,10 @@ import AbstractSphericalHarmonics as ASH
     # with step B2's recovery seed, `0.05` too fast, the track recovers on its
     # finds as it does on the analytic source (`tracked_target_tests.jl`), and the
     # line, pulled toward it while it does, stays on the hole. A line started on
-    # the seed instead carried the hole with it — measured 2026-10-26 on this
-    # fixture at `τ = 1`: the source at `0.255`, the track at `0.252` after
-    # `0.3 M` and `0.18` cells off the analytic line, `C_a` `10⁴×` at `t = 0`:
-    # the hole's coordinate velocity is the gauge source's.
+    # the seed instead carried the hole with it, the target riding the same seed
+    # — measured 2026-10-26 on this fixture at `τ = 1`: the source at `0.255`,
+    # the track at `0.252` after `0.3 M` and `0.18` cells off the analytic line,
+    # `C_a` `10⁴×` at `t = 0`.
     @testset "a controlled line restarts bit for bit, and starts on the data's gauge" begin
         c = fixture(:controlled; τ=T(1), seed_dv=1 // 20)
         a = run(c)

@@ -33,7 +33,10 @@ milestones G7 and G8, which go beyond the proof of concept. The design is
 `CODE.md`, "Binary black holes". **Erik decided the pairing on 2026-10-26: (α)**,
 the composite tracked Kerr-Schild source fed by the per-hole tracks with B2's
 tracked `:damped` target per hole — and `GHCase(…; holes)`, and the superposed
-metric kept here. This file stays until G8 is done.
+metric kept here. **And on what feeds that source, the same day (`CODE.md`'s item
+7):** a slow control law for the track-fed source, tested on one moving hole fed
+by its own track first — built in B3's review, `CODE.md`, "The controlled source
+line". This file stays until G8 is done.
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1439,7 +1442,8 @@ rule, the moving `:damped` layer, `core_follows`). **One hole only.**
 `CODE.md`: "A case without a background", "One interior per hole",
 "Refinement for two holes", "The record", "Initial data" (item 1). **Starts
 after Erik's decision on the pairing** (made 2026-10-26: (α); B3 ran that day,
-`CODE.md`, "What step B3 built and measured").
+`CODE.md`, "What step B3 built and measured"; its review added the controlled
+source line on Erik's decision of the same day, "The controlled source line").
 
 **Changes:**
 

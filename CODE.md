@@ -111,6 +111,7 @@ research project; the inherited documents live in `notes/`.
     - [What step B3 built and measured (2026-10-26)](#what-step-b3-built-and-measured-2026-10-26)
   - [The gauge](#the-gauge)
     - [What step B1 built and measured (2026-10-25)](#what-step-b1-built-and-measured-2026-10-25)
+    - [The controlled source line](#the-controlled-source-line)
   - [One interior per hole](#one-interior-per-hole)
   - [The tracks](#the-tracks)
     - [What step B2 built and measured (2026-10-26)](#what-step-b2-built-and-measured-2026-10-26)
@@ -6804,8 +6805,10 @@ tracked analytic target ([What step B2 built and
 measured](#what-step-b2-built-and-measured-2026-10-26)) — and step B3 the case
 of several holes on Erik's decisions of 2026-10-26, run on a head-on pair from
 rest to `2 M` ([What step B3 built and
-measured](#what-step-b3-built-and-measured-2026-10-26)) **(amended in steps B2
-and B3)**. It extends the proof of concept to two black holes that orbit,
+measured](#what-step-b3-built-and-measured-2026-10-26)), and its review the
+controlled source line, run on one moving hole to `20 M` and on the pair to `6 M`
+([The controlled source line](#the-controlled-source-line)) **(amended in steps
+B2 and B3)**. It extends the proof of concept to two black holes that orbit,
 merge and ring down, with the gravitational waves they emit as the result.
 `PLAN.md`'s steps B1–B9 are the work breakdown, and the two milestones are
 under [Milestones G7 and G8](#milestones-g7-and-g8): two holes colliding
@@ -7066,8 +7069,11 @@ spin at every row (`N = 16`) and the ADM monitor at every row, to `2 M`.
   separates these rows from step B2's single hole is the target: the superposition
   is not a solution, and where `ρ` is small the evolved state leaves it at the rate
   the equations move the data, which these rows cannot separate from the lines'
-  mismatch. The controlled feed removes the mismatch; its row is the test ([The
-  controlled source line](#the-controlled-source-line)).
+  mismatch. The controlled feed was the test ([The controlled source
+  line](#the-controlled-source-line)): to `2 M` the residual is the same `4.5–4.7`
+  on every feed, so that part is the superposed target's, and from `3 M` on it
+  grows with the source line's distance from the track — to `8.45` at `6 M` on the
+  seeds, saturating at `7.1` and `6.4` on the controlled lines.
 - **The found separation does not fall as free fall predicts, and the junk moves
   it first (measured in step B3; corrected in its review, 2026-10-26).** Its drop
   over each `M/4` against Newtonian free fall from rest over the same interval:
@@ -7350,6 +7356,228 @@ horizon and a moving one `6–31×` above it at `1/32` — the binary's case —
 improving fast with `h`. Before (β) is a candidate: the moving hole under the
 gauge at `1/48` (several GPUs on this capsule), or with a longer roll-on or
 another `:fitted` depth, and a boundary for its far field.
+
+#### The controlled source line
+
+**Erik's decision of 2026-10-26** on item 7 of [What this asks Erik to
+decide](#what-this-asks-erik-to-decide): a slow control law for the track-fed
+source, tested on one moving hole fed by its own track first. What follows is the
+law, its time and its measurements; every choice in it is **proposed in step
+B3** (its review), and it is built: `SourceLine`, `advance_source_lines`,
+`source_line_states`, `lines_source_at` and `fed_case_at` in
+`src/tracking.jl`, a `TrackedSpec`'s `source_feed` and `control_time`, a case of
+several holes' `source_feed = :controlled`, the lines in the driver's run state
+and checkpoint, and `test/source_line_tests.jl`.
+
+**What it must do.** The gauge and the targets ride the same trajectory, and the
+source's line is smooth enough — `C²` in time — that each piece's `∂_t H` is the
+time derivative of the source in use.
+
+**What the source does with a line (measured in step B3's review).**
+
+- **One hole's source reads its line's velocity and acceleration, not its
+  center.** The closed form `H(g; u)` has no position in it; for several holes
+  the centers enter the partition of unity alone, `1 − O((r/d)⁴)` on each
+  horizon.
+- **A source off the hole's motion moves the hole, in part.** Measured three
+  ways. On the suite's `q = 2` quadrant hole, a line and a target both started
+  `0.05` too fast carried the hole at `0.27`, `0.259` and `0.252` over three
+  chunks, `0.18` cells off the analytic line after `0.3 M`, with `C_a` `10⁴×` its
+  own at `t = 0` — where the analytic source brings the same track back to `1/5`
+  in that time (`tracked_target_tests.jl`). On step B2's production hole at
+  `1/24`, a line pulled `+0.009` off by the track's first chunk moved the hole
+  `0.09` cells in `4 M`, about `40 %` of the line's own excess there (below). On the
+  head-on pair the holes' coordinate motion is the same to `10–20 %` whether the
+  source rides the Newtonian seeds or a controlled line cells away from them
+  (below). So a loop from the track to the source's velocity has a gain of at most
+  one at zero frequency — nothing in it fixes the velocity — and a lead in it
+  amplifies what the hole does on its own. The raw feed, step B3's pairing (α)
+  as built, leads: the track's quadratic carries the last four finds'
+  acceleration forward (a loop `v(t) = v(t − D) + D v̇(t − D)` of a plant that
+  follows at once would grow at `s ≈ 1.5/D`). On the pair it amplified the junk's
+  swing — the track's velocity `0.047` at `0.75 M` (`b3tg48`) against the
+  seed-fed row's `0.023` — until the quadratic's prediction missed the swing's
+  reversal by more than `G h/2`: found at `x = −4.0019` at `1 M`, predicted at
+  `−3.9637`.
+
+**The law.** Each hole's line obeys
+
+    c̈ = a_N(c) + ω² (c_tr(t) − c) + 2ω (ċ_tr(t) − ċ),    ω = 1/τ,
+
+- a **critically damped second-order loop** onto the track's position and
+  velocity ([`track_state`](@ref)) — not its acceleration, the noisiest of the
+  three and the lead above;
+- with a **model**, the Newtonian pull `a_N` of the other holes on their own lines
+  (zero for one hole): what the line does when the loop has nothing to say, the
+  free fall the seeds' quadratic is the first term of;
+- **started on the case's own source**, the data's gauge — each `HoleSpec`'s center
+  and velocity, or one hole's composite — and not on the track's seed: a source
+  on another line than the data's violates `C_a` at `t = 0` by the difference, and
+  the seed is a guess the finds correct (step B2's recovery seed is `0.05` off);
+- integrated on the host by RK4 in steps of at most `τ/64` as the pieces go, on
+  every rank from the tracks every rank adopted, and carried by the run state and
+  the checkpoint;
+- handed to each piece as a [`TrackedHole`](@ref) about the piece's time with the
+  line's center, velocity and acceleration — the law's right-hand side there — so
+  that within a piece `∂_t H` is the derivative of the `H` in use, and a piece
+  meets the next to the line's jerk, `O(δ²)` over a piece of `δ`
+  (`source_line_tests.jl`).
+
+Its response to the track is `T(s) = (2ωs + ω²)/(s + ω)²`: unit gain at zero
+frequency, `12 %` above it at `ω`, `2ω/Ω` well above. A velocity seeded `δv` off
+decays as `δv t e^{−ωt}`; an acceleration the model misses, `Δa`, is followed with
+a **position** lag `Δa τ²` and no velocity lag, the position term being the
+velocity error's integral — and the velocity is what one hole's source reads.
+
+**Its time, chosen before the runs: `τ = 10 M_A`** (`control_time = 10` for a
+hole of mass one, scaled by each hole's mass; the pair's rows below prefer `4
+M_A`), from three bounds:
+
+- **the loop's stability.** In the limit the measurements bound, a hole whose
+  coordinate velocity follows the source's through a lag `τ_g`, the closed loop's
+  characteristic is `s (τ_g s² + (1 + 2ωτ_g) s + ω² τ_g)`: stable at every `ω` and
+  `τ_g`, with a neutral mode at `s = 0`. With a hole that answers the source's
+  velocity changes with an offset `κ dV/dt` it is stable while `ωκ < ½` and
+  `ωτ_g < 2`. The raw rows' growth, the track's velocity `×3` in `M/4` (`≈ 4.4/M
+  = 2.2/M_A`), is twenty times `ω = 0.1/M_A`, and the loop has no lead.
+- **the junk's time scale.** The track's velocity against the seed's in step B3's
+  rows swings with a period of about `3–4 M`, `7 M_A`, and an amplitude of
+  `0.017–0.038`. At `Ω = 2π/7 M_A` the loop passes `|T(iΩ)| = 0.220`
+  (`source_line_tests.jl` measures `0.220` on the analytic input), so the source
+  sees a fifth of the junk's velocity.
+- **the find cadence.** The pair finds every `M_A/2`, one hole every `M`:
+  `ω Δt_f = 0.05–0.1`, so the loop reads the track many times per `τ`.
+
+The price is the lag of a model error, `Δa τ²` in position: for a head-on pair
+whose coordinate fall lagged Newtonian by half (step B3's rows, after the
+transient), `0.004 × 25 = 0.1 M`, five cells (measured: `4.2` cells at `6 M`,
+below) — harmless to the source, whose one-hole form reads no center and whose
+weights are flat near each hole, and not seen by the targets.
+
+**The targets ride the track, not the line.** Step B2 measured that a target one
+cell off the hole costs `16–26×` its `ℋ` just outside the horizon, and the track
+is where the horizon is (its predictions `10⁻³–10⁻¹` cells off the next find),
+while the line lags the track by the filtered junk and by a model error's `Δa τ²`
+(on the pair, `0.6` cells at `1 M` and `4.2` at `6 M` for `τ = 10 M_A`, below). A target on the line would be step B2's displaced
+target. In steady motion the line's velocity is the track's, so source and target
+ride the same trajectory in what the source reads; they part by the filtered junk
+while it lasts.
+
+**One hole fed by its own track (measured in step B3's review**, jobs 583736 and
+583739–583742 in `step-B3-holes`, one H200 a row, `14–15 min` to `20 M`; data in
+`.claude/data/step-B3`, tables by `test/fed_study.jl`**).** Step B2's production
+row — Kerr-Schild `a = 0` at `v = 1/5` on the quadrant, the tracked `:damped`
+target at `1/24`, `ρ_max = 4/M` — with the one-hole composite source rebuilt every
+piece from the track (`test/octant_runs.jl source=composite feed=…`), against
+`b2t24`, the same row on the analytic source:
+
+| row | feed | `ℋ` in `[2, 9/4)` over `b2t24`'s at 1, 4, 20 M | residual at 1–20 M | track off the analytic line at 20 M | line off the track at 20 M |
+|---|---|---|---|---|---|
+| `b3fa24` | the track's state, raw | 1, 1, 1 | `0.123–0.148`, `b2t24`'s | `2.7·10⁻⁵` cells | — |
+| `b3fb24` | controlled, `τ = 10 M` | 1, 1, 1 | the same | `2.5·10⁻⁵` cells | `−1.1·10⁻⁵` cells |
+| `b3fd24` | controlled, `τ = 4 M` | 1, 1, 1 | the same | `2.7·10⁻⁵` cells | `−3.4·10⁻⁶` cells |
+
+Each row is `b2t24` at every row of the record — `ℋ` in every shell and on every
+level and the residual within `0.15 %`, the momentum constraint within `1 %` (and
+`30 %` in the boundary band, where it is `10⁻¹²`), the track's drift off the
+analytic line growing as `b2t24`'s does (`3.5·10⁻⁵` cells at `24 M` there) — and
+the line's and the track's velocities are `1/5` to `1.5·10⁻⁷`. On a hole whose
+data are exact the track is the hole's line to the finder's `10⁻⁷–10⁻⁵` cells,
+and the raw feed's lead has nothing to grow from in `20 M`; the pair's raw rows
+ran away within `1 M` on a junk whose velocity is `0.02–0.04`.
+
+**From step B2's recovery seed** (the track `0.05` too fast, the line on the
+data's gauge), against `b2r24` — the same seed on the analytic source:
+
+| | 1 M | 2 M | 4 M | 8 M | 12 M | 16 M | 20 M |
+|---|---|---|---|---|---|---|---|
+| `b3fc24` (`τ = 10 M`): `ℋ` in `[2, 9/4)` over `b2r24`'s | 1.45 | 1.00 | 0.94 | 0.94 | 0.94 | 0.99 | 1.00 |
+| `b3fe24` (`τ = 4 M`): the same | 1.44 | 0.99 | 0.86 | 1.08 | 1.02 | 1.03 | 1.04 |
+| `b3fc24`: the line's velocity − 1/5 | `+0.0093` | `−0.0012` | `−0.0006` | `−0.0009` | `−0.0005` | `−0.0003` | `−0.0001` |
+| `b3fe24`: the same | `+0.0208` | `−0.0061` | `−0.0034` | `−0.0025` | `+0.0005` | `+0.0005` | `+0.0001` |
+| `b3fc24`: the track off the analytic line (cells) | 1.2 | 0.039 | 0.094 | −0.015 | −0.018 | −0.018 | −0.014 |
+| `b3fe24`: the same | 1.2 | 0.093 | 0.149 | −0.109 | −0.035 | −0.002 | 0.0006 |
+| `b3fc24`: the residual against the layer's own target | 1.79 | 4.77 | 0.30 | 0.125 | 0.122 | 0.155 | 0.123 |
+| `b3fe24`: the same | 1.55 | 4.86 | 0.69 | 0.27 | 0.16 | 0.14 | 0.116 |
+
+`ℋ` just outside the horizon is `b2r24`'s at every time but the first: its excess
+over `b2t24` (`33×` at `4 M`, `1.1×` at `20 M`) is the first chunk's target on the
+wrong line, which step B2 measured, and the line adds nothing to it. The line is
+pulled by that first chunk's track (`+0.009` at `τ = 10 M`, `+0.021` at `4 M`),
+carries the hole with it — `0.09` and `0.15` cells off the analytic line at `4 M`
+— and settles back onto the data's motion, its velocity within `10⁻⁴` of `1/5` at
+`20 M`. What it does not undo is the displacement it caused: `−0.014` cells at
+`τ = 10 M`, the loop's neutral mode — the track says where the hole is, and
+nothing says where it was meant to be. `τ = 4 M` swings further and ends closer.
+The residual against the layer's own target is step B2's `0.12–0.16` from `8 M`
+on; against Kerr-Schild it reads the moved line too (`0.19–0.32` at `τ = 10 M`).
+
+**The head-on pair on the controlled line (measured in step B3's review**, two
+`h200debugq` links of under an hour a row, `walltime = 3000`, about `1.1`
+GPU-hours a row to `6 M`: `τ = 10 M_A`, jobs 583932 and 584024 (`b3cg48`);
+`τ = 4 M_A`, jobs 583933 and 584025 (`b3cd48`); and for the comparison the
+seed-fed row on this code, jobs 584022 and 584076 (`b3sl48`), which is `b3sg48`
+to `2 M` in all 64 columns of its CSV but the wall time and the memory; data in
+`.claude/data/step-B3`, tables by `test/binary_study.jl`**).** Step B3's head-on
+row at `1/48` with `Π` from `C_a = 0`, to `6 M`. Hole 1's track and line along
+`x`, in cells of `1/48`, `+` toward the companion; hole 2's are their mirror image:
+
+| | 1 M | 2 M | 3 M | 4 M | 5 M | 6 M |
+|---|---|---|---|---|---|---|
+| free fall, the separation | 7.992 | 7.969 | 7.929 | 7.874 | 7.803 | 7.715 |
+| found separation, seed | 7.920 | 7.901 | 7.911 | 7.933 | 7.949 | 7.950 |
+| found separation, `τ = 10 M_A` | 7.921 | 7.897 | 7.906 | 7.937 | 7.968 | 7.987 |
+| found separation, `τ = 4 M_A` | 7.921 | 7.894 | 7.904 | 7.944 | 7.989 | 8.020 |
+| the track off its seed, seed | 0.76 | 0.58 | −0.62 | −2.46 | −4.51 | −6.60 |
+| the track off its seed, `τ = 10 M_A` | 0.72 | 0.69 | −0.51 | −2.55 | −4.98 | −7.50 |
+| the track off its seed, `τ = 4 M_A` | 0.66 | 0.77 | −0.43 | −2.74 | −5.49 | −8.29 |
+| the source's line off the track, seed | −0.76 | −0.58 | 0.62 | 2.46 | 4.51 | 6.60 |
+| the source's line off the track, `τ = 10 M_A` | −0.61 | −0.34 | 0.82 | 2.26 | 3.46 | 4.24 |
+| the source's line off the track, `τ = 4 M_A` | −0.44 | −0.10 | 0.87 | 1.74 | 2.05 | 1.86 |
+| residual, seed | 1.45 | 4.49 | 6.38 | 7.61 | 8.26 | 8.45 |
+| residual, `τ = 10 M_A` | 1.61 | 4.68 | 6.35 | 7.00 | 7.08 | 6.80 |
+| residual, `τ = 4 M_A` | 1.75 | 4.74 | 6.16 | 6.30 | 6.08 | 5.78 |
+| `ℋ` L2, seed | `1.55·10⁻³` | `1.47·10⁻³` | `1.33·10⁻³` | `1.27·10⁻³` | `1.33·10⁻³` | `1.38·10⁻³` |
+| `ℋ` L2, `τ = 4 M_A` | `1.53·10⁻³` | `1.44·10⁻³` | `1.32·10⁻³` | `1.22·10⁻³` | `1.19·10⁻³` | `1.18·10⁻³` |
+
+- **It holds the pair.** Every find of both holes succeeded at every row of all
+  three, nothing was refused, and the constraints are the same bounded numbers in
+  each — `C_a` L2 at most `5.2·10⁻⁴` (at `1 M`) and `2.2–2.7·10⁻⁴` from `3 M` on,
+  `ℋ` L2 `1.2–1.4·10⁻³` — where the raw feed's rows died within `1 M`.
+- **The residual saturates on the controlled line**, at `7.10` (`4.75 M`, `τ = 10
+  M_A`) and `6.36` (`3.75 M`, `τ = 4 M_A`), and falls after; on the seeds it is
+  `8.45` at `6 M` and still rising. To `2 M` the three agree (`4.5–4.7`): that
+  part is common to every feed, so it is not the lines' mismatch the review asked
+  about — it is the layer against a superposed target while the junk moves the
+  data. From `3 M` on it grows with the source line's distance from the track, in
+  position (the table) and in velocity (`0.043` on the seeds at `6 M`, `0.012` and
+  `−0.008` on the controlled lines).
+- **The holes' coordinate motion is the gauge's, and the line moves it little.**
+  In every row the holes fall faster than free fall for `2 M`, stop at `2.2–2.4 M`
+  and recede; by `6 M` they are `6.6–8.3` cells outward of their Newtonian seeds
+  and the found separation is `7.95–8.02` against free fall's `7.715`. The line
+  changes that by `10–25 %`: on the seeds, which pull inward at `0.047`, the
+  recession has turned by `6 M` (the track at `+0.004`), and on the controlled
+  lines, which follow the holes out, not yet (`−0.006`, `−0.010`). The transient is
+  longer than `6 M`, and no fall can be read off this window's coordinate
+  separation.
+- **The area falls `2.7 %`** from its peak (`13.62` at `1 M` to `13.25` at `6 M`)
+  in every row alike: the superposed data violate the Hamiltonian constraint
+  (`ℋ` L2 `1.4·10⁻³` at `t = 0`), and the area theorem is a theorem about
+  solutions.
+
+**What this proposes (step B3's review).** The controlled line is the feed for a
+pair: it holds where the raw feed died, saturates the residual the seeds let grow,
+and keeps the line within `2–4` cells of the holes. Of the two times the pair
+prefers `τ = 4 M_A` — the residual `15 %` lower and saturating sooner, `ℋ` `5 %`
+lower, the line within `2` cells — at the price of passing `0.52` of the junk's
+velocity against `0.22` and of `10 %` more coordinate recession; one hole is
+`b2t24` at both and recovers from a wrong seed at both (`4 M` swings further and
+ends closer). Proposed for B4: **`τ = 4 M_A`, its first orbit checked at `10
+M_A`**; the targets stay on the tracks, since the line is up to `4` cells from
+the holes here and step B2's target one cell off cost `16–26×` in `ℋ`. What it
+does not give is a fall: a coordinate separation in this gauge is the gauge's
+for at least `6 M`, and B7's measure of the fall must be gauge-invariant.
 
 ### One interior per hole
 
@@ -8003,7 +8231,16 @@ hours on one H200.
    Newtonian or post-Newtonian orbit of the holes, corrected slowly by the finds
    — that the source follows and the tracks only check, or (β), whose gauge knows
    no trajectory. **(Proposed in step B3:** the seeds for the head-on of B3; the
-   integrated trajectory for B4 onward, before (β).**)**
+   integrated trajectory for B4 onward, before (β).**)** **(Decided by Erik
+   2026-10-26: design and test a slow control law for the track-fed source, and
+   start with one moving hole fed by its own track.** Built and measured in step
+   B3's review, its design proposed there: [The controlled source
+   line](#the-controlled-source-line) — a critically damped loop onto each
+   track, with the Newtonian pull of the other holes as its model and the targets
+   left on the tracks; `τ = 10 M_A` chosen a priori, `4 M_A` preferred by the
+   pair's rows and proposed for B4. It holds one hole as the analytic source does
+   and the head-on pair to `6 M`; the holes' coordinate motion stays the
+   gauge's.**)**
 
 ## Possible extensions
 
