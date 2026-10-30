@@ -20,6 +20,8 @@ here; links have been pointed at the right file.
 - [A spinning hole along its axis (2026-10-21)](#a-spinning-hole-along-its-axis-2026-10-21)
 - [Aligned spin and velocity: which holes the algorithm holds (2026-10-22)](#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22)
 - [Spin across the motion: the bitant (2026-10-24)](#spin-across-the-motion-the-bitant-2026-10-24)
+- [The damped harmonic gauge rolled on (step B1, 2026-10-25)](#the-damped-harmonic-gauge-rolled-on-step-b1-2026-10-25)
+- [The tracked analytic target (step B2, 2026-10-26)](#the-tracked-analytic-target-step-b2-2026-10-26)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -3546,6 +3548,356 @@ is the resting hole's.
   These rows show that the Kerr-Schild chart's analytic layer holds the same
   geometry.
 - **Circular orbits**; unchanged.
+
+## The damped harmonic gauge rolled on (step B1, 2026-10-25)
+
+`PLAN.md`'s step B1 and `CODE.md`'s [The gauge](CODE.md#the-gauge): the damped
+harmonic gauge of Szilágyi, Lindblom and Scheel in SpECTRE's form, rolled on from
+the hole's own Kerr-Schild source, on the boosted `a = 0` hole of [the boosted
+Kerr-Schild hole at binary
+speed](#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20) and on the same hole
+at rest, against both in their own Kerr-Schild gauge. It is pairing (β)'s first
+run: the gauge with `:fitted`, because once the gauge has moved the analytic
+`:damped` target is in the wrong one. Single holes only; the binary is step B3's.
+
+**The setup** (commit `a22122e`, `test/octant_runs.jl gauge=dh`):
+
+- **The gauge.** `RolledGaugeSource(KerrSchildSource, DampedHarmonicSource(σ_r = 32,
+  A_L1 = A_S = 1, A_L2 = 0, e = 2); σ_g = 10, t_0 = 0)` **(proposed in step B1:**
+  SpEC rolls on over `15–25 M`; `10 M` leaves half of a `40 M` run with the roll-on
+  done, `f(15) = 0.006` and `f(20) = 1.1·10⁻⁷`**)**. `f` underflows only at `52 M`,
+  so these runs evaluate both sources to the end.
+- **Everything else is `bf24n`'s** (the `:fitted` row of the boosted hole without
+  `trail_ramp`): Kerr-Schild `a = 0`, at `x = −4 + t/5` or at rest at `x = −4`, on
+  the quadrant `[−64, 64] × [0, 64]²` and its capsule of radii `32, 16, 8, 4` swept
+  along `x ∈ [−4, 4]` (856 blocks; `N = 24, 32`: `h = 1/24, 1/32` at the hole,
+  `11.83 M` and `28.05 M` points); `:fitted` with `m = 16`, `n_L = 20`,
+  `fit_cont = 2`, `lmax_fit = 8`; `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, the Gaussian
+  `γ0`; the finder every chunk; to `40 M`. **New:** `chunk = M` with the split
+  (the folds of 2026-10-23 made it cheap), `checkpoint_every = 4`.
+- **The runs**, one H200 each, in `step-B1-gauge` on Symmetry (TreeAMR 0.2.6, CUDA
+  added): `b1dm24` (damped harmonic, moving), `b1ds24`, `b1ds32` (damped
+  harmonic, at rest), `b1km24`, `b1km32`, `b1ks24`, `b1ks32` (Kerr-Schild, the
+  controls), and `b1dm24t`, `b1dm32t`, the moving damped harmonic rows again
+  with the shells about the tracked horizon (`shell_center=track`, below) — jobs
+  582577 (`b1km32`), 582578 (`b1ds32`), 582579 (`b1ks32`), 582580 (`b1dm24`),
+  582581 (`b1km24`), 582582 and 582643 (`b1ds24`, pre-empted at its start and
+  resubmitted), 582583 (`b1ks24`), 582625 (`b1dm24t`), 582624, 582634 and 582663
+  (`b1dm32t`, pre-empted twice and continued from its checkpoints), all on
+  `h200preq`; `b1dm32` (582574, 582585) was pre-empted at its start and then
+  cancelled for `b1dm32t`. The CSVs and logs are in `.claude/data/step-B1`, and `julia
+  test/gauge_study.jl dir=.claude/data/step-B1` prints every table below.
+
+The norms are point-weighted L2 in shells — `[2, 2.25)` just outside the
+horizon, `[3, 5)`, `[5, 8)` — about the analytic center `c(t)`, or, in
+`b1dm24t` and `b1dm32t`, about the tracked horizon's; `C_a` is the largest
+component's. Under the damped harmonic gauge the analytic center is the
+Kerr-Schild hole's, not the evolved hole's: the gauge moves the coordinates, and
+the found horizon's origin is the hole's position.
+
+**Every run reached `40 M`, every find succeeded, and the range projection never
+fired.** On one H200 at `chunk = M` with the split: `32–37 s/M` at `1/24` and
+`72–81 s/M` at `1/32` — the damped harmonic rows about `12 %` dearer than the
+Kerr-Schild ones (`37` against `33 s/M` moving at `1/24`, `81` against `72` at
+rest at `1/32`), the roll-on evaluating both sources to the end. A `40 M` row is
+`22–25 min` at `1/24` and `48–55 min` at `1/32` on one H200, uninterrupted.
+
+**The gauge moves the hole, and grows its horizon in coordinates.** The horizon's
+least coordinate radius about its own origin goes from `2.00` (at rest) and `1.96`
+(moving, the boost's contraction) to `2.06` in both by `20 M`, and its mean radius
+to `2.07`: under this gauge the moving hole's horizon is no longer contracted
+(least over mean `0.995` against Kerr-Schild's `0.985`). The moving hole falls
+behind the analytic center `c(t) = −4 + t/5`, by `0.11`, `0.34`, `0.44` and
+`0.49 M` at `10`, `20`, `30` and `40 M`, its coordinate speed back to `0.196` at
+the end; the hole at rest drifts `+0.010 M` along `x`, towards the Gaussian's
+center at the origin, slowing (`0.0069`, `0.0092`, `0.0099` at `20`, `30`, `40 M`).
+So two things in the record are not what they were for the Kerr-Schild runs:
+
+- a shell about `c(t)` is not about the moving hole — `b1dm24`, with the shells
+  about `c(t)`, read `ℋ` `1.2·10⁻²` in `[2, 2.25)` at `40 M` against `2.4·10⁻³`
+  about the hole (`b1dm24t`, `shell_center=track`; the evolution is the same bit
+  for bit, the record's `M_irr` and positions agree to every digit) — and
+- `[2, 2.25)` straddles the horizon at `2.06`, a quarter of it inside, so its
+  norms mix the horizon's inside with its outside. `[3, 5)` and `[5, 8)` are
+  outside it in either gauge, and are what the comparisons below read.
+
+**The hole at rest settles, at the Kerr-Schild hole's level outside `r = 3`.**
+Damped harmonic over Kerr-Schild at `1/32`, the hole at rest:
+
+| shell | `ℋ` at `10, 20, 30, 40 M` | `C_a` at `10, 20, 30, 40 M` |
+|---|---|---|
+| `[2, 2.25)` (straddling) | `1.23`, `3.52`, `3.27`, `3.26` | `1.32`, `2.90`, `2.74`, `2.76` |
+| `[3, 5)` | `1.24`, `1.59`, `1.60`, `1.60` | `1.07`, `1.31`, `1.32`, `1.29` |
+| `[5, 8)` | `1.09`, `1.17`, `1.19`, `1.18` | `1.01`, `1.25`, `1.26`, `1.30` |
+
+- Every ratio is flat from `20 M` on, and the state's distance from the
+  Kerr-Schild solution in `[2, 2.25)` is `0.343`, `0.333`, `0.339`, `0.338` at
+  `15`, `20`, `30`, `40 M`: the solution has moved to another gauge and stopped
+  there — the time-independent state Lindblom and Szilágyi saw a hole reach.
+- `M_irr − 1` is `1.73·10⁻⁷` at `40 M` against the Kerr-Schild hole's
+  `1.46·10⁻⁷`: the horizon is the same hole.
+- At `1/24` the ratios are the same (`[3, 5)` `1.63` and `1.23`, `[5, 8)` `1.20`
+  and `1.25` at `40 M`), and from `1/24` to `1/32` `ℋ` converges at order
+  `3.96–4.04` in `[3, 5)` and `[5, 8)`, as the Kerr-Schild hole's does
+  (`3.97–4.03`): the excess is the new chart's own truncation error, not a
+  transient. The drift, `+0.00995 M` at both spacings, is the gauge's, and
+  `M_irr` converges at order `3.8` (`1 + 5.2·10⁻⁷` at `1/24`). Just outside the
+  horizon, in the straddling `[2, 2.25)`, neither gauge converges (`0.5–0.8`),
+  the `:fitted` layer's known floor at `m = 16`.
+
+**The moving hole does not, at `1/24`.** Damped harmonic (`b1dm24t`) over
+Kerr-Schild (`b1km24`), the moving hole, the shells about the hole:
+
+| shell | `ℋ` at `10, 20, 30, 40 M` | `C_a` at `10, 20, 30, 40 M` |
+|---|---|---|
+| `[2, 2.25)` (straddling) | `0.78`, `28`, `40`, `44` | `1.2`, `49`, `86`, `100` |
+| `[3, 5)` | `1.0`, `1.7`, `61`, `118` | `1.0`, `1.4`, `55`, `195` |
+| `[5, 8)` | `0.92`, `1.0`, `13`, `72` | `1.0`, `1.2`, `7.4`, `69` |
+
+- It starts when the roll-on ends: the ratios are about one to `10 M`, and from
+  `15 M` (`f = 0.006`) the excess grows at the horizon and travels out, reaching
+  `[5, 8)` by `30 M`, still growing at `40 M`.
+- `M_irr − 1` is `+2.2·10⁻⁷` at `15 M`, `−4.8·10⁻⁶` at `20 M` and `−1.3·10⁻⁵` at
+  `40 M`, against the Kerr-Schild hole's `+4.5·10⁻⁷`: the horizon itself is
+  `30×` worse, and that does not depend on where a shell is.
+- **At `1/32` the excess is much smaller, and falls faster than the scheme's
+  order.** Damped harmonic over Kerr-Schild at `1/32` (`b1dm32t` over `b1km32`),
+  at `20`, `30`, `40 M`: `ℋ` in `[3, 5)` `1.16`, `6.7`, `6.3` and `C_a` `1.26`,
+  `9.7`, `15`; `ℋ` in `[5, 8)` `1.03`, `1.7`, `9.9` and `C_a` `1.03`, `1.9`, `31`;
+  in the straddling `[2, 2.25)` `7.8`, `12`, `13`. From `1/24` to `1/32`, from
+  `30 M` on, `ℋ` falls at order `7.8–10` in `[3, 5)` and `5.5–7.6` in `[5, 8)`
+  (`3.2–3.6` in `[2, 2.25)`), and `M_irr − 1` is `−1.0·10⁻⁶` at `40 M` against
+  `−1.3·10⁻⁵`: an under-resolved feature of the moving hole under the new gauge,
+  not a gauge that fails. The lag is the same at both spacings to every printed
+  digit, so it is the gauge's, as the resting hole's drift is. Whether `1/48`
+  puts the moving hole at the Kerr-Schild hole's level is the next measurement;
+  on this capsule it does not fit one H200 with `:fitted` (about `171 GB`,
+  `CODE.md`'s recommended settings), so it needs `mpi=true` or a mesh that
+  follows the hole.
+
+**The faces: the harmonic far field against Kerr-Schild Dirichlet data.** `C_a`
+in the blocks touching an outer face is `2.0·10⁻⁵`, `9.5·10⁻⁵`, `1.6·10⁻⁴`,
+`2.4·10⁻⁴` at `10`, `20`, `30`, `40 M` under the damped harmonic gauge, at rest and
+moving alike, against `10⁻¹¹` under Kerr-Schild's (`ℋ` there `5·10⁻⁵` against
+`4·10⁻¹²`), still growing linearly at `40 M`; over the whole evolved region the
+faces are most of the damped harmonic runs' `C_a` (`7.4·10⁻⁵` at rest at `40 M`).
+`2M/r²` is `4.9·10⁻⁴` at `64 M` ([What step B1 built and
+measured](CODE.md#what-step-b1-built-and-measured-2026-10-25)). It does not reach
+the shells about the hole by `40 M`.
+
+**What this says about the pairings** (`CODE.md`, "The gauge"): the damped harmonic
+gauge with `:fitted` holds a hole at rest at the Kerr-Schild level outside
+`r = 3` — `1.2–1.6×`, converging at order four — and its horizon at the
+Kerr-Schild hole's `M_irr`. A moving hole it holds less well: from the end of
+the roll-on its constraints grow, `70–200×` the same hole's in its own gauge by
+`40 M` at `1/24` and `6–31×` at `1/32`, falling with `h` faster than the
+scheme's order. The analytic `:damped` layer does not survive the gauge moving
+at all (the smoke runs below). Pairing (α) — the tracked Kerr-Schild source with
+`:damped` — is the accurate one on everything measured here; (β) needs a finer
+moving hole than one H200 holds on this capsule to show whether it reaches the
+same level, and a boundary condition of its own.
+
+
+**The local smoke runs (2026-10-25, the development machine, six threads).** The
+moving and the resting hole at `h = 1/16` on a quadrant of half-width `16`
+(`radii = 8,6,4,3`), with the `:damped` layer that is the production layer at that
+spacing (`r_0 = 5/8`, `r_1 = 23/16`, `4/M` with the target's rate), a fast roll-on
+(`σ_g = 1`), to `4 M`:
+
+| run | `ℋ` `[2, 2.25)` at `1, 2, 3, 4 M` | `C_a` `[2, 2.25)` | `C_a` at the faces |
+|---|---|---|---|
+| Kerr-Schild, moving | `6.2·10⁻⁶`, `8.6·10⁻⁶`, `1.5·10⁻⁵`, `1.9·10⁻⁵` | `2.0·10⁻⁶` … `4.3·10⁻⁶` | `2.8·10⁻⁹` |
+| damped harmonic, at rest | `6.5·10⁻⁶`, `1.5·10⁻⁵`, `1.3·10⁻⁴`, `2.7·10⁻⁴` | `1.8·10⁻⁶` … `2.7·10⁻⁵` | `1.3·10⁻⁴` … `1.4·10⁻³` |
+| damped harmonic, moving | `6.5·10⁻⁶`, `8.3·10⁻⁵`, `5.3·10⁻⁴`, — | `1.9·10⁻⁶` … `9.8·10⁻⁵` | `1.3·10⁻⁴` … `1.1·10⁻³` |
+
+- **The analytic `:damped` layer does not survive the gauge moving.** The moving
+  hole's layer residual — its distance from the Kerr-Schild target it relaxes to —
+  went `0.73`, `6.7`, `36`, `100`, `350`, `1616` at `t = 1/2 … 3`, and a `sqrt` of a
+  negative number ended it after `3 M`. At rest the residual rose to `14` by `3 M`
+  and stayed there (the Kerr-Schild hole's: `0.12–0.21`), and `ℋ` just outside the
+  horizon was `15×` the Kerr-Schild hole's at `4 M`. The layer
+  holds the interior in Kerr-Schild's gauge while the source moves the exterior
+  out of it. That is `CODE.md`'s reason to pair this gauge with `:fitted`, measured.
+- **The faces' `C_a` is the gauge's far field**, `10⁵×` the Kerr-Schild run's:
+  the harmonic far field against Kerr-Schild Dirichlet data, `2M/r²` at a box of
+  `16 M` ([What step B1 built and
+  measured](CODE.md#what-step-b1-built-and-measured-2026-10-25)).
+- A `:fitted` smoke run (`h = 1/24` on a box of `8 M`, `m = 16`, `n_L = 20`,
+  `σ_g = 1`, moving) reached `2 M`, the found center `0.074 M` behind the analytic
+  one.
+
+## The tracked analytic target (step B2, 2026-10-26)
+
+`PLAN.md`'s step B2 and `CODE.md`'s [The tracks](CODE.md#the-tracks) and [One
+interior per hole](CODE.md#one-interior-per-hole): the moving `:damped` layer of [the
+moving `:damped` layer's target rate](#the-moving-damped-layers-target-rate-2026-10-21)
+— the accurate interior — with its target and its center taken from the horizon
+track instead of the analytic background, which a binary does not have. The sphere is
+the same (`r_0 = 5/8`, `r_1 = 23/16`, `4/M` with the target's rate, its core
+following its target); what changes is that the target is the boosted Kerr-Schild hole
+the track says is there, rebuilt at every piece's midpoint, and the track predicts
+along the quadratic of its last four finds ([What step B2 built and
+measured](CODE.md#what-step-b2-built-and-measured-2026-10-26)). One hole, in its own
+Kerr-Schild gauge, where it moves at exactly `v`: with exact finds the tracked target
+is the analytic one, so what is measured is the price of the finds' noise, and of
+each perturbation of the target's parameters a binary's target will carry —
+its mass, its velocity, its center — and whether a track started wrong recovers.
+
+**The setup** (commit `8012032`, `test/octant_runs.jl interior=tracked`): the moving
+`:damped` production row of [the moving `:damped` layer's target
+rate](#the-moving-damped-layers-target-rate-2026-10-21) — Kerr-Schild `a = 0` at
+`x = −4 + t/5` on the quadrant `[−64, 64] × [0, 64]²` and its capsule of radii `32,
+16, 8, 4` swept along `x ∈ [−4, 4]` (856 blocks; `N = 24, 32`: `h = 1/24, 1/32` at
+the hole, `11.83 M` and `28.05 M` points), `r_0 = 5/8`, `r_1 = 23/16`, `ρ_ramp = 1`,
+`4/M` with the target's rate, `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, the Gaussian `γ0`,
+the algebraic source, the finder every chunk with the spin — at `chunk = M` without
+the split (the production cadence of 2026-10-22), to `40 M`, `checkpoint_every = 4`.
+The tracked rows predict along the quadratic; the hole's acceleration is zero, so the
+cadence is one find a chunk, the row's, and the target is rebuilt at the midpoints of
+`20` pieces a chunk at `1/24` (`26` at `1/32`).
+
+- **The runs**, one H200 each, in `step-B2-tracked` on Symmetry (TreeAMR 0.2.6, CUDA
+  added), all on `h200preq`: the analytic `:damped` control `b2a24`, `b2a32` (jobs
+  582992, 582995) — rerun on this commit and cadence, so that no comparison crosses
+  either — and the tracked target `b2t24`, `b2t32` (582988, 582994); at `1/24` the
+  target's mass times `1.01` and `0.99` (`b2mp24`, `b2mm24`: 582996, 582997), its
+  velocity `+0.02` and `−0.02` along `x` (`b2vp24`, `b2vm24`: 582998, pre-empted
+  while it wrote its `40 M` checkpoint and continued from `36 M` as 583116 for its
+  record; 583000), its
+  center one cell (`1/24`) ahead and behind along `x` (`b2xp24`, `b2xm24`: 583001;
+  583003 pre-empted at `10 M` and continued from its `8 M` checkpoint as 583088),
+  and the seed track `0.05` too fast (`b2r24`: 583004, pre-empted at `6 M` and
+  continued from `4 M` as 583091, pre-empted again at `17 M` and continued from
+  `16 M` as 583105). A pre-empted job here ended `FAILED` and was not requeued
+  (`CLAUDE.md`, "Things that will bite"), so each was resubmitted by hand; every
+  continued row wrote again the rows its predecessor had written after the
+  checkpoint, identical to the CSV's ten digits but for the wall clock — the chain
+  is the run on an H200 too. The CSVs
+  and logs are in `.claude/data/step-B2`, and `julia test/tracked_study.jl
+  dir=.claude/data/step-B2` prints every table below.
+- **Every run reached `40 M`, every find succeeded, the range projection never
+  fired**, and the tracked target costs what the analytic layer does: `37–40 s/M` at
+  `1/24` and `88–89 s/M` at `1/32` on one H200, a `40 M` row `25 min` and `59 min`.
+
+**The tracked target is the analytic layer, to the tracking.** The tracked rows over the
+analytic ones at `1, 2, 4, 8, 16, 24, 32, 40 M`, in the shells just outside the horizon
+`[2, 2.25)`, `[3, 5)` and `[5, 8)` and over the evolved region:
+
+| | `1/24` | `1/32` |
+|---|---|---|
+| `ℋ` in `[2, 2.25)` | `0.9992–1.0009` | `1.0000` |
+| the error in `[2, 2.25)` | `0.9998–1.0003` | `1.0000` |
+| `ℋ` and the error in `[3, 5)` and `[5, 8)` | `0.9999–1.0001` | `1.0000` |
+| `ℋ` over the evolved region | `0.9965–1.0026` | `0.9997–1.0000` |
+| the error over the evolved region | `0.9986–1.0017` | `0.9992–1.0001` |
+| the layer residual (an L∞ over the layer) | `0.89–1.12` (`0.12–0.15` both) | `0.81–1.00` (`0.09–0.12`) |
+
+- **Order four**, from `1/24` to `1/32`, the tracked target's and the analytic layer's
+  to the printed digit: `ℋ` `4.01–4.15` in `[2, 2.25)`, `4.00–4.02` in `[3, 5)`,
+  `3.97–4.01` in `[5, 8)`; the error `3.97–4.05`, `4.00–4.04` and `3.99–4.04`.
+- **The track**: `1.2·10⁻⁴` cells off the analytic center at `40 M` at `1/24` and
+  `5.2·10⁻⁵` at `1/32` — the found center running ahead by the truncation error the
+  analytic rows' finder already showed (`1.6·10⁻⁶ M` at `1/32`, order four) — and every
+  prediction within `6·10⁻⁷` cells of its find; its velocity `0.2` to `3·10⁻⁷`.
+  `M_irr − 1` is the analytic rows' to every printed digit (`4.3·10⁻⁷` and
+  `1.3·10⁻⁷` at `40 M`).
+
+**The sensitivity.** Each perturbation over the tracked target at `1/24`, at
+`1, 2, 4, 8, 16, 24, 32, 40 M`:
+
+| perturbation | `ℋ` in `[2, 2.25)` | the error there | `ℋ` in `[3, 5)` | the layer residual | the error over the evolved region |
+|---|---|---|---|---|---|
+| mass `+1 %` | `1.07`, `2.95`, `7.71`, `7.63`, `7.42`, `7.32`, `7.30`, `7.39` | `1.01` → `2.73` at `4 M` → `1.22` | `1.00` → `1.19` at `8 M` → `0.97` | `6.5–8.4` | `10.9` → `3.8` |
+| mass `−1 %` | `1.03`, `3.19`, `7.76`, `7.88`, `7.65`, `7.56`, `7.56`, `7.61` | `1.01` → `2.46` at `8 M` → `1.17` | `1.00` → `1.23` at `8 M` → `1.06` | `7.0–8.3` | `10.5` → `3.6` |
+| velocity `+0.02` | `1.28`, `7.65`, `19.9`, `18.3`, `17.6`, `17.4`, `17.4`, `17.6` | `1.14` → `8.20` at `4 M` → `2.32` | `1.00` → `2.52` at `8 M` → `1.09` | `14.1–17.3` | `32.7` → `11.7` |
+| velocity `−0.02` | `1.35`, `7.61`, `18.7`, `18.0`, `17.3`, `17.1`, `17.1`, `17.2` | `1.13` → `7.60` at `4 M` → `2.27` | `1.00` → `2.54` at `8 M` → `1.24` | `13.7–16.4` | `31.2` → `10.9` |
+| center `+1` cell | `1.20`, `6.29`, `16.6`, `16.3`, `15.8`, `15.8`, `15.7`, `15.9` | `1.05` → `5.00` at `4 M` → `1.62` | `1.00` → `1.92` at `8 M` → `1.07` | `69–84` | `26.2` → `9.1` |
+| center `−1` cell | `2.02`, `11.7`, `28.9`, `26.9`, `26.2`, `26.1`, `26.1`, `26.2` | `1.20` → `7.59` at `4 M` → `1.60` | `1.00` → `3.08` at `8 M` → `1.25` | `53–65` | `28.3` → `10.5` |
+| seed velocity `+0.05` | `2.00`, `12.5`, `35.6`, `6.40`, `1.42`, `1.02`, `1.00`, `1.00` | `1.44` → `13.6` at `4 M` → `1.00` from `32 M` | `1.00` → `14.5` at `8 M` → `1.00` at `32 M` | `66.7`, `33.7`, then `1.00–1.13` from `4 M` | `100` → `1.00` from `32 M` |
+
+- **A wrong target is a steady excess just outside the horizon, and nowhere else.**
+  Each perturbation raises `ℋ` in `[2, 2.25)` within `4 M` to a level it then keeps to
+  `40 M` — `7.4–7.9×` for the mass, `17–20×` for the velocity — the two signs
+  alike — and `16×` for the center a cell ahead, `26×` a cell behind, on the side
+  the layer releases its points. Farther out the excess is the transient the
+  start sends out, one pulse through `[3, 5)` at `8 M` and `[5, 8)` at `16 M`, and
+  `ℋ` is back at the tracked target's (`0.96–1.25×`) by `24–40 M`; the error just
+  outside the horizon decays the same way, to `1.2–2.3×` at `40 M`. (Behind the hole
+  the target holds back the late error of the hole's position — the found center's
+  truncation-order lead — and the error in `[3, 5)` and `[5, 8)` is `0.40` and `0.53`
+  of the tracked target's at `40 M`.) Step 8c's rule — a layer at `4/M` on a ramp
+  of at least `4G` cells leaves the exterior what the exact target leaves — holds
+  from `r = 3` out, and not in the band between the
+  layer and the horizon's `2 M`, which a wrong target holds `7–26×` above the exact
+  one's level.
+- **The scale, per unit of error.** The layer residual — its L∞ distance from the
+  true solution — is `7–8×` the exact target's for `1 %` of mass, `14–17×` for `0.02`
+  of velocity and `53–84×` for a cell of center, and `ℋ` just outside the horizon
+  `7.5×`, `18×` and `16–26×`: as the residual for the mass and the velocity, and much
+  less for the center, whose error is largest deep in the layer, near the core,
+  where the residual's L∞ lives. What a binary's target misses — the companion's
+  tidal field over the layer, `M_B r²/d³` (`5·10⁻⁴` at `d = 10`, `0.02` at
+  `d = 3`), and the orbit's acceleration across it (`0.005` and `0.06`, `CODE.md`, "One interior per
+  hole") — is at `d = 10` a twentieth of the `1 %` the mass row carries, and at
+  `d = 3` twice it.
+- **The recovery is the track's, in one find, and the run's, in one crossing.** The
+  first find, at `t = 0`, keeps the seed's velocity, which carries the target
+  `0.05 M` ahead of the hole by the second, at `1 M` — `1.2` cells, inside the
+  check's `1.5` at `1/24` — and that find's chord is the hole's `0.2000`; from
+  `2 M` on the track is the tracked target's — `10⁻⁶–10⁻⁵` cells off the analytic
+  center to `16 M`, `1.2·10⁻⁴` at `40 M` — and its predictions within `7·10⁻⁶` cells of the finds. The layer
+  residual is `8.2` and `5.0` at `1` and `2 M` and the exact target's from `4 M`. What the first two `M` left in the layer travels out — `ℋ`
+  `36×` just outside the horizon at `4 M`, `14.5×` in `[3, 5)` at `8 M`, `14×` in
+  `[5, 8)` at `16 M` — and leaves: by `40 M` every shell and the evolved region are
+  the tracked target's to `0.6 %` (`[5, 8)` still `1.3×` in `ℋ` at `32 M`), and
+  `M_irr` is its to two digits (`4.30·10⁻⁷` against `4.28·10⁻⁷`). No refusal; the
+  row was pre-empted twice (above) and continued from its checkpoints at `4` and
+  `16 M`.
+
+**The local smoke runs (2026-10-26, the development machine, three threads each,
+loaded 13–28 by other work).** B1's smoke setup — the moving hole at `h = 1/16` on a
+quadrant of half-width `16` (`radii = 8,6,4,3`, `x0 = −1`, `v = 1/5`, `chunk = M/2`,
+`cfl = 1/2`), the production layer at that spacing — to `4 M`, each run about
+`13–15 min`; `.claude/data/step-B2-cpu`. The analytic layer (`s16a`), the tracked
+target (`s16t`), its center one cell (`0.0625 M`) ahead along `x` (`s16x`,
+`target_dx=1`), and the track seeded `0.05` too fast (`s16r`, `seed_dv=1/20`); each
+over the analytic layer at `1, 2, 3, 4 M`:
+
+| run | `ℋ` in `[2, 2.25)` | the error there | `ℋ` in `[3, 5)` | the layer residual | `ℋ` over the evolved region |
+|---|---|---|---|---|---|
+| tracked | `1.000`, `1.001`, `1.000`, `1.000` | `1.000`, `1.001`, `1.000`, `1.000` | `1.000` at every time | `1.000` (`0.21`, `0.12`, `0.13`, `0.16`) | `1.001`, `1.000`, `1.000`, `1.002` |
+| center `+1` cell | `2.3`, `9.4`, `9.7`, `11.0` | `1.5`, `4.6`, `6.7`, `8.4` | `1.00`, `1.00`, `1.07`, `1.52` | `78`, `121`, `127`, `106` (`15–17`) | `32`, `15`, `11`, `11` |
+| seed `+0.05` | `3.5`, `9.0`, `4.6`, `3.0` | `2.9`, `7.4`, `4.5`, `2.9` | `1.00`, `1.00`, `1.64`, `5.4` | `20`, `2.5`, `0.99`, `1.00` | `40`, `13`, `5.4`, `2.2` |
+
+- **The tracked target is the analytic layer.** Every number agrees to `0.2 %`, the
+  track `≤ 9·10⁻⁶` cells off the analytic center and every prediction within
+  `5·10⁻⁶` cells of the find; `[5, 8)` agrees to every printed digit in all four
+  runs.
+- **A target one cell off is not held.** The layer relaxes toward a hole a cell
+  ahead of the one it holds — a residual of `16`, a hundred times the exact
+  target's — and the mismatch leaves through `r_1`: `ℋ` just outside the horizon
+  `10×` the analytic layer's after `2 M`, and on its way out by `4 M`. The tracked
+  center is good to `10⁻⁵` cells; a cell is the scale of a find that has converged
+  to the wrong surface, which the center-jump check refuses.
+- **The recovery is the track's, in two finds**: the first, at `t = 0`, keeps the
+  seed's velocity, the second, at `t = 1/2`, finds the hole `0.025 M` (`0.4` cells)
+  off the prediction, and the chord of the two is the hole's `0.2000`; from `t = 1`
+  the track is within `3·10⁻⁵` cells, the residual the analytic layer's from `3 M`. What the half `M` of a target running ahead left in
+  the layer travels out — `ℋ` in `[3, 5)` `5.4×` at `4 M` — which the `40 M` row
+  follows.
+
+**What it says.** The tracked analytic target is the accurate moving `:damped` layer
+without the analytic background: on one hole in its own gauge it is the analytic layer
+to the tracking, `10⁻³` and order four at both spacings, at the analytic layer's cost,
+and a track started wrong recovers in two finds without a refusal. A target whose
+parameters are wrong is the layer's business and the band's just outside the horizon:
+`1 %` of mass costs `7.5×` there, `0.02` of velocity `18×`, a cell of center `16–26×`,
+steadily, and nothing from `r = 3` out once the start's transient has passed. For
+pairing (α) that puts the open question where `CODE.md`'s "One interior per hole"
+put it — whether a target without the companion's tidal field is good enough late
+in the inspiral — with a scale: at `d = 10` its error is a twentieth of the mass
+row's, at `d = 3` twice it. Beside step B1's (β), `6–31×` the Kerr-Schild hole outside
+`r = 3` at `1/32` and still growing, the numbers favour (α).
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 

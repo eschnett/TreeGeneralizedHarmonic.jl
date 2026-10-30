@@ -108,9 +108,13 @@ research project; the inherited documents live in `notes/`.
 - [Binary black holes (proposed 2026-10-25)](#binary-black-holes-proposed-2026-10-25)
   - [What the single holes hand over](#what-the-single-holes-hand-over)
   - [A case without a background](#a-case-without-a-background)
+    - [What step B3 built and measured (2026-10-26)](#what-step-b3-built-and-measured-2026-10-26)
   - [The gauge](#the-gauge)
+    - [What step B1 built and measured (2026-10-25)](#what-step-b1-built-and-measured-2026-10-25)
+    - [The controlled source line](#the-controlled-source-line)
   - [One interior per hole](#one-interior-per-hole)
   - [The tracks](#the-tracks)
+    - [What step B2 built and measured (2026-10-26)](#what-step-b2-built-and-measured-2026-10-26)
   - [The common horizon and the handover](#the-common-horizon-and-the-handover)
   - [Initial data](#initial-data)
   - [The outer boundary and the wave zone](#the-outer-boundary-and-the-wave-zone)
@@ -1061,6 +1065,14 @@ sampled source does — masked error `1.44·10⁻⁵` against `1.11·10⁻⁵`, 
 `1.81·10⁻⁵` against `1.93·10⁻⁵`, `C_a` `3.87·10⁻⁶` against `3.96·10⁻⁶` — in
 `62 s` against `90 s`; `cfl = 1/2` reproduces `cfl = 1/4` to six digits at
 every row to `4 M`.
+
+**(Amended in step B1.)** `KerrSchildSource` is one `AlgebraicGaugeSource`
+among four: the kernels now evaluate `algebraic_gauge_source(src, x, t, h,
+∂ₜh, ∂h)` with the point's position and the time, which the tracked composite,
+the damped harmonic gauge and the roll-on read, and every launch is handed
+`effective_source(src, t)`. `KerrSchildSource`'s arithmetic, and the sampled
+source's, are what they were, bit for bit — [What step B1 built and
+measured](#what-step-b1-built-and-measured-2026-10-25).
 
 **Constraint damping** (decided): the Gundlach–Pretorius term `Z_ab`,
 with `γ0(x)` a *function of position* — a Gaussian of width a few `M`
@@ -3452,7 +3464,7 @@ the tests assert on them.
 | mesh statistics | leaf count per level, finest spacing, the indicator's `τ_max`, the refinement centroid against the analytic center | every chunk |
 | range projection | `bounds_hits` (points moved, summed over every stage-limiter call of the chunk), `bounds_nonfinite` (of those, points with a non-finite component), `bounds_r_max` (the outermost radius it fired at, `−1` where it did not); `nothing` for a case without bounds (added in step 8b) | every chunk |
 | validity monitor | over the layer `r_0 ≤ r < r_1` and over the `G` points outside it: `min_detγ`, `min_α` (the *signed* lapse, negative where `g^{tt} > 0`), `max_h`, `max_Π` (the largest component magnitudes) — `min_detγ_layer` … `max_Π_shell` (added in step 8b); and over the whole evolved region, `min_detγ_evolved`, `min_α_evolved` — the lapse-collapse trigger's input (added in step 8d). On the tracked geometry the two bands are its own (`layer_mask`, `shell_mask`) | every chunk |
-| horizon track | for a case whose interior is a `FittedSpec` (added in step 8d; `nothing` otherwise): `track_source` (`:found`, `:coasting`), `track_center` and `track_velocity` (the tracked trajectory after this row's find), `track_r_min`, `track_r_max` (the found surface's radii about its own origin), **`track_offset`** (the tracked center's distance from the analytic one, in cells of the finest spacing — the number "good to about a cell" is read from), `track_misses`, `track_prediction` (the found origin's distance from where the track predicted it, in cells; `nothing` without a find), `track_trigger` (this row's find was forced by the lapse trigger) | every chunk, the find every `k`-th or when triggered |
+| horizon track | for a case whose interior is a `FittedSpec` (added in step 8d; `nothing` otherwise): `track_source` (`:found`, `:coasting`), `track_center` and `track_velocity` (the tracked trajectory after this row's find), `track_r_min`, `track_r_max` (the found surface's radii about its own origin), **`track_offset`** (the tracked center's distance from the analytic one, in cells of the finest spacing — the number "good to about a cell" is read from), `track_misses`, `track_prediction` (the found origin's distance from where the track predicted it, in cells; `nothing` without a find), `track_trigger` (this row's find was forced by the lapse trigger); for a `TrackedSpec`'s quadratic track (added in step B2; `nothing` otherwise) also `track_finds` (the finds this chunk made, those at its pieces' boundaries and the row's), `track_prediction_max` (the largest prediction error among them, in cells), `track_acceleration` (`|a|` of the prediction) and `track_interval` (the find interval it asks for), with `track_center` the track's position at the row | every chunk, the find every `k`-th or when triggered (every row for a tracked analytic target) |
 | tracked layer | the geometry the next chunk runs on: `layer_h` (the spacing its offset and ramp are stated in), `layer_offset = m h`, `layer_thickness = n_L h`, `layer_r_in`, `layer_r_out` (the shape's bounding radii), and `margin_efolds` — step 8a's leakage e-folds across the margin, the least of the six grid axes (added in step 8d) | every chunk |
 | fitted target | for a `:fitted` case (added in step 8e; `nothing` otherwise), of the fit built from this row's state: **`fit_valid`** (every point of the fit's validity sweep a Lorentzian metric — `fit_valid(fit)`; a fit that is not does not become the target), **`fit_residual`** (`fit_residual(fit).overall`, the fit's worst relative residual block by block against the data it was fitted to), and beside them the sweep's worst **`fit_min_detγ`**, `fit_min_α`, `fit_min_λ`, `fit_hits` (swept points the target's ranges would move) and `fit_refills` (the cache's mid-chunk refills in the chunk this row ends) **(proposed in step 8e)**; for `:fitted` the row `residual` is the layer's distance from its target (the cache), not from the analytic solution | every chunk |
 
@@ -4005,7 +4017,21 @@ the development machine, MPICH from `MPI.jl`: every line agrees — 81 a group,
 roundoff — in 4m37 for the launch, most of it three ranks compiling; and
 `test/octant_runs.jl mpi=true` at two ranks writes the serial run's CSV
 character for character on the tracked `:fitted` octant hole. The suite with
-the test is 5364 assertions in 16m35 at four threads.**)**
+the test is 5364 assertions in 16m35 at four threads.**)** **(Amended
+2026-10-30.)** Where the machine has no room for the three ranks beside the
+suite — CI's threaded Linux cell, four cores and 16 GB — they run to their end
+*before* the suite (`test/mpi_jobs.jl`), and `mpi_tests.jl` compares what they
+wrote. Until then they ran after it, beside a test process that had compiled
+everything, and that cell's runner went down in five of its thirteen attempts
+from 2026-10-23 to 2026-10-30 ("lost communication", "received a shutdown
+signal"), each time while the ranks ran. Measured on the development machine
+(`/usr/bin/time -l`, macOS): the suite's process peaks at 5.1 GB, and each rank
+at 3.9–4.5 GB resident and 5.4–5.9 GB of footprint with step B3's workload,
+against 4.4–4.9 and 4.8–5.3 GB with step B2's — the pair adds about 0.6 GB of
+footprint a rank, and the ranks together are about 13 GB resident and 17 GB of
+footprint, close to what that runner holds on their own. With the job first, as
+that cell runs it, the suite is 6016 assertions in 17m12 after the job's 879 s
+(which shared the machine with two other launches of the workload).
 
 **On Symmetry's H200s (measured 2026-10-19, job 578514, cn113, four of its
 eight H200s; `bench/symmetry_mpi_gpu.sh`, environments by
@@ -4308,8 +4334,9 @@ the layer and the hook depend on `(x, t)` only" — was no longer true:
 **Reals are stored exactly**: TreeAMR's plain data refuse a MultiFloat
 scalar, so `plain_reals` stores a native float as itself and any `isbits`
 real made of one native float throughout as its limbs (TreeHydro's rule).
-**The run state's structs** (`HorizonTrack`, `FitParams`, `StateBounds`,
-`BoundsAccounting`, …) are stored field by field and rebuilt from their
+**The run state's structs** (`HorizonTrack` — from step B2 with its
+`TrackLine`s and the packed history of its last four finds — `FitParams`,
+`StateBounds`, `BoundsAccounting`, …) are stored field by field and rebuilt from their
 declared field types, so that an `SVector{3,T}` comes back as one and not as
 the `Vector{Float64}` a plain read gives; only this package's own structs
 are taken apart, and anything else is refused with its field's path. The
@@ -4525,7 +4552,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
 | `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the **six** `Val`s (the SIMD width the sixth, from 2026-10-05) and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. Step 5 split the streaming body out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and added `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
 | `src/lanes.jl` | the right-hand-side kernel's SIMD lanes on the CPU (added 2026-10-05): `default_simd_width` and `check_simd_width`, `Lanes` (an array read and written `W` consecutive elements at a time, with the `Const` wrapper unwrapped), `is_lane_leader` (every `W`-th item, and the overlapping last group of a row), and the `Vec` methods of `pointwise.jl`'s `_anynonzero` and `_select`; the kernel's group is `evolution.jl`'s `gh_rhs_lanes!` |
-| `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c) |
+| `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c); the algebraic sources — `KerrSchildSource` (2026-10-02), and from step B1 `CompositeKerrSchildSource` of `TrackedHole`s, `DampedHarmonicSource`, `RolledGaugeSource`, `effective_source` — and `gauge_consistent_momentum` |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook, and the declarations TreeAMR's symmetries ask of every field set: the parities of the reflecting faces (`state_parity`, `even_parity`, added 2026-10-02) and the signed maps of the rotating seam (`state_rotation`, `identity_rotation`, added 2026-10-04) |
 | `src/bounds.jl` | the range projection (added in step 8b): `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
 | `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii and the hole's mass (`hole_mass`, added in step 8c′), and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes. **Step 8d adds the tracked geometry's kernel side**: the real harmonics (`real_harmonic_index`, `real_from_complex`/`complex_from_real`, the recurrence `shape_series`, `shape_bounds`), the analytic horizon of the seed (`analytic_horizon_radius`), `FittedSpec` — what a case holds — and `FittedInterior` — the kernel argument — with `interior_point`, `fitted_geometry`, `core_position`, `ShapeMask`, `ShapeBand`, `geometry_spacing` and its `check_interior_radii`; and the protocol both geometries speak (`in_layer(int, t, x)`, `interior_point`, `is_outside`, `geometry_radii`, `layer_radii`, `layer_mask`, `shell_mask`) |
@@ -4533,7 +4560,7 @@ device boundary hook (radiative boundaries, excision) and excised leaves
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
 | `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate step 5's interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` (added in step 4) |
 | `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`; **amended 2026-09-26**: `gh_interpolate`/`gh_interpolate_grad` over TreeAMR's `interpolate`, and the guard as the `Region` `UnevolvedRegion`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
-| `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl` |
+| `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl`; from step B2 the quadratic prediction (`TrackLine`, `track_state`, `track_position`, `fit_track_quadratic`, `find_count`, `find_interval`, `seeded_track`) and the tracked analytic target's `tracked_interior` |
 | `src/fit.jl` | the fitted target (added in step 8e, after `tracking.jl` and before `driver.jl`): the fit's variables (`fit_variables`, `state_from_fit`), the real solid harmonics (`_solid_harmonic_fold`, `real_solid_harmonics`, `fit_directions`), the two samplers (`state_sampler`, `analytic_sampler`), the least squares (`solve_fit`, `fit_row_weights`), the validity sweep (`fit_sweep`), `FitParams` and `InteriorFit` with `build_fit`, `fit_residual` and `fit_valid`, the kernel-callable evaluator `fit_variables_at`/`fit_state`, and the kernel half (8e-ii): `derive_target_bounds`, the 40-variable cache (`target_cache`, `fit_target_kernel!`, `fill_target!`) and the initial data's `fitted_state_kernel!`. The variant's branch is in `evolution.jl` (`GHProblem`'s `target`/`fits`/`t_target`, `refill_target`), its residual in `constraints.jl`'s error kernel, its flow in `driver.jl` (`refit!`, the refill and the pieces of a moving chunk) |
 | `src/checkpoint.jl` | checkpoint and restart (added 2026-10-01, after `fit.jl` and before `driver.jl`): the file names and their rotation and `latest_checkpoint` (TreeHydro's), `plain_reals` for exact reals, `to_plain`/`from_plain` for the run state's own structs and `fit_from_plain` for an `InteriorFit`, `run_recipe` and `run_criterion`, `check_recipe`, `save_run`/`load_run` over TreeIOHDF5's `save_checkpoint`/`load_checkpoint`, and `check_checkpoint_keywords`. `evolve!` writes and reads through it; `test/checkpoint_tests.jl` is its file |
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written (added in step 8c′) — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
@@ -5927,6 +5954,7 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 | 0 | `:fitted` | `1/24` (`1/24`, `1/32`) | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured: `ℋ` outside `1.6×` `:damped`'s, the error `1.1×` |
 | 0, *moving* (`v = 1/5` along `x`) | `:damped` (with the target's rate, 2026-10-21) | `1/16` (`1/24`, `1/32`) | `r_0 = 5/8`, `r_1 = 23/16` (`8.4` cells inside the contracted horizon at `1/16`) | measured to `40 M` at `4/M`: from `1/24` on `ℋ` just outside the horizon `1.00–1.03×` the resting hole's and the error there `1.26–1.36×` to `16 M`; order 4 in every shell from `1/24` to `1/32`; at `1/16` `ℋ` there `1.4–1.6×` (`8/M`: `1.03–1.09×` its own resting hole, which `8/M` lowers too) |
 | 0, *moving* (`v = 1/5` along `x`) | `:fitted` | `1/24` | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured to `40 M`: stable, the error just outside the horizon `:damped`'s at `4/M`, `ℋ` there `13–15×` `:damped`'s at `8/M`; `ℋ` there does not converge to `1/32` at `m = 16`, even at rest; `trail_ramp = 9/10` raised the error there `1.5–2.4×` and lowered it over the evolved region to `0.72–0.91×` |
+| 0, *moving* (`v = 1/5` along `x`) | `:damped` on the tracked target (`TrackedSpec`, step B2) | `1/24` (`1/24`, `1/32`) | `r_0 = 5/8`, `r_1 = 23/16`, the quadratic track, a find a chunk | measured to `40 M`: the analytic `:damped` layer's `ℋ` and error in every shell to `10⁻³` and its order four; a target `1 %` off in mass, `0.02` in velocity or a cell in center holds `ℋ` just outside the horizon at `7.5×`, `18×`, `16–26×` and leaves `r ≥ 3` as it was |
 | 0, *along `z`* (`v = 1/5`, `1/2`) | `:damped` (the core at `max(ρ_max, 12 |v|/r_0)`, 2026-10-22) | `1/16`; `1/24` at `v = 1/2` (`1/16`, `1/24`, `1/32`) | `r_0 = 1/2`, `r_1 = 19/16` (`8.7` cells inside the contracted pole `1.732` at `v = 1/2` and `1/16`; the ramp `11` cells) | measured to `20 M`: order 4 in the error outside the horizon; moving over resting in `[3, 5)` `1.38×` at `1/5` and `4.9×` at `1/2`, the same at every `h` (the moving solution and its position); `ℋ` `0.8–2.0×` at `1/2`, `0.65–1.01×` at `1/5` |
 | 0.3 | `:damped` | `1/16` (`1/16`, `1/24`) | `r_0 = 3/4`, `r_1 = 3/2` | the rules |
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:damped` (with the target's rate) | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 23/16` (`9.4` cells inside the contracted pole `r₊ √(1 − v²) = 1.828` at `1/24`) | measured to `40 M` at `4/M`, with `1/40`: `ℋ` `0.81–1.08×` the resting hole's in every shell at every `h` and time, the error `1.1–1.6×` (the hole's position, late); order 4 outside the horizon in both pairs; `J − a` drifts at the resting hole's rate, order 4 |
@@ -6784,8 +6812,17 @@ inferred from the native code and the clock.
 
 ## Binary black holes (proposed 2026-10-25)
 
-*Status: a design for review. Nothing in this section is built or
-measured.* It extends the proof of concept to two black holes that orbit,
+*Status: a design for review.* Steps B1 and B2 have built and measured
+their single-hole parts — the gauge sources ([What step B1 built and
+measured](#what-step-b1-built-and-measured-2026-10-25)) and the tracks and the
+tracked analytic target ([What step B2 built and
+measured](#what-step-b2-built-and-measured-2026-10-26)) — and step B3 the case
+of several holes on Erik's decisions of 2026-10-26, run on a head-on pair from
+rest to `2 M` ([What step B3 built and
+measured](#what-step-b3-built-and-measured-2026-10-26)), and its review the
+controlled source line, run on one moving hole to `20 M` and on the pair to `6 M`
+under five laws ([The controlled source line](#the-controlled-source-line))
+**(amended in steps B2 and B3)**. It extends the proof of concept to two black holes that orbit,
 merge and ring down, with the gravitational waves they emit as the result.
 `PLAN.md`'s steps B1–B9 are the work breakdown, and the two milestones are
 under [Milestones G7 and G8](#milestones-g7-and-g8): two holes colliding
@@ -6857,7 +6894,232 @@ becomes: the *data*, read at `t = 0` and by the frozen boundary hook, and
 never as the truth. A single-hole case is `holes = (spec,)`, built from its
 background as now, and is the case it was **bit for bit**: that is the first
 claim of step B3. `error_norms` refuses a case whose data are not a
-solution, and says why.
+solution, and says why. **(Built in step B3**, `GHCase(…; holes)` decided by Erik
+2026-10-26: [What step B3 built and
+measured](#what-step-b3-built-and-measured-2026-10-26)**.)**
+
+#### What step B3 built and measured (2026-10-26)
+
+Everything this section proposes for a case of several holes is built —
+`src/holes.jl`, the holes in `GHCase` (`src/initialdata.jl`), the tracks' builders
+(`src/tracking.jl`) and the loop (`src/driver.jl`) — on Erik's three decisions of
+2026-10-26: pairing (α), `GHCase(…; holes)`, and the superposition kept here.
+
+**The case.** `HoleSpec(T; mass, spin, center, velocity, acceleration,
+interior)`, `isbits`: the spin along `z` (the tracked target is an unrotated
+Kerr-Schild hole boosted along the track; a tilted spin is refused), the
+acceleration the seed's (B2's hand-over), the interior step B2's `TrackedSpec`
+(a `FittedSpec` is refused: not built). `GHCase(T, data; holes)` refuses an
+`interior`, radii, a target, a center or a velocity beside the holes.
+
+- **One hole is the case it was (decided by Erik 2026-10-26).** `holes =
+  (spec,)` is built from the hole's own background, whose mass, spin and velocity
+  must be the spec's; the case's interior is the spec's `TrackedSpec`, its center
+  the spec's line, and `evolve!` runs it as it ran the case built with `interior =
+  TrackedSpec(…)` **(measured in step B3:** bit for bit, the state after two
+  chunks and every record row, on the suite's static fixture with its sampled
+  source and on step B2's moving quadrant hole, at one thread and at four;
+  `holes_tests.jl`**)**. The path of several holes is taken from `K = 2`
+  **(proposed in step B3)**: a case of one hole keeps its analytic source and its
+  record's rows, which the path of several feeds from the tracks and splits by
+  hole.
+- **Several holes.** `binary_case(T; holes, halfwidth, chunk, horizon, …)` on the
+  full box: the data `superposed_kerr_schild` of the holes, the case's interior a
+  `HolesSpec` (the holes' rules and three switches), its center the holes' center
+  of mass (`holes_center`, proposed in step B3: the remnant's Gaussian and the
+  refinement centroid's reference), its source the composite of the holes
+  (`holes_source`), `γ0` the three Gaussians (`holes_damping`). `head_on_holes(T;
+  d, masses, interior)` is a pair at rest on an axis about the origin, each with
+  its Newtonian acceleration and its interior stated for a hole of mass one times
+  its own mass (`scaled_spec`; `CODE.md`'s units).
+
+**What each reader of the background reads for several holes:**
+
+| reader | one hole | several holes (step B3) |
+|---|---|---|
+| initial data | `state(background, 0, x)`, core rule | the superposition at `t = 0`, the acting hole's core rule; `Π` the data's own or from `C_a = 0` (`momentum = :gauge`) |
+| Dirichlet hook | `state(background, t, x)` | the data at `t = 0`, frozen, with the initial `Π`'s rule |
+| gauge source | `−Γ_a` sampled, or algebraic | the composite of the holes, rebuilt every piece from the tracks (`source_feed = :tracks`, pairing (α)) or from the seeds' quadratics (`:seed`) |
+| layer target | `u_exact` | each hole's tracked target: the superposition of the holes on their tracks' lines (`hole_target = :superposed`, the default), or the hole's own (`:own`) |
+| error reference | `u_exact` | none: `err_*` and `drift` are `nothing`, `error_norms` refuses; the residual is each layer's distance from its own target |
+| center | `HoleCenter` | each hole's track; `case.center` the center of mass |
+| radii, seed | `horizon_min_radius`, `analytic_horizon_radius` | each hole's own boosted Kerr-Schild metric on its line (`HoleSpec`, then its track's: `HoleInteriors.own`); the seeds `seed_tracks`, then a find on the data (below) |
+| `γ0`, `ε_KO` | about the analytic center | the holes' Gaussians and profiles on the tracks' lines every piece (`HolesDamping`, `HolesDissipation`), the remnant's on the center of mass |
+| level floor | the hole's shell | one per hole, their union (`UnionLevelBounds`) |
+| refinement centroid | against `c(t)` | against the center of mass |
+| default rate | `4/M` | `4/M_A` of the lightest hole, `8/M` for an equal pair (per-hole rates for unequal masses not built) |
+
+**The composition is a selection, and it is the rule (proposed in step B3).** The
+kernel takes a `HoleInteriors` — the `K` holes' interiors, one type, `isbits`, `K`
+a type parameter — and at each point runs the arithmetic of the hole deepest in
+its own layer, `acting_interior`: the smallest `s_A = (r_A − r_0,A)/(r_1,A −
+r_0,A)`, chosen by `ifelse` over whole interiors, unrolled over `K` with no
+closure and no runtime index. Every profile is a monotone function of `s`, so with
+the holes' ramps alike this is `w = min_A w_A`, `ρ = max_A ρ_A`, the union of the
+cores and the target of the largest `ρ_A`; before merger the layers are disjoint
+and it decides nothing. On SIMD lanes a group goes on lanes when every point of it
+is outside every layer (`outside_all`), and point by point otherwise, as for one
+hole. **(Measured in step B3:)** the composite right-hand side is the single-hole
+kernel of the nearer hole, the same case and state, at every owned point of a
+two-hole mesh, bit for bit, on four lanes and on the scalar kernel
+(`holes_tests.jl`). The composite masks: `HolesMask` (evolved outside every layer)
+for every norm, the speed, the indicator and the finder's footprint guard — whose
+`stencil_hits` is the union of each hole's exact method, checked against
+TreeAMR's enumeration — and `AnyMask` for the layer's and the shell's bands of the
+validity monitor; the range projection is gated about the nearest hole's center
+and its gate checked against every hole's layer.
+
+**The tracks (proposed in step B3).**
+
+- **One per hole, finding together**: every hole at every row and as often between
+  rows as the hole that asks most often (`find_count` at its own layer's spacing),
+  at the pieces' boundaries; the pieces are `h/(4|v|)` of the fastest hole.
+- **The seeds know their acceleration**: `seed_tracks` carries each `HoleSpec`'s
+  center, velocity and acceleration along its quadratic.
+- **A hole's horizon is not centred on the hole.** The companion's field displaces
+  the superposed data's horizon toward it — `0.022 M` at `d = 8`, `0.35` cells at
+  `h = 1/16` — and the first find, `0.35` cells off its seed, was read as motion:
+  blended into the seed's prediction over a find interval of `M/50` it was a
+  velocity of `2`, and a track moved onto the found origin put the target off the
+  data's hole (a layer residual of `12.7` at `t = 0`). So `evolve!` finds each hole
+  once on the initial data (`reseed_holes!`), keeps the track on the hole with the
+  found surface's radii and shape, and corrects every later find's origin by that
+  **horizon offset** before it updates the track; the record carries it.
+
+**The record.** A row of several holes keeps every single-hole field — the horizon
+fields `nothing` but `horizon_success`, every hole's — and adds `holes`, one row
+per hole (the find's numbers, the track's center, velocity, radii, misses,
+prediction, finds, acceleration and interval, the horizon offset and the layer's
+spacing), `separation` (between the tracks' centers) and `phase` (of `c_2 − c_1`
+in the plane `z = 0`). A run of one hole writes exactly the rows it did. **The run
+state** carries the `K` tracks, the chunk's tracks, the finder's `K` seeds and the
+horizon offsets; a chain of restarts of the suite's pair is the uninterrupted run
+bit for bit. **Over MPI** the `K` finds and the re-seeding find run on rank 0
+inside the row's analysis, through `fill_state!` and `interpolate_state` alone
+(the composite mask goes over in the interpolation request), and the
+`mpi_workload.jl` pair is the serial run at one, two and three ranks.
+
+**The head-on pair (measured in step B3**; `test/binary_runs.jl`, one H200 a row,
+jobs 583285–583290 in `step-B3-holes`, data in `.claude/data/step-B3`**).** Two
+Kerr-Schild holes of `M_A = 1/2` from rest at `d = 8 M` on the full box `[−32,
+32]³`: `holes_forest`'s balls `16, 8, 4, 2` about each hole (`h = 1/3` at the
+boundary), each hole's layer step B2's production sphere times `M_A` (`r_0 =
+5/16`, `r_1 = 23/32`, `m = 8`), `q = 4`, `cfl = 1/2`, `chunk = M/4`, `ρ_max =
+8/M`, `ε_KO = 1/2`, the three Gaussians, `λ_B = 4 M_B`, both holes found with the
+spin at every row (`N = 16`) and the ADM monitor at every row, to `2 M`.
+
+- **Which `1/24` (proposed in step B3): `1/24` in `M_A`, `1/48` in `M`.** It is
+  the validated single-hole `:damped` spacing, and step B2's production layer fits
+  it; `1/24` in `M` is `1/12` in `M_A`, under the validated range, where that layer
+  is refused (`r_1 = 23/32` is `6.75` cells inside the horizon against `m = 8`),
+  and its row ran with `r_1 = 13/20`. Priced on one H200 (the evolution and the
+  rows, the ADM monitor and two finds with the spin every `M/4`):
+
+  | at the holes | blocks | owned points | state | device memory | wall per `M` | first row |
+  |---|---|---|---|---|---|---|
+  | `1/24` (`1/12` in `M_A`) | 4600 | `7.95 M` | `1.3 GB` | `28.8 GB` | `61 s` | `524 s` |
+  | `1/48` (`1/24` in `M_A`) | 4600 | `63.6 M` | `10.2 GB` | `103.8 GB` | `362 s` | `540 s` |
+  | `1/64` (`1/32` in `M_A`) | 4600 | `151 M` | `24 GB` | `≈ 250 GB` (predicted) | — | — |
+
+  `1/64` does not fit one H200 (`141 GB`); it needs two, over MPI. The first row
+  is compilation, the initial data and the re-seeding finds; a `10 GB` checkpoint
+  costs `126 s`. A run to `2 M` at `1/48` is `25–27 min`.
+- **The source fed by the tracks — pairing (α) as decided — does not hold the pair
+  (found in step B3).** Every row with `source_feed = :tracks` ended within `1 M`
+  on the track's own refusals: `1/48` with the superposition's `Π` at `0.75 M`
+  (a center jump: found at `x = −3.9812`, predicted `−3.9348`), `1/48` with `Π`
+  from `C_a = 0` at `1.0 M` (a center jump), `1/24` at `1.0 M` (an `r_min` jump),
+  with the layer residual at `7.6–26` and the predictions at `0.15–0.9` cells
+  before the end, against `0.0005–0.1` cells after the first chunk on the
+  seed-fed rows (the first chunk runs on the seeds in every row). The same
+  happened on the `q = 2` smoke pair at `h = 1/16` with either momentum, by
+  `0.4 M`, and not with the seed-fed source. The mechanism is a loop: the
+  composite source carries each hole at its track's velocity and the coordinates
+  follow it, the track follows the horizons' centroids, which the data's junk
+  moves (below), and the next piece's source carries the holes further.
+- **The source on the seeds' Newtonian quadratics holds it** (`source_feed =
+  :seed`, proposed in step B3 as the head-on's), with the tracks feeding the
+  targets alone, as step B2's single hole's analytic source did:
+
+  | row | `Π` | reached | `C_a` L2 (`t = 0` → `2 M`) | `ℋ` L2 | area of hole 1 (`t = 0` → `2 M`) | separation of the tracks at `2 M` | free fall |
+  |---|---|---|---|---|---|---|---|
+  | `b3s48` | the superposition's | `2 M` | `6.8·10⁻³ → 2.2·10⁻³` | `1.41 → 2.19 ·10⁻³` | `13.455 → 15.905` (`+18 %`) | `7.8870` (`Δ = −0.113`) | `7.9687` (`−0.031`) |
+  | `b3sg48` | from `C_a = 0` | `2 M` | `1.6·10⁻⁸ → 3.4·10⁻⁴` (peak `5.0·10⁻⁴` at `1 M`) | `1.41 → 1.47 ·10⁻³` | `13.455 → 13.553` (`+0.7 %`, peak `13.619` at `1 M`) | `7.9444` (`Δ = −0.056`) | `7.9687` |
+
+  Every find of both holes succeeded at every row, no assertion fired, and the
+  constraints stay bounded — falling, with the gauge-consistent `Π`.
+- **The layers' residual grows, and is not a single hole's (measured in step B3;
+  corrected in its review, 2026-10-26).** It is the L∞ over both layers of
+  `|u − u_target|` — the Euclidean norm of the twenty components, against each
+  hole's own target, the superposition on the tracks — and it rises from `0.41`
+  at `M/4` to `4.49` at `2 M` (`b3sg48`; `0.44` to `4.52` in `b3s48`), still
+  rising. **Its units:** `Π` carries `1/M` and dominates. A boosted Kerr-Schild
+  hole and the same hole one cell along the boost differ in the layer by `8.3` at
+  `M = 1`, `h = 1/24` (step B2's runs with a target one cell off held `7.8–10.1`)
+  and by `16.6` at `M = 1/2`, `h = 1/48`, `98 %` of it in `Π` (evaluated from the
+  analytic metrics, `r ∈ [5/8, 23/16] M`, `v = 1/5`). So step B2's single hole,
+  `0.12–0.15` at its `1/24`, is at most `0.25–0.30` at `M_A = 1/2` — a run with
+  every length, time and rate scaled by the mass has `h` unchanged and `Π` over
+  `M` — and the pair's `4.5` is `15–18×` that: the distance of a target a quarter
+  of a cell off, or of one whose velocity is `0.02` off (step B2's `±1/50` held
+  `2.0–2.2` at `M = 1`). **The lines:** each target rides its track, and the
+  source carries its hole on the seed's quadratic, `c₀ ± ½ (M_B/d²) t²`. At
+  `1/48`, hole 1 (hole 2's are equal and opposite to the digits shown):
+
+  | t | 0.25 | 0.5 | 0.75 | 1.0 | 1.25 | 1.5 | 1.75 | 2.0 |
+  |---|---|---|---|---|---|---|---|---|
+  | `b3sg48` track − seed (cells) | 0.00 | 0.30 | 0.55 | 0.76 | 0.80 | 0.80 | 0.73 | 0.58 |
+  | `b3sg48` track's velocity − seed's | `+0.0126` | `+0.0166` | `+0.0173` | `+0.0113` | `+0.0050` | `−0.0015` | `−0.0080` | `−0.0143` |
+  | `b3sg48` residual | 0.41 | 2.81 | 1.31 | 1.45 | 2.52 | 3.42 | 3.98 | 4.49 |
+  | `b3s48` track − seed (cells) | 0.00 | 0.83 | 1.34 | 1.72 | 1.88 | 2.00 | 2.02 | 1.96 |
+  | `b3s48` track's velocity − seed's | `+0.0347` | `+0.0384` | `+0.0357` | `+0.0251` | `+0.0159` | `+0.0074` | `−0.0009` | `−0.0090` |
+  | `b3s48` residual | 0.44 | 8.67 | 3.05 | 1.30 | 2.30 | 3.05 | 3.80 | 4.52 |
+
+  The track's distance from its seed peaks at `0.80` cells at `1.25–1.5 M` in
+  `b3sg48` and falls, while the residual keeps rising; and the two rows end at the
+  same residual with their tracks `0.58` and `1.96` cells off the seeds and their
+  velocities `0.014` and `0.009` off. Neither the position nor the velocity of
+  the target's line against the source's accounts for the growth alone. What else
+  separates these rows from step B2's single hole is the target: the superposition
+  is not a solution, and where `ρ` is small the evolved state leaves it at the rate
+  the equations move the data, which these rows cannot separate from the lines'
+  mismatch. The controlled feed was the test ([The controlled source
+  line](#the-controlled-source-line)): to `2 M` the residual is the same `4.5–4.7`
+  on every feed, so that part is the superposed target's, and from `3 M` on it
+  grows with the source line's distance from the track — to `8.45` at `6 M` on the
+  seeds, saturating at `7.1` and `6.4` on the controlled lines with the model and
+  at `6.0–6.4` without it, over a floor of about `5.6` at `6 M`.
+- **The found separation does not fall as free fall predicts, and the junk moves
+  it first (measured in step B3; corrected in its review, 2026-10-26).** Its drop
+  over each `M/4` against Newtonian free fall from rest over the same interval:
+
+  | interval ending at | 0.25 | 0.5 | 0.75 | 1.0 | 1.25 | 1.5 | 1.75 | 2.0 |
+  |---|---|---|---|---|---|---|---|---|
+  | `b3sg48` found | 0.0068 | 0.0098 | 0.0102 | 0.0094 | 0.0078 | 0.0059 | 0.0038 | 0.0017 |
+  | `b3s48` found | 0.0178 | 0.0207 | 0.0196 | 0.0171 | 0.0141 | 0.0110 | 0.0079 | 0.0048 |
+  | free fall | 0.0005 | 0.0015 | 0.0024 | 0.0034 | 0.0044 | 0.0054 | 0.0064 | 0.0073 |
+
+  The holes start toward each other at once, fastest over `0.5–0.75 M`, and
+  decelerate while free fall accelerates: over the last interval the separation
+  falls at `0.23×` free fall's rate with the gauge-consistent `Π` and `0.66×` with
+  the superposition's, whose junk is larger. It is a gauge transient that
+  decelerates — the track's velocity against the seed's swings from `+0.017` at
+  `0.75 M` through zero near `1.45 M` to `−0.014` at `2 M` (`b3sg48`), a period of
+  about `3–4 M` (`7 M_A`) — not a fall, and no ratio over the window is its rate.
+  The finder is not the cause: its predictions are `3·10⁻³` cells off at `2 M`,
+  and at `M/4` the `1/24` and `1/48` rows agree on the found separation to six
+  digits (`7.938328`) and on the area to `10⁻⁶`, so the motion is the continuum
+  solution's. A coordinate separation is not a gauge-invariant measure of the
+  fall, and a fall read off this one waits for the transient to end; the proper
+  distance between the two horizons along the axis is what B7 should read.
+- **Restarts:** the suite's pair as a chain of one-chunk jobs is the uninterrupted
+  run bit for bit — the state, every record row, both tracks with their
+  histories, the horizon offsets and the finder's seeds (`holes_tests.jl`). **On
+  an H200 too (measured 2026-10-26):** the head-on row's chain, `b3sg48` continued
+  from its `1 M` checkpoint to `2 M` as job 583463 (`b3sg48r`), is the
+  uninterrupted row — its rows at `1.25`, `1.5`, `1.75` and `2 M` equal
+  `b3sg48`'s in all 64 columns but the wall time, the device memory and the
+  host's resident set, as step B2's chains did.
 
 ### The gauge
 
@@ -6925,6 +7187,12 @@ questions](#open-questions):
 Step B1 builds both sources and runs each on a single moving hole. Step B7's
 head-on collision is the first test of either through a merger.
 **(Proposed:)** build (α) first, and keep (β) as the measured alternative.
+**(Decided by Erik 2026-10-26: (α).** Built in step B3, which found that the
+composite's holes fed by the tracks do not hold a head-on pair from rest — the
+source carries the holes where the tracks say, the tracks follow horizons the
+junk moves, and every such row ended within `1 M` — and that the same source on
+the holes' Newtonian seeds does: [What step B3 built and
+measured](#what-step-b3-built-and-measured-2026-10-26)**.)**
 
 A third pairing is noted and not planned: a Kerr-Schild source near each
 hole, with the damped harmonic gauge between and beyond the holes. It is the
@@ -6935,9 +7203,573 @@ data are `(γ_ij, K_ij)` with a lapse and a shift, and `Π` needs `∂_t α` and
 `∂_t β^i` as well. Those two are free. Choosing them so that
 `C_a = H_a + Γ_a = 0` at `t = 0` is four linear equations per point:
 `Γ_a` is linear in `∂_t g_tb`, with `g^{tt} = −1/α²` on the diagonal
-(**proposed**: `gauge_consistent_momentum`). For one boosted Kerr-Schild
+(**proposed**: `gauge_consistent_momentum`, built in step B1). For one boosted Kerr-Schild
 hole under its own source the result must be the analytic `Π` to roundoff,
 and that is its test.
+
+#### What step B1 built and measured (2026-10-25)
+
+Everything above in this section is built in `src/gauge.jl`, on one hole (the
+binary case is step B3's):
+
+- **The interface.** Every closed-form source is an `AlgebraicGaugeSource`
+  behind the kernels' existing `Val(:algebraic)`, evaluated as
+  `algebraic_gauge_source(src, x, t, h, ∂ₜh, ∂h)`. The kernels now pass the
+  point's position and the time (the right-hand side, the gauge constraint and
+  the ADM monitor; on SIMD lanes the position is one `Vec` per axis), and a
+  source that reads neither is compiled without them. **(Measured in step
+  B1:)** the right-hand side, both monitors' `diag` and both kernel widths are
+  bit for bit what they were for the sampled source (the step-5 fixture), no
+  source (the gauge wave), and `KerrSchildSource` at rest (the octant) and
+  moving (the quadrant).
+- **`effective_source(src, t)`** is what every launch is handed, chosen on the
+  host from that launch's `t` **(proposed in step B1)**: a roll-on's `from` up
+  to `t_0`, its `to` once its weight has underflowed, and the blend between;
+  and a one-hole composite without acceleration is its `KerrSchildSource`. So
+  those stretches are their sources' kernels bit for bit, and a kernel carries
+  nothing it does not evaluate. The composite's own kernel forms the same
+  arithmetic, but LLVM contracts that specialisation into fused multiply-adds
+  differently: on the moving quadrant hole its right-hand side differed from
+  the Kerr-Schild kernel's in a third of the entries, by at most `6·10⁻¹³`
+  against terms of `800` **(measured in step B1)**.
+- **The composite**, `CompositeKerrSchildSource(holes::TrackedHole...)`, with
+  `p = 4`. A `TrackedHole` is one hole on one piece of its track: the center to
+  second order about the piece's `t_p`, `c(t) = c₀ + v₀ τ + ½ a τ²`, and the
+  4-velocity and spin 4-vector to first order, `u = u₀ + u̇ τ`, `S = S₀ + Ṡ τ`,
+  with `u̇` and `Ṡ` the rates of `γ(1, v⃗)` and of the boosted rest-frame spin
+  under the acceleration **(proposed in step B1:** first order is what a piece
+  of `h/(4|v|)` needs, and keeps the rate a constant of the piece; the spin is
+  held fixed in the rest frame, no Thomas precession**)**. `∂_a H_b` carries
+  the weights' gradients in space and in time (through each `ċ`) and each
+  hole's `(∂H/∂u) u̇ + (∂H/∂S) Ṡ`. `K` is a type parameter; the sum is a
+  generated, closure-free block per hole.
+- **The damped harmonic gauge**, `DampedHarmonicSource(; σ_r, A_L1 = 1,
+  A_L2 = 0, A_S = 1, e_L1 = e_L2 = e_S = 2, center)`, exactly SpECTRE's form:
+  `μ_L2` carries `log(1/α)^{e_L2}` (the open question's `L^{e_X}` holds for
+  `μ_L1` and `μ_S`), and the Gaussian is about a fixed `center`. **How the sign
+  was fixed:** SpECTRE's gauge constraint is `C_a = H_a + Γ_a` (its
+  documentation of `gauge_constraint` and `trace_christoffel`), which is the
+  package's, so its `H_a` is used unchanged. On flat space with `β = 0` and
+  `K = 0`, `C_t = 0` is `∂_t L = −α (μ_L1 L + μ_L2 log(1/α))` and `C_i = 0` is
+  `∂_t β^i = −α μ_S β^i`: `L = log(√γ/α)`, a perturbed lapse and the shift are
+  driven back. `test/gauge_source_tests.jl` checks both through
+  `gauge_consistent_momentum` to `10⁻¹³`, and on a mesh a lapse perturbation
+  of flat space (`e = 0`, a linear rate) is halved by `t = 2` while the
+  harmonic gauge keeps it (`|h_tt|` `0.107` against `0.210`).
+- **The roll-on**, `RolledGaugeSource(from, to; σ_g, t_0 = 0)`: `f = 1` up to
+  `t_0` (SpECTRE's `R(t) = 0` before its `t_0`) and `e^{−((t − t_0)/σ_g)⁴}`
+  after, `C³` at `t_0`, and `∂_t H` carries `∂_t f (H_from − H_to)`. `GHCase`
+  checks a source at `t = 0`, so a roll-on from the hole's own source passes and
+  the damped harmonic gauge alone is refused on a hole, by name.
+- **`gauge_consistent_momentum(src, x, t, γ, K, α, β, ∂γ, ∂α, ∂β)`** returns
+  `Π`, `∂_t α` and `∂_t β^i` from `C_a = 0`, any source or a given `H_a`. A host
+  function; step B8 calls it.
+- **Run options.** `hole_case(; gauge_source = :composite)` is the one-hole
+  composite; `test/octant_runs.jl` takes `source=composite` and `gauge=dh`
+  with `sigma_g`, `t0`, `sigma_r`, the amplitudes and the exponents.
+
+**(Measured in step B1)** each source's `H` and `∂_a H_b` against ForwardDiff's
+derivative of its closed form, written out apart from the kernel's spelling, at
+random metrics near the holes and random times: one accelerating hole
+`1.8·10⁻¹⁶`, two holes `2.2·10⁻¹⁶`, the damped harmonic gauge `9.6·10⁻¹⁶`
+(`7.2·10⁻¹⁶` at `e = 0`), the roll-on half way `1.6·10⁻¹⁵`, all of the
+source's size. `gauge_consistent_momentum` returns the boosted, spinning,
+translated hole's `Π` under its own source to `7.0·10⁻¹⁵` of `Π`, and gives
+`C_a` of `5.7·10⁻¹⁶` of `H_a` and `∂_t h` for a perturbed lapse under every
+source. On SIMD lanes the
+new sources are the scalar ones to `16 ε` lane by lane, and the roll-on's
+kernel to `19 ε` of the terms on the moving quadrant hole (the lanes' `log` is
+LLVM's, the scalar one Julia's).
+
+**A miscompile, and the rule it leaves (found in step B1).** Written as an
+early `return` of the Kerr-Schild closed form at `u₀` before a second call at
+`u(t)`, the tracked source, inlined into a function that also took ForwardDiff
+Jacobians, came out of Julia 1.13.2 on aarch64 with `∂_x H` off by `10⁻³` of
+the source for an accelerating hole: at `-O2` and `-O3`, not at `-O1`, not
+with the call out of line, not on Julia 1.14.0-alpha1, and unchanged by
+`--check-bounds=yes`. The source now evaluates the closed form once and
+branches on its inputs, and the roll-on's ends are chosen on the host
+(`effective_source`) so that no kernel merges two inlined sources through an
+early return. `test/gauge_source_tests.jl`'s closed-form testset calls the
+sources in that shape, and failed before.
+
+**The far field is harmonic, and the Dirichlet data are not (found in step
+B1).** `μ_X ∝ L^e` with `e = 2`, and `L ≈ 2M/r` far from a Kerr-Schild hole,
+so the damped harmonic gauge is the harmonic gauge out there whatever `σ_r`
+is, while the outer boundary's Dirichlet data stay the Kerr-Schild solution,
+whose `Γ_a` is `−H^{KS}_a ≈ 2M/r²`: `5·10⁻⁴` at `64 M`. **(Measured in step
+B1:)** `C_a` in the blocks touching an outer face rose to `2.4·10⁻⁴` by `40 M`
+and was still growing linearly (`10⁻¹¹` in the Kerr-Schild gauge); travelling
+inward at most at the speed of light, it came no nearer than `24 M` to the hole
+in those runs. Step B5's frozen data at a far boundary meets the same mismatch;
+the damped harmonic gauge needs a boundary condition of its own there, or the
+third pairing's Kerr-Schild weight far away.
+
+**What a source costs (measured in step B1**, `bench/gauge_source_cost.jl`: one
+launch of the right-hand-side kernel on a filled working array, the
+Kerr-Schild exterior `[2, 6]³` with no interior, uniform, `q = 4`, `Float64`;
+on an H200 `N = 32` and 64 blocks, `2.1 M` points, the best of 20; on one core
+of an EPYC 7543 `N = 16` and 64 blocks, the best of 10; in ns per point**)**:
+
+| source | H200 | EPYC, scalar | EPYC, four lanes |
+|---|---|---|---|
+| none (`H ≡ 0`) | `1.05` | `994` | `467` |
+| sampled `Hsrc` | `1.48` | `1206` | `536` |
+| `KerrSchildSource` | `1.29` | `1206` | `477` |
+| one hole, accelerating | `1.20` | `1176` | `459` |
+| two holes | `1.56` | `1448` | `565` |
+| damped harmonic | `1.40` | `1346` | `621` |
+| roll-on, half way (both) | `1.74` | `1351` | `593` |
+
+A closed form adds a fifth to a half to the kernel without a source; the
+roll-on, which evaluates both of its ends while it rolls, adds two thirds on an
+H200 (`1.35×` the Kerr-Schild source's kernel), and costs one end's before
+`t_0` and after `f` has underflowed (`5.2 σ_g` after `t_0`). The one-hole rows
+within `0.1 ns` of each other are the measurement's resolution.
+
+**The damped harmonic gauge rolled on, on one hole (measured in step B1;**
+[`SINGULARITY_HANDLING.md`, "The damped harmonic gauge rolled
+on"](SINGULARITY_HANDLING.md#the-damped-harmonic-gauge-rolled-on-step-b1-2026-10-25)**).**
+The roll-on from the hole's own source over `σ_g = 10 M` **(proposed in step
+B1**, the low side of SpEC's `15–25 M` so that half of a `40 M` run is the
+gauge itself**)**, `σ_r = 32`, `A_L1 = A_S = 1/M`, `A_L2 = 0`, `e = 2`, on the
+boosted `a = 0` hole at `v = 1/5` on the quadrant and on the same hole at rest,
+`:fitted` (`m = 16`, `n_L = 20`, `fit_cont = 2`), `1/24` and `1/32`, to `40 M`,
+one H200 a run, against the same holes in their own Kerr-Schild gauge:
+
+- **The hole at rest settles.** From `20 M` its state's distance from the
+  Kerr-Schild solution is constant (`0.34` just outside the horizon), the horizon
+  has grown in coordinates from `2.00` to `2.06`, `ℋ` and `C_a` are `1.6×` and
+  `1.3×` the Kerr-Schild hole's in `[3, 5)` and `1.2×` and `1.3×` in `[5, 8)`,
+  flat, and `M_irr` is the Kerr-Schild hole's (`1 + 1.7·10⁻⁷` against
+  `1 + 1.5·10⁻⁷`).
+- **The moving hole does not.** It falls `0.49 M` behind the boosted hole's
+  center by `40 M` and its horizon loses the boost's contraction; from the end of
+  the roll-on its constraints grow at the horizon and travel out, `118×` and `72×`
+  the Kerr-Schild hole's `ℋ` in `[3, 5)` and `[5, 8)` at `40 M` at `1/24`, and its
+  `M_irr` is off by `−1.3·10⁻⁵` (Kerr-Schild: `+4.5·10⁻⁷`). At `1/32` the
+  excess outside `r = 3` is `6–31×` at `40 M` and `M_irr` is off by
+  `−1.0·10⁻⁶`, falling from `1/24` at order `5.5–10`: an under-resolved feature
+  of the moving hole under the new gauge, which `1/48` would test and which on
+  this capsule does not fit one H200. The lag is the same at both spacings: the
+  gauge's.
+- **The analytic `:damped` layer does not survive the gauge moving** (local smoke
+  runs at `1/16`): it holds the interior in Kerr-Schild's gauge while the source
+  moves the exterior, and the moving hole's run ended after `3 M`. So the pairing
+  is forced as this section says: the damped harmonic gauge goes with `:fitted`.
+- **Measure about the hole.** Under this gauge the hole is not at the analytic
+  center, and a shell about that center cut through the horizon
+  (`test/octant_runs.jl shell_center=track`); and `[2, 2.25)` straddles the grown
+  horizon, so `[3, 5)` and `[5, 8)` are the comparisons.
+- **The faces** take the far field's mismatch with the Kerr-Schild Dirichlet data
+  (above): `C_a` there `2.4·10⁻⁴` at `40 M`, growing, against `10⁻¹¹`.
+
+**What it says about the decision** ([What this asks Erik to
+decide](#what-this-asks-erik-to-decide)): on one hole, pairing (α)'s source is the
+accurate one. (β) holds a resting hole at the Kerr-Schild level outside the
+horizon and a moving one `6–31×` above it at `1/32` — the binary's case —
+improving fast with `h`. Before (β) is a candidate: the moving hole under the
+gauge at `1/48` (several GPUs on this capsule), or with a longer roll-on or
+another `:fitted` depth, and a boundary for its far field.
+
+#### The controlled source line
+
+**Erik's decision of 2026-10-26** on item 7 of [What this asks Erik to
+decide](#what-this-asks-erik-to-decide): a slow control law for the track-fed
+source, tested on one moving hole fed by its own track first. What follows is the
+law, its time and its measurements; every choice in it is **proposed in step
+B3** (its review), and it is built: `SourceLine`, `SourceLaw`, `source_law`, `advance_source_lines`,
+`source_line_states`, `lines_source_at` and `fed_case_at` in `src/tracking.jl`, a
+`TrackedSpec`'s `source_feed`, `control_time`, `control_integral` and
+`control_model`, a case of
+several holes' `source_feed = :controlled`, the lines in the driver's run state
+and checkpoint, and `test/source_line_tests.jl`.
+
+**What it must do.** The gauge and the targets ride the same trajectory, and the
+source's line is smooth enough — `C²` in time — that each piece's `∂_t H` is the
+time derivative of the source in use.
+
+**What the source does with a line (measured in step B3's review).**
+
+- **One hole's source reads its line's velocity and acceleration, not its
+  center.** The closed form `H(g; u)` has no position in it; for several holes
+  the centers enter the partition of unity alone, `1 − O((r/d)⁴)` on each
+  horizon.
+- **A source off the hole's motion moves the hole, in part.** Measured three
+  ways. On the suite's `q = 2` quadrant hole, a line and a target both started
+  `0.05` too fast carried the hole at `0.27`, `0.259` and `0.252` over three
+  chunks, `0.18` cells off the analytic line after `0.3 M`, with `C_a` `10⁴×` its
+  own at `t = 0` — where the analytic source brings the same track back to `1/5`
+  in that time (`tracked_target_tests.jl`). On step B2's production hole at
+  `1/24`, a line pulled `+0.009` off by the track's first chunk moved the hole
+  `0.09` cells in `4 M`, about `40 %` of the line's own excess there (below). On the
+  head-on pair the holes' coordinate motion is the same to `10–20 %` whether the
+  source rides the Newtonian seeds or a controlled line cells away from them
+  (below). So a loop from the track to the source's velocity has a gain of at most
+  one at zero frequency — nothing in it fixes the velocity — and a lead in it
+  amplifies what the hole does on its own. The raw feed, step B3's pairing (α)
+  as built, leads: the track's quadratic carries the last four finds'
+  acceleration forward (a loop `v(t) = v(t − D) + D v̇(t − D)` of a plant that
+  follows at once would grow at `s ≈ 1.5/D`). On the pair it amplified the junk's
+  swing — the track's velocity `0.047` at `0.75 M` (`b3tg48`) against the
+  seed-fed row's `0.023` — until the quadratic's prediction missed the swing's
+  reversal by more than `G h/2`: found at `x = −4.0019` at `1 M`, predicted at
+  `−3.9637`.
+
+**The law** (`SourceLaw`; the PD loop with the model built first, the rest added
+in the review's second round, 2026-10-29). With `e = c_tr(t) − c` the line's
+distance from the track's position, `ė = ċ_tr(t) − ċ` from its velocity
+([`track_state`](@ref)), `ω = 1/τ`, and `a_m` the model — the Newtonian pull of
+the other holes on their own lines (`control_model`), or zero, and always zero for
+one hole — each hole's line obeys one of
+
+    PD:   c̈ = a_m + ω² e + 2ω ė
+    PID:  c̈ = a_m + 3ω² e + 3ω ė + ω³ i,    i̇ = e   (control_integral)
+
+both critically damped, with their two or three poles at `−ω`:
+
+- a loop onto the track's position and velocity — not its acceleration, the
+  noisiest of the three and the raw feed's lead;
+- **started on the case's own source**, the data's gauge — each `HoleSpec`'s center
+  and velocity, or one hole's composite — and not on the track's seed: a source
+  on another line than the data's violates `C_a` at `t = 0` by the difference, and
+  the seed is a guess the finds correct (step B2's recovery seed is `0.05` off);
+  the PID integral starts at zero;
+- integrated on the host by RK4 in steps of at most `τ/64` as the pieces go, on
+  every rank from the tracks every rank adopted, and carried by the run state and
+  the checkpoint, the integral included;
+- handed to each piece as a [`TrackedHole`](@ref) about the piece's time with the
+  line's center, velocity and acceleration — the law's right-hand side there,
+  continuous wherever the track is `C¹` — so that within a piece `∂_t H` is the
+  derivative of the `H` in use, and a piece meets the next to the line's jerk,
+  `O(δ²)` over a piece of `δ` (`source_line_tests.jl`, under both laws).
+
+**What each law holds.** The error obeys `ë + 2ωė + ω²e = c̈_tr − a_m` (PD) and
+`e⃛ + 3ωë + 3ω²ė + ω³e = d/dt (c̈_tr − a_m)` (PID). So for a track whose
+acceleration is steady the **PD line settles at `e_ss = (c̈_tr − a_m) τ²`** — a
+position offset with no velocity offset, the position term being the velocity
+error's integral — and the **PID line at zero**, its integral taking up the
+difference (`ω³ i → c̈_tr − a_m`); the PID line lags a steady *jerk* `J` by `J τ³`
+instead. The model helps the PD loop exactly when the coordinate acceleration is
+the Newtonian one, and the rows below say when that is. From the track the PD
+line is the filter `T(s) = (2ωs + ω²)/(s + ω)²` (unit gain at zero frequency,
+`12 %` above it at `ω`, `2ω/Ω` well above), the PID line `T(s) = (3ωs² + 3ω²s +
+ω³)/(s + ω)³` (`3ω/Ω` well above). A velocity seeded `δv` off decays as `δv t
+e^{−ωt}` on the PD line, a steady acceleration from rest as `(a/2) t² e^{−ωt}` on
+the PID line (both `source_line_tests.jl`, against the closed forms).
+
+**Its time, chosen before the runs: `τ = 10 M_A`** (`control_time = 10` for a
+hole of mass one, scaled by each hole's mass; the pair's rows below prefer `4
+M_A` for the PD loop), from three bounds:
+
+- **the loop's stability.** In the limit the measurements bound, a hole whose
+  coordinate velocity follows the source's through a lag `τ_g`, the closed PD
+  loop's characteristic is `s (τ_g s² + (1 + 2ωτ_g) s + ω² τ_g)` and the PID
+  loop's `s (τ_g s³ + (1 + 3ωτ_g) s² + 3ω²τ_g s + ω³τ_g)`: stable at every `ω` and
+  `τ_g`, with a neutral mode at `s = 0`. With a hole that answers the source's
+  velocity changes with an offset `κ dV/dt` the PD loop is stable while `ωκ < ½`
+  and `ωτ_g < 2`, the PID loop while `ωκ < ⅓`. The raw rows' growth, the track's
+  velocity `×3` in `M/4` (`≈ 4.4/M = 2.2/M_A`, `κ ≲ 0.25 M`), is twenty times `ω =
+  0.1/M_A`, and neither loop has a lead.
+- **the junk's time scale.** The track's velocity against the seed's in step B3's
+  rows swings with a period of about `3–4 M`, `7 M_A`, and an amplitude of
+  `0.017–0.038`. At `Ω = 2π/7 M_A` and `τ = 10 M_A` the PD loop passes `|T(iΩ)| =
+  0.22` of it and the PID loop `0.33` (`4 M_A`: `0.52` and `0.76`;
+  `source_line_tests.jl` measures both on the analytic input).
+- **the find cadence.** The pair finds every `M_A/2`, one hole every `M`:
+  `ω Δt_f = 0.05–0.1`, so the loop reads the track many times per `τ`.
+
+**The targets ride the track, not the line.** Step B2 measured that a target one
+cell off the hole costs `16–26×` its `ℋ` just outside the horizon, and the track
+is where the horizon is (its predictions `10⁻³–10⁻¹` cells off the next find),
+while the line lags the track by the filtered junk and by its law's steady error
+(on the pair from `0.6` cells for the PD loop without the model to `4.2` with it,
+below). A target on the line would be step B2's displaced target. In steady motion
+the line's velocity is the track's, so source and target ride the same trajectory
+in what the source reads; they part by the filtered junk while it lasts.
+
+**One hole fed by its own track (measured in step B3's review**, jobs 583736 and
+583739–583742 in `step-B3-holes`, one H200 a row, `14–15 min` to `20 M`; data in
+`.claude/data/step-B3`, tables by `test/fed_study.jl`**).** Step B2's production
+row — Kerr-Schild `a = 0` at `v = 1/5` on the quadrant, the tracked `:damped`
+target at `1/24`, `ρ_max = 4/M` — with the one-hole composite source rebuilt every
+piece from the track (`test/octant_runs.jl source=composite feed=…`), against
+`b2t24`, the same row on the analytic source:
+
+| row | feed | `ℋ` in `[2, 9/4)` over `b2t24`'s at 1, 4, 20 M | residual at 1–20 M | track off the analytic line at 20 M | line off the track at 20 M |
+|---|---|---|---|---|---|
+| `b3fa24` | the track's state, raw | 1, 1, 1 | `0.123–0.148`, `b2t24`'s | `2.7·10⁻⁵` cells | — |
+| `b3fb24` | controlled, `τ = 10 M` | 1, 1, 1 | the same | `2.5·10⁻⁵` cells | `−1.1·10⁻⁵` cells |
+| `b3fd24` | controlled, `τ = 4 M` | 1, 1, 1 | the same | `2.7·10⁻⁵` cells | `−3.4·10⁻⁶` cells |
+
+Each row is `b2t24` at every row of the record — `ℋ` in every shell and on every
+level and the residual within `0.15 %`, the momentum constraint within `1 %` (and
+`30 %` in the boundary band, where it is `10⁻¹²`), the track's drift off the
+analytic line growing as `b2t24`'s does (`3.5·10⁻⁵` cells at `24 M` there) — and
+the line's and the track's velocities are `1/5` to `1.5·10⁻⁷`. On a hole whose
+data are exact the track is the hole's line to the finder's `10⁻⁷–10⁻⁵` cells,
+and the raw feed's lead has nothing to grow from in `20 M`; the pair's raw rows
+ran away within `1 M` on a junk whose velocity is `0.02–0.04`.
+
+**From step B2's recovery seed** (the track `0.05` too fast, the line on the
+data's gauge), against `b2r24` — the same seed on the analytic source:
+
+| | 1 M | 2 M | 4 M | 8 M | 12 M | 16 M | 20 M |
+|---|---|---|---|---|---|---|---|
+| `b3fc24` (`τ = 10 M`): `ℋ` in `[2, 9/4)` over `b2r24`'s | 1.45 | 1.00 | 0.94 | 0.94 | 0.94 | 0.99 | 1.00 |
+| `b3fe24` (`τ = 4 M`): the same | 1.44 | 0.99 | 0.86 | 1.08 | 1.02 | 1.03 | 1.04 |
+| `b3fc24`: the line's velocity − 1/5 | `+0.0093` | `−0.0012` | `−0.0006` | `−0.0009` | `−0.0005` | `−0.0003` | `−0.0001` |
+| `b3fe24`: the same | `+0.0208` | `−0.0061` | `−0.0034` | `−0.0025` | `+0.0005` | `+0.0005` | `+0.0001` |
+| `b3fc24`: the track off the analytic line (cells) | 1.2 | 0.039 | 0.094 | −0.015 | −0.018 | −0.018 | −0.014 |
+| `b3fe24`: the same | 1.2 | 0.093 | 0.149 | −0.109 | −0.035 | −0.002 | 0.0006 |
+| `b3fc24`: the residual against the layer's own target | 1.79 | 4.77 | 0.30 | 0.125 | 0.122 | 0.155 | 0.123 |
+| `b3fe24`: the same | 1.55 | 4.86 | 0.69 | 0.27 | 0.16 | 0.14 | 0.116 |
+
+`ℋ` just outside the horizon is `b2r24`'s at every time but the first: its excess
+over `b2t24` (`33×` at `4 M`, `1.1×` at `20 M`) is the first chunk's target on the
+wrong line, which step B2 measured, and the line adds nothing to it *there* — far
+from the hole it adds a great deal (below). The line is
+pulled by that first chunk's track (`+0.009` at `τ = 10 M`, `+0.021` at `4 M`),
+carries the hole with it — `0.09` and `0.15` cells off the analytic line at `4 M`
+— and settles back onto the data's motion, its velocity within `10⁻⁴` of `1/5` at
+`20 M`. What it does not undo is the displacement it caused: `−0.014` cells at
+`τ = 10 M`, the loop's neutral mode — the track says where the hole is, and
+nothing says where it was meant to be. `τ = 4 M` swings further and ends closer.
+The residual against the layer's own target is step B2's `0.12–0.16` from `8 M`
+on; against Kerr-Schild it reads the moved line too (`0.19–0.32` at `τ = 10 M`).
+
+**One hole on the PID loop (the review's second round**, jobs 585660 and 585661,
+on `770f0fe`**).** At `τ = 10 M` it is `b2t24` again to `0.15 %` in `ℋ` in every
+shell and level and in the residual (`b3fp24`), its line within `6·10⁻⁶` cells of
+the track at `20 M`. From the recovery seed (`b3fpr24`) it sits between the PD
+loop's two times: `ℋ` just outside the horizon `0.91–1.01×` `b2r24`'s after `1 M`
+(`1.44×` at `1 M`), the line pulled `+0.014` by the first chunk, the hole `0.13`
+cells off the analytic line at `4 M` and `−0.015` at `20 M`, the residual against
+its own target `0.12–0.19` from `8 M` on. The law is not broken on one hole, and
+it is not better there either — a hole whose data are exact gives the loop nothing
+to do — and it costs as much far from the hole as the PD loop does (below).
+
+**What a recovering line costs far from the hole (measured from the screens'
+CSVs in the review's third look, 2026-10-30; no new runs).** The shell just outside
+the horizon is not the whole of it. Once the line has moved off the data's line,
+`ℋ` and `C_a` on the coarsest level (`L0`) and in the boundary band rise about
+`10³` above `b2r24`'s, on both laws:
+
+| row | t | `ℋ` L2 | `ℋ` L2 on `L0` | `C_a` L2 on `L0` | `ℋ` L2 in the boundary band |
+|---|---|---|---|---|---|
+| `b2r24` | 8 | `1.94·10⁻⁶` | `6.32·10⁻¹¹` | `1.23·10⁻¹⁰` | `1.03·10⁻¹¹` |
+| `b2r24` | 12 | `1.01·10⁻⁶` | `6.18·10⁻¹¹` | `1.26·10⁻¹⁰` | `1.02·10⁻¹¹` |
+| `b2r24` | 20 | `6.35·10⁻⁷` | `6.06·10⁻¹¹` | `1.42·10⁻¹⁰` | `1.11·10⁻¹¹` |
+| `b3fc24` (PD) | 8 | `4.18·10⁻⁶` | `1.09·10⁻⁷` | `2.33·10⁻⁷` | `1.29·10⁻⁷` |
+| `b3fc24` (PD) | 12 | `2.43·10⁻⁶` | `1.12·10⁻⁷` | `1.93·10⁻⁷` | `1.32·10⁻⁷` |
+| `b3fc24` (PD) | 20 | `1.22·10⁻⁶` | `8.82·10⁻⁸` | `1.27·10⁻⁷` | `8.13·10⁻⁸` |
+| `b3fpr24` (PID) | 8 | `7.31·10⁻⁶` | `1.60·10⁻⁷` | `3.49·10⁻⁷` | `1.90·10⁻⁷` |
+| `b3fpr24` (PID) | 12 | `4.20·10⁻⁶` | `1.64·10⁻⁷` | `2.94·10⁻⁷` | `1.94·10⁻⁷` |
+| `b3fpr24` (PID) | 20 | `9.73·10⁻⁷` | `1.28·10⁻⁷` | `1.89·10⁻⁷` | `1.19·10⁻⁷` |
+
+- **The mesh's `ℋ`** over `b2r24`'s is `0.99`, `0.89`, `1.13`, `3.78`, `4.14`,
+  `2.81` and `1.53` at `1`, `2`, `4`, `8`, `12`, `16` and `20 M` on `b3fpr24`, and
+  `0.99`, `0.93`, `1.08`, `2.16`, `2.40`, `2.39` and `1.93` on `b3fc24`. `ℋ` on
+  `L0` is `1200–2650×` `b2r24`'s from `2 M` on on `b3fpr24`, `800–1800×` on
+  `b3fc24` and `1800–4100×` on `b3fe24` (PD at `τ = 4 M`).
+- **The composite path itself is clean**: the exact-seed rows (`b3fa24`, `b3fb24`,
+  `b3fd24`, `b3fp24`) are `b2t24` on every level, `L0` and the boundary band
+  included (`ℋ` on `L0` `6.07·10⁻¹¹` against `6.06·10⁻¹¹` at `20 M`). The excess
+  comes with the line having moved off the data's line.
+- **The likely cause, with a check from the CSVs:** the source rides the line
+  everywhere, while the Dirichlet data and the outer region's gauge stay the
+  analytic hole's, so at the faces `C_a` is about the source's change with the
+  line. One hole's source reads the line's velocity and not its center, so that
+  is `(∂H/∂u) δu`; the review's estimate, `∂H · δ ≈ (2M/r³) · 5·10⁻³ M` at `r ≈
+  64`, is `10⁻⁸–10⁻⁷`, the order measured. The
+  excess is there from the first chunk (`1100–2600×` `b2r24`'s at `1 M`), so it is
+  made at the boundary and not carried out from the hole, and across the three
+  recovery rows it scales with the size of the line's excursion: the boundary
+  band's `ℋ` at `8–12 M` is `1.3`, `1.9` and `3.0·10⁻⁷` on `b3fc24`, `b3fpr24` and
+  `b3fe24`, whose lines peaked `+0.0093`, `+0.0136` and `+0.0208` off `1/5` in
+  velocity (`1.39–1.46·10⁻⁵` per unit) and `0.24`, `0.35` and `0.50` cells off
+  the analytic line (`5.4–6.1·10⁻⁷` per cell). These rows move both together, so
+  they do not separate the velocity from the position.
+- **It is invisible on the pair** (`ℋ` L2 `1.2·10⁻³` there), but B4 has to make the
+  outer boundary agree with the source lines. The options, none decided: Dirichlet
+  data from the holes on their source lines; the source blended back to the data's
+  gauge far from the holes; a constraint-preserving boundary.
+
+**The head-on pair on the controlled line (measured in step B3's review**, two
+`h200debugq` links of under an hour a row, `walltime = 3000`, about `1.1`
+GPU-hours a row to `6 M`: `τ = 10 M_A`, jobs 583932 and 584024 (`b3cg48`);
+`τ = 4 M_A`, jobs 583933 and 584025 (`b3cd48`); and for the comparison the
+seed-fed row on this code, jobs 584022 and 584076 (`b3sl48`), which is `b3sg48`
+to `2 M` in all 64 columns of its CSV but the wall time and the memory; data in
+`.claude/data/step-B3`, tables by `test/binary_study.jl`**).** Step B3's head-on
+row at `1/48` with `Π` from `C_a = 0`, to `6 M`. Hole 1's track and line along
+`x`, in cells of `1/48`, `+` toward the companion; hole 2's are their mirror image:
+
+| | 1 M | 2 M | 3 M | 4 M | 5 M | 6 M |
+|---|---|---|---|---|---|---|
+| free fall, the separation | 7.992 | 7.969 | 7.929 | 7.874 | 7.803 | 7.715 |
+| found separation, seed | 7.920 | 7.901 | 7.911 | 7.933 | 7.949 | 7.950 |
+| found separation, `τ = 10 M_A` | 7.921 | 7.897 | 7.906 | 7.937 | 7.968 | 7.987 |
+| found separation, `τ = 4 M_A` | 7.921 | 7.894 | 7.904 | 7.944 | 7.989 | 8.020 |
+| the track off its seed, seed | 0.76 | 0.58 | −0.62 | −2.46 | −4.51 | −6.60 |
+| the track off its seed, `τ = 10 M_A` | 0.72 | 0.69 | −0.51 | −2.55 | −4.98 | −7.50 |
+| the track off its seed, `τ = 4 M_A` | 0.66 | 0.77 | −0.43 | −2.74 | −5.49 | −8.29 |
+| the source's line off the track, seed | −0.76 | −0.58 | 0.62 | 2.46 | 4.51 | 6.60 |
+| the source's line off the track, `τ = 10 M_A` | −0.61 | −0.34 | 0.82 | 2.26 | 3.46 | 4.24 |
+| the source's line off the track, `τ = 4 M_A` | −0.44 | −0.10 | 0.87 | 1.74 | 2.05 | 1.86 |
+| residual, seed | 1.45 | 4.49 | 6.38 | 7.61 | 8.26 | 8.45 |
+| residual, `τ = 10 M_A` | 1.61 | 4.68 | 6.35 | 7.00 | 7.08 | 6.80 |
+| residual, `τ = 4 M_A` | 1.75 | 4.74 | 6.16 | 6.30 | 6.08 | 5.78 |
+| `ℋ` L2, seed | `1.55·10⁻³` | `1.47·10⁻³` | `1.33·10⁻³` | `1.27·10⁻³` | `1.33·10⁻³` | `1.38·10⁻³` |
+| `ℋ` L2, `τ = 4 M_A` | `1.53·10⁻³` | `1.44·10⁻³` | `1.32·10⁻³` | `1.22·10⁻³` | `1.19·10⁻³` | `1.18·10⁻³` |
+
+- **It holds the pair.** Every find of both holes succeeded at every row of all
+  three, nothing was refused, and the constraints are the same bounded numbers in
+  each — `C_a` L2 at most `5.2·10⁻⁴` (at `1 M`) and `2.2–2.7·10⁻⁴` from `3 M` on,
+  `ℋ` L2 `1.2–1.4·10⁻³` — where the raw feed's rows died within `1 M`.
+- **The residual saturates on the controlled line**, at `7.10` (`4.75 M`, `τ = 10
+  M_A`) and `6.36` (`3.75 M`, `τ = 4 M_A`), and falls after; on the seeds it is
+  `8.45` at `6 M` and still rising. To `2 M` the three agree (`4.5–4.7`): that
+  part is common to every feed, so it is not the lines' mismatch the review asked
+  about — it is the layer against a superposed target while the junk moves the
+  data. From `3 M` on it grows with the source line's distance from the track, in
+  position (the table) and in velocity (`0.043` on the seeds at `6 M`, `0.012` and
+  `−0.008` on the controlled lines) — a distance the model term put there (the
+  second round, below).
+- **The holes' coordinate motion is the gauge's, and the line moves it little.**
+  In every row the holes fall faster than free fall for `2 M`, stop at `2.2–2.4 M`
+  and recede; by `6 M` they are `6.6–8.3` cells outward of their Newtonian seeds
+  and the found separation is `7.95–8.02` against free fall's `7.715`. The line
+  changes that by `10–25 %`: on the seeds, which pull inward at `0.047`, the
+  recession has turned by `6 M` (the track at `+0.004`), and on the controlled
+  lines, which follow the holes out, not yet (`−0.006`, `−0.010`). The transient is
+  longer than `6 M`, and no fall can be read off this window's coordinate
+  separation.
+- **The area falls `2.7 %`** from its peak (`13.62` at `1 M` to `13.25` at `6 M`)
+  in every row alike: the superposed data violate the Hamiltonian constraint
+  (`ℋ` L2 `1.4·10⁻³` at `t = 0`), and the area theorem is a theorem about
+  solutions.
+
+**What put the first round's lines where they are (measured in the review's second
+round, 2026-10-29).** Each row's line obeys its law: the line's own equation,
+driven by the row's measured track (its velocity at every row, linear between),
+reproduces the row's line off the track to `0.05` cells at every row of every
+pair run below. For the PD loop with the model the forcing is `f = c̈_tr − a_N`,
+with the tracks' acceleration read from their velocity every `M/4` (`b3cg48`,
+`τ = 10 M_A`; cells of `1/48`):
+
+| | 1 M | 2 M | 3 M | 4 M | 5 M | 6 M |
+|---|---|---|---|---|---|---|
+| the track's acceleration `c̈_tr` (`+` inward) | −0.0073 | −0.0202 | −0.0123 | −0.0008 | +0.0058 | +0.0087 |
+| the model `a_N` on the lines | 0.0078 | 0.0079 | 0.0080 | 0.0080 | 0.0081 | 0.0081 |
+| the forcing `f = c̈_tr − a_N` | −0.0151 | −0.0281 | −0.0203 | −0.0088 | −0.0023 | +0.0006 |
+| the line off the track, measured | −0.61 | −0.34 | +0.82 | +2.26 | +3.46 | +4.24 |
+| the same from the law and the measured track | −0.62 | −0.37 | +0.80 | +2.24 | +3.43 | +4.20 |
+
+The steady error `e_ss = (c̈_tr − a_N) τ²` is the right formula, and the review's
+reading of it — `c̈_tr ≈ 0` by `5–6 M`, so a line climbing toward `9.4` cells at
+`10 M_A` — had the premise wrong for this row. `b3cg48`'s track accelerates inward
+at `0.0058`, `0.0067`, `0.0075`, `0.0081` and `0.0087` over its last five `M/4`
+(corrected in the review's third look, 2026-10-30), crossing the model's `a_N =
+0.0081` near `5.75 M`: its forcing is within `±0.001` over `5.25–6 M`, and the
+line's `4.24` cells at `6 M` is the response, decaying on `τ`, to the forcing of
+`1–3.5 M`, `−0.015` to `−0.028`, when the gauge decelerated the holes against the
+model's pull. Its acceleration has not settled there, though, and neither has any
+other row's: the controlled rows' tracks cross `a_N` between `5` and `5.75 M` and
+are still rising at `6 M`, `0.0087–0.0133` over the last `M/4` (`1.1–1.7 a_N`, the
+`τ = 4 M_A` rows highest); only the seed-fed row stays near `a_N` (`0.0086`). The
+window does not show a settled acceleration, and so no steady error is reached in
+it. The review's conclusion stands: the model put the line there. "Within `2–4`
+cells" was the window's number and not the law's.
+
+**The second round: the model off, and an integral (measured 2026-10-29/30**, on
+`770f0fe` and `b708384`, each row two `h200debugq` links of under an hour: the PD
+loop without the model at `τ = 4 M_A`, jobs 585662 (`b3nd48`), and at `10 M_A`,
+585663 (`b3ng48`); the PID loop without the model at `10 M_A` with its integral
+started at the data's acceleration `a₀/ω³`, 585664 (`b3ig48`), and started at zero,
+585985 and 586001 (`b3iz48`)**).** The same pair, mesh, layers, momentum and
+cadence; only the law changes. Hole 1, cells of `1/48`, `+` toward the companion:
+
+| | 1 M | 2 M | 3 M | 4 M | 5 M | 6 M |
+|---|---|---|---|---|---|---|
+| the line off the track, PD, model, `10 M_A` (`b3cg48`) | −0.61 | −0.34 | 0.82 | 2.26 | 3.46 | 4.24 |
+| PD, model, `4 M_A` (`b3cd48`) | −0.44 | −0.10 | 0.87 | 1.74 | 2.05 | 1.86 |
+| PD, no model, `10 M_A` (`b3ng48`) | −0.74 | −0.78 | −0.10 | 0.73 | 1.24 | 1.29 |
+| PD, no model, `4 M_A` (`b3nd48`) | −0.55 | −0.43 | 0.27 | 0.86 | 0.96 | 0.60 |
+| PID, no model, `10 M_A`, integral from `a₀/ω³` (`b3ig48`) | −0.55 | −0.22 | 0.88 | 2.10 | 2.88 | 3.11 |
+| PID, no model, `10 M_A`, integral from zero (`b3iz48`) | −0.67 | −0.63 | 0.10 | 0.89 | 1.25 | 1.10 |
+| residual, `b3cg48` | 1.61 | 4.68 | 6.35 | 7.00 | 7.08 | 6.80 |
+| residual, `b3cd48` | 1.75 | 4.74 | 6.16 | 6.30 | 6.08 | 5.78 |
+| residual, `b3ng48` | 1.54 | 4.35 | 5.80 | 6.40 | 6.31 | 6.00 |
+| residual, `b3nd48` | 1.69 | 4.49 | 5.84 | 6.03 | 5.86 | 5.62 |
+| residual, `b3ig48` | 1.66 | 4.72 | 6.29 | 6.76 | 6.59 | 6.17 |
+| residual, `b3iz48` | 1.60 | 4.45 | 5.87 | 6.30 | 6.11 | 5.79 |
+| the track off its seed, `b3ng48` | 0.68 | 0.52 | −0.85 | −3.06 | −5.63 | −8.28 |
+| the track off its seed, `b3nd48` | 0.63 | 0.65 | −0.66 | −3.00 | −5.78 | −8.56 |
+| the track off its seed, `b3iz48` | 0.66 | 0.58 | −0.75 | −3.01 | −5.66 | −8.40 |
+| found separation, `b3ng48`, `b3nd48`, `b3iz48` | 7.922–7.923 | 7.899–7.904 | 7.913–7.921 | 7.955–7.958 | 7.995–8.001 | 8.020–8.031 |
+
+- **Every row holds the pair**: every find of both holes at every row; `C_a` L2
+  the first round's to two digits (`2.70–2.72·10⁻⁴` at `6 M`), `ℋ` L2 lower without
+  the model (`1.17–1.20·10⁻³` at `6 M`, against `1.24·10⁻³` with it at `10 M_A`
+  and `1.38·10⁻³` on the seeds), the areas the same (`13.26` at `6 M`). `C_a` at
+  `t = 0` does not read the source's acceleration: every row starts at
+  `1.622·10⁻⁸`, whether its line starts at the data's acceleration or at none.
+- **Without the model the line stays within `1.3` cells of the track** at either
+  time, and the residual's rise from `3 M` is smaller: peaks `6.05–6.43` on the PD
+  and zero-started PID rows, against `7.10` and `6.36` with the model and `8.45`
+  on the seeds. Across all
+  seven rows the residual at `6 M` follows the line's distance from the track —
+  `5.62` at `0.6` cells, `5.8–6.0` at `1.1–1.9`, `6.2–6.8` at `3.1–4.2`, `8.45` at
+  `6.6` — over a floor of about `5.6`, the superposed target's part that every
+  feed shares (`4.35–4.74` already at `2 M`).
+- **An integral started at the data's acceleration is a model**: `b3ig48`'s
+  integral holds `a_N` from `t = 0` and takes `τ` to forget it, and its line lags
+  as the model's rows did (`3.11` cells at `6 M`). From zero (`b3iz48`) the PID
+  line is the PD line's equal without the model in this window (at most `1.25`
+  cells), and the only one of the no-model lines whose offset falls at the end
+  (`1.25 → 1.10` over `5–6 M`, where the PD line at the same `τ` rises `1.24 →
+  1.29`). As a property of the laws, the PD loop without a model lags any steady
+  acceleration by `c̈ τ²` — at `a_N`, `1.7` cells at `4 M_A` and `10` at `10 M_A`
+  — and the PID loop lags none. These rows do not reach a steady acceleration: the
+  tracks' acceleration rises through `a_N` between `5` and `5.75 M` and is `1.1–1.7
+  a_N` and still climbing at `6 M`, a coordinate jerk of about `5·10⁻³` over `4–6
+  M`. So `c̈ τ²`
+  is not a prediction for them, and the lines' offsets at `6 M` are what each law
+  gives on its measured track (the `0.05`-cell agreement above).
+- **The holes' coordinate motion is still the gauge's**: `8.3–8.6` cells outward of
+  their seeds at `6 M` without the model, `7.5` with it at `10 M_A`, `6.6` on the
+  seeds; the found separation `8.02–8.03` against free fall's `7.715`.
+
+**What this proposes for B4 (step B3's review, second round).** **The PID loop
+without the model, its integral starting at zero, `τ = 10 M_A`** — from this round
+the default of `TrackedSpec`, `SourceLaw` and `test/binary_runs.jl`.
+In this window it matches the best no-model PD row in the line's distance, the
+residual (`5.79` at `6 M`) and `ℋ` (`1.18·10⁻³`), and it is the law that does not
+lag a steady acceleration: the PD loop without a model lags the fall's `c̈_tr ≈
+a_N` by `c̈_tr τ²`, and an orbit's centripetal `v²/R` the same way — at `d = 10 M`,
+`a = 0.005`, `6` cells at `10 M_A` and `1` at `4 M_A` — where the PID loop lags a
+steady jerk by `J τ³`: about a cell for that orbit (`R Ω³ τ³ = 0.02 M`), and about
+a cell for the head-on's *Newtonian* jerk at `6 M` (`2 M_B |ḋ|/d³ ≈ 2·10⁻⁴`). The
+coordinate jerk the gauge's transient puts on the tracks over `4–6 M` is about
+`5·10⁻³`, `25×` that and lasting about `τ`, so it is not steady and `J τ³` predicts
+nothing for these rows; the PID line's `1.10` cells at `6 M` is what its law
+gives on the measured track. It costs a half more of the junk than the PD loop at the same `τ`
+(`0.33` against `0.22`, which `4 M_A` would raise to `0.76`), a state in the
+checkpoint, and a slower forgetting of a wrong start — why its integral starts at
+zero. **The model is not kept**: in this gauge the holes' coordinate acceleration
+is not the Newtonian one while the gauge's transient lasts — opposite to `a_N`
+until about `4 M`, then rising through it and still rising at `6 M` — and over
+`1–3.5 M` the model added `40–100 %` to the forcing the line answers (`a_N =
+0.008` against `c̈_tr` from `−0.007` to `−0.020`). A model could be right only once
+the transient is over, and it is not over by `6 M`. The targets stay on the
+tracks. **What the window does not decide:** the choice between the PID loop at
+`10 M_A` and the PD loop without the model at `4 M_A` rests on a `6 M` window in
+which the gauge's transient has not ended. Running both pair rows to about `12 M`,
+about four sub-hour `h200debugq` links a row, would decide it; that is Erik's call,
+and it has not been run. What none of the laws gives is a fall: the coordinate separation is the
+gauge's for at least `6 M` whatever the line does, and B7's measure of the fall
+must be gauge-invariant.
 
 ### One interior per hole
 
@@ -6984,6 +7816,10 @@ holes need.)
   enough: a smooth layer at `4/M` with a ramp of at least `4G` cells holds
   an inexact target and leaves the exterior what the exact one leaves.
   Step B2 measures it.
+
+  **(Built in step B2** for one hole, as `TrackedSpec` and
+  `tracked_interior`: [What step B2 built and
+  measured](#what-step-b2-built-and-measured-2026-10-26)**.)**
 - **`:fitted`.** Nothing is new but the composition and the tracks; each
   fit is one hole's own.
 
@@ -7022,7 +7858,153 @@ moves.
 
 **One track per hole.** Under the half turn there is one track, and its
 image is the other hole ([The symmetric
-domains](#the-symmetric-domains)).
+domains](#the-symmetric-domains)). **(Built in step B3** for the full box: the
+holes find together, their seeds know their accelerations, and each hole's
+horizon offset from its center, measured on the initial data, corrects every
+find — [What step B3 built and
+measured](#what-step-b3-built-and-measured-2026-10-26)**.)**
+
+**(Built in step B2**, for one hole: [What step B2 built and
+measured](#what-step-b2-built-and-measured-2026-10-26)**.)**
+
+#### What step B2 built and measured (2026-10-26)
+
+Everything the two subsections above propose for one hole is built: the
+quadratic track in `src/tracking.jl`, and the tracked analytic target in
+`src/interior.jl`, `src/tracking.jl` and `src/driver.jl`. The binary's tuple of
+interiors and its gauge source fed by the tracks are step B3's.
+
+**The quadratic track.** A `HorizonTrack` carries, beside step 8d's line,
+the times and origins of its last four finds, the prediction made at the last
+one (`TrackLine`, a quadratic in time about the find) and the prediction in use
+before it, which the new one takes over from (`track_state`, `track_position`,
+`track_center(tr, t)`):
+
+- **Which tracks predict along it (proposed in step B2).** A
+  `TrackedSpec`'s, by default (`quadratic = true`). A `FittedSpec`'s track
+  keeps step 8d's line, and its position is `center_at(track_center(tr), t)` —
+  the same expression — so every `:fitted` run is the run it was, bit for bit
+  (`tracking_tests.jl`, "a fitted case's track is step 8d's line"). Step B3
+  decides whether the binary's `:fitted` holes take the quadratic too; the
+  fitted geometry reads `track_center(tr)`, a line, and would read
+  `track_center(tr, t)` instead.
+- **The prediction (proposed in step B2).** After the first find: the found
+  origin, carried along the velocity and acceleration the previous prediction
+  gives there — the seed's. After the second and third: the chord of the last
+  two finds, its velocity carried to the newer one by the previous
+  prediction's acceleration, which it keeps — step 8d's line where that is
+  zero. From the fourth: the least-squares quadratic in time through the last
+  four (`fit_track_quadratic`, the normal equations in time scaled by the
+  finds' span). The acceleration before the fourth find is the previous
+  prediction's own and not the blend's, whose `c̈` carries the turnover from
+  one prediction to the next.
+- **The blend (proposed in step B2).** The new prediction takes over from the
+  one in use with the quintic smoothstep over the next find interval. "The one
+  in use" is its quadratic Taylor polynomial at the find, so that the center
+  and its velocity are continuous at every find — `C²`, in fact — even where a
+  find comes before the previous blend has ended.
+- **The cadence (proposed in step B2).** `find_count(a, G, h, chunk) =
+  ⌈chunk / √(G h/(4|a|))⌉` finds a chunk, equally spaced, the last of them the
+  record row's: the chunk divided rather than an interval laid end to end, so
+  that the finds fall on the pieces' boundaries and the row still finds.
+  `TrackedSpec(; max_interval)` caps the interval. The finds between two rows
+  run at the pieces' boundaries, on rank 0 inside `on_root` like the row's,
+  without the row; the tracked target finds at **every** row, whatever the
+  `Horizon`'s cadence.
+- **The center-jump check**, a quadratic track's only: a find whose origin
+  is more than `G h/2` from `track_position(tr, t)` is refused by name, as a
+  jump of `r_min` always was.
+- **The record** (`no_cadence` elsewhere): `track_finds` (the finds the chunk
+  made), `track_prediction_max` (the largest prediction error among them, in
+  finest cells), `track_acceleration` and `track_interval`; `track_center` is
+  `track_position` at the row's time.
+- **The run state.** The track's new fields are in the checkpoint with it;
+  the tracked target's row runs on the sphere built at the chunk's **end** from
+  the track before the row's find, and that track is what `track_chunk` holds
+  for it, so that a restart rebuilds the row's sphere (a fitted run's
+  `track_chunk` is the chunk's start, as before).
+
+**(Measured in step B2)** on synthetic finds on a Keplerian circle — holes of
+a binary of total mass `1` at `d/2` from the origin, `Ω = √(1/d³)`, `G = 3`,
+`h = 1/64`, the seed knowing the orbit's acceleration — over two orbits at
+`d = 10` and fifteen at `d = 3` (`tracking_tests.jl`):
+
+| `d` | `|a|` | cadence | quadratic at a find | between finds | the line at a find |
+|---|---|---|---|---|---|
+| `10` | `0.0050` | `1` a chunk of `M` | `0.024 G h/4` | `0.036 G h/4` | `0.43 G h/4` |
+| `3` | `0.056` | `3` a chunk (`Δt = M/3`) | `0.059 G h/4` | `0.091 G h/4` | `0.53 G h/4` |
+
+The cadence alone keeps even the line under the check; the quadratic is
+`9–18×` better and leaves the jerk, `Ω · 1.5 Δt` of the acceleration behind the
+orbit's. **A binary's seed must know its acceleration** (found in step B2):
+seeded with its position and velocity alone at `d = 3`, the first interval is
+a whole chunk, the prediction at `1 M` is `2.4 G h/4` off — over the check's
+`2 G h/4` — and the find is refused. Step B3's seed takes the orbit's
+acceleration from the initial data (`seed_track(…; acceleration)`), or starts
+with a short `max_interval`.
+
+**The tracked analytic target.** A case whose `interior` is a
+`TrackedSpec(T; r_0, r_1, …)` runs step 5's `:damped` sphere of those radii
+about the track, relaxing toward the boosted, translated Kerr-Schild hole of the
+background's mass and spin on the track's line — the `isbits` target metric an
+`Interior` already carries — rebuilt at every piece's midpoint by
+`tracked_interior(spec, track, t; mass, spin)`, on pieces of at most `h/(4|v|)`
+(proposed in step B2). Being an `Interior`, its core follows its target with the
+target's rate and its layer carries `(1 − w) ∂_t u_target`, the rate of the
+target along its own line: nothing in the kernel is new.
+
+- **Bit for bit where it should be (measured in step B2).** The target built
+  from the analytic seed at `t = 0` is the case's background bit for bit —
+  `boost(…, 0 − v)`, not `−v`, keeps a zero component `+0` as the case's own
+  `(−v, 0, 0)` has it — and the right-hand side on it is the analytic layer's
+  bit for bit (`tracked_target_tests.jl`). Every run that does not ask for the
+  tracked target computes what it did before step B2 bit for bit: the analytic
+  `:damped` quadrant with its finds, a moving `:fitted` hole with step 8′'s
+  ramp and the resting hole with the sampled source, digests of `u` and of
+  every record row against `2bdb584`.
+- **The perturbations** of the sensitivity study are the spec's:
+  `mass_factor`, `velocity_offset` and `center_offset` move the target and its
+  sphere together, the track unchanged, and `seed_velocity_offset` starts the
+  track off the hole's velocity (`test/octant_runs.jl interior=tracked
+  target_mass= target_dv= target_dx= seed_dv=`).
+- **Refused:** a `TrackedSpec` on a background that is not a translated,
+  boosted Kerr-Schild hole, and `r_0`/`r_1` beside one.
+
+**The moving hole on the tracked target (measured in step B2**;
+[`SINGULARITY_HANDLING.md`, "The tracked analytic
+target"](SINGULARITY_HANDLING.md#the-tracked-analytic-target-step-b2-2026-10-26)**).**
+The boosted Kerr-Schild `a = 0` hole at `v = 1/5` on the quadrant, the production
+`:damped` layer (`r_0 = 5/8`, `r_1 = 23/16`, `4/M` with the target's rate), `1/24`
+and `1/32`, to `40 M`, `chunk = M`, one H200 a row, against the analytic layer rerun
+on the same commit and cadence:
+
+- **The tracked target is the analytic layer to the tracking.** `ℋ` just outside the
+  horizon is the analytic layer's to `0.9992–1.0009` at `1/24` and to `10⁻⁴` at
+  `1/32` at every time — the acceptance's "within `1.5×`" by three orders — and
+  every shell from `r = 3` out to `10⁻⁴`; both converge at order four, `4.01–4.15` in
+  `ℋ` and `3.97–4.05` in the error just outside the horizon, `4.00–4.04` farther out.
+  The track is `1.2·10⁻⁴` and `5.2·10⁻⁵` cells off the analytic center at `40 M`,
+  every prediction within `6·10⁻⁷` cells of its find, and the row costs what the
+  analytic one does (`38` and `88 s/M`).
+- **The sensitivity** at `1/24`: a target wrong by `1 %` in mass, `0.02` in velocity
+  or a cell (`0.042 M`) in center holds the band between the layer and the horizon at
+  a steady `7.4–7.9×`, `17–20×` and `16–26×` (a cell ahead, a cell behind) the exact
+  target's `ℋ` from `4 M` to `40 M`, its layer residual `7–8×`, `14–17×` and
+  `53–84×`; the exterior from `r = 3` out sees one transient pulse (`1.2–3.1×` at
+  `8 M` in `[3, 5)`) and is back at the exact target's `0.96–1.25×` by `24–40 M`.
+  Step 8c's rule holds from `r = 3` out, and not between the layer and the horizon. **What a binary's target misses** — the
+  companion's tidal field over the layer, `5·10⁻⁴` of the metric at `d = 10` and
+  `0.02` at `d = 3`, and the orbit's acceleration across it — is a twentieth of the
+  mass row's `1 %` at `d = 10` and twice it at `d = 3`: at `d = 10` the tracked target
+  should be the exact one's to tens of per cent, and late in the inspiral, by the
+  mass row's scale, about `15×` just outside each horizon unless the target learns
+  the tidal field **(predicted)**.
+- **The recovery**: a track seeded `0.05` too fast puts the target `1.2` cells ahead
+  at its second find, at `1 M` (accepted: the check is `1.5` cells at `1/24`) — the
+  first, at `t = 0`, keeps the seed's velocity — whose chord is the hole's velocity,
+  and is the tracked target's track from `2 M` on, with no refusal; the layer residual is the exact target's from `4 M`, and the transient
+  the first `2 M` sent out (`ℋ` `36×` just outside the horizon at `4 M`) has left
+  every shell by `40 M`.
 
 ### The common horizon and the handover
 
@@ -7093,7 +8075,25 @@ Three sources, in the order the steps use them.
 - **(Proposed:)** an `isbits` superposition belongs in `SpacetimeMetrics`
   upstream, where the backgrounds live. Until then it is written here, with
   the attenuation option `w_A = exp(−|x − c_A|²/ℓ²)` that XCTS's free data
-  use.
+  use. **(Decided by Erik 2026-10-26: here**, `SuperposedMetric` in
+  `src/holes.jl`, built in step B3**.)**
+- **The plain sum is not a 3+1 metric inside the horizons (found in step
+  B3).** `α² = −g_tt + β_i β^i` is negative on the side of each hole that faces
+  its companion, where the two Kerr-Schild shifts `2H l_i` cancel: for an
+  equal-mass pair of total mass `1` at `d = 8` out to `0.52 M` from the hole's
+  center (`−0.154` on the sphere `5/16`, the single hole's core radius times
+  `M_A`), at `d = 10` to `0.40`, at `d = 12` to `0.35`, and through the whole
+  horizon at `d = 4`. A layer or a core cannot be put there. **(Proposed in step
+  B3:)** turn each hole's companions off near it, `w_A = Π_{B≠A}(1 −
+  e^{−r_B²/λ_B²})`, `λ_B = 4 M_B` (`binary_case(; companion = 4)`, the
+  default): the least `α²` is then within `0.01` of the single hole's from the
+  core radius out at `d = 8`, and the companion keeps `98 %` of its field at the
+  midpoint. XCTS's own attenuation is kept beside it (`attenuation`).
+- **Both momenta are built (step B3):** `binary_case(; momentum =
+  :superposition)`, the data's own `∂_t g`, the default, and `:gauge`, `∂_t g_tb`
+  from `C_a = 0` at `t = 0` under the holes' source (`gauge_consistent_state`,
+  the four equations of `gauge_consistent_momentum` on the data's `g` and `∂g`),
+  which the Dirichlet hook writes too.
 
 **2. XCTS** (step B8, for the inspiral). It solves the five XCTS fields on
 superposed Kerr-Schild free data (SpEC's direct-K variant), compactified to
@@ -7228,6 +8228,16 @@ A regrid moves a block by at most one level, and near merger a hole moves
 `0.3 M` a chunk, 19 cells at `h = 1/64`. The travel margin has to carry the
 finest level ahead of the hole, as it does for a single hole.
 
+**(Built in step B3:** the per-hole floors and their union (`UnionLevelBounds`),
+the indicator on the composite mask, the travel from the holes' seeds — `|v_A| +
+|a_A| · chunk`, the fastest hole's (proposed in step B3) — and `holes_forest`,
+the frozen hierarchy about every hole. On a pair of unit holes at `d = 8` in the box
+`[−16, 16]³` (`q = 2`, cap at `h = 1/8`) the initial-data cycle converges in five
+passes at `1800` blocks, both holes found at every row of a `0.2 M` regridding
+run (a local smoke run, not in the suite); the head-on runs are on a frozen
+hierarchy. The wave zone's and the common geometry's floors are
+steps B5's and B7's.**)**
+
 ### The waveform
 
 **`Ψ₄` at the extraction points, not on the mesh** **(proposed)**.
@@ -7277,6 +8287,11 @@ for step 9's viewers.
 **The checkpoint** carries everything the loop now carries: the tracks,
 the common track, the handover state, the predictions' history and the
 extraction's running integrals.
+
+**(Built in step B3** for the holes: the per-hole rows, the separation and the
+phase, the constraints under the composite mask, and the tracks with their
+histories, the horizon offsets and the finder's seeds in the checkpoint — [What
+step B3 built and measured](#what-step-b3-built-and-measured-2026-10-26)**.)**
 
 ### What it costs (predicted)
 
@@ -7372,12 +8387,27 @@ hours on one H200.
 1. **The gauge and the interior together**: (α) the tracked Kerr-Schild
    source with `:damped` per hole, built first, or (β) the damped harmonic
    gauge with `:fitted`. Steps B1 and B2 measure both on one moving hole
-   before step B3 commits the composition.
+   before step B3 commits the composition. **(Decided by Erik 2026-10-26: (α)**
+   — the composite tracked Kerr-Schild source of B1's `TrackedHole`s, fed by
+   the per-hole tracks, with B2's tracked `:damped` target per hole; (β) is not
+   built into the binary, and the per-hole interior is kept abstract enough for
+   a `:fitted` hole to be added later. Built in step B3: [What step B3 built and
+   measured](#what-step-b3-built-and-measured-2026-10-26).**)** **(Measured in
+   steps B1 and B2.)**
+   On one hole moving at `v = 1/5`, (β) is `6–31×` the Kerr-Schild hole's `ℋ`
+   and `C_a` outside `r = 3` at `1/32` and still growing at `40 M` (B1), and
+   (α)'s tracked target is the analytic layer to `4·10⁻³` everywhere and order four
+   (B2): a target wrong by `1 %` in mass costs `7.5×` just outside the horizon and
+   nothing from `r = 3` out ([What step B2 built and
+   measured](#what-step-b2-built-and-measured-2026-10-26)).
 2. **The case**: `GHCase` with `holes` and the background demoted to data,
    or a separate `BinaryCase`. The first keeps one driver and makes the
-   single hole a binary with one hole.
+   single hole a binary with one hole. **(Decided by Erik 2026-10-26:
+   `GHCase(…; holes)`**, one driver, no `BinaryCase`; built in step B3**.)**
 3. **The superposed metric**: upstream in `SpacetimeMetrics` (not yet
-   requested), or kept here.
+   requested), or kept here. **(Decided by Erik 2026-10-26: kept here**, an
+   `isbits` superposition with the optional attenuation, `SuperposedMetric` in
+   `src/holes.jl`; built in step B3**.)**
 4. **XCTS**: its default Dirichlet inner boundary on spheres inside the
    cores, or its isolated-horizon data extended inward. And the file
    handoff from a host tool.
@@ -7385,6 +8415,27 @@ hours on one H200.
    hook at a smaller `L` if step B5 shows its reflection is small enough.
 6. **Subcycling in TreeAMR**: the largest cost lever, about `4×`, and not
    needed for G7 or G8.
+7. **What feeds the composite source (raised in step B3).** Fed by the tracks,
+   as decided in item 1, it did not hold a head-on pair past `1 M` at `1/48` or
+   `1/24`, with either initial momentum; fed by the holes' Newtonian seeds it ran
+   every row to `2 M`. A seed's quadratic is enough for a head-on fall over a few
+   `M` and not for an orbit: the choices are an integrated trajectory — a
+   Newtonian or post-Newtonian orbit of the holes, corrected slowly by the finds
+   — that the source follows and the tracks only check, or (β), whose gauge knows
+   no trajectory. **(Proposed in step B3:** the seeds for the head-on of B3; the
+   integrated trajectory for B4 onward, before (β).**)** **(Decided by Erik
+   2026-10-26: design and test a slow control law for the track-fed source, and
+   start with one moving hole fed by its own track.** Built and measured in step
+   B3's review, its design proposed there: [The controlled source
+   line](#the-controlled-source-line) — a critically damped loop onto each
+   track, the targets left on the tracks. The first round's PD loop with the
+   Newtonian model holds one hole as the analytic source does and the head-on
+   pair to `6 M`, but the model, wrong while the gauge's transient lasts, put its
+   line up to `4.2` cells off the holes; Erik then asked for the model off and an
+   integral term (second round), and the PID loop without the model, its integral
+   from zero, at `τ = 10 M_A`, is proposed for B4: within `1.3` cells of the holes,
+   the residual and `ℋ` at the best rows', and no lag of a steady acceleration.
+   The holes' coordinate motion stays the gauge's.**)**
 
 ## Possible extensions
 
@@ -7714,3 +8765,9 @@ rate](SINGULARITY_HANDLING.md#the-moving-damped-layers-target-rate-2026-10-21)).
 It was not compared with G5's rows, which differ in chart, speed (`0.3`),
 order (`q = 2`) and spin. A moving spinning Kerr-Schild hole, `a = 9/10`
 above all, is still open.
+
+**Built (2026-10-25, step B1)**: the damped harmonic gauge of the second item,
+in SpECTRE's form (where `μ_L2` carries `log(1/α)^{e_L2}`, not `L^{e_L2}`),
+rolled on from the hole's own source, and run on the boosted and the resting
+`a = 0` hole on the quadrant — [What step B1 built and
+measured](#what-step-b1-built-and-measured-2026-10-25).

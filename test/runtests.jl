@@ -9,8 +9,9 @@ using TreeGeneralizedHarmonic
 
 # The MPI test's `mpiexec` job, started now where the machine has room for
 # it beside the suite, so that its compilation overlaps the files below
-# rather than following them; `mpi_tests.jl` collects it, or runs it then
-# where it was not started (added 2026-10-19). See `mpi_jobs.jl`.
+# rather than following them, and run to its end now where it has not, while
+# this process is small (amended 2026-10-30); `mpi_tests.jl` collects it
+# (added 2026-10-19). See `mpi_jobs.jl`.
 include("mpi_jobs.jl")
 start_mpi_job!()
 
@@ -72,6 +73,9 @@ start_mpi_job!()
     include("rotation_tests.jl")    # 2026-10-04: the rotating octant is the box
     include("gauge_source_tests.jl")  # 2026-10-02: the algebraic Kerr-Schild source
     include("boosted_tests.jl")     # 2026-10-20: a moving hole on the quadrant
+    include("tracked_target_tests.jl")  # step B2: the tracked analytic target
+    include("holes_tests.jl")       # step B3: several holes in one case
+    include("source_line_tests.jl")  # step B3: the controlled source line
     include("simwatch_tests.jl")    # 2026-10-02: SimWatch status files
     include("type_tests.jl")
     include("threading_tests.jl")

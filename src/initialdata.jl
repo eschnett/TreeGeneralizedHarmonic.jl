@@ -155,7 +155,7 @@ right-hand side needs a case two steps before there is a driver, and a
 struct cannot be defined twice. `driver.jl` adds `evolve!` and the
 refinement fields step 6 needs.
 """
-struct GHCase{T,B,D,I,R,H,X,E,S}
+struct GHCase{T,B,D,I,R,H,X,E,S,Q}
     background::B
     box::NTuple{3,Tuple{T,T}}
     periodic::NTuple{3,Bool}
@@ -170,7 +170,8 @@ struct GHCase{T,B,D,I,R,H,X,E,S}
     horizon::H                   # a `Horizon`, or `nothing`
     bounds::X                    # a `StateBounds`, or `nothing`
     chunk::T
-    gauge::S                     # a `KerrSchildSource`, or `nothing` (2026-10-02)
+    gauge::S                     # an `AlgebraicGaugeSource`, or `nothing` (2026-10-02)
+    holes::Q                     # an `NTuple` of `HoleSpec`s, or `nothing` (step B3)
 end
 
 function GHCase(::Type{T}, background; box, periodic,
@@ -179,11 +180,23 @@ function GHCase(::Type{T}, background; box, periodic,
                 interior=nothing, r_0=zero(T), r_1=zero(T), margin::Integer=8,
                 w_ramp=T(1 // 2), ρ_ramp=T(1 // 2), target=nothing,
                 refinement=nothing, horizon=nothing, bounds=nothing,
-                chunk=zero(T), gauge_source=nothing) where {T}
-    gauge_source === nothing || gauge_source isa KerrSchildSource{T} ||
+                chunk=zero(T), gauge_source=nothing, holes=nothing,
+                hole_target::Symbol=:superposed, source_feed::Symbol=:tracks,
+                momentum::Symbol=:superposition) where {T}
+    # The holes (step B3): every hole's numbers are its `HoleSpec`'s, and the
+    # case's center, interior and source follow from them (`case_holes`).
+    if holes !== nothing
+        hk = case_holes(T, background, holes; interior, r_0, r_1, target, center,
+                        velocity, gauge_source, hole_target, source_feed, momentum)
+        holes, interior, center, velocity = hk.holes, hk.interior, hk.center, hk.velocity
+    end
+    gauge_source === nothing || gauge_source isa AlgebraicGaugeSource{T} ||
         throw(ArgumentError(
             "gauge_source is nothing (the sampled H_a(x), or none on a harmonic " *
-            "background) or a KerrSchildSource{$T}, got a $(typeof(gauge_source))."))
+            "background) or an algebraic source in the case's type $T (a " *
+            "KerrSchildSource{$T}, a CompositeKerrSchildSource{$T}, a " *
+            "DampedHarmonicSource{$T} or a RolledGaugeSource{$T}), got a " *
+            "$(typeof(gauge_source))."))
     gauge_source !== nothing || isharmonic(background) || isstatic(background) ||
         throw(ArgumentError(
         "this background is neither harmonic nor static, so its prescribed " *
@@ -238,23 +251,278 @@ function GHCase(::Type{T}, background; box, periodic,
             "a tracked case's layer target is the FittedSpec's own `target`; " *
             "the case's `target` keyword is for step 5's sphere."))
         interior
+    elseif interior isa TrackedSpec
+        # The tracked analytic target (step B2): the case holds the rule, and
+        # the sphere and its target are built from the track once per piece.
+        # The target is a Kerr-Schild hole with this background's mass and
+        # spin, so the background must be one.
+        interior isa TrackedSpec{T} || throw(ArgumentError(
+            "a case's TrackedSpec is stated in the case's own type $T, got a " *
+            "$(typeof(interior))."))
+        target === nothing || throw(ArgumentError(
+            "a tracked analytic target is the Kerr-Schild hole on the track's " *
+            "line, built every piece (tracked_interior); the case's `target` " *
+            "keyword is for step 5's sphere."))
+        _kerr_schild_parameters(background)
+        interior
+    elseif interior isa HolesSpec
+        # A case of several holes (step B3): the rule the composite is built by
+        # per piece from the tracks; `case_holes` made it from the holes.
+        interior
     else
         Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
                  margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp, target=target)
     end
     check_case_bounds(bounds, int, T)
-    ε = case_dissipation(ε_KO, c, T)
+    ε = int isa HolesSpec ? holes_dissipation(ε_KO, holes, T) :
+        case_dissipation(ε_KO, c, T)
     # The algebraic source must make this background exact, or the run starts
-    # with a gauge transient (added 2026-10-02).
-    gauge_source === nothing ||
+    # with a gauge transient (added 2026-10-02). A case of several holes has no
+    # analytic background to be exact on: its source is checked hole by hole
+    # (`check_holes_source`, step B3).
+    if int isa HolesSpec
+        check_holes_source(holes, gauge_source, T)
+    elseif gauge_source !== nothing
         check_gauge_source(background, gauge_source, T; center=center_at(c, zero(T)),
-                           scale=gauge_source.M)
+                           scale=gauge_scale(gauge_source))
+    end
     return GHCase{T,typeof(background),typeof(damping),typeof(int),
                   typeof(refinement),typeof(horizon),typeof(bounds),
-                  typeof(ε),typeof(gauge_source)}(
+                  typeof(ε),typeof(gauge_source),typeof(holes)}(
         background, ntuple(d -> (T(box[d][1]), T(box[d][2])), Val(3)),
         ntuple(d -> Bool(periodic[d]), Val(3)), refl, rot, ε, damping, T(γ2), c,
-        int, refinement, horizon, bounds, T(chunk), gauge_source)
+        int, refinement, horizon, bounds, T(chunk), gauge_source, holes)
+end
+
+"""
+    case_holes(T, background, holes; …) -> (; holes, interior, center, velocity)
+
+What a case's `holes` decide (added in step B3; `CODE.md`, "A case without a
+background"): the [`HoleSpec`](@ref)s as an `NTuple` in the case's type, and the
+case's interior, center and velocity, which are the holes' and are refused beside
+them.
+
+- **One hole** is the case it was (decided by Erik 2026-10-26: the single hole
+  is a binary with one hole): its background is its own Kerr-Schild hole, whose
+  mass, spin and velocity must be the spec's; its interior is the spec's
+  `TrackedSpec`, and its center the spec's line. `evolve!` runs it as it runs a
+  case built with `interior = TrackedSpec(…)`, bit for bit.
+- **Several holes**: the background is the data (a [`SuperposedMetric`](@ref),
+  say), the interior the [`HolesSpec`](@ref) of the holes' rules, the center the
+  center of mass ([`holes_center`](@ref)), and the gauge source a
+  [`CompositeKerrSchildSource`](@ref) of the holes (pairing (α), decided by Erik
+  2026-10-26), which the driver feeds from the tracks.
+"""
+function case_holes(::Type{T}, background, holes; interior, r_0, r_1, target, center,
+                    velocity, gauge_source, hole_target, source_feed=:tracks,
+                    momentum=:superposition) where {T}
+    holes isa Tuple && !isempty(holes) && all(h -> h isa HoleSpec{T}, holes) ||
+        throw(ArgumentError(
+            "holes is a tuple of at least one HoleSpec{$T} — (spec,) for one hole — " *
+            "got $(typeof(holes))."))
+    refused = Pair{String,Bool}["interior" => interior !== nothing,
+                                "r_0" => !iszero(r_0), "r_1" => !iszero(r_1),
+                                "target" => target !== nothing,
+                                "center" => any(!iszero, center),
+                                "velocity" => velocity !== nothing]
+    bad = [k for (k, b) in refused if b]
+    isempty(bad) || throw(ArgumentError(
+        "a case with `holes` takes its interior, center and velocity from them, so " *
+        "it refuses $(join(bad, ", ")) beside them: each hole's are its HoleSpec's."))
+    hole_target in (:superposed, :own) || throw(ArgumentError(
+        "hole_target is :superposed (each layer relaxes toward the superposition of " *
+        "all the holes on their tracks) or :own (toward its own hole's), got " *
+        ":$hole_target."))
+    source_feed in (:tracks, :seed, :controlled) || throw(ArgumentError(
+        "source_feed is :tracks (the composite source's holes follow the tracks, " *
+        "pairing (α)), :seed (they follow their HoleSpecs' quadratics) or " *
+        ":controlled (they follow the controlled source lines, each with its own " *
+        "TrackedSpec's control_time), got :$source_feed."))
+    momentum in (:superposition, :gauge) || throw(ArgumentError(
+        "momentum is :superposition (the data's own ∂_t g) or :gauge (∂_t g_tb from " *
+        "C_a = 0 at t = 0), got :$momentum."))
+    K = length(holes)
+    if K == 1
+        (source_feed === :tracks && momentum === :superposition) || throw(ArgumentError(
+            "source_feed and momentum are several holes' switches; a case of one hole " *
+            "is the case it was built from, and takes neither: its feed is its " *
+            "TrackedSpec's own source_feed."))
+        h = holes[1]
+        M, a, v = _kerr_schild_parameters(background)
+        (T(M) == h.mass && T(a) == h.spin[3] &&
+         SVector{3,T}(T(v[1]), T(v[2]), T(v[3])) == h.velocity) || throw(ArgumentError(
+            "a case of one hole is built from its own background, and the hole's " *
+            "HoleSpec must be that background's: mass $(h.mass), spin $(h.spin[3]) " *
+            "and velocity $(Tuple(h.velocity)) against the background's $M, $a and $v."))
+        hole_target === :superposed || throw(ArgumentError(
+            "hole_target chooses between the superposition and a hole's own target, " *
+            "which for one hole are one metric; leave it unset."))
+        return (holes=holes, interior=h.interior, center=h.center, velocity=h.velocity)
+    end
+    hs = ntuple(A -> holes[A], Val(K))
+    for A in 1:K
+        hs[A].interior.source_feed == FEED_OWN || throw(ArgumentError(
+            "a case of several holes takes its source feed from the case " *
+            "(source_feed = :$source_feed), and hole $A's TrackedSpec asks for " *
+            ":$(feed_name(hs[A].interior.source_feed)): leave the specs' at :own, " *
+            "and give the controlled feed's time as each spec's control_time."))
+    end
+    source_feed === :controlled &&
+        any(A -> !(hs[A].interior.control_time > 0), 1:K) && throw(ArgumentError(
+            "source_feed = :controlled follows each hole's track through a loop of " *
+            "its own TrackedSpec's control_time, which must be positive; got " *
+            "$(Tuple(hs[A].interior.control_time for A in 1:K))."))
+    c = holes_center(hs)
+    return (holes=hs,
+            interior=HolesSpec{K,typeof(hs[1].interior)}(ntuple(A -> hs[A].interior,
+                                                                Val(K)),
+                                                         hole_target === :superposed,
+                                                         feed_code(source_feed),
+                                                         momentum === :gauge),
+            center=c.c0, velocity=c.v)
+end
+
+# A case of several holes is not a hole the background classifies, so its
+# velocity is the holes' center of mass's, given (step B3).
+case_velocity(::Type{T}, background::SuperposedMetric, velocity) where {T} =
+    velocity === nothing ? zero(SVector{3,T}) : SVector{3,T}(velocity...)
+
+# `ε_KO` of a case of several holes (step B3): a number, or one
+# `HorizonDissipation` per hole about its initial line, as `HolesDissipation`.
+holes_dissipation(ε::Real, holes, ::Type{T}) where {T} = T(ε)
+holes_dissipation(ε, holes, ::Type{T}) where {T} = throw(ArgumentError(
+    "a case of $(length(holes)) holes takes ε_KO as a number or a HolesDissipation, " *
+    "one HorizonDissipation per hole, got a $(typeof(ε))."))
+
+function holes_dissipation(ε::HolesDissipation, holes::NTuple{K}, ::Type{T}) where {K,T}
+    ε isa HolesDissipation{T,K} || throw(ArgumentError(
+        "a case of $K holes takes ε_KO as a HolesDissipation{$T,$K}, one " *
+        "HorizonDissipation per hole, got a $(typeof(ε))."))
+    all(A -> ε.profiles[A].center == initial_line(holes[A]), 1:K) || throw(ArgumentError(
+        "the dissipation profiles are centered on $(map(p -> p.center, ε.profiles)) " *
+        "and the holes start on $(map(initial_line, holes)): each profile rises from " *
+        "its own hole's horizon, about that hole's line."))
+    return ε
+end
+
+"""
+    check_holes_source(holes, src, T)
+
+The `t = 0` check of a case of several holes' gauge source (proposed in step B3,
+replacing [`check_gauge_source`](@ref)'s for it): a superposition has no analytic
+`−Γ_a` to be exact on, so the source must be the holes' own — a
+[`CompositeKerrSchildSource`](@ref) whose `K` holes carry each `HoleSpec`'s mass,
+spin, center, velocity and acceleration at `t = 0` — and each hole's own
+Kerr-Schild source must make that hole's own metric exact, which is what the
+composite is near the hole, `w_A = 1 − O((r_A/d)⁴)`. What the superposition
+leaves, `H + Γ ≠ 0` where the fields overlap, is the data's constraint violation
+and the record's first `C_a`.
+"""
+function check_holes_source(holes::NTuple{K}, src, ::Type{T}) where {K,T}
+    src isa CompositeKerrSchildSource{T,K} || throw(ArgumentError(
+        "a case of $K holes runs on the composite tracked Kerr-Schild source of its " *
+        "holes (pairing (α), decided by Erik 2026-10-26), a " *
+        "CompositeKerrSchildSource{$T,$K}; got a $(typeof(src)). binary_case builds " *
+        "it from the holes, and the driver feeds it from the tracks."))
+    for A in 1:K
+        h, th = holes[A], src.holes[A]
+        ks = KerrSchildSource(T; M=h.mass, spin=h.spin, velocity=h.velocity)
+        (th.ks == ks && th.c0 == h.center && th.v0 == h.velocity &&
+         th.acc == h.acceleration && iszero(th.t_p)) || throw(ArgumentError(
+            "hole $A of the composite source is not the case's hole $A at t = 0: the " *
+            "source holds M = $(th.ks.M), center $(Tuple(th.c0)), velocity " *
+            "$(Tuple(th.v0)), acceleration $(Tuple(th.acc)) at t_p = $(th.t_p), and " *
+            "the HoleSpec $(h.mass), $(Tuple(h.center)), $(Tuple(h.velocity)), " *
+            "$(Tuple(h.acceleration)). Build it with holes_source(holes)."))
+        check_gauge_source(hole_metric(h), ks, T; center=h.center, scale=h.mass)
+    end
+    return nothing
+end
+
+"""
+    holes_source(T, holes) -> CompositeKerrSchildSource
+
+The composite tracked Kerr-Schild source of the holes at `t = 0` (added in step
+B3): each hole a [`TrackedHole`](@ref) of its mass and spin on its initial
+center, velocity and acceleration, `t_p = 0` — the source the first piece runs
+on before the tracks feed it.
+"""
+holes_source(::Type{T}, holes::NTuple{K,HoleSpec{T}}) where {T,K} =
+    CompositeKerrSchildSource(ntuple(A -> TrackedHole(T; M=holes[A].mass,
+                                                      spin=holes[A].spin,
+                                                      center=holes[A].center,
+                                                      velocity=holes[A].velocity,
+                                                      acceleration=holes[A].acceleration),
+                                     Val(K))...)
+
+"""
+    binary_case(T = Float64; holes, halfwidth, chunk, horizon, ε_KO = 1//2,
+                γ0 = holes_damping(…), γ2 = 0, refinement = nothing,
+                bounds = nothing, attenuation = nothing, companion = 4,
+                hole_target = :superposed, source_feed = :tracks,
+                momentum = :superposition)
+
+A case of several holes on the full box `[−halfwidth, halfwidth]³`, Dirichlet at
+every face (added in step B3; `CODE.md`, "Binary black holes"): the data the
+superposed boosted Kerr-Schild holes ([`superposed_kerr_schild`](@ref)) with each
+hole's companions turned off within `companion · M_B` of hole `B` — `4` by default
+**(proposed in step B3)**: the plain superposition is not a 3+1 metric inside the
+horizons, see `SuperposedMetric` — and XCTS's optional attenuation, the composite tracked Kerr-Schild source of the holes
+([`holes_source`](@ref), pairing (α)), `γ0` the three Gaussians
+([`holes_damping`](@ref)), each hole's interior its `HoleSpec`'s tracked target,
+and a [`Horizon`](@ref) to track the holes with, which has no default.
+
+`hole_target`, `source_feed` and `momentum` are [`HolesSpec`](@ref)'s switches.
+
+The Dirichlet hook writes the data at `t = 0` — frozen — whatever the time
+([`dirichlet`](@ref); `CODE.md`, "The outer boundary", option 1): a superposition
+has no solution to write at a later time. For holes at rest that is the data at
+every time anyway.
+"""
+function binary_case(::Type{T}=Float64; holes, halfwidth, chunk, horizon,
+                     ε_KO=T(1 // 2), γ0=nothing, γ2=zero(T), refinement=nothing,
+                     bounds=nothing, attenuation=nothing, companion=4,
+                     hole_target::Symbol=:superposed, source_feed::Symbol=:tracks,
+                     momentum::Symbol=:superposition) where {T}
+    holes isa Tuple && length(holes) ≥ 2 || throw(ArgumentError(
+        "binary_case takes at least two HoleSpecs; a single hole is " *
+        "kerr_schild_case's (or GHCase(…; holes = (spec,)))."))
+    hs = ntuple(A -> holes[A], Val(length(holes)))
+    data = superposed_kerr_schild(T, hs; attenuation=attenuation, companion=companion)
+    L = T(halfwidth)
+    return GHCase(T, data; box=ntuple(_ -> (-L, L), Val(3)), periodic=(false, false, false),
+                  ε_KO=ε_KO, γ0=γ0 === nothing ? holes_damping(T, hs) : γ0, γ2=γ2,
+                  refinement=refinement, horizon=horizon, bounds=bounds, chunk=chunk,
+                  gauge_source=holes_source(T, hs), holes=hs, hole_target=hole_target,
+                  source_feed=source_feed, momentum=momentum)
+end
+
+"""
+    head_on_holes(T = Float64; d, masses = (1//2, 1//2), axis = 1, interior,
+                  spins = (0, 0)) -> NTuple{2,HoleSpec}
+
+A pair at rest at separation `d` on the coordinate axis `axis`, the center of mass
+at the origin — hole 1 at `−d M_2/M`, hole 2 at `+d M_1/M` — each with the
+Newtonian acceleration toward the other, `M_B/d²`, as its seed knows it (step B2's
+hand-over), and each spinning `spins[A]` (a length) about `z` (added in step B3).
+`interior` is a [`TrackedSpec`](@ref) stated for a hole of mass one, which each
+hole takes times its own mass ([`scaled_spec`](@ref); `CODE.md`'s units: every
+single-hole setting scales by `M_A`).
+"""
+function head_on_holes(::Type{T}=Float64; d, masses=(1 // 2, 1 // 2), axis::Integer=1,
+                       interior, spins=(0, 0)) where {T}
+    axis in 1:3 || throw(ArgumentError("axis is 1, 2 or 3, got $axis."))
+    M1, M2 = T(masses[1]), T(masses[2])
+    M = M1 + M2
+    D = T(d)
+    D > 0 || throw(ArgumentError("the separation must be positive, got $d."))
+    e = SVector{3,T}(ntuple(k -> k == axis ? one(T) : zero(T), Val(3)))
+    c1, c2 = (-D * M2 / M) * e, (D * M1 / M) * e
+    a1, a2 = (M2 / (D * D)) * e, (-M1 / (D * D)) * e
+    return (HoleSpec(T; mass=M1, spin=(0, 0, spins[1]), center=c1, acceleration=a1,
+                     interior=scaled_spec(interior, M1)),
+            HoleSpec(T; mass=M2, spin=(0, 0, spins[2]), center=c2, acceleration=a2,
+                     interior=scaled_spec(interior, M2)))
 end
 
 # The `rotating` keyword as the case stores it (added 2026-10-04): `(0, 0)` for
@@ -355,6 +623,29 @@ check_case_bounds(::Nothing, int, ::Type) = nothing
 # A tracked case has no radius to hold the gate against until its geometry is
 # built; `check_bounds_gate` asserts it against each one (step 8d).
 check_case_bounds(::Nothing, ::FittedSpec, ::Type) = nothing
+check_case_bounds(::Nothing, ::TrackedSpec, ::Type) = nothing
+check_case_bounds(::Nothing, ::HolesSpec, ::Type) = nothing
+
+# Several holes (step B3): the gate inside every hole's `r_1`.
+function check_case_bounds(bd, spec::HolesSpec, ::Type{T}) where {T}
+    for s in spec.specs
+        check_case_bounds(bd, s, T)
+    end
+    return nothing
+end
+
+# The tracked analytic target's sphere has its radii (step B2): the gate
+# inside `r_1`, as for step 5's.
+function check_case_bounds(bd, spec::TrackedSpec, ::Type{T}) where {T}
+    bd isa StateBounds{T} || throw(ArgumentError(
+        "a case's bounds are a StateBounds{$T} or `nothing`, got a " *
+        "$(typeof(bd))."))
+    bd.r_gate ≤ spec.r_1 || throw(ArgumentError(
+        "the range projection's gate r_gate = $(bd.r_gate) lies outside the " *
+        "layer's outer radius r_1 = $(spec.r_1): it would project evolved " *
+        "points."))
+    return nothing
+end
 
 function check_case_bounds(bd, ::FittedSpec, ::Type{T}) where {T}
     bd isa StateBounds{T} || throw(ArgumentError(
@@ -400,11 +691,11 @@ and every evaluation.
 with_interior(case::GHCase{T}, interior) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(interior),
            typeof(case.refinement),typeof(case.horizon),typeof(case.bounds),
-           typeof(case.ε_KO),typeof(case.gauge)}(
+           typeof(case.ε_KO),typeof(case.gauge),typeof(case.holes)}(
         case.background, case.box, case.periodic, case.reflecting, case.rotating,
         case.ε_KO, case.γ0, case.γ2,
         case.center, interior, case.refinement, case.horizon, case.bounds,
-        case.chunk, case.gauge)
+        case.chunk, case.gauge, case.holes)
 
 """
     with_refinement(case::GHCase, refinement) -> GHCase
@@ -419,11 +710,11 @@ A reconstruction and not a mutation, for the reason
 with_refinement(case::GHCase{T}, refinement) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
            typeof(refinement),typeof(case.horizon),typeof(case.bounds),
-           typeof(case.ε_KO),typeof(case.gauge)}(
+           typeof(case.ε_KO),typeof(case.gauge),typeof(case.holes)}(
         case.background, case.box, case.periodic, case.reflecting, case.rotating,
         case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, refinement, case.horizon, case.bounds,
-        case.chunk, case.gauge)
+        case.chunk, case.gauge, case.holes)
 
 """
     with_horizon(case::GHCase, horizon) -> GHCase
@@ -438,11 +729,11 @@ A reconstruction and not a mutation, for the reason
 with_horizon(case::GHCase{T}, horizon) where {T} =
     GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
            typeof(case.refinement),typeof(horizon),typeof(case.bounds),
-           typeof(case.ε_KO),typeof(case.gauge)}(
+           typeof(case.ε_KO),typeof(case.gauge),typeof(case.holes)}(
         case.background, case.box, case.periodic, case.reflecting, case.rotating,
         case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, horizon, case.bounds,
-        case.chunk, case.gauge)
+        case.chunk, case.gauge, case.holes)
 
 """
     with_bounds(case::GHCase, bounds) -> GHCase
@@ -461,11 +752,11 @@ function with_bounds(case::GHCase{T}, bounds) where {T}
     return GHCase{T,typeof(case.background),typeof(case.γ0),
                   typeof(case.interior),typeof(case.refinement),
                   typeof(case.horizon),typeof(bounds),typeof(case.ε_KO),
-                  typeof(case.gauge)}(
+                  typeof(case.gauge),typeof(case.holes)}(
         case.background, case.box, case.periodic, case.reflecting, case.rotating,
         case.ε_KO, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, case.horizon, bounds,
-        case.chunk, case.gauge)
+        case.chunk, case.gauge, case.holes)
 end
 
 """
@@ -483,11 +774,11 @@ function with_dissipation(case::GHCase{T}, ε_KO) where {T}
     return GHCase{T,typeof(case.background),typeof(case.γ0),
                   typeof(case.interior),typeof(case.refinement),
                   typeof(case.horizon),typeof(case.bounds),typeof(ε),
-                  typeof(case.gauge)}(
+                  typeof(case.gauge),typeof(case.holes)}(
         case.background, case.box, case.periodic, case.reflecting, case.rotating,
         ε, case.γ0, case.γ2,
         case.center, case.interior, case.refinement, case.horizon,
-        case.bounds, case.chunk, case.gauge)
+        case.bounds, case.chunk, case.gauge, case.holes)
 end
 
 """
@@ -503,7 +794,11 @@ function horizon_dissipation(case::GHCase{T}; ε_in, ε_out=case.ε_KO) where {T
     case.interior === nothing && throw(ArgumentError(
         "the dissipation profile rises from the horizon to the layer's outer " *
         "radius r_1, and this case has no interior, so no r_1."))
-    case.interior isa FittedSpec && throw(ArgumentError(
+    case.interior isa HolesSpec && throw(ArgumentError(
+        "a case of several holes takes ε_KO per hole as a HolesDissipation of one " *
+        "HorizonDissipation about each hole's line (step B3); horizon_dissipation " *
+        "builds one hole's."))
+    case.interior isa Union{FittedSpec,TrackedSpec} && throw(ArgumentError(
         "the dissipation profile is a function of the radius about the " *
         "analytic center, and a tracked case's layer follows a surface: step " *
         "8c measured the profile off for a smooth target, and a tracked one " *
@@ -694,7 +989,12 @@ from its own mass and spin (`spin = (0, 0, a)`), at any position and — from
 2026-10-20 — under any `boost`, with the hole's lab velocity
 [`hole_velocity`](@ref) (`−u` for `boost(m, u)`). That is what lets a moving
 Kerr-Schild hole run at all: its prescribed source depends on time, which the
-sampled one cannot represent.
+sampled one cannot represent. `:composite` (added in step B1) is the same hole
+as a [`CompositeKerrSchildSource`](@ref) of one [`TrackedHole`](@ref) on its
+line from `center` ([`tracked_hole`](@ref)), which is `:algebraic` bit for bit;
+any other [`AlgebraicGaugeSource`](@ref) — a [`RolledGaugeSource`](@ref) from
+the hole's own source to a [`DampedHarmonicSource`](@ref), say — is passed
+through, and checked at `t = 0`.
 """
 function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
                    chunk,
@@ -713,6 +1013,11 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
             "a tracked case derives its layer's radii from the found horizon " *
             "(offset = m h and thickness = n_L h below it), so it takes no " *
             "r_0 or r_1; got r_0 = $r_0, r_1 = $r_1."))
+    elseif interior isa TrackedSpec
+        (r_0 === nothing && r_1 === nothing) || throw(ArgumentError(
+            "a tracked analytic target's sphere carries its own radii " *
+            "(TrackedSpec(T; r_0, r_1, …)), so the case takes no r_0 or r_1 " *
+            "beside it; got r_0 = $r_0, r_1 = $r_1."))
     elseif interior !== nothing
         (r_0 === nothing || r_1 === nothing) && throw(ArgumentError(
             "a :$interior layer needs its two radii, r_0 (the frozen core) and " *
@@ -793,8 +1098,10 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
             (bspin === nothing ? "a background with no spin parameter, or a " *
                                  "rotated spinning hole" : "a = $bspin") * "."))
     end
-    src = gauge_source === :algebraic ?
-          algebraic_source(T, background) : gauge_source
+    src = gauge_source === :algebraic ? algebraic_source(T, background) :
+          gauge_source === :composite ?
+          CompositeKerrSchildSource(tracked_hole(T, background; center=center)) :
+          gauge_source
     damping = γ0 !== nothing ? γ0 :
               GaussianDamping(T; near=1 / T(M), far=1 / (10 * T(M)),
                               width=3 * T(M), center=HoleCenter(T, center, v))
@@ -843,6 +1150,13 @@ end
 # spinning hole is the source's own case, and a nested boost, whose rest-frame
 # spin is Thomas-rotated, is what `check_gauge_source` refuses at construction.
 function algebraic_source(::Type{T}, background) where {T}
+    M, a, v = _kerr_schild_parameters(background)
+    return KerrSchildSource(T; M=M, spin=(0, 0, a), velocity=v)
+end
+
+# The bare `KerrSchild`'s mass and spin under `translate`s and `boost`s, and the
+# hole's lab velocity.
+function _kerr_schild_parameters(background)
     bare = background
     while bare isa Union{SpacetimeMetrics.TranslatedMetric,SpacetimeMetrics.BoostedMetric}
         bare = bare.metric
@@ -853,8 +1167,20 @@ function algebraic_source(::Type{T}, background) where {T}
         "hole_velocity; for any other hole pass KerrSchildSource(T; M, spin, " *
         "velocity) itself. Got a $(typeof(background))."))
     v = hole_velocity(background)
-    return KerrSchildSource(T; M=bare.mass, spin=(0, 0, bare.spin),
-                            velocity=(v[1], v[2], v[3]))
+    return bare.mass, bare.spin, (v[1], v[2], v[3])
+end
+
+"""
+    tracked_hole(T, background; center) -> TrackedHole{T}
+
+The [`TrackedHole`](@ref) of a translated and boosted Kerr-Schild
+`background` (added in step B1): its mass, its spin along `z`, its lab
+velocity, on the line from `center` at `t = 0` without acceleration. Its
+[`KerrSchildSource`](@ref) is `gauge_source = :algebraic`'s, bit for bit.
+"""
+function tracked_hole(::Type{T}, background; center) where {T}
+    M, a, v = _kerr_schild_parameters(background)
+    return TrackedHole(T; M=M, spin=(0, 0, a), center=center, velocity=v)
 end
 
 """
@@ -1115,6 +1441,52 @@ end
 
 hole_forest(case::GHCase; kwargs...) = hole_forest(Float64, case; kwargs...)
 
+"""
+    holes_forest(T = Float64, case::GHCase; N, roots, radii, levels = length(radii),
+                 shape = :ball, comm = nothing)
+
+[`hole_forest`](@ref)'s fixed nested hierarchy about **every** hole of a case of
+several holes (added in step B3): at level `ℓ` every leaf of level `ℓ − 1` that
+meets the shell of radius `radii[ℓ]` about any hole's initial center is refined,
+and the forest balanced — the union of the holes' hierarchies, which is what a
+frozen-hierarchy run of a pair is stated on: doubling `N` leaves the layout alone
+and halves every spacing. `shape` and `comm` are `hole_forest`'s.
+"""
+function holes_forest(::Type{T}, case::GHCase; N, roots, radii,
+                      levels::Integer=length(radii), shape::Symbol=:ball,
+                      comm=nothing) where {T}
+    case.holes === nothing && throw(ArgumentError(
+        "holes_forest refines about a case's holes, and this case has none: " *
+        "hole_forest is one hole's."))
+    shape in (:ball, :cube) || throw(ArgumentError(
+        "a shell is a :ball (|x − c| ≤ R) or a :cube (|x − c|_∞ < R), got :$shape"))
+    length(radii) == levels || throw(ArgumentError(
+        "holes_forest takes one radius per refinement level, but levels = $levels " *
+        "and radii has $(length(radii)) entries."))
+    all(ℓ -> radii[ℓ] ≤ radii[ℓ - 1], 2:levels) || throw(ArgumentError(
+        "the shells must nest, so the radii must not increase with the level, but " *
+        "radii = $radii."))
+    forest = gh_forest(T, case; N=N, roots=roots, comm=comm)
+    cs = [ntuple(d -> T(h.center[d]), Val(3)) for h in case.holes]
+    for ℓ in 1:levels
+        R = T(radii[ℓ])
+        targets = filter(forest.leaves) do k
+            level(k) == ℓ - 1 || return false
+            ext = block_extent(T, forest, k)
+            return any(c -> shape === :ball ? _box_meets_ball(ext, c, R) :
+                            _box_meets_cube(ext, c, R), cs)
+        end
+        isempty(targets) && throw(ArgumentError(
+            "no leaf of level $(ℓ - 1) comes within radii[$ℓ] = $R of a hole, so " *
+            "shell $ℓ would refine nothing."))
+        refine!(forest, targets)
+        balance!(forest)
+    end
+    return forest
+end
+
+holes_forest(case::GHCase; kwargs...) = holes_forest(Float64, case; kwargs...)
+
 # Whether the extent `ext` overlaps the open cube `|x − c|_∞ < R` — strictly,
 # so that a block sharing only a face with the cube is outside it.
 _box_meets_cube(ext, c, R) =
@@ -1350,11 +1722,11 @@ reference at the end of a chunk, the Dirichlet data at every ghost fill
 function state_callback(case::GHCase{T}, t; interior=case.interior) where {T}
     bg = case.background
     int = interior
-    int isa FittedSpec && throw(ArgumentError(
-        "this case's interior is a FittedSpec, the rule a tracked geometry is " *
-        "built by: the core rule needs the geometry itself — pass `interior " *
-        "= fitted_interior(…)`, which is what evolve! does for the initial " *
-        "data (step 8d)."))
+    int isa Union{FittedSpec,TrackedSpec,HolesSpec} && throw(ArgumentError(
+        "this case's interior is a $(nameof(typeof(int))), the rule a tracked " *
+        "geometry is built by: the core rule needs the geometry itself — pass " *
+        "`interior = fitted_interior(…)` or `tracked_interior(…)`, which is " *
+        "what evolve! does for the initial data (steps 8d and B2)."))
     interior_variant(int) === :fitted && throw(ArgumentError(
         "a :fitted interior's initial data is the analytic solution outside " *
         "the offset surface and the fit of it inside, read from the target " *
@@ -1362,7 +1734,54 @@ function state_callback(case::GHCase{T}, t; interior=case.interior) where {T}
         "callback would evaluate the analytic solution inside, where the " *
         "fitted variant exists not to (decided in review, step 8e)."))
     tt = T(t)
+    # Several holes with the gauge-consistent momentum (step B3): `Π` from
+    # `C_a = 0` under the holes' source at `t = 0`, at the core rule's point.
+    if case.interior isa HolesSpec && case.interior.gauge_momentum
+        src = holes_source(T, case.holes)
+        return AllVariables(x -> gauge_state_tuple(bg, src, int, tt, x))
+    end
     return AllVariables(x -> case_state_tuple(bg, int, tt, x))
+end
+
+"""
+    gauge_consistent_state(src, background, t, x) -> (h, Π)
+
+The state at `(t, x)` whose `∂_t g_tb` makes the gauge constraint vanish under
+the algebraic source `src` (added in step B3): the background's `g`, its spatial
+gradients and its `∂_t g_ij`, and `∂_t g_tt`, `∂_t g_ti` from `C_a = H_a + Γ_a = 0`
+— [`gauge_consistent_momentum`](@ref)'s four decoupled equations, `Γ_t = Γ⁰_t +
+½ g^{tt} X_t`, `Γ_i = Γ⁰_i + g^{tt} X_i` with `X_b = ∂_t g_tb` — then `Π =
+(√γ/α)(∂_t g − β^i ∂_i g)`. What a case of several holes with `momentum = :gauge`
+starts from and writes at its boundary.
+"""
+@inline function gauge_consistent_state(src, bg, t, x)
+    D = typeof(x[1])
+    p = SVector{4,D}(D(t), x[1], x[2], x[3])
+    g, dg = dmetric(bg, p)
+    h = pack_g(g)
+    gu = inv(g)
+    Hl = _source_value(effective_source(src, t), x, t, h)
+    # `∂_c g_ab` with `∂_t g_tb = 0`: `dg[a, b, c]` is SpacetimeMetrics' `∂_c g_ab`.
+    dz(a, b, c) = (c == 1 && (a == 1 || b == 1)) ? zero(D) : dg[a, b, c]
+    Γ0 = SVector{4,D}(sum(gu[b, c] * dz(a, c, b) for b in 1:4, c in 1:4) -
+                      sum(gu[b, c] * dz(b, c, a) for b in 1:4, c in 1:4) / 2
+                      for a in 1:4)
+    Xt = -2 * (Hl[1] + Γ0[1]) / gu[1, 1]
+    Xi = SVector{3,D}(-(Hl[i + 1] + Γ0[i + 1]) / gu[1, 1] for i in 1:3)
+    ∂ₜg = SMatrix{4,4,D}((a == 1 && b == 1) ? Xt : a == 1 ? Xi[b - 1] :
+                         b == 1 ? Xi[a - 1] : dg[a, b, 1] for a in 1:4, b in 1:4)
+    ∂h = ntuple(Val(3)) do i
+        pack_sym(SMatrix{4,4,D}(dg[a, b, i + 1] for a in 1:4, b in 1:4))
+    end
+    _, _, α, β, _, sqrtγ = metric_quantities(_sym4(h))
+    Π = (sqrtγ / α) * (pack_sym(∂ₜg) - β[1] * ∂h[1] - β[2] * ∂h[2] - β[3] * ∂h[3])
+    return h, Π
+end
+
+# The 20 values of the gauge-consistent state at `x`, with the core rule.
+@inline function gauge_state_tuple(bg, src, interior, t, x)
+    h, Π = gauge_consistent_state(src, bg, t, core_position(interior, t, x))
+    return (Tuple(h)..., Tuple(Π)...)
 end
 
 """

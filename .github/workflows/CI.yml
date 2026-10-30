@@ -100,7 +100,10 @@ jobs:
           # a macOS runner has (7 GB, where it ran past its hour), and on
           # the serial Linux cell the runner went down mid-test. It needs a
           # machine with room (`mpi_jobs.jl`), and is forced on here for the
-          # threaded Linux cell, where it passed in 17 minutes.
+          # threaded Linux cell, where it passed in 17 minutes. There it
+          # runs before the suite (amended 2026-10-30): after it, beside a
+          # test process that had compiled everything, the runner went down
+          # in five of thirteen attempts.
           TREEGH_TEST_MPI: ${{ matrix.threads == 4 && '1' || '' }}
       - uses: julia-actions/julia-processcoverage@v1
         if: ${{ matrix.coverage == true && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}

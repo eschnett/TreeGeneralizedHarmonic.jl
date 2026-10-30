@@ -26,11 +26,19 @@ first, before excision" (proposed in step 8′) awaiting Erik's decision.
 Step 9 (G6), which does not depend on it, is running (started
 2026-09-25).**
 
-**Steps B1–B9 (added 2026-10-25) are proposed and not started**: binary
-black holes, toward `CODE.md`'s milestones G7 and G8, which go beyond the
-proof of concept. The design is `CODE.md`, "Binary black holes", and Erik
-decides the gauge and interior pairing after B1 and B2. This file stays
-until G8 is done.
+**Steps B1–B9 (added 2026-10-25) are proposed; B1 ran on 2026-10-25, B2 and B3
+on 2026-10-26** (B1 and B2 on PR #18, B3 on `claude/step-B3-several-holes`, each
+awaiting review; B4–B9 not started): binary black holes, toward `CODE.md`'s
+milestones G7 and G8, which go beyond the proof of concept. The design is
+`CODE.md`, "Binary black holes". **Erik decided the pairing on 2026-10-26: (α)**,
+the composite tracked Kerr-Schild source fed by the per-hole tracks with B2's
+tracked `:damped` target per hole — and `GHCase(…; holes)`, and the superposed
+metric kept here. **And on what feeds that source, the same day (`CODE.md`'s item
+7):** a slow control law for the track-fed source, tested on one moving hole fed
+by its own track first — built in B3's review, which in its second round, on
+Erik's request, turned the model off and added an integral: the PID loop without
+the model is proposed for B4 (`CODE.md`, "The controlled source line"). This file
+stays until G8 is done.
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1435,7 +1443,9 @@ rule, the moving `:damped` layer, `core_follows`). **One hole only.**
 
 `CODE.md`: "A case without a background", "One interior per hole",
 "Refinement for two holes", "The record", "Initial data" (item 1). **Starts
-after Erik's decision on the pairing.**
+after Erik's decision on the pairing** (made 2026-10-26: (α); B3 ran that day,
+`CODE.md`, "What step B3 built and measured"; its review added the controlled
+source line on Erik's decision of the same day, "The controlled source line").
 
 **Changes:**
 

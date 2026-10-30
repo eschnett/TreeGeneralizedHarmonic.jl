@@ -249,6 +249,10 @@ end
 function to_plain(x::Array{R,3}; path="run") where {R<:AbstractFloat}
     return (; size=collect(Int, size(x)), values=plain_reals(vec(x)))
 end
+# Several holes' tracks and the holes' controlled source lines (step B3): one
+# plain struct each, as a tuple.
+to_plain(x::Vector{S}; path="run") where {S<:Union{HorizonTrack,SourceLine}} =
+    Tuple(to_plain(x[A]; path="$path[$A]") for A in eachindex(x))
 # The finder's grid, carried by a coasting track and read by nobody: the one
 # kind `find_horizon` makes.
 to_plain(x::EquiangularGrid; path="run") = (; kind="EquiangularGrid", lmax=x.lmax)
@@ -297,6 +301,10 @@ function from_plain(::Type{F}, v; path="run") where {F}
     if F <: Vector && eltype(F) <: Union{NativeFloat,Int,ComplexF64}
         v isa AbstractVector{eltype(F)} || _plain_refusal(F, v, path)
         return collect(eltype(F), v)
+    end
+    if F <: Vector && eltype(F) <: Union{HorizonTrack,SourceLine}
+        v isa Union{Tuple,AbstractVector} || _plain_refusal(F, v, path)
+        return eltype(F)[from_plain(eltype(F), v[A]; path="$path[$A]") for A in eachindex(v)]
     end
     if F <: Array{<:AbstractFloat,3}
         x = from_plain_reals(eltype(F), v.values)
@@ -394,6 +402,8 @@ function run_recipe(::Type{T}, case::GHCase; q, ops, chunk, cfl, adapt, adm_ever
     # The rotating seam (added 2026-10-04) only where there is one, so that a
     # checkpoint written before it still restarts.
     seam = seam_dims(case) === nothing ? (;) : (; rotating=case.rotating)
+    # The holes (step B3), only where there are any, for the same reason.
+    holes = case.holes === nothing ? (;) : (; holes=repr(case.holes))
     return (; float_type=type_name(T), q=Int(q),
             ops=(; family=Symbol(ops.family), prolongation=Int(ops.prolongation),
                  restriction=Int(ops.restriction)),
@@ -404,7 +414,7 @@ function run_recipe(::Type{T}, case::GHCase; q, ops, chunk, cfl, adapt, adm_ever
             epsilon_KO=repr(case.ε_KO), gamma0=repr(case.γ0),
             gamma2=r(case.γ2), center=repr(case.center), interior=repr(case.interior),
             horizon=repr(case.horizon), bounds=repr(case.bounds),
-            gauge=repr(case.gauge),
+            gauge=repr(case.gauge), holes...,
             chunk=r(chunk), cfl=r(cfl), adapt=Bool(adapt), adm_every=Int(adm_every),
             rho_max_factor=r(ρ_max_factor), rho_max_fixed=r(ρ_max_fixed),
             fit_initial_cont=Int(fit_initial_cont),
