@@ -48,9 +48,12 @@ guard — screened on the static `a = 0` hole against `:damped`. It builds on
 B1's gauge sources and is independent of B2–B9. A CPU diagnosis on Symmetry
 (2026-10-30) found that no start survives `M/4` without a strong anchor toward
 the smoothed state, so the screen was rebuilt around the anchor at
-`ρ_a = 10/M`, which held the ball to `4 M`; no GPU row has run. The screen's
-command lines are in `SINGULARITY_HANDLING.md`, "A layer-free interior (step
-I1)".
+`ρ_a = 10/M`, which held the ball to `4 M`. That screen ran on H200s the same
+day: the base passes at `8 M` with `ℋ` just outside the horizon at `0.34×`
+`:damped`'s and the error at `0.71×`, and the steering, `ΔH` and the guard
+are inert; the promotion (`1/24`, `1/32`, `24 M`, and `128 M`) is not run. The
+screen's command lines and results are in `SINGULARITY_HANDLING.md`, "A
+layer-free interior (step I1)".
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each

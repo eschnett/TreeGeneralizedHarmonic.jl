@@ -1882,9 +1882,11 @@ function state_callback(case::GHCase{T}, t; interior=case.interior) where {T}
     # The layer-free interior's data (step I1): the smoothed metric with its
     # lapse pre-collapsed, or with `Π` from `C_a = 0` under a source that is not
     # the smoothed metric's own `−Γ_a` ([`layerfree_needs_gauge_momentum`](@ref)).
+    # Its own name: a second assignment of the holes' `src` would box it, and a
+    # boxed capture is not a kernel argument (found on an H200 after step I1).
     if int isa LayerFreeInterior && layerfree_needs_gauge_momentum(case, int)
-        src = case.gauge
-        return AllVariables(x -> layerfree_state_tuple(bg, src, int, tt, x))
+        lf_src = case.gauge
+        return AllVariables(x -> layerfree_state_tuple(bg, lf_src, int, tt, x))
     end
     return AllVariables(x -> case_state_tuple(bg, int, tt, x))
 end

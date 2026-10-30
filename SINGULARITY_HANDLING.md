@@ -3902,8 +3902,8 @@ row's, at `d = 3` twice it. Beside step B1's (β), `6–31×` the Kerr-Schild ho
 
 ## A layer-free interior (step I1)
 
-**Diagnosed on the CPU, and the screen rebuilt around the anchor (2026-10-30);
-no GPU row run.** The design is `CODE.md`'s [A layer-free interior (proposed
+**Diagnosed on the CPU, the screen rebuilt around the anchor and run on
+H200s (2026-10-30); the promotion not run.** The design is `CODE.md`'s [A layer-free interior (proposed
 in step I1)](CODE.md#a-layer-free-interior-proposed-in-step-i1), the brief
 `PLAN.md`'s step I1. Step I1's implementation job built the code, the tests
 and the run tools; the diagnosis below ("Why the smoothed ball dies within
@@ -4079,6 +4079,59 @@ singular analytic one, with `F` evaluated at every point. That is what the
 rebuilt screen below measures against `:damped`. The diagnosis's rows are
 `jobs/jobD.sh` and `jobs/jobE.sh` in the remote `step-I1-impl`, their CSVs in
 `out/diag-586071` and `out/diag-586072`.
+
+### The rebuilt screen's results (2026-10-30)
+
+Run on Symmetry's H200s (one a row, jobs 586084–586094, the remote
+`step-I1-screen`, commit `464ca32` with `CUDA` added; A6, A10c0 and A10e34
+again as 586125–586128 after the two fixes below), read by
+`julia test/layerfree_study.jl dir=out times=1,2,4,8 at=8`. R0 reproduces the
+baseline at `24 M` to three digits (`ℋ [2, 9/4) = 2.42·10⁻⁵`, the error there
+`1.08·10⁻⁵`). Every row that survived its first chunk reached `8 M` with **no
+projection hit**:
+
+| row | outcome | `ℋ [2, 9/4)` at `8 M` | ×R0 | error `[2, 9/4)` | ×R0 | `dM_irr/dt` |
+|---|---|---|---|---|---|---|
+| R0, `:damped` | baseline | `2.46·10⁻⁵` | `1` | `1.00·10⁻⁵` | `1` | `3.6·10⁻⁸` |
+| A10, the base | **pass** | `8.38·10⁻⁶` | `0.34` | `7.08·10⁻⁶` | `0.71` | `1.1·10⁻⁷` |
+| A10n, no steering | **pass** | `8.36·10⁻⁶` | `0.34` | `7.07·10⁻⁶` | `0.71` | `1.1·10⁻⁷` |
+| A10c0, no `ΔH` | **pass** | `8.34·10⁻⁶` | `0.34` | `7.24·10⁻⁶` | `0.72` | `1.1·10⁻⁷` |
+| A10t, tight ranges | **pass** | `8.38·10⁻⁶` | `0.34` | `7.08·10⁻⁶` | `0.71` | `1.1·10⁻⁷` |
+| A10e54, `ε = 5/4` | **pass** | `8.32·10⁻⁶` | `0.34` | `8.19·10⁻⁶` | `0.82` | `1.0·10⁻⁷` |
+| A30, `ρ_a = 30/M` | **pass** | `1.56·10⁻⁵` | `0.64` | `6.11·10⁻⁶` | `0.61` | `9.5·10⁻⁸` |
+| A30e54 | fail (error `+7 %/M` from `4 M`) | `1.69·10⁻⁵` | `0.69` | `1.45·10⁻⁵` | `1.44` | `1.3·10⁻⁷` |
+| A6, `ρ_a = 6/M` | fail: a `DomainError` in the first chunk | — | — | — | — | — |
+| A10e34, `ε = 3/4` | fail: a `DomainError` in the first chunk | — | — | — | — | — |
+
+`ℋ [2, 9/4)` against time, A10 against R0 (`10⁻⁶`): `6.24, 6.45, 7.19, 8.38` and
+`6.25, 7.44, 20.4, 24.6` at `1, 2, 4, 8 M`. R0's grows threefold between `2`
+and `5 M`, the layer's leak arriving, and is flat from `6 M`; A10's grows by
+`0.4·10⁻⁶` a `M` to `6 M` and by `0.1` from `7` to `8` — slowing, not
+flat, which `24 M` has to settle.
+
+- **The anchor's rate has a floor and an optimum.** `6/M` does not hold the
+  ball at `ε = 1` and `10/M` does not at `ε = 3/4` (`ℋ` `2.9×`): the rate has to
+  beat the ball's own growth. `30/M` holds it closer to its data but doubles
+  `ℋ` just outside the horizon against `10/M`.
+- **Everything but the anchor is inert.** The steering, `ΔH` and the guard's
+  ranges change the exterior in the third digit at most, and the projection
+  never fires. The design reduces to smoothed data, the Kerr-Schild source and
+  the anchor at `10/M`.
+- **The horizon's mass drifts `3×` faster** than R0's (`dM_irr/dt`
+  `1.1·10⁻⁷` against `3.6·10⁻⁸`, both at `1/16`, over `8 M` and `24 M`).
+- **The ball is not a solution, and stays so**: `ℋ` `361` in it at `8 M` (A10),
+  held, with `α` `0.24` and `√γ/√γ_s` `0.46` — what the anchor buys is that this
+  stays inside `ε` and leaks less than `:damped`'s layer does.
+
+Two GPU-only bugs in step I1's code ended three rows in the first submission,
+both fixed on the branch: `state_callback` assigned `src` in two branches, so
+the layer-free data's closure captured a `Core.Box` (A10c0, the first kernel);
+and the hits' histogram folded a 48-tuple, which `map` allocates for (A6 and
+A10e34, at the row after their first hits), now two 24-tuples. A10c0 ran on
+the fix; A6 and A10e34 now end inside their first chunk with a `DomainError`
+(a `sqrt` of a negative number in a kernel), before any row, so the split fold
+has not yet been compiled on a device. `layerfree_tests.jl` passes on the fix
+on the CPU (1589 claims, job 586129).
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 

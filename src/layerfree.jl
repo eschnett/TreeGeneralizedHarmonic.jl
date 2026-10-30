@@ -321,21 +321,29 @@ end
              Sum(hit & ((k & BOUNDS_KIND_LAPSE) != 0) ? s : z),
              Sum(hit & ((k & BOUNDS_KIND_MOMENTUM) != 0) ? s : z))
     j = hit ? min(Base.unsafe_trunc(Int, p.u[3] * f.inv_h), BOUNDS_HIST_BINS - 1) + 1 : 0
-    return (kinds=TreeAMR.combine(acc.kinds, kinds), hist=addto(acc.hist, j, Sum(s)))
+    # Two halves of the bins: `combine` maps over a tuple, and `map` over more than
+    # 32 elements allocates, which a device refuses (found on an H200 after step I1).
+    H = BOUNDS_HIST_BINS ÷ 2
+    return (kinds=TreeAMR.combine(acc.kinds, kinds),
+            hist_lo=addto(acc.hist_lo, j, Sum(s)),
+            hist_hi=addto(acc.hist_hi, j - H, Sum(s)))
 end
 
 function _bounds_detail!(acc, int::LayerFreeInterior, p)
     acc isa BoundsAccounting || return nothing
     T = eltype(p.U.work)
     z = Sum(zero(T))
-    init = (kinds=ntuple(_ -> z, Val(5)), hist=ntuple(_ -> z, Val(BOUNDS_HIST_BINS)))
+    H = BOUNDS_HIST_BINS ÷ 2
+    init = (kinds=ntuple(_ -> z, Val(5)), hist_lo=ntuple(_ -> z, Val(H)),
+            hist_hi=ntuple(_ -> z, Val(H)))
     f = BoundsDetailFold{T}(inv(minimum_spacing(T, p.U.forest)))
     r = mesh_fold(f, TreeAMR.combine, init, p.diag; vars=DIAG_BOUNDS:DIAG_BOUNDS_KIND)
     for i in 1:5
         acc.chunk_kinds[i] += round(Int, tofloat64(r.kinds[i].value))
     end
-    for i in 1:BOUNDS_HIST_BINS
-        acc.chunk_hist[i] += round(Int, tofloat64(r.hist[i].value))
+    for i in 1:H
+        acc.chunk_hist[i] += round(Int, tofloat64(r.hist_lo[i].value))
+        acc.chunk_hist[H + i] += round(Int, tofloat64(r.hist_hi[i].value))
     end
     return nothing
 end

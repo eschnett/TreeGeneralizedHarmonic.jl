@@ -94,8 +94,8 @@ for lb in labels
     # Moving outward: the outermost hit's radius over the second half against the first.
     rr = col(d, "hit_r_max")
     k2 = length(rr) ÷ 2
-    moving = k2 ≥ 2 && maximum(filter(x -> x ≥ 0, vcat(rr[(k2 + 1):end], -1.0))) >
-                       maximum(filter(x -> x ≥ 0, vcat(rr[1:k2], -1.0))) + 1e-12
+    moving = k2 ≥ 2 && maximum(vcat(filter(x -> x ≥ 0, rr[(k2 + 1):end]), -1.0)) >
+                       maximum(vcat(filter(x -> x ≥ 0, rr[1:k2]), -1.0)) + 1e-12
     # Hits that level off: the last two chunks' mean not above the two before by > 20 %.
     lev = length(hits) < 5 || all(isnan, hits) ? true :
           sum(hits[(end - 1):end]) ≤ 1.2 * sum(hits[(end - 3):(end - 2)]) + 2

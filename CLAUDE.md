@@ -731,7 +731,9 @@ validity rows by region, the hits by kind (`DIAG_BOUNDS_KIND`, `NDIAG = 18`) and
 `test/octant_runs.jl interior=layerfree` its runs and `test/layerfree_study.jl`
 their reader; `CODE.md`, "A layer-free interior (proposed in step I1)", is the
 design, and `SINGULARITY_HANDLING.md`, "A layer-free interior (step I1)", the
-screen's command lines, not yet run. **Without the anchor nothing survives**
+screen's command lines and its results (the base passes at `8 M`, `ℋ`
+outside the horizon `0.34×` `:damped`'s; the promotion is not run). **Without
+the anchor nothing survives**
 (diagnosed on Symmetry's CPUs, 2026-10-30): the smoothed ball's own `ℋ`
 (`1182` at `ε = 1`) grows at `15–25/M` whatever the gauge does, and every
 unanchored start ends within `M/4`; `rho_a=10` (`10/M`) holds it to `4 M`, so
