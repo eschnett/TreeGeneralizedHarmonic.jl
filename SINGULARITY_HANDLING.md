@@ -22,6 +22,7 @@ here; links have been pointed at the right file.
 - [Spin across the motion: the bitant (2026-10-24)](#spin-across-the-motion-the-bitant-2026-10-24)
 - [The damped harmonic gauge rolled on (step B1, 2026-10-25)](#the-damped-harmonic-gauge-rolled-on-step-b1-2026-10-25)
 - [The tracked analytic target (step B2, 2026-10-26)](#the-tracked-analytic-target-step-b2-2026-10-26)
+- [A layer-free interior (step I1)](#a-layer-free-interior-step-i1)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -3898,6 +3899,240 @@ put it — whether a target without the companion's tidal field is good enough l
 in the inspiral — with a scale: at `d = 10` its error is a twentieth of the mass
 row's, at `d = 3` twice it. Beside step B1's (β), `6–31×` the Kerr-Schild hole outside
 `r = 3` at `1/32` and still growing, the numbers favour (α).
+
+## A layer-free interior (step I1)
+
+**Diagnosed on the CPU, the screen rebuilt around the anchor and run on
+H200s (2026-10-30); the promotion not run, and the design shelved by Erik the
+same day** — this exact idea is not pursued further, similar ones will be. The design is `CODE.md`'s [A layer-free interior (proposed
+in step I1)](CODE.md#a-layer-free-interior-proposed-in-step-i1), the brief
+`PLAN.md`'s step I1. Step I1's implementation job built the code, the tests
+and the run tools; the diagnosis below ("Why the smoothed ball dies within
+`M/4`, and what holds it") ran the first screen's start on Symmetry's CPUs and
+found that every row without a strong anchor ends within `M/4`, so its
+eighteen rows were replaced (amended 2026-10-30): rows R1–R9 and R14 of the
+first screen are answered by the diagnosis, and the anchor at `ρ_a = 10/M` is
+the new base. The lines below are what the next session launches, one H200 a
+row, each study in its own remote directory (`CLAUDE.md`: never rsync into a
+directory whose jobs are running), from a copy with `CUDA` added to its
+`Project.toml`. The rows share the baseline's case and mesh — Kerr-Schild
+`a = 0` on the reflecting octant `[0, 64]³`, root brick `2³`, cubes
+`R = 32, 16, 8`, `h = 1/16` on `[0, 8]³` (9.4 M points), `q = 4`, `cfl = 1/2`,
+`ε_KO = 1/2`, the Gaussian `γ0`, `chunk = 1`, the finder every chunk. The base
+point A10 is `ε = 1`, `ΔH` on, V with `p = 1`, `μ_α = 4/M`, `μ_β = 0`, the
+ramp `[1, 3/2)`, the guard's ranges gated at `3/2`, and the anchor `ρ_a =
+10/M` (`test/octant_runs.jl`'s defaults but `rho_a`, which is `0` there).
+`R0` is the `:damped` baseline on this commit, to `24 M`; every other row is
+`8 M`. With R0 at `24 M` the screen is about one GPU-hour.
+
+```bash
+B="julia --project=. test/octant_runs.jl backend=cuda case=ks L=64 roots=2 radii=32,16,8 N=64 chunk=1 cfl=1/2 amplitude=0 group=step-I1"
+$B t_end=24 r_0=3/4 r_1=3/2 out=out/i1/R0
+$B t_end=8 interior=layerfree rho_a=10 out=out/i1/A10
+$B t_end=8 interior=layerfree rho_a=6 out=out/i1/A6
+$B t_end=8 interior=layerfree rho_a=30 out=out/i1/A30
+$B t_end=8 interior=layerfree rho_a=10 steer=none out=out/i1/A10n
+$B t_end=8 interior=layerfree rho_a=10 correction=0 out=out/i1/A10c0
+$B t_end=8 interior=layerfree rho_a=10 smooth=3/4 out=out/i1/A10e34
+$B t_end=8 interior=layerfree rho_a=10 smooth=5/4 out=out/i1/A10e54
+$B t_end=8 interior=layerfree rho_a=30 smooth=5/4 out=out/i1/A30e54
+$B t_end=8 interior=layerfree rho_a=10 alpha_min=17/100 lambda_min=1/2 lambda_max=10 K_max=17 out=out/i1/A10t
+julia test/layerfree_study.jl dir=out/i1 times=1,2,4,8 at=8
+```
+
+| row | what it is |
+|---|---|
+| R0 | `:damped`, `r_0 = 3/4`, `r_1 = 3/2`, the baseline, to `24 M`: must give `ℋ [2, 9/4) = 2.42·10⁻⁵` and the error there `1.08·10⁻⁵` to two digits |
+| A10 | **the base point**: the first screen's R3 with the anchor at `10/M` |
+| A6, A30 | the anchor's rate: between `4/M` (ends within `M/2` on the CPU) and `10/M`; and `30/M`, the ball held near its data (`√γ/√γ_s = 0.84`) |
+| A10n | no steering: the CPU rows say it changes nothing once the ball is anchored — if so, the design drops it |
+| A10c0 | no `ΔH` (`Π` from `C_a = 0`): the volume stays at one; is the gentle start still worth the sampled source? |
+| A10e34, A10e54 | `ε = 3/4` (`ℋ` L∞ `3442` at `t = 0`, `2.9×` `ε = 1`'s); `ε = 5/4` (`570`, half) |
+| A30e54 | the strongest hold of the CPU rows |
+| A10t | tight ranges at `2×` the data's extremes (`α ≥ 0.17`, `λ(γ) ∈ [1/2, 10]`, the momentum scale `≤ 17/M`): does limiting the values add anything to the anchor? |
+
+**A row passes** (`PLAN.md`) if it reaches `8 M`, its hits per chunk level off
+with the outermost hit at least 8 cells inside the horizon and not moving out,
+and its `ℋ` and error in `[2, 9/4)` are within `3×` R0's, flat or falling from
+`4 M`; `test/layerfree_study.jl` prints that verdict beside the numbers. The
+promotion rows (at most three passing rows at `N = 96` and `128`, `1/24` and
+`1/32`, to `24 M` with `checkpoint=` and `walltime=`) and the best row at
+`128 M` on `ks-octant`'s `[0, 128]³` mesh (`L=128 radii=64,32,16,8 N=32`
+gives `h = 1/16` there) are the same lines; `series=` gives their orders.
+
+**What the start does, measured before the screen** (step I1, on the laptop, on
+`[0, 4]³` with Dirichlet data at `4 M`, chunks of `M/32`): the base point's
+smoothed ball collapses before the steering acts. At `h = 1/16` the least
+`det γ` in the ball is `1, 0.840, 0.460, 0.146, 0.0247, 0.0023` at
+`t = 0, 1/32, …, 5/32 M` and the least lapse `0.347, 0.341, 0.302, 0.230,
+0.142, 0.066`; at `3/16 M` the projection fires on six points, `C_a`'s L2 jumps
+from `0.11` to `25`, the fastest speed from `1.69` to `204`, and the CFL recheck
+ends the run. At `h = 1/8` the same ends at `1/8 M` (`det γ = 0.11` at
+`0.094 M`). **Expect R3 and its neighbours to end in their first chunk at
+`1/16`**; a row that does is the failure signature "the singularity re-forms
+before the gauge collapses" rather than a leak, and the rows that change it —
+F pre-collapsed (R6), the anchor (R14), the rate — are the screen's answer.
+(Answered on the CPU, 2026-10-30, in the subsection below: of those only the
+anchor, and only at `ρ_a ≥ 10/M`.)
+A layer-free run sizes its step as a moving hole's (`1 %` and the previous
+chunk's growth squared), so a slow speed growth does not end it; a fast one
+still does, through the recheck.
+
+**The smoke** (job 586053, `amddebugq`, an EPYC 7532, CPU): each line above,
+with `backend=cuda`, `L`, `roots`, `radii`, `N`, `t_end` and `chunk` replaced by
+the small mesh `L=4 roots=2 radii=2 N=16` (`h = 1/16` on `[0, 2]³`, Dirichlet at
+`4 M`) and one chunk of `1/16 M`, parsed, built its case and wrote its `t = 0`
+row; every row but R1 finished the chunk (`6–8 min` a row with 18 at once on 64
+cores, compilation included), its CSV's 147 columns matching its header, and
+`test/layerfree_study.jl` read the directory. **R1 ended at the end of its first
+chunk**: the analytic hole's core-rule data inside `r_core = 1/4` are not a
+solution (`ℋ` L∞ `4.9·10⁵` at `t = 0`), and at the chunk's end the speed
+kernel's `metric_quantities` took `√(det γ)` of `−1.65·10⁻⁷` at some point (a
+`DomainError` on the CPU; a `NaN`, and the driver's refusal, on a device) — the
+bare conjecture's failure signature on this mesh, not diagnosed further. **A
+caution for every layer-free row:** `metric_quantities` forms `det γ` as
+`det g · g^{tt}`, so its roundoff grows as `1/α²` — about `10⁻⁶` absolute at
+the lapse floor `α = 10⁻³` with `|h| ~ 10` — and the guard's spectrum floor
+`λ ≥ 10⁻³` does not protect a quantity computed that way; a row that collapses
+its lapse to the floor may end the same way. That is the parse and the start,
+not a result.
+
+### Why the smoothed ball dies within `M/4`, and what holds it
+
+Measured on 2026-10-30 on Symmetry's CPUs (jobs 586071 and 586072,
+`amddebugq`, an EPYC 7532), on the smoke's mesh (`L=4 roots=2 radii=2`,
+`h = 1/16` on `[0, 2]³` unless stated) in chunks of `M/32` to `M/2`, every row
+with `finder=0`. The quantities are in the smoothed ball `r < ε` (the CSV's
+`_r0` columns): the least lapse, the least `√γ/√γ_s`, `ℋ`'s L∞, and the L2 of
+the `h` part of the right-hand side (stationarity).
+
+**The ball is not vacuum, and its constraint violation is the clock.** At
+`ε = 1` the data violate the Hamiltonian constraint by up to `ℋ = 1182` inside
+the ball (`1109` at `1/32`), so its curvature time is `1/√ℋ ≈ 0.03 M`. That
+violation grows at `15–25/M` in every row that is not anchored, whatever the
+volume does, and each such row ends at the center (the projection's outermost
+hit at `r ≤ 3/16`, the CSV's last row before the error) within `0.16–0.25 M`:
+
+| row | dies at | `√γ/√γ_s` at `5/32 M` | `α` at `5/32 M` | `ℋ` L∞ at `5/32 M` |
+|---|---|---|---|---|
+| R2, `ΔH`, no steering | `0.19 M` | `0.043` | `0.066` | `1.7·10⁵` |
+| R3, the base | `0.19 M` | `0.048` | `0.066` | `1.8·10⁵` |
+| R3 at `μ_α = 32/M` | `0.19 M` | `0.080` | `0.069` | `1.5·10⁵` |
+| R4, `p = 2` | `0.19 M` | `0.057` | `0.067` | `1.7·10⁵` |
+| R14, `ρ_a = 1/(10M)` | `0.19 M` | `0.052` | `0.070` | `1.5·10⁵` |
+| R9, no `ΔH` | `0.19 M` | `1.000` | `0.080` | `2.0·10⁴` |
+| R9, no `ΔH`, no steering | `0.16 M` | `1.000` | `0.077` | `2.1·10⁵` |
+| R6, F `κ = 1/3` pre-collapsed | `0.22 M` | `1.084` | `0.094` | `7.5·10³` |
+| R3 at `h = 1/32` | `0.22 M` | `0.044` | `0.088` | `2.6·10⁵` |
+| R9 at `h = 1/32` | `0.16 M` | `1.000` | `0.107` | `1.4·10⁵` |
+| R9 at `ε = 5/4` (`ℋ` `570` at `t = 0`) | `0.22 M` | `1.000` | `0.125` | `4.0·10³` |
+| R9 at `ε = 3/2` (`ℋ` `321`) | after `0.25 M` | `1.000` | `0.190` | `1.4·10³` |
+
+- **`ΔH` is what lets the volume fall**: it holds the lapse at the static
+  slice's value while the non-vacuum ball falls in on its own time. Without it
+  (R9) the Kerr-Schild source drives `∂_t α ≈ −3.4/M` from the first step and
+  the volume stays at one — and the row ends at the same time.
+- **No knob of the gauge moves the clock**: the steering's rate and power,
+  `ΔH` and the pre-collapse change the end by at most a chunk, and resolution
+  not at all (`1/32` against `1/16`). A deeper pre-collapse is worse: at
+  `κ = 1/10` and `1/30` the data violate `C_a` at `t = 0` (L2 `0.78` and `7.0`,
+  against `0.07` at `1/3`) and end in the first chunk. A larger `ε` lowers
+  `ℋ` and delays the end by a chunk or two. (R9 at `h = 1/8` was refused:
+  `r_s1 = 3/2` is above `r_h,min − 8h = 1` there.)
+- **A strong anchor holds the ball.** With `ρ_a = 10/M` and `30/M` the base
+  reaches `M/2` with no hit, and settles:
+
+| `ρ_a` | `α` at `M/2` | `√γ/√γ_s` at `M/2` | `ℋ` L∞ at `M/2` | stationarity L2 at `M/2` |
+|---|---|---|---|---|
+| `10/M` | `0.246` | `0.467` | `5.1·10³` | `0.061`, falling |
+| `30/M` | `0.326` | `0.838` | `2.2·10³` | `2.5·10⁻⁴` |
+
+**The anchored rows to `4 M`** (job 586077, the same node, `L=8 N=16 roots=2
+radii=4,2` — `h = 1/16` in the cube `|x|_∞ ≤ 2`, `1/8` to `4`, `1/4` to `8`,
+Dirichlet at `8 M` — in chunks of `M/4`, against `:damped` with `r_0 = 3/4`,
+`r_1 = 3/2` on the same mesh, D0). Every anchored row from `10/M` up reaches
+`4 M` with no projection hit, its ball stationary to `3·10⁻⁵`; `ρ_a = 4/M` ends in
+its second chunk, the volume at `0.17` and the fastest speed `1.71 → 4.17`
+(the CFL recheck). The ball at `4 M` (`r < ε`) and the exterior's shells:
+
+| row | `α` | `√γ/√γ_s` | stationarity L2 | `ℋ` L2 `[2, 9/4)` | error L2 `[9/4, 3)` | `ℋ` L2 `[3, 5)` |
+|---|---|---|---|---|---|---|
+| D0, `:damped` | — | — | — | `8.93·10⁻⁵` | `3.28·10⁻⁵` | `5.46·10⁻⁶` |
+| `ρ_a = 10/M`, the rest the base | `0.241` | `0.464` | `2.5·10⁻⁵` | `8.82·10⁻⁵` | `3.26·10⁻⁵` | `5.46·10⁻⁶` |
+| `ρ_a = 30/M` | `0.326` | `0.838` | `2.1·10⁻⁵` | `9.00·10⁻⁵` | `3.26·10⁻⁵` | `5.46·10⁻⁶` |
+| `ρ_a = 10/M`, no steering | `0.242` | `0.457` | `2.6·10⁻⁵` | `8.82·10⁻⁵` | `3.26·10⁻⁵` | `5.46·10⁻⁶` |
+| `ρ_a = 10/M`, no `ΔH` | `0.281` | `1.000` | `2.6·10⁻⁵` | `8.81·10⁻⁵` | `3.26·10⁻⁵` | `5.46·10⁻⁶` |
+| `ρ_a = 10/M`, `ε = 5/4` | `0.306` | `0.560` | `1.6·10⁻⁵` | `8.79·10⁻⁵` | `3.26·10⁻⁵` | `5.46·10⁻⁶` |
+| `ρ_a = 30/M`, `ε = 5/4` | `0.369` | `0.894` | `1.3·10⁻⁵` | `8.58·10⁻⁵` | `3.26·10⁻⁵` | `5.46·10⁻⁶` |
+
+Outside the horizon every row is D0's to `4 %` and the shells from `9/4` out to
+three digits. On this mesh that says little: the exterior is set by the
+refinement boundary at `|x|_∞ = 2`, which every row shares (D0's `ℋ`
+`[2, 9/4)` is `3.7×` the production octant's at `24 M`). The steering changes
+nothing once the ball is anchored, and neither does `ΔH` outside it (without
+`ΔH` the volume stays at one and the lapse settles higher). The screen's mesh
+is what separates the interiors.
+
+The anchor is a relaxation toward a target, so an anchored interior is not
+layer-free: it is a damping layer at `r < ε = 1`, inside `:damped`'s
+`r_1 = 3/2`, relaxing toward a regular state (the smoothed data) rather than the
+singular analytic one, with `F` evaluated at every point. That is what the
+rebuilt screen below measures against `:damped`. The diagnosis's rows are
+`jobs/jobD.sh` and `jobs/jobE.sh` in the remote `step-I1-impl`, their CSVs in
+`out/diag-586071` and `out/diag-586072`.
+
+### The rebuilt screen's results (2026-10-30)
+
+Run on Symmetry's H200s (one a row, jobs 586084–586094, the remote
+`step-I1-screen`, commit `464ca32` with `CUDA` added; A6, A10c0 and A10e34
+again as 586125–586128 after the two fixes below), read by
+`julia test/layerfree_study.jl dir=out times=1,2,4,8 at=8`. R0 reproduces the
+baseline at `24 M` to three digits (`ℋ [2, 9/4) = 2.42·10⁻⁵`, the error there
+`1.08·10⁻⁵`). Every row that survived its first chunk reached `8 M` with **no
+projection hit**:
+
+| row | outcome | `ℋ [2, 9/4)` at `8 M` | ×R0 | error `[2, 9/4)` | ×R0 | `dM_irr/dt` |
+|---|---|---|---|---|---|---|
+| R0, `:damped` | baseline | `2.46·10⁻⁵` | `1` | `1.00·10⁻⁵` | `1` | `3.6·10⁻⁸` |
+| A10, the base | **pass** | `8.38·10⁻⁶` | `0.34` | `7.08·10⁻⁶` | `0.71` | `1.1·10⁻⁷` |
+| A10n, no steering | **pass** | `8.36·10⁻⁶` | `0.34` | `7.07·10⁻⁶` | `0.71` | `1.1·10⁻⁷` |
+| A10c0, no `ΔH` | **pass** | `8.34·10⁻⁶` | `0.34` | `7.24·10⁻⁶` | `0.72` | `1.1·10⁻⁷` |
+| A10t, tight ranges | **pass** | `8.38·10⁻⁶` | `0.34` | `7.08·10⁻⁶` | `0.71` | `1.1·10⁻⁷` |
+| A10e54, `ε = 5/4` | **pass** | `8.32·10⁻⁶` | `0.34` | `8.19·10⁻⁶` | `0.82` | `1.0·10⁻⁷` |
+| A30, `ρ_a = 30/M` | **pass** | `1.56·10⁻⁵` | `0.64` | `6.11·10⁻⁶` | `0.61` | `9.5·10⁻⁸` |
+| A30e54 | fail (error `+7 %/M` from `4 M`) | `1.69·10⁻⁵` | `0.69` | `1.45·10⁻⁵` | `1.44` | `1.3·10⁻⁷` |
+| A6, `ρ_a = 6/M` | fail: a `DomainError` in the first chunk | — | — | — | — | — |
+| A10e34, `ε = 3/4` | fail: a `DomainError` in the first chunk | — | — | — | — | — |
+
+`ℋ [2, 9/4)` against time, A10 against R0 (`10⁻⁶`): `6.24, 6.45, 7.19, 8.38` and
+`6.25, 7.44, 20.4, 24.6` at `1, 2, 4, 8 M`. R0's grows threefold between `2`
+and `5 M`, the layer's leak arriving, and is flat from `6 M`; A10's grows by
+`0.4·10⁻⁶` a `M` to `6 M` and by `0.1` from `7` to `8` — slowing, not
+flat, which `24 M` has to settle.
+
+- **The anchor's rate has a floor and an optimum.** `6/M` does not hold the
+  ball at `ε = 1` and `10/M` does not at `ε = 3/4` (`ℋ` `2.9×`): the rate has to
+  beat the ball's own growth. `30/M` holds it closer to its data but doubles
+  `ℋ` just outside the horizon against `10/M`.
+- **Everything but the anchor is inert.** The steering, `ΔH` and the guard's
+  ranges change the exterior in the third digit at most, and the projection
+  never fires. The design reduces to smoothed data, the Kerr-Schild source and
+  the anchor at `10/M`.
+- **The horizon's mass drifts `3×` faster** than R0's (`dM_irr/dt`
+  `1.1·10⁻⁷` against `3.6·10⁻⁸`, both at `1/16`, over `8 M` and `24 M`).
+- **The ball is not a solution, and stays so**: `ℋ` `361` in it at `8 M` (A10),
+  held, with `α` `0.24` and `√γ/√γ_s` `0.46` — what the anchor buys is that this
+  stays inside `ε` and leaks less than `:damped`'s layer does.
+
+Two GPU-only bugs in step I1's code ended three rows in the first submission,
+both fixed on the branch: `state_callback` assigned `src` in two branches, so
+the layer-free data's closure captured a `Core.Box` (A10c0, the first kernel);
+and the hits' histogram folded a 48-tuple, which `map` allocates for (A6 and
+A10e34, at the row after their first hits), now two 24-tuples. A10c0 ran on
+the fix; A6 and A10e34 now end inside their first chunk with a `DomainError`
+(a `sqrt` of a negative number in a kernel), before any row, so the split fold
+has not yet been compiled on a device. `layerfree_tests.jl` passes on the fix
+on the CPU (1589 claims, job 586129).
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 

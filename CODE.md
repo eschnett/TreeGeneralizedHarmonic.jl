@@ -86,6 +86,7 @@ research project; the inherited documents live in `notes/`.
     - [The tracked geometry](#the-tracked-geometry)
     - [The fitted target](#the-fitted-target)
     - [What the layer costs](#what-the-layer-costs)
+    - [A layer-free interior (proposed in step I1)](#a-layer-free-interior-proposed-in-step-i1)
 - [Initial data and backgrounds](#initial-data-and-backgrounds)
 - [Refinement and regridding](#refinement-and-regridding)
 - [Time integration](#time-integration)
@@ -2825,6 +2826,214 @@ prescribed sources; whether exact interior and boundary data anchor the
 gauge better is **(predicted: partly — the drift rate falls but does not
 vanish)** and is the main risk to a long run. G4 records the rate; the
 damped harmonic gauge driver is the extension that would remove it.
+
+#### A layer-free interior (proposed in step I1)
+
+**The question** (Erik's conjecture, 2026-10-30; `PLAN.md`, step I1): can
+this package hold a black hole the way moving-puncture codes do — no damping
+layer and no analytic target, the Einstein equations at every point, the
+interior made harmless by its data and its gauge, and a pointwise limit on the
+state as the backstop — and what do the constraints outside the horizon look
+like then? Every GH characteristic moves at zero or light speed relative to
+the normal observers, so in the continuum nothing made inside the horizon
+reaches the exterior; the discrete leak is step 8a's `0.40–0.51` e-folds per
+cell. Against it: this package's Kerr-Schild source keeps the singularity on
+the slice, and steps 8b and 8c saw abrupt changes of the state end runs in
+`2–18 M`. So the design takes the singularity off the initial slice, gives the
+interior a gauge that collapses the lapse where the volume collapses, and
+keeps the projection only as a guard. It is screened on the static `a = 0`
+hole against `:damped` ([`SINGULARITY_HANDLING.md`, "A layer-free interior
+(step I1)"](SINGULARITY_HANDLING.md#a-layer-free-interior-step-i1)).
+**Shelved** (Erik, 2026-10-30): the screen passed with the anchor at `10/M`
+and left the steering, `ΔH` and the guard inert; this exact design is not
+pursued further, similar ones will be, and the promotion is not run.
+
+**The design** (all **proposed in step I1**):
+
+1. **Smoothed data.** `SmoothedKerrSchild(T; M, ε)` (`src/initialdata.jl`),
+   TreeBSSN's port of the `Exact` thorn's `parabolic` smoothing at `a = 0`:
+   inside `ε` the Kerr-Schild radius is the `C⁴` polynomial
+   `r_s = ε(35/128 + 35/32 s − 35/64 s² + 7/32 s³ − 5/128 s⁴)`, `s = r²/ε²`,
+   and the metric is built from `γ_ij = δ_ij + 2H l_i l_j`,
+   `α = (1 + 2H)^{−1/2}`, `β^i = 2H l^i/(1 + 2H)`, `H = M/r_s`, `l_i = x_i/r_s`.
+   It is Kerr-Schild exactly for `r ≥ ε` (to `10⁻¹⁴`, `test/layerfree_tests.jl`),
+   a Lorentzian metric with `α > 0` inside, not vacuum there, static, with no
+   singular set; `0 < ε < 2M` is required, so the horizon is Kerr-Schild's and
+   the violation is causally hidden. `kerr_schild_case(T; smoothing = ε, …)`
+   builds the case; the smoothed hole is also the error reference, which means
+   something only for `r ≥ ε` (and for `r ≥ r_s1` once the steering has moved
+   the slice). **(Measured in step I1)** the data's extremes over the
+   `h = 1/16` lattice of `r ≤ 3/2`, with `|β| = √(β_iγ^{ij}β_j)` and the
+   momentum scale as `bounds.jl` reads them — the brief's host-side values
+   between the lattice points are `0.305/6.18/1.98/15.8`, `0.347/4.88/1.68/8.44`
+   and `0.382/4.11/1.47/5.16`:
+
+   | data | min `α` | `λ(γ)` | max `\|β\|` | max `\|(α/√γ)Π\|` |
+   |---|---|---|---|---|
+   | `ε = 3/4` | `0.3050` | `[1, 6.177]` | `1.984` | `15.27` |
+   | `ε = 1` | `0.3468` | `[1, 4.883]` | `1.680` | `8.33` |
+   | `ε = 5/4` | `0.3820` | `[1, 4.106]` | `1.472` | `5.13` |
+
+2. **A frozen gauge correction.** The source is
+   `H_a = H_a^{KS}(h) + ΔH_a(x) + (steering)`, with
+   `ΔH = −Γ[g_s] − H^{KS}(h_s)` sampled once, with its gradient, by the nested
+   dual pass the sampled source uses (`frozen_correction_tuple`), and **exactly
+   zero for `r ≥ ε` through a branch** — there the smoothed metric is
+   Kerr-Schild and the algebraic source its `−Γ`, so the exterior's gauge is the
+   baseline's. With it the static smoothed data start with `C_a = 0`
+   **(measured in step I1:** pointwise with the analytic `∂g`, at every lattice
+   point of `r < ε` at `h = 1/8`, `8.0·10⁻¹⁵` of the source; `ΔH` itself reaches
+   `48.8` there**)**. On the mesh the gauge monitor at `t = 0` reads the stencils'
+   truncation of `Γ_a` instead, **the same with and without `ΔH`** (the data's
+   `h` is the same, and `Π` is gauge consistent either way): on the
+   `h = 1/8` fixture (`ε = 1` eight cells across) `C_t` L2 `0.0614`, L∞ `7.19`,
+   which the screen's `h = 1/16` divides by about `2⁴`.
+
+   **Sampled, behind a new gauge-source kind, not in closed form (decided in
+   step I1, as the brief asked).** `ΔH`'s gradient is the smoothed metric's
+   *second* derivatives. In the kernel that is a nested dual pass: on a device
+   a call with a stack larger than the rest of the right-hand side, paid in
+   every launch whether or not a point is inside `ε` (`CLAUDE.md`, "On a device
+   a closure is a call"), and no SIMD lane can carry a `Dual`. By hand it is
+   the second derivatives of a polynomial-in-`r²` metric's Christoffels, error
+   prone for a quantity a sample gives exactly. The sample costs one nested dual
+   pass when a problem is built (the static hole is never regridded in the
+   screen) and twenty loads per point **inside `ε` only** — the kernel branches
+   on whether the point (on lanes: any lane) is in the ball. The kind is
+   `Val(:corrected)`; a problem's `Hsrc` is then a `CorrectedSource` (the
+   closed form, the `G = 0` sample of 20 variables in the sampled source's
+   layout, and the ball), and each launch is handed `(effective_source(src,
+   t), sample, ball)`. The sampled `ΔH` is static: a moving hole would need it
+   in closed form, a later step's.
+
+3. **Interior lapse steering.** `SteeredSource(T; M, ε, r_s0, r_s1, steering,
+   p, κ, μ_α, μ_β, correction)` adds
+   `ψ(r) [μ_α log(α_*/α) n_a − μ_β g_ai β^i/α]` to `H_a`, `n_a = (−α, 0, 0, 0)`,
+   with `ψ = 1 − smoothstep((r − r_s0)/(r_s1 − r_s0))`, `C²`, and the target
+   `α_* = κ α_s(x) (√γ/√γ_s(x))^p` from the smoothed hole's closed forms
+   (`smoothed_logs`): **V** (`steering = :volume`, `κ = 1`, `p ≥ 1`) vanishes on
+   the data (**measured:** `1.1·10⁻¹⁵` of the source on the `1/8` lattice of
+   `r < 3/2`) and collapses the lapse where the volume collapses; **F**
+   (`:fixed`, `p = 0`) is the pre-collapsed `κ α_s`. The shift is steered toward
+   `β_* = 0` only. **The signs** are B1's damped harmonic gauge's: on a slice
+   with `γ` fixed `C_t = 0` gives the steering's share of `∂_t α` as
+   `α² μ_α ψ log(α_*/α)` — the lapse rises below its target and falls above it —
+   and `C_i = 0` gives `∂_t β^i = −α μ_β ψ β^i`; `test/layerfree_tests.jl` checks
+   both through `gauge_consistent_momentum` before anything runs. `H` and `∂H`
+   are checked against ForwardDiff of a closed form written apart (`4.9·10⁻¹⁵`), on
+   SIMD lanes against the scalar code lane by lane, and for `r ≥ r_s1` the source
+   is `KerrSchildSource`'s bit for bit (a branch on whether any lane is inside
+   `r_s1`, adding exact zeros otherwise — not an early return between two inlined
+   sources, B1's miscompile).
+
+4. **The data.** The smoothed metric's own `(h, Π)`; with a pre-collapsed lapse
+   (`LayerFreeInterior(…; κ < 1)`) the lapse is scaled by `1 − (1 − κ)ψ`, `γ_ij`
+   and `K_ij = L_β γ_ij/(2α)` (the static data's) and the shift are kept, and
+   `Π` comes from `gauge_consistent_momentum` under the case's source at `t = 0`
+   plus `ΔH` (`layerfree_momentum`); the same solve gives `Π` where the source
+   has no `ΔH` (the screen's R9: `∂_t α` up to `3.33/M` on the `1/8` lattice,
+   `3.4/M` between its points). `C_a = 0` to roundoff pointwise in both,
+   `2.4·10⁻¹³` (**measured in step I1**). The
+   alternative start rolls the steering on (`RolledGaugeSource` from the
+   unsteered source); a roll-on's two ends share the one sample.
+
+5. **The range projection as a guard** (`bounds.jl`, unchanged in substance):
+   `layerfree_bounds(T; r_gate)` — `α ∈ [10⁻³, 2]`, `λ(γ) ∈ [10⁻³, 10³]`,
+   `|β| ≤ 3`, `K_max = 100/M`, each a keyword. It does not fire on any of the
+   three data above. **The gate rule replaces `check_bounds_gate`'s**:
+   `r_gate ≤ r_h,min − margin · h`, `margin = 8`, with `h` the coarsest spacing
+   of the blocks meeting the sphere `r_gate`; the projection's kink is read by
+   evolved stencils here on purpose. `gate_rule = false` lifts it by name (the
+   screen's "gate everywhere").
+
+6. **Optional drivers.** `ε_KO`'s `HorizonDissipation` rising from `r_h` to
+   `r_s0` (`horizon_dissipation(case; ε_in)`), `γ0`'s Gaussian at another
+   amplitude, and the **anchor** `−ρ_a χ(r)(u − u_s)` toward the smoothed state
+   with `χ = 1 − smoothstep(2r/ε − 1)` — `1` inside `ε/2`, `0` from `ε` out
+   (proposed) — with `F` evaluated everywhere: the kernel variant `:anchored`.
+   **The anchor is not optional** (amended after step I1's diagnosis,
+   2026-10-30): without it every start ends within `M/4`, and the rebuilt
+   screen takes `ρ_a = 10/M` as its base. An anchored interior is a damping
+   layer at `r < ε`, relaxing toward a regular state instead of the singular
+   analytic one, so the screen asks whether that beats `:damped`, not whether
+   a layer can be done without.
+
+**What step I1 built** (`src/layerfree.jl`, beside the background in
+`src/initialdata.jl`):
+
+- **`LayerFreeInterior(T; r_s0, r_s1, r_core = 0, ρ_a = 0, κ = 1, margin = 8,
+  ε_cells = 8, gate_rule = true)`**, `isbits`, which `GHCase` and `hole_case`
+  accept as `interior` (no `r_0`, `r_1` or `target`; a `refinement` is refused —
+  there is no level floor to keep, and step I1 runs on frozen cubes). The case
+  builds it about its own center and reads `ε` and `r_h,min` from the
+  background. Its kernel variant is `:none` (or `:anchored`): `F` at every
+  point, no core, no `w`. Every mask — the norms', the speed's, the finder's
+  footprint — is `AllPoints`. `r_core > 0` fills a core by step 5's core rule,
+  for the analytic hole of the screen's R1 (whose center is singular); a
+  layer-free case on an unsmoothed background without one is refused.
+- **The radius rules**, in place of `check_interior_radii`'s, at every problem:
+  `r_s1 ≤ r_h,min − margin · h` and `ε ≥ ε_cells · h`, `h` the coarsest
+  spacing of the blocks meeting each sphere.
+- **The validity rows by region**: `_layer` is the smoothed ball (or the core),
+  `_shell` the steering's ramp `[r_s0, r_s1)`, new `_band` rows the band
+  `[r_s1, r_h,min)` inside the horizon, `_evolved` every point — one fold.
+- **The hits by kind and by radius.** `bounds_project_kind` returns which steps
+  fired (non-finite, spectrum, shift, lapse, momentum), the bounds kernel writes
+  that mask into a new `diag` slot (`DIAG_BOUNDS_KIND = 18`, `NDIAG = 18`,
+  appended), and for a layer-free problem a second fold, only when something
+  fired, counts the chunk's hits by kind and in `48` one-cell bins of the
+  radius in finest cells; the record's `bounds_kinds` and `bounds_hist` rows
+  (`take_chunk_detail!`). Per chunk, so not in a checkpoint: the accounting's
+  saved fields are what they were, and old checkpoints restart.
+- **The per-shell diagnostics**, `layerfree_diagnostics!(aux, du, p, u, t;
+  edges)`: one right-hand side, one kernel into a five-variable field set and
+  one fold — per shell the stationarity `|∂_t h|`, the least lapse and
+  `√γ/√γ_s`, the largest `λ(γ)` and TreeBSSN's roughness, the largest undivided
+  sixth difference of any variable along any axis. `test/octant_runs.jl
+  interior=layerfree` writes them with the shells `[0, ε)`, `[ε, r_s1)`,
+  `[r_s1, 2)`, `[2, 9/4)`, `[9/4, 3)`, `[3, 5)`, `[5, 8)`, `r ≥ 8`, `C_a` over
+  the ramp, the hits, the radii where `α = 1/2` and `1/10` along `x`, `M_irr` and
+  `r_min`, and `lapse.csv` (α along `x` and the diagonal) and `hits.csv`; its
+  keys are listed in its header, one per knob of the screen, and
+  `test/layerfree_study.jl` prints the screen's tables.
+- **The tests** (`test/layerfree_tests.jl`, 1589 claims, `3m04` in a process
+  of its own at four threads on an EPYC 7532 — over `PLAN.md`'s 30 s, most of it
+  the fixture's two short runs, `1m32`, the bitwise control, and the
+  `:anchored` kernel's compilation, `44 s`): the claims above, the rules'
+  refusals, the guard's control `isequal`, the diagnostics on the data
+  (`√γ/√γ_s = 1` to `4·10⁻¹⁶`, the least lapse `α_s(0)`) and the anchor's term.
+- **The step of a layer-free run is sized as a moving hole's** (proposed in step
+  I1): from `λ` times the square of the previous chunk's growth, never less than
+  `1 %` above `λ`. The interior's speeds evolve with the equations — no layer
+  holds them — and the strict recheck would end a run at any growth of the
+  fastest speed once the interior's exceeds the far field's `√3`. The recheck
+  stays, and still ends a run whose speed outgrows that margin within a chunk.
+
+**What the start does, before the screen (measured in step I1 on the laptop,
+before the runs moved to Symmetry; the base point R3 on `[0, 4]³`, Dirichlet at
+`4 M`, chunks of `M/32`).** The smoothed ball is not vacuum, and it does not
+wait for the gauge: `∂_t Π` is `O(500)` at the center at `t = 0`, and at
+`h = 1/16` the least `det γ` in the ball falls `1 → 0.84, 0.46, 0.146, 0.025,
+0.0023` at `t = 1/32 … 5/32 M` while the least lapse falls only
+`0.347 → 0.066` — the volume collapses about ten times faster than V's
+`α μ_α ≈ 1.4/M` steers. At `3/16 M` the projection fires (six points), `C_a`
+jumps to `25` and the fastest speed to `204`, and the CFL recheck ends the run.
+At `h = 1/8` the same happens at `1/8 M`. So the screen's rows may end in their
+first chunk; the screen says which knobs (the rate, `p`, F's pre-collapse, the
+anchor) change that, and whether `1/16` on the screen's mesh does.
+
+**What ends it, and what holds it (measured after step I1, on Symmetry's
+CPUs, 2026-10-30;** `SINGULARITY_HANDLING.md`, ["Why the smoothed ball dies
+within `M/4`, and what holds
+it"](SINGULARITY_HANDLING.md#why-the-smoothed-ball-dies-within-m4-and-what-holds-it)**).**
+The clock is the ball's own constraint violation, not the gauge: `ℋ` is `1182`
+inside `ε = 1` at `t = 0` and grows at `15–25/M` in every start that is not
+anchored, so each ends at the center within `0.16–0.25 M` — with or without
+`ΔH` (without it the volume does not fall at all), at any steering rate or
+power, pre-collapsed or not, and at `1/32` as at `1/16`. An anchor of
+`ρ_a ≥ 10/M` holds the ball to `4 M` with no hit and a stationary interior
+(`4/M` ends within `M/2`), and outside the horizon such a row is `:damped`'s to
+a few percent on that CPU mesh. The screen was rebuilt around it.
 
 ## Initial data and backgrounds
 

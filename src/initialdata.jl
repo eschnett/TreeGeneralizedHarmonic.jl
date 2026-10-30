@@ -269,6 +269,11 @@ function GHCase(::Type{T}, background; box, periodic,
         # A case of several holes (step B3): the rule the composite is built by
         # per piece from the tracks; `case_holes` made it from the holes.
         interior
+    elseif interior isa LayerFreeInterior
+        # The layer-free interior (step I1): no layer and no target, so no
+        # `target`, and no level floor for a refinement to keep (not built).
+        layerfree_case_interior(interior, c, T; target=target, refinement=refinement,
+                                background=background)
     else
         Interior(T; center=c, r_0=r_0, r_1=r_1, variant=Symbol(interior),
                  margin=margin, w_ramp=w_ramp, ρ_ramp=ρ_ramp, target=target)
@@ -807,8 +812,11 @@ function horizon_dissipation(case::GHCase{T}; ε_in, ε_out=case.ε_KO) where {T
         "the profile's exterior amplitude is a number, got a " *
         "$(typeof(ε_out)): pass `ε_out` explicitly for a case whose ε_KO is " *
         "already a profile."))
+    # The layer-free interior (step I1) has no `r_1`: the profile rises from the
+    # horizon to the steering's inner radius `r_s0`.
     return HorizonDissipation(T; ε_out=ε_out, ε_in=ε_in,
-                              r_1=case.interior.r_1,
+                              r_1=case.interior isa LayerFreeInterior ?
+                                  case.interior.r_s0 : case.interior.r_1,
                               r_h=horizon_min_radius(case.background),
                               center=case.center)
 end
@@ -1018,6 +1026,11 @@ function hole_case(::Type{T}, background; halfwidth, r_0=nothing, r_1=nothing,
             "a tracked analytic target's sphere carries its own radii " *
             "(TrackedSpec(T; r_0, r_1, …)), so the case takes no r_0 or r_1 " *
             "beside it; got r_0 = $r_0, r_1 = $r_1."))
+    elseif interior isa LayerFreeInterior
+        (r_0 === nothing && r_1 === nothing) || throw(ArgumentError(
+            "a layer-free interior (step I1) has no layer, so it takes no r_0 or " *
+            "r_1; its radii are its own (LayerFreeInterior(T; r_s0, r_s1, …)). " *
+            "Got r_0 = $r_0, r_1 = $r_1."))
     elseif interior !== nothing
         (r_0 === nothing || r_1 === nothing) && throw(ArgumentError(
             "a :$interior layer needs its two radii, r_0 (the frozen core) and " *
@@ -1161,6 +1174,9 @@ function _kerr_schild_parameters(background)
     while bare isa Union{SpacetimeMetrics.TranslatedMetric,SpacetimeMetrics.BoostedMetric}
         bare = bare.metric
     end
+    # The smoothed hole (step I1) is Kerr-Schild outside its smoothing radius,
+    # and its source there is the Kerr-Schild hole's.
+    bare isa SmoothedKerrSchild && return bare.mass, bare.spin, (0, 0, 0)
     bare isa KerrSchild || throw(ArgumentError(
         "gauge_source = :algebraic reads the mass and spin of a Kerr-Schild hole " *
         "at rest or translated and boosted, unrotated, and its velocity from " *
@@ -1182,6 +1198,113 @@ function tracked_hole(::Type{T}, background; center) where {T}
     M, a, v = _kerr_schild_parameters(background)
     return TrackedHole(T; M=M, spin=(0, 0, a), center=center, velocity=v)
 end
+
+# --- the smoothed hole (step I1) ---------------------------------------------
+
+"""
+    SmoothedKerrSchild(T = Float64; M = 1, ε)
+
+The Kerr-Schild hole of mass `M`, `a = 0`, at rest at the origin, with the
+singularity smoothed away inside `r < ε` (added in step I1; `CODE.md`, "A
+layer-free interior"): TreeBSSN's `SmoothedKerrSchild`, the `Exact` thorn's
+`Kerr/Kerr-Schild` with `parabolic = yes`, ported for `a = 0` only. Inside `ε`
+the Kerr-Schild radius is replaced by the even polynomial
+
+    r_s = ε (35/128 + 35/32 s − 35/64 s² + 7/32 s³ − 5/128 s⁴),   s = r²/ε²,
+
+which joins `r` at `r = ε` with its value and slope and vanishing second to
+fourth derivatives (`C⁴`), and is `35ε/128` at the center. Everything else is
+evaluated with `r_s`: `H = M/r_s`, `l_i = x_i/r_s`, and the metric is built from
+its 3+1 parts, as the thorn's lapse and shift are,
+
+    γ_ij = δ_ij + 2H l_i l_j,   α = 1/√(1 + 2H),   β^i = 2H l^i/(1 + 2H),
+
+which is Kerr-Schild's `η + 2H l ⊗ l` exactly where `l` is null (`r ≥ ε`), and a
+Lorentzian metric everywhere: inside `ε`, where `l` is not null, `η + 2H l ⊗ l`
+is not (TreeBSSN's `CODE.md`, "The smoothed hole"). It is not vacuum where
+`r < ε`: a turducken whose constraint violation is causally hidden for
+`ε < r₊ = 2M`, which the constructor requires.
+
+`a = 0` only (decided in step I1's brief): at `a ≠ 0` the radius is a polynomial
+in `r²`, and `r²` is Lipschitz but not differentiable on the ring, a kink a
+spinning hole needs another smoothing for. `isbits`, static (its metric does not
+mention `t`, which [`isstatic`](@ref) measures) and not harmonic. Its field
+`spin` is zero, so that the octant's refusals read it as they read
+`KerrSchild`'s.
+"""
+struct SmoothedKerrSchild{T} <: AbstractMetric
+    mass::T
+    spin::T
+    ε::T
+end
+
+function SmoothedKerrSchild(::Type{T}=Float64; M=one(T), ε) where {T}
+    T(M) > 0 || throw(ArgumentError("the hole's mass must be positive, got $M"))
+    0 < T(ε) < 2 * T(M) || throw(ArgumentError(
+        "the smoothing radius must satisfy 0 < ε < r₊ = 2M, got ε = $ε and " *
+        "M = $M: inside ε the data are not vacuum, and only inside the horizon is " *
+        "that violation causally hidden — and a horizon outside ε is Kerr-Schild's."))
+    return SmoothedKerrSchild{T}(T(M), zero(T), T(ε))
+end
+
+"""
+    smoothed_radius(r², ε) -> r_s
+
+The Kerr-Schild radius `r = √(r²)` at `a = 0`, replaced inside `ε` by
+[`SmoothedKerrSchild`](@ref)'s polynomial in `r²`, so that no square root is
+taken there and the result is smooth through the center. A branch, for the
+host and the dual passes; the kernels' closed forms take
+[`smoothed_radius_select`](@ref), which chooses lane by lane.
+"""
+@inline function smoothed_radius(r2, ε)
+    D = typeof(r2)
+    r2 ≥ ε * ε && return sqrt(r2)
+    s = r2 / (ε * ε)
+    return ε * (D(35) / D(128) +
+                s * (D(35) / D(32) +
+                     s * (-D(35) / D(64) + s * (D(7) / D(32) - s * (D(5) / D(128))))))
+end
+
+function SpacetimeMetrics.metric(bg::SmoothedKerrSchild, p::AbstractVector)
+    _, x, y, z = p
+    D = typeof(x)
+    M = D(bg.mass)
+    r = smoothed_radius(x * x + y * y + z * z, D(bg.ε))
+    H = M / r
+    l = SVector{3,D}(x / r, y / r, z / r)
+    o = one(D)
+    γ = SMatrix{3,3,D}((i == j ? o : zero(o)) + 2 * H * l[i] * l[j]
+                       for i in 1:3, j in 1:3)
+    βu = (2 * H / (1 + 2 * H)) * l
+    α2 = 1 / (1 + 2 * H)
+    βl = γ * βu
+    gtt = -α2 + βl[1] * βu[1] + βl[2] * βu[2] + βl[3] * βu[3]
+    return SMatrix{4,4,D}(gtt, βl[1], βl[2], βl[3],
+                          βl[1], γ[1, 1], γ[2, 1], γ[3, 1],
+                          βl[2], γ[1, 2], γ[2, 2], γ[3, 2],
+                          βl[3], γ[1, 3], γ[2, 3], γ[3, 3])
+end
+
+# The hole's numbers, as `interior.jl` states them for `KerrSchild`: the
+# horizon is Kerr-Schild's sphere `r = 2M` (outside `ε`, which the constructor
+# requires), and there is no singular set at all.
+horizon_min_radius(bg::SmoothedKerrSchild) = 2 * bg.mass
+horizon_max_radius(bg::SmoothedKerrSchild) = 2 * bg.mass
+horizon_ellipsoid(bg::SmoothedKerrSchild) = _spheroid_ellipsoid(2 * bg.mass, zero(bg.mass))
+analytic_horizon_radius(bg::SmoothedKerrSchild, n) = 2 * bg.mass
+hole_mass(bg::SmoothedKerrSchild) = bg.mass
+hole_velocity(bg::SmoothedKerrSchild) = zero(SVector{3,typeof(bg.mass)})
+has_hole_velocity(::SmoothedKerrSchild) = true
+singular_radius(::SmoothedKerrSchild) = 0
+
+"""
+    smoothing_radius(background) -> ε
+
+The radius inside which the background's data are smoothed: `ε` for a
+[`SmoothedKerrSchild`](@ref), `0` for every other background (added in step I1).
+"""
+smoothing_radius(bg::SmoothedKerrSchild) = bg.ε
+smoothing_radius(bg) = 0
 
 """
     kerr_schild_case(T = Float64; M = 1, a = 0, v = 0, x0 = 0, axis = 1, halfwidth,
@@ -1212,12 +1335,28 @@ exactly (`v = 1//5`), since they are converted once into `T`; `x0` replaces
 `center`, which is refused beside it. With both zero the case is the one
 above, the static hole at `center`.
 
+`smoothing = ε > 0` (added in step I1) is the smoothed hole instead,
+[`SmoothedKerrSchild`](@ref)`(T; M, ε)`, at rest at `center` with `a = 0`: the
+data of `CODE.md`'s "A layer-free interior".
+
 Every other keyword is [`hole_case`](@ref)'s.
 """
 function kerr_schild_case(::Type{T}=Float64; M=one(T), a=zero(T), v=zero(T),
-                          x0=zero(T), axis::Integer=1, kwargs...) where {T}
+                          x0=zero(T), axis::Integer=1, smoothing=zero(T),
+                          kwargs...) where {T}
     axis in 1:3 || throw(ArgumentError(
         "axis is the coordinate the hole sits and moves on, 1, 2 or 3, got $axis."))
+    # The smoothed hole (added in step I1): at rest at `center`, without spin.
+    if !iszero(smoothing)
+        (iszero(a) && iszero(v) && iszero(x0)) || throw(ArgumentError(
+            "smoothing = $smoothing is step I1's SmoothedKerrSchild, which is built " *
+            "for a = 0 at rest only (the parabolic radius has a kink on a spinning " *
+            "hole's ring, and a moving hole needs its frozen correction in closed " *
+            "form); got a = $a, v = $v, x0 = $x0."))
+        all(iszero, get(kwargs, :center, (0, 0, 0))) || throw(ArgumentError(
+            "the smoothed hole is at the origin, got center = $(kwargs[:center])."))
+        return hole_case(T, SmoothedKerrSchild(T; M=M, ε=smoothing); M=T(M), kwargs...)
+    end
     bg = KerrSchild(T(M), T(a))
     iszero(v) && iszero(x0) && return hole_case(T, bg; M=T(M), kwargs...)
     xyz = ("x", "y", "z")[axis]
@@ -1739,6 +1878,15 @@ function state_callback(case::GHCase{T}, t; interior=case.interior) where {T}
     if case.interior isa HolesSpec && case.interior.gauge_momentum
         src = holes_source(T, case.holes)
         return AllVariables(x -> gauge_state_tuple(bg, src, int, tt, x))
+    end
+    # The layer-free interior's data (step I1): the smoothed metric with its
+    # lapse pre-collapsed, or with `Π` from `C_a = 0` under a source that is not
+    # the smoothed metric's own `−Γ_a` ([`layerfree_needs_gauge_momentum`](@ref)).
+    # Its own name: a second assignment of the holes' `src` would box it, and a
+    # boxed capture is not a kernel argument (found on an H200 after step I1).
+    if int isa LayerFreeInterior && layerfree_needs_gauge_momentum(case, int)
+        lf_src = case.gauge
+        return AllVariables(x -> layerfree_state_tuple(bg, lf_src, int, tt, x))
     end
     return AllVariables(x -> case_state_tuple(bg, int, tt, x))
 end

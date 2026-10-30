@@ -383,5 +383,7 @@ end
     @test (TreeGeneralizedHarmonic.DIAG_BOUNDS,
            TreeGeneralizedHarmonic.DIAG_BOUNDS_NF,
            TreeGeneralizedHarmonic.DIAG_BOUNDS_R) == Tuple(15:17)
-    @test NDIAG == 17
+    # Step I1 appended the projection's kind (amended in step I1).
+    @test TreeGeneralizedHarmonic.DIAG_BOUNDS_KIND == 18
+    @test NDIAG == 18
 end

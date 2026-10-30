@@ -65,8 +65,8 @@ end
 # time step is taken from, the two constraint monitors of step 4, and the
 # indicator that says which points a masked norm counts. Step 5 adds the
 # masked error and the interior residual, step 6 the refinement indicator,
-# step 8b the range projection's three — **appended**, never inserted, for
-# the reason the next paragraph gives. Step 8b's validity monitor's four and
+# step 8b the range projection's three, step I1 its kind — **appended**, never
+# inserted, for the reason the next paragraph gives. Step 8b's validity monitor's four and
 # the evolved region's non-finite count (18–22) went on 2026-10-23, when
 # both became folds over the state vector and stopped writing `diag`.
 #
@@ -86,7 +86,8 @@ const DIAG_TAU = 14           # the Löhner indicator τ, masked inside r_1
 const DIAG_BOUNDS = 15        # 1 where the range projection fired, else 0
 const DIAG_BOUNDS_NF = 16     # 1 where it found a non-finite component
 const DIAG_BOUNDS_R = 17      # the radius where it fired, 0 elsewhere
-const NDIAG = 17
+const DIAG_BOUNDS_KIND = 18   # the mask of the steps that fired (step I1)
+const NDIAG = 18
 
 # **The error slots are magnitudes, not components (proposed in step 5.)**
 # `CODE.md`'s analysis table says "`|u − u_exact|` per component into
@@ -467,6 +468,32 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
         o, sd = state_offset(du, I)
         gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, x, t, var, st, sv, inv_h,
                       γ0, γ2, εh, Val(q), Val(HASH), Val(DISS))
+    elseif INT === :anchored
+        # The layer-free interior's anchor (step I1; `CODE.md`, "A layer-free
+        # interior"): `F` at every point — there is no core and no `w` — and,
+        # inside the smoothed ball, `−ρ_a χ(r) (u − u_s)` toward the smoothed
+        # state, the background ([`anchor_weight`](@ref)). Where `χ = 0` it is `F`
+        # itself, without the background's dual pass. Names of their own, for
+        # the reason above.
+        ∂ₜha, ∂ₜΠa = gh_rhs_at_point(T, work, Hwork, inner, b, x, t, var, st, sv,
+                                     inv_h, γ0, γ2, εh, Val(q), Val(HASH), Val(DISS))
+        χa = anchor_weight(interior, t, x)
+        if iszero(χa)
+            ntuple(Val(NC)) do v
+                du[inner..., v, b] = ∂ₜha[v]
+                du[inner..., NC + v, b] = ∂ₜΠa[v]
+                nothing
+            end
+        else
+            ρχ = interior.ρ_a * χa
+            hsa, Πsa, _ = background_state(bg, t, x)
+            ntuple(Val(NC)) do v
+                du[inner..., v, b] = ∂ₜha[v] - ρχ * (work[var + (v - 1) * sv] - hsa[v])
+                du[inner..., NC + v, b] =
+                    ∂ₜΠa[v] - ρχ * (work[var + (NC + v - 1) * sv] - Πsa[v])
+                nothing
+            end
+        end
     else
         # The one hole that acts here (step B3): for several holes the hole
         # deepest in its own layer — `CODE.md`'s composition, `w = min w_A`,
@@ -780,7 +807,9 @@ is masked. The other items do nothing, and cost less than one percent.
 **The interior's fifth `Val` is the variant and not a `Bool`
 (proposed in step 5.)** `CODE.md` and `PLAN.md` call it "has interior";
 `:none`, `:damped`, `:pasted` and `:frozen` say that and *which*, in one
-parameter, and the three variants differ in the kernel — `:frozen` has
+parameter (and, from step I1, `:anchored`: the layer-free interior's anchor,
+`F` everywhere and `−ρ_a χ (u − u_s)` inside the smoothed ball;
+a layer-free interior without one runs `:none`), and the three variants differ in the kernel — `:frozen` has
 `ρ ≡ 0` and `:pasted` freezes the whole ball `r < r_1` — so a `Bool` would
 have needed a second parameter beside it.
 
@@ -1057,9 +1086,15 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
     # where the case carries one (added 2026-10-02) — it is then the kernel
     # argument itself, in place of the sampled `Hsrc` array — and the sample
     # otherwise.
-    HASH = case.gauge !== nothing ? :algebraic : !isharmonic(case.background)
+    # A source with a frozen correction (step I1) is the closed form plus the
+    # correction `ΔH` sampled once, `Val(:corrected)`: the kernel argument is
+    # the closed form beside the sample ([`CorrectedSource`](@ref)).
+    HASH = case.gauge === nothing ? !isharmonic(case.background) :
+           has_frozen_correction(case.gauge) ? :corrected : :algebraic
     Hsrc = if HASH === :algebraic
         case.gauge
+    elseif HASH === :corrected
+        corrected_source(case, U, t)
     elseif HASH
         fs = FieldSet{T}(U.forest, 2NC; G=0, centering=U.centering,
                          parity=even_parity(U.forest, 2NC),
@@ -1163,7 +1198,9 @@ function with_case(p::GHProblem{T,G,q,HASH,DISS,INT,W}, case::GHCase{T};
     has_dissipation(case.ε_KO) == DISS || throw(ArgumentError(
         "the new case's dissipation is $(has_dissipation(case.ε_KO) ? "on" : "off") " *
         "and the problem's kernel was built with it $(DISS ? "on" : "off")."))
-    Hsrc = HASH === :algebraic ? case.gauge : p.Hsrc
+    Hsrc = HASH === :algebraic ? case.gauge :
+           HASH === :corrected ? CorrectedSource(case.gauge, p.Hsrc.fs, p.Hsrc.support) :
+           p.Hsrc
     q2 = with_interior(p, interior)
     return GHProblem{T,G,q,HASH,DISS,interior_variant(interior),W,typeof(q2.U),
                      typeof(q2.schedule),typeof(Hsrc),typeof(q2.diag),
@@ -1308,6 +1345,9 @@ gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:none},
 gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:damped},
                  t) where {T,G,q,HASH,DISS} = nothing
 gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:frozen},
+                 t) where {T,G,q,HASH,DISS} = nothing
+# The layer-free interior's anchor writes nothing (step I1): it is a term of `du`.
+gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:anchored},
                  t) where {T,G,q,HASH,DISS} = nothing
 # The fitted layer writes nothing (step 8e): its target is a term of `du`.
 gh_step_limiter!(u, integrator, p::GHProblem{T,G,q,HASH,DISS,:fitted},

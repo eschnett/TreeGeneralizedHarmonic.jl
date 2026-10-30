@@ -131,6 +131,43 @@
 #                                   horizon track, relaxing toward the boosted
 #                                   Kerr-Schild hole on the track's line, rebuilt
 #                                   every piece, the finder every chunk
+#   interior=layerfree              (added in step I1) no layer and no target: the
+#                                   smoothed hole, the steered source with its frozen
+#                                   correction ΔH, the range projection as the guard
+#                                   (CODE.md, "A layer-free interior"); reflecting
+#                                   octant, a = 0, at rest. Its knobs, the screen's
+#                                   base point by default (SINGULARITY_HANDLING.md,
+#                                   "A layer-free interior (step I1)"):
+#   smooth=1                        the smoothing radius ε of SmoothedKerrSchild; 0 is
+#                                   the analytic Kerr-Schild hole, its core filled by
+#                                   the core rule at r_core (R1)
+#   r_core=1/4                      smooth=0 only: the core rule's radius
+#   correction=1                    the frozen correction ΔH (0: the algebraic source
+#                                   alone, Π from C_a = 0)
+#   steer=v|f|none p=1 mu_alpha=4   the lapse steering: v the volume-coupled target
+#   mu_beta=0 kappa=1/3             α_s (√γ/√γ_s)^p, f the fixed κ α_s, none; its
+#                                   rate μ_α, the shift's μ_β (β_* = 0), f's κ (in 1/M)
+#   r_s0=1 r_s1=3/2                 the steering's ramp
+#   start=plain|collapsed|rolled    the data: the smoothed hole, its lapse scaled by
+#                                   1 − (1 − κ) ψ (Π from C_a = 0), or the plain data
+#                                   with the steering rolled on from the unsteered
+#                                   source over sigma_g (default 4) after t0
+#   rho_a=0                         the anchor toward the smoothed state inside ε (1/M)
+#   eps_in=                         the Kreiss–Oliger amplitude inside, rising from
+#                                   the horizon to r_s0 (default: eps everywhere)
+#   gamma0_near=1                   γ0 at the hole (1/M; the Gaussian's far value
+#                                   stays 1/(10M))
+#   alpha_min=1/1000 alpha_max=2    the guard's ranges (K_max in 1/M), and its gate:
+#   lambda_min=1/1000 lambda_max=1000  a radius, or `everywhere` (no gate rule)
+#   beta_max=3 K_max=100 r_gate=3/2
+#                                   The CSV then adds, per shell — [0, ε), [ε, r_s1),
+#                                   [r_s1, 2) and the shells= ones — |∂_t h|, the least
+#                                   lapse and √γ/√γ_s, the largest λ(γ) and the
+#                                   roughness, then C_a over the ramp [r_s0, r_s1), the
+#                                   projection's hits by kind and the outermost hit,
+#                                   the radii where α = 1/2 and 1/10 along x, M_irr and
+#                                   r_min; `lapse.csv` holds α along x and the diagonal,
+#                                   `hits.csv` the hits by radius in finest cells
 #   prediction=quadratic|line       interior=tracked only (step B2): the track's
 #                                   prediction, the quadratic of the last four
 #                                   finds or step 8d's line
@@ -368,6 +405,65 @@ comm = use_mpi ? communicator(MPI.COMM_WORLD;
 roots = haskey(OPTIONS, "roots") ? parse(Int, OPTIONS["roots"]) : Int(L ÷ N)
 haskey(OPTIONS, "roots") || roots * N == L ||
     error("L = $L must be a multiple of N = $N (one root block is N cells of h = 1)")
+# The layer-free interior's knobs (added in step I1).
+# (`r_core` is also the `:fitted` noise's core, so it is not refused elsewhere.)
+const LAYERFREE_KEYS = ("smooth", "correction", "steer", "p", "mu_alpha",
+                        "mu_beta", "kappa", "r_s0", "r_s1", "start", "rho_a", "eps_in",
+                        "gamma0_near", "alpha_min", "alpha_max", "lambda_min",
+                        "lambda_max", "beta_max", "K_max", "r_gate")
+layerfree = opt("interior", "damped") == "layerfree"
+function layerfree_case(gs)
+    symmetry == "reflecting" && iszero(a_spin) ||
+        error("interior=layerfree is the static a = 0 hole on the reflecting octant")
+    ε_s = rat(opt("smooth", "1"))
+    r_s0, r_s1 = rat(opt("r_s0", "1")), rat(opt("r_s1", "3/2"))
+    steer = opt("steer", "v")
+    steer in ("v", "f", "none") || error("steer is v, f or none, got $steer")
+    start = opt("start", "plain")
+    start in ("plain", "collapsed", "rolled") ||
+        error("start is plain, collapsed or rolled, got $start")
+    κ = rat(opt("kappa", "1/3"))
+    correction = opt("correction", "1") in ("1", "true")
+    src = if iszero(ε_s)
+        (steer == "none" && !correction && start == "plain") ||
+            error("smooth=0 is the analytic hole with the algebraic source alone: " *
+                  "steer=none correction=0 start=plain")
+        gs
+    else
+        mk(st) = SteeredSource(T; M=1, ε=ε_s, r_s0=r_s0, r_s1=r_s1, steering=st,
+                               p=st === :volume ? parse(Int, opt("p", "1")) : 1,
+                               κ=st === :fixed ? κ : 1,
+                               μ_α=rat(opt("mu_alpha", "4")), μ_β=rat(opt("mu_beta", "0")),
+                               correction=correction)
+        steered = mk(steer == "v" ? :volume : steer == "f" ? :fixed : :none)
+        start == "rolled" ?
+            RolledGaugeSource(mk(:none), steered; σ_g=T(rat(opt("sigma_g", "4"))),
+                              t_0=T(rat(opt("t0", "0")))) : steered
+    end
+    everywhere = opt("r_gate", "3/2") == "everywhere"
+    bd = layerfree_bounds(T; r_gate=everywhere ? 4 * L : rat(opt("r_gate", "3/2")),
+                          α_min=rat(opt("alpha_min", "1/1000")),
+                          α_max=rat(opt("alpha_max", "2")),
+                          λ_min=rat(opt("lambda_min", "1/1000")),
+                          λ_max=rat(opt("lambda_max", "1000")),
+                          β_max=rat(opt("beta_max", "3")), K_max=rat(opt("K_max", "100")))
+    lf = LayerFreeInterior(T; r_s0=r_s0, r_s1=r_s1,
+                           r_core=iszero(ε_s) ? rat(opt("r_core", "1/4")) : 0,
+                           ρ_a=rat(opt("rho_a", "0")), κ=start == "collapsed" ? κ : 1,
+                           margin=parse(Int, opt("margin", "8")), gate_rule=!everywhere)
+    γ0 = haskey(OPTIONS, "gamma0_near") ?
+         (; γ0=GaussianDamping(T; near=T(rat(OPTIONS["gamma0_near"])), far=T(1 // 10),
+                               width=T(3), center=HoleCenter(T, (0, 0, 0)))) : (;)
+    c = kerr_schild_case(T; smoothing=ε_s, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
+                         octant=:reflecting, gauge_source=src, interior=lf,
+                         horizon=opt("finder", "1") != "0" ?
+                                 Horizon(T; every=1, N=12, spin=true) : nothing,
+                         bounds=bd, γ0...)
+    haskey(OPTIONS, "eps_in") &&
+        (c = with_dissipation(c, horizon_dissipation(c; ε_in=T(rat(OPTIONS["eps_in"])))))
+    return c
+end
+
 case = if hole
     src = opt("source", "algebraic")
     src in ("algebraic", "sampled", "composite") ||
@@ -384,8 +480,11 @@ case = if hole
     motion = quadrant || bitant ? (v=v_hole, x0=x0_hole) :
              rquadrant ? (v=v_hole, x0=x0_hole, axis=3) : (;)
     interior_kind = opt("interior", "damped")
-    interior_kind in ("damped", "fitted", "tracked") ||
-        error("interior is damped, fitted or tracked, got $interior_kind")
+    interior_kind in ("damped", "fitted", "tracked", "layerfree") ||
+        error("interior is damped, fitted, tracked or layerfree, got $interior_kind")
+    interior_kind == "layerfree" || !any(k -> haskey(OPTIONS, k), LAYERFREE_KEYS) ||
+        error("$(join(LAYERFREE_KEYS, "=, "))= are the layer-free interior's " *
+              "(interior = layerfree)")
     interior_kind == "tracked" || !any(k -> haskey(OPTIONS, k),
                                        ("prediction", "find_interval", "target_mass",
                                         "target_dv", "target_dx", "seed_dv", "feed",
@@ -393,7 +492,9 @@ case = if hole
         error("prediction=, find_interval=, target_mass=, target_dv=, target_dx=, " *
               "seed_dv=, feed= and control_time= are the tracked analytic target's " *
               "(interior = tracked)")
-    build_case(gs) = if interior_kind == "fitted"
+    build_case(gs) = if interior_kind == "layerfree"
+        layerfree_case(gs)
+    elseif interior_kind == "fitted"
         m = parse(Int, opt("margin", "8"))
         spec = FittedSpec(T; variant=Symbol(opt("variant", "fitted")), margin=m,
                           n_L=parse(Int, opt("n_L", "0")), lmax_shape=4,
@@ -457,6 +558,7 @@ case = if hole
     # with the roll-on, which `GHCase` checks at `t = 0`, where it is the
     # hole's own source.
     if gauge_kind == "dh"
+        layerfree && error("gauge=dh is not a layer-free knob")
         c.gauge === nothing &&
             error("gauge=dh rolls on from the hole's algebraic source; source=sampled has none")
         e_all = parse(Int, opt("e", "2"))
@@ -518,8 +620,14 @@ hole && isrank0 && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin
                 "$(Tuple(case.interior.velocity_offset)), center + " *
                 "$(Tuple(case.interior.center_offset)), seed velocity + " *
                 "$(Tuple(case.interior.seed_velocity_offset))" :
+                case.interior isa LayerFreeInterior ?
+                "layer-free interior, ε = $(case.interior.ε), r_core = " *
+                "$(case.interior.r_core), steering ramp [$(case.interior.r_s0), " *
+                "$(case.interior.r_s1)), data κ = $(case.interior.κ), anchor ρ_a = " *
+                "$(case.interior.ρ_a), $(case.bounds), ε_KO $(case.ε_KO), γ0 $(case.γ0)" :
                 "damped layer, r_0 = $(case.interior.r_0), r_1 = $(case.interior.r_1)",
                 case.gauge === nothing ? "sampled" :
+                layerfree ? repr(case.gauge) :
                 case.gauge isa RolledGaugeSource ?
                 "$(opt("source", "algebraic")), rolled on to the damped harmonic gauge " *
                 "(t0 = $(case.gauge.t_0), σ_g = $(case.gauge.σ_g), σ_r = " *
@@ -550,7 +658,14 @@ hole && push!(cols, "err_l2_bnd")
 shell_r = !hole ? T[] : haskey(OPTIONS, "shells") ?
           [T(rat(x)) for x in split(OPTIONS["shells"], ',')] :
           vcat([r_equator], T[9 // 4, 3, 5, 8])
-shell_names = hole ? vcat(["in"], [@sprintf("r%g", r) for r in shell_r]) : String[]
+# The layer-free interior's (step I1): from the center, `[0, ε)` (the smoothed
+# ball, or the core), `[ε, r_s1)` and `[r_s1, s_1)`, then the `shells=` ones;
+# every shell is named by its inner radius.
+lf_inner = !(hole && layerfree) ? T[] :
+           T[0, TreeGeneralizedHarmonic.layerfree_ball(case.interior), case.interior.r_s1]
+shell_names = !hole ? String[] :
+              layerfree ? [@sprintf("r%g", r) for r in vcat(lf_inner, shell_r)] :
+              vcat(["in"], [@sprintf("r%g", r) for r in shell_r])
 for nm in shell_names, c in ("ham_l2", "ham_linf", "mom_l2", "gauge_l2", "err_l2", "err_linf")
     push!(cols, "$(c)_$nm")
 end
@@ -571,6 +686,101 @@ fed_cols = hole && case.interior isa TrackedSpec &&
            case.interior.source_feed != TreeGeneralizedHarmonic.FEED_OWN
 fed_cols && append!(cols, ["track_c", "track_v", "src_c", "src_v", "src_a", "err_l2_trk",
                             "err_linf_trk", "res_trk"])
+# The layer-free interior's (added in step I1), last: per shell the stationarity
+# `|∂_t h|`, the least lapse and `√γ/√γ_s`, the largest `λ(γ)` and the roughness;
+# then `ℋ` and `C_a` over the steering's ramp `[r_s0, r_s1)`, the chunk's hits by
+# kind, the outermost hit's radius and its depth inside the horizon in finest
+# cells, the radii where `α = 1/2` and `1/10` along `x`, and the finder's `M_irr`
+# and `r_min`.
+const LF_SHELL_COLS = ("stat_l2", "stat_linf", "alpha_min", "vol_min", "lambda_max", "rough")
+if hole && layerfree
+    for nm in shell_names, c in LF_SHELL_COLS
+        push!(cols, "$(c)_$nm")
+    end
+    append!(cols, ["ham_l2_ramp", "gauge_l2_ramp", "gauge_linf_ramp", "hits",
+                   "hits_nonfinite", "hits_spectrum", "hits_shift", "hits_lapse",
+                   "hits_momentum", "hit_r_max", "hit_cells_inside", "r_alpha_half",
+                   "r_alpha_tenth", "M_irr", "r_min"])
+end
+# The lapse along `x` and along the diagonal, `ax<k>` and `ad<k>` at `k` finest
+# cells from the center to `3 M` (`lapse.csv`), and the hits by radius in finest cells (`hits.csv`).
+lapse_path = joinpath(outdir, "lapse.csv")
+hits_path = joinpath(outdir, "hits.csv")
+if hole && layerfree && isrank0
+    hf = minimum_spacing(T, forest0)
+    isfile(lapse_path) || open(lapse_path, "w") do io
+        K = round(Int, 3 / hf)
+        println(io, join(vcat(["t"], ["ax$k" for k in 0:K], ["ad$k" for k in 0:K]), ','))
+    end
+    isfile(hits_path) || open(hits_path, "w") do io
+        println(io, join(vcat(["t"], ["c$(k - 1)" for k in
+                                      1:TreeGeneralizedHarmonic.BOUNDS_HIST_BINS]), ','))
+    end
+end
+# The layer-free diagnostics' field set and the right-hand side's vector, made
+# once per mesh (the screen's mesh is frozen).
+const LF_AUX = Ref{Any}(nothing)
+
+# The lapse at the points `xs` (ghosts filled), and the outermost radius along a
+# ray where it is `level`, linearly between the samples.
+function lapse_at(p, xs)
+    vals = gh_interpolate(p.U, xs; q=q)
+    # The signed lapse of `state_validity`: a collapsed point reads, not throws.
+    return [state_validity(SVector{10,T}(ntuple(i -> v[i], 10)),
+                           SVector{10,T}(ntuple(i -> v[10 + i], 10)))[2] for v in vals]
+end
+function crossing(s, α, level)
+    k = findlast(a -> a ≤ level, α)
+    k === nothing && return NaN
+    k == length(α) && return s[end]
+    return s[k] + (level - α[k]) / (α[k + 1] - α[k]) * (s[k + 1] - s[k])
+end
+
+# The layer-free row's columns (step I1), appended after every other.
+function layerfree_columns!(row, extra, p, t, u, rec, c_t, dir)
+    li = p.interior
+    if LF_AUX[] === nothing || LF_AUX[].forest !== p.U.forest
+        LF_AUX[] = TreeGeneralizedHarmonic.layerfree_aux(p)
+    end
+    edges = vcat(lf_inner, shell_r, [T(Inf)])
+    rows = layerfree_diagnostics!(LF_AUX[], similar(u), p, u, t; edges=edges)
+    lf = Dict{String,Any}()
+    for (i, nm) in enumerate(shell_names)
+        r = rows[i]
+        append!(row, (r.stat_l2, r.stat_linf, r.α_min, r.vol_min, r.λ_max, r.rough))
+        lf[nm] = Dict("stat_l2" => r.stat_l2, "stat_linf" => r.stat_linf,
+                      "alpha_min" => r.α_min, "vol_min" => r.vol_min,
+                      "lambda_max" => r.λ_max, "rough" => r.rough)
+    end
+    # `ℋ` and `C_a` over the steering's ramp: the row's fold with one band. The
+    # monitors' slots are still the row's (the diagnostics write their own set).
+    rr = binnorms(row_fold(p, c_t, ((li.r_s0, li.r_s1),), dir, Val(nlev), Val(1),
+                           Val(0)).shell[1])
+    append!(row, (rr.ham_l2, gauge2(rr), gauge∞(rr)))
+    k = get(rec, :bounds_kinds, nothing)
+    hits = something(rec.bounds_hits, 0)
+    append!(row, (hits, (k === nothing ? (0, 0, 0, 0, 0) : Tuple(k))...))
+    hf = minimum_spacing(T, p.U.forest)
+    r_hit = something(rec.bounds_r_max, -1.0)
+    append!(row, (r_hit, r_hit < 0 ? NaN : (r_hmin - r_hit) / hf))
+    # The lapse along x and the diagonal; the ghosts are the diagnostics'.
+    ss = [k * hf for k in 0:round(Int, 3 / hf)]
+    ax = lapse_at(p, [SVector{3,T}(s, 0, 0) for s in ss])
+    ad = lapse_at(p, [SVector{3,T}(s, s, s) / sqrt(T(3)) for s in ss])
+    r_half, r_tenth = crossing(ss, ax, T(1 // 2)), crossing(ss, ax, T(1 // 10))
+    append!(row, (r_half, r_tenth, something(rec.M_irr, NaN), something(rec.r_min, NaN)))
+    isrank0 && open(io -> println(io, join((@sprintf("%.10g", x) for x in
+                                            vcat([t], ax, ad)), ',')), lapse_path, "a")
+    hist = get(rec, :bounds_hist, nothing)
+    isrank0 && hist !== nothing &&
+        open(io -> println(io, join(vcat([@sprintf("%.10g", t)], string.(collect(hist))),
+                                    ',')), hits_path, "a")
+    extra["layerfree"] = Dict{String,Any}(
+        "shells" => lf, "ramp" => Dict("ham_l2" => rr.ham_l2, "gauge_l2" => gauge2(rr)),
+        "hits" => hits, "hits_by_kind" => k === nothing ? nothing : Dict(pairs(k)),
+        "hit_r_max" => r_hit, "r_alpha_half" => r_half, "r_alpha_tenth" => r_tenth)
+    return nothing
+end
 # The error against the hole on the track's line, and the layer's residual
 # against its own target (added in step B3): a fed source moves the hole off
 # the analytic line, so `err_*` and `residual` measure the move as well. The
@@ -743,7 +953,7 @@ t_wall0 = time()
 # overall error and of the horizon's `M_irr` and `J`, each named like the key
 # it tracks. A restart refills the window from the CSV, which lacks the
 # horizon's numbers (`records.csv` is written at the end).
-eq_shell = hole ? shell_names[2] : ""
+eq_shell = hole ? @sprintf("r%g", shell_r[1]) : ""
 history_csv = vcat(["constraints.ham_l2" => "ham_l2", "constraints.mom_l2" => "mom_l2",
                     "constraints.gauge_l2" => "gauge_l2"],
                    hole ? ["shells.$eq_shell.ham_l2" => "ham_l2_$eq_shell",
@@ -793,7 +1003,8 @@ if hole
     setup["a"] = Float64(a_spin)
     setup["M_irr_kerr"] = M_irr_kerr
     setup["interior"] = case.interior isa FittedSpec ? "fitted" :
-                        case.interior isa TrackedSpec ? "tracked" : "damped"
+                        case.interior isa TrackedSpec ? "tracked" :
+                        case.interior isa LayerFreeInterior ? "layerfree" : "damped"
     if case.interior isa TrackedSpec
         sp = case.interior
         setup["tracked"] = Dict("prediction" => sp.quadratic ? "quadratic" : "line",
@@ -804,8 +1015,9 @@ if hole
                                 "seed_velocity_offset" =>
                                     Float64.(collect(sp.seed_velocity_offset)))
     end
-    setup["gauge_source"] = case.gauge === nothing ? "sampled" : opt("source", "algebraic")
-    if case.gauge isa RolledGaugeSource
+    setup["gauge_source"] = case.gauge === nothing ? "sampled" :
+                            layerfree ? repr(case.gauge) : opt("source", "algebraic")
+    if case.gauge isa RolledGaugeSource && case.gauge.to isa DampedHarmonicSource
         dh = case.gauge.to
         setup["gauge"] = "damped harmonic, rolled on"
         setup["rollon"] = Dict("t0" => Float64(case.gauge.t_0),
@@ -817,9 +1029,20 @@ if hole
         setup["gauge"] = "Kerr-Schild"
     end
     setup["shell_center"] = shell_track ? "track" : "analytic"
-    case.interior isa FittedSpec ? (setup["margin_cells"] = case.interior.margin) :
-                                   (setup["r_0"] = Float64(case.interior.r_0);
-                                    setup["r_1"] = Float64(case.interior.r_1))
+    if case.interior isa LayerFreeInterior
+        li = case.interior
+        setup["layerfree"] = Dict("eps" => Float64(li.ε), "r_core" => Float64(li.r_core),
+                                  "r_s0" => Float64(li.r_s0), "r_s1" => Float64(li.r_s1),
+                                  "kappa_data" => Float64(li.κ), "rho_a" => Float64(li.ρ_a),
+                                  "gate_rule" => li.gate_rule,
+                                  "bounds" => repr(case.bounds),
+                                  "eps_KO" => repr(case.ε_KO), "gamma0" => repr(case.γ0))
+    elseif case.interior isa FittedSpec
+        setup["margin_cells"] = case.interior.margin
+    else
+        setup["r_0"] = Float64(case.interior.r_0)
+        setup["r_1"] = Float64(case.interior.r_1)
+    end
     case.interior isa FittedSpec &&
         (setup["variant"] = string(TreeGeneralizedHarmonic.interior_variant(case.interior)))
     setup["points"] = sum(last, points_by_level)
@@ -901,7 +1124,9 @@ function observe(p, t, u, rec)
           shell_track && case.interior isa TrackedSpec && rec.track_center !== nothing ?
           SVector{3,T}(rec.track_center) :
           SVector{3,T}(center_at(case.center, T(t)))
-    edges = if hole
+    edges = if hole && layerfree
+        vcat(lf_inner, shell_r, [T(Inf)])
+    elseif hole
         r_in = case.interior isa FittedSpec ?
                shell_r[1] - case.interior.margin * minimum_spacing(T, p.U.forest) :
                case.interior.r_1
@@ -1028,6 +1253,7 @@ function observe(p, t, u, rec)
                            get_ax(rec.source_center), get_ax(rec.source_velocity),
                            get_ax(rec.source_acceleration), tn.err_l2, tn.residual)
     end
+    hole && layerfree && layerfree_columns!(row, extra, p, t, u, rec, c_t, dir)
     isrank0 && open(csvpath, "a") do io
         println(io, join((x isa Real ? @sprintf("%.10g", x) : string(x) for x in row), ','))
     end
@@ -1141,7 +1367,8 @@ restarting = get(ckw, :restart_file, nothing) !== nothing
 # at `a = 0`, as before).
 core² = !hole ? zero(T) : case.interior isa FittedSpec ?
         (haskey(OPTIONS, "r_core") ? T(rat(OPTIONS["r_core"])) :
-         r_hmin - 5 // 4)^2 : case.interior.r_0^2
+         r_hmin - 5 // 4)^2 :
+        case.interior isa LayerFreeInterior ? case.interior.r_core^2 : case.interior.r_0^2
 fitkw = if hole && case.interior isa FittedSpec
     nL = case.interior.n_L > 0 ? case.interior.n_L :
          TreeGeneralizedHarmonic.layer_cells(q ÷ 2 + 1, T(4), one(T))

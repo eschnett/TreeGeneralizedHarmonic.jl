@@ -199,6 +199,15 @@ export fill_fitted_initial!, adapt_fitted_initial_data!
 export discrete_gradient_momentum!
 
 # Checkpoint and restart (2026-10-01, on TreeAMR 0.1.4's M9a)
+# Step I1: a layer-free interior — the smoothed hole, the steered source with its
+# frozen correction, the interior that replaces the layer, and its record.
+export SmoothedKerrSchild, smoothed_radius, smoothing_radius
+export LayerFreeInterior, anchor_weight, layerfree_ball, layerfree_bounds
+export SteeredSource, smoothed_logs, steering_profile, has_frozen_correction
+export CorrectedSource, frozen_correction_tuple, sample_frozen_correction!
+export layerfree_needs_gauge_momentum, layerfree_state, layerfree_momentum
+export layerfree_validity
+export layerfree_aux, layerfree_diagnostics!, take_chunk_detail!, bounds_project_kind
 export latest_checkpoint
 
 # SimWatch status files (2026-10-02)
@@ -252,6 +261,7 @@ include("fit.jl")
 # before `driver.jl`, which writes and reads it (added 2026-10-01).
 include("checkpoint.jl")
 include("driver.jl")
+include("layerfree.jl")
 # SimWatch status files (2026-10-02): host-side, for run scripts.
 include("simwatch.jl")
 

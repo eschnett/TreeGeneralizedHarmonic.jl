@@ -718,6 +718,30 @@ the line's: in every row they fall faster than free fall for `2 M`, stop near
 `test/binary_runs.jl feed=controlled` its runs, `test/fed_study.jl` and
 `test/binary_study.jl` their tables.
 
+From 2026-10-30 (step I1, branch `claude/step-I1-layer-free-interior`) a hole
+may be held **without a layer**: `src/layerfree.jl` has `LayerFreeInterior`
+(kernel variant `:none`, or `:anchored` with its anchor; every mask
+`AllPoints`; its own radius and gate rules), `SteeredSource` (the algebraic
+Kerr-Schild source plus a lapse steering toward a collapsed target), the frozen
+correction `ΔH` sampled behind the new gauge-source kind `Val(:corrected)`
+(`CorrectedSource`), the pre-collapsed data (`layerfree_momentum`), the
+validity rows by region, the hits by kind (`DIAG_BOUNDS_KIND`, `NDIAG = 18`) and
+`layerfree_diagnostics!`; `initialdata.jl` has `SmoothedKerrSchild` and
+`kerr_schild_case(; smoothing)`. `test/layerfree_tests.jl` is its file,
+`test/octant_runs.jl interior=layerfree` its runs and `test/layerfree_study.jl`
+their reader; `CODE.md`, "A layer-free interior (proposed in step I1)", is the
+design, and `SINGULARITY_HANDLING.md`, "A layer-free interior (step I1)", the
+screen's command lines and its results (the base passes at `8 M`, `ℋ`
+outside the horizon `0.34×` `:damped`'s; the promotion is not run, and Erik
+shelved this exact design on 2026-10-30 in favour of similar ones). **Without
+the anchor nothing survives**
+(diagnosed on Symmetry's CPUs, 2026-10-30): the smoothed ball's own `ℋ`
+(`1182` at `ε = 1`) grows at `15–25/M` whatever the gauge does, and every
+unanchored start ends within `M/4`; `rho_a=10` (`10/M`) holds it to `4 M`, so
+the screen was rebuilt around that, and an anchored interior is a damping
+layer at `r < ε` toward a regular state. `rho_a` defaults to `0` in
+`test/octant_runs.jl`: pass it.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -788,7 +812,14 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **6016 assertions in 17m26** at four threads and **6008 in 20m59**
+The suite is **7605 assertions in 36m38** at four threads (EPYC 7532, job
+586055) and **7597 in 33m14** at one (EPYC 7543, job 586054) after step I1
+(2026-10-30, branch `claude/step-I1-layer-free-interior`; run on Symmetry's
+`amdq`, the development machine being full — read the times as a cluster node's,
+about twice the development machine's): its 1589 new claims are
+`layerfree_tests.jl`'s, `3m04` on its own at four threads — 1507 of them the
+smoothed data's lattice points, and most of the time the fixture's two short
+runs and the `:anchored` kernel's compilation. It was **6016 assertions in 17m26** at four threads and **6008 in 20m59**
 at one after the review's second round (2026-10-30, the PID law): its 24 new claims
 are `source_line_tests.jl`'s, `16.3 s` and `20.7 s` inside the suite — the PID
 loop against its closed form and the junk, `∂_t H` under the PID law, a PID line

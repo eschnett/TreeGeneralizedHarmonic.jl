@@ -1401,6 +1401,11 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
            val.min_α_evolved < spec.α_trigger
             trigger_pending = true
         end
+        # The layer-free interior's hits by kind and by radius (step I1).
+        lf_rows = acc !== nothing && p.interior isa LayerFreeInterior ?
+                  (lfd = take_chunk_detail!(acc);
+                   (bounds_kinds=lfd.kinds, bounds_hist=lfd.hist)) :
+                  (;)
         # A case of several holes has no exact solution (step B3): no error and no
         # drift, and the residual is the layers' distance from their targets.
         rec = (t=R(t), dt=R(dt), steps=steps, λ=R(λ), λ_end=R(λ_end),
@@ -1427,7 +1432,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                bounds_r_max=bh.r_max, val..., trk..., cad..., fr...,
                nblocks=nleaves(mesh), levels=forest_levels(mesh),
                h=R(minimum_spacing(T, mesh)),
-               finite=nonfinite == 0)
+               finite=nonfinite == 0, lf_rows...)
         # Several holes (step B3; `CODE.md`, "The record"): each hole's rows, and
         # the pair's separation and orbital phase — the angle of `c_2 − c_1` in
         # the plane `z = 0` — from the tracks.
@@ -1495,8 +1500,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # after a quieter chunk 3, and the recheck stopped the run at a CFL
     # number of `0.20003` against `0.2`. A 1 % margin costs 1 % of the steps.
     # Several holes move whatever their initial velocities: a pair from rest
-    # accelerates (step B3).
-    moving = binary || sum(abs2, case.center.v) > 0
+    # accelerates (step B3). **And a layer-free interior (step I1)** evolves its
+    # interior's speeds with the equations: no layer holds them, and the
+    # smoothed data's are `0.6–1.6` against the far field's `√3` only at `t = 0`
+    # (proposed in step I1: the same sizing, so that the recheck reads a growth
+    # beyond the previous chunk's, not every growth).
+    moving = binary || sum(abs2, case.center.v) > 0 ||
+             case.interior isa LayerFreeInterior
     growth = saved === nothing ? one(T) : from_plain(T, saved.growth)
     # The previous chunk's integrator, whose scratch the next one takes over
     # while the mesh is unchanged (`reuse`); `nothing` before the first chunk
