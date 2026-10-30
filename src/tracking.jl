@@ -1130,7 +1130,7 @@ end
 SourceLaw(; integral::Bool=false, model::Bool=true) = SourceLaw(integral, model)
 
 """
-    seed_source_lines(case::GHCase; law = SourceLaw(), τs) -> Vector{SourceLine}
+    seed_source_lines(case::GHCase) -> Vector{SourceLine}
 
 Each hole's controlled source line at `t = 0`, started where the case's own
 source puts the hole — the initial data's gauge (added in step B3): for several
@@ -1140,39 +1140,25 @@ holes each [`HoleSpec`](@ref)'s center and velocity, the composite
 B3):** a source on another line than the data's violates `C_a` at `t = 0` by the
 difference, and the track's seed is a guess the finds correct (step B2's
 recovery seed is `0.05` off) — the line follows the track from there, through
-the loop. A PID line's integral starts at `(a₀ − a_m)/ω³`, so that its
-acceleration at `t = 0` is the case's source's, `a₀` (each `HoleSpec`'s
-acceleration; amended in step B3's review); a PD line has no state to hold it,
-and starts at the model's.
+the loop. **The integral starts at zero (amended in step B3's review)**, so that
+the line's acceleration at `t = 0` is the loop's, the model's or nothing: an
+integral started at `(a₀ − a_m)/ω³`, holding the data's Newtonian acceleration
+`a₀`, is a model the loop takes `τ` to forget, and the pair's row with it
+(`b3ig48`, commit `770f0fe`) lagged its tracks as the model's rows did. `C_a` at
+`t = 0` does not read the source's acceleration, and the pair's rows started
+with and without it agree there to every digit.
 """
-function seed_source_lines(case::GHCase{T}; law::SourceLaw=SourceLaw(),
-                           τs=nothing) where {T}
+function seed_source_lines(case::GHCase{T}) where {T}
     if case.interior isa HolesSpec
-        holes = case.holes
-        cs = [h.center for h in holes]
-        vs = [h.velocity for h in holes]
-        a0 = [h.acceleration for h in holes]
-        masses = [h.mass for h in holes]
-    else
-        case.gauge isa CompositeKerrSchildSource{T,1} || throw(ArgumentError(
-            "a controlled source line starts on the case's one-hole composite " *
-            "source (gauge_source = :composite), and this case's source is a " *
-            "$(typeof(case.gauge))."))
-        h = only(case.gauge.holes)
-        c, v = _hole_line(h, zero(T))
-        cs, vs, a0, masses = [c], [v], [h.acc], [one(T)]
+        return [SourceLine{T}(zero(T), h.center, h.velocity) for h in case.holes]
     end
-    K = length(cs)
-    is = [zero(SVector{3,T}) for _ in 1:K]
-    if law.integral
-        τs === nothing && throw(ArgumentError(
-            "a PID source line's integral starts from its loop time; pass τs."))
-        ωs = _omegas(T, τs)
-        am = law.model && K > 1 ? _model_accelerations(cs, masses) :
-             [zero(SVector{3,T}) for _ in 1:K]
-        is = [ωs[A] > 0 ? (a0[A] - am[A]) / ωs[A]^3 : zero(SVector{3,T}) for A in 1:K]
-    end
-    return [SourceLine{T}(zero(T), cs[A], vs[A], is[A]) for A in 1:K]
+    case.gauge isa CompositeKerrSchildSource{T,1} || throw(ArgumentError(
+        "a controlled source line starts on the case's one-hole composite source " *
+        "(gauge_source = :composite), and this case's source is a " *
+        "$(typeof(case.gauge))."))
+    h = only(case.gauge.holes)
+    c, v = _hole_line(h, zero(T))
+    return [SourceLine{T}(zero(T), c, v)]
 end
 
 """

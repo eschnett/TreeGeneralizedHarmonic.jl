@@ -690,7 +690,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
               targeted ? T[spec.control_time] : T[]
     line_law = controlled ? source_law(case) : SourceLaw()
     source_lines = !controlled ? nothing :
-                   saved === nothing ? seed_source_lines(case; law=line_law, τs=line_τs) :
+                   saved === nothing ? seed_source_lines(case) :
                    from_plain(Vector{SourceLine{T}}, saved.source_lines;
                               path="run.source_lines")
     # The case a piece about `t` runs, its source on the feed: the controlled
