@@ -143,7 +143,8 @@ export HolesDamping, holes_damping, holes_center, HolesDissipation
 export binary_case, head_on_holes, holes_source, check_holes_source, holes_forest
 export seed_tracks, holes_interior, holes_source_at, holes_seed_source_at, holes_case_at
 export with_case, gauge_consistent_state
-export SourceLine, seed_source_lines, advance_source_lines, source_line_states
+export SourceLine, SourceLaw, source_law, seed_source_lines, advance_source_lines
+export source_line_states
 export track_input, lines_source_at, fed_case_at
 
 # The fitted target (step 8e): the fit's variables, the solid harmonics, the

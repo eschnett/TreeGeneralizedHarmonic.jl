@@ -1084,31 +1084,53 @@ _on_lines(d::HolesDissipation{T,K}, lines) where {T,K} =
 # arithmetic.
 
 """
-    SourceLine{T}(t, c, v)
+    SourceLine{T}(t, c, v, i)
 
 Where the gauge source carries one hole at time `t` (added in step B3): the
-center `c` and the velocity `v` of the **controlled source line**, the state of
-the loop [`advance_source_lines`](@ref) integrates,
+center `c` and the velocity `v` of the **controlled source line**, and the
+integral `i = ∫ (c_tr − c) dt` of its distance from the track, the state of the
+loop [`advance_source_lines`](@ref) integrates. With `e = c_tr − c` the distance
+from the track's position and `ė = ċ_tr − ċ` from its velocity
+([`track_state`](@ref)), and `ω = 1/τ` (the hole's spec's `control_time`), the
+line's acceleration is one of
 
-    c̈ = a_N(c) + ω² (c_tr(t) − c) + 2ω (ċ_tr(t) − ċ),    ω = 1/τ,
+    PD:   c̈ = a_m + ω² e + 2ω ė                  (the loop of 7fea8eb)
+    PID:  c̈ = a_m + 3ω² e + 3ω ė + ω³ i,  i̇ = e  (amended in step B3's review)
 
-a critically damped second-order loop of time `τ` (the hole's spec's
-`control_time`) pulling the line onto its track's position `c_tr` and velocity
-`ċ_tr` ([`track_state`](@ref)), with the Newtonian acceleration `a_N` from the
-other holes on their lines as its model (zero for one hole). The line is `C²` in
-time wherever the track is `C¹`, which [`track_state`](@ref)'s blend makes it,
-and its acceleration is the law's right-hand side at `t`
-([`source_line_states`](@ref)), which the piece's [`TrackedHole`](@ref) carries
-into `∂_t H`. A plain immutable struct, carried by the run and its checkpoint.
+— a critically damped loop with its two, or three, poles at `−ω` — where the
+model `a_m` is the Newtonian pull of the other holes on their lines, or zero
+(`model = false`, and always for one hole). The PD loop holds a steady track
+acceleration `c̈_tr` off by `(c̈_tr − a_m) τ²`; the PID loop by nothing, its
+integral taking up the difference. The line is `C²` in time wherever the track
+is `C¹`, which [`track_state`](@ref)'s blend makes it, and its acceleration is
+the law's right-hand side at `t` ([`source_line_states`](@ref)), which the
+piece's [`TrackedHole`](@ref) carries into `∂_t H`. A plain immutable struct,
+carried by the run and its checkpoint; `i` is zero and unread for the PD loop.
 """
 struct SourceLine{T}
     t::T
     c::SVector{3,T}
     v::SVector{3,T}
+    i::SVector{3,T}
 end
 
+SourceLine{T}(t, c, v) where {T} = SourceLine{T}(t, c, v, zero(SVector{3,T}))
+
 """
-    seed_source_lines(case::GHCase) -> Vector{SourceLine}
+    SourceLaw(; integral = false, model = true)
+
+The controlled source line's law (amended in step B3's review): the PD loop
+(`integral = false`) or the PID loop (`true`), with or without the Newtonian
+model (`model`; one hole has none). `isbits`.
+"""
+struct SourceLaw
+    integral::Bool
+    model::Bool
+end
+SourceLaw(; integral::Bool=false, model::Bool=true) = SourceLaw(integral, model)
+
+"""
+    seed_source_lines(case::GHCase; law = SourceLaw(), τs) -> Vector{SourceLine}
 
 Each hole's controlled source line at `t = 0`, started where the case's own
 source puts the hole — the initial data's gauge (added in step B3): for several
@@ -1118,70 +1140,109 @@ holes each [`HoleSpec`](@ref)'s center and velocity, the composite
 B3):** a source on another line than the data's violates `C_a` at `t = 0` by the
 difference, and the track's seed is a guess the finds correct (step B2's
 recovery seed is `0.05` off) — the line follows the track from there, through
-the loop.
+the loop. A PID line's integral starts at `(a₀ − a_m)/ω³`, so that its
+acceleration at `t = 0` is the case's source's, `a₀` (each `HoleSpec`'s
+acceleration; amended in step B3's review); a PD line has no state to hold it,
+and starts at the model's.
 """
-function seed_source_lines(case::GHCase{T}) where {T}
+function seed_source_lines(case::GHCase{T}; law::SourceLaw=SourceLaw(),
+                           τs=nothing) where {T}
     if case.interior isa HolesSpec
-        return [SourceLine{T}(zero(T), h.center, h.velocity) for h in case.holes]
+        holes = case.holes
+        cs = [h.center for h in holes]
+        vs = [h.velocity for h in holes]
+        a0 = [h.acceleration for h in holes]
+        masses = [h.mass for h in holes]
+    else
+        case.gauge isa CompositeKerrSchildSource{T,1} || throw(ArgumentError(
+            "a controlled source line starts on the case's one-hole composite " *
+            "source (gauge_source = :composite), and this case's source is a " *
+            "$(typeof(case.gauge))."))
+        h = only(case.gauge.holes)
+        c, v = _hole_line(h, zero(T))
+        cs, vs, a0, masses = [c], [v], [h.acc], [one(T)]
     end
-    case.gauge isa CompositeKerrSchildSource{T,1} || throw(ArgumentError(
-        "a controlled source line starts on the case's one-hole composite source " *
-        "(gauge_source = :composite), and this case's source is a " *
-        "$(typeof(case.gauge))."))
-    h = only(case.gauge.holes)
-    c, v = _hole_line(h, zero(T))
-    return [SourceLine{T}(zero(T), c, v)]
+    K = length(cs)
+    is = [zero(SVector{3,T}) for _ in 1:K]
+    if law.integral
+        τs === nothing && throw(ArgumentError(
+            "a PID source line's integral starts from its loop time; pass τs."))
+        ωs = _omegas(T, τs)
+        am = law.model && K > 1 ? _model_accelerations(cs, masses) :
+             [zero(SVector{3,T}) for _ in 1:K]
+        is = [ωs[A] > 0 ? (a0[A] - am[A]) / ωs[A]^3 : zero(SVector{3,T}) for A in 1:K]
+    end
+    return [SourceLine{T}(zero(T), cs[A], vs[A], is[A]) for A in 1:K]
 end
 
 """
     seed_source_lines(tracks, t) -> Vector{SourceLine}
 
-Lines started on tracks at `t`: each track's center and velocity there.
+Lines started on tracks at `t`: each track's center and velocity there, the
+integral zero.
 """
 function seed_source_lines(tracks::AbstractVector{HorizonTrack{T}}, t) where {T}
     tt = T(t)
     return [(s = track_state(tr, tt); SourceLine{T}(tt, s[1], s[2])) for tr in tracks]
 end
 
-# The loop's acceleration of every line at `t`, from the lines' centers `xs` and
-# velocities `vs` and the inputs' `(c, ċ)`: the law above, the model's Newtonian
-# pull of the other holes first. `ω = 0` (`τ = Inf`) is the model alone, exactly:
-# `0 · (c_tr − c)` is zero.
-function _line_accelerations(xs, vs, cs, ċs, masses, ωs, newton::Bool)
+# The model: the Newtonian pull on each line of the other holes on theirs.
+function _model_accelerations(xs, masses)
     K = length(xs)
     T = eltype(eltype(xs))
     return [begin
                 a = zero(SVector{3,T})
-                if newton
-                    for B in 1:K
-                        B == A && continue
-                        d = xs[B] - xs[A]
-                        r = sqrt(sum(abs2, d))
-                        a = a + (T(masses[B]) / (r * r * r)) * d
-                    end
+                for B in 1:K
+                    B == A && continue
+                    d = xs[B] - xs[A]
+                    r = sqrt(sum(abs2, d))
+                    a = a + (T(masses[B]) / (r * r * r)) * d
                 end
+                a
+            end for A in 1:K]
+end
+
+# The loop's acceleration of every line at `t`, from the lines' centers `xs`,
+# velocities `vs` and integrals `is`, and the inputs' `(c, ċ)`: the law above,
+# the model first. `ω = 0` (`τ = Inf`) is the model alone, exactly: `0 · (c_tr −
+# c)` is zero.
+function _line_accelerations(xs, vs, is, cs, ċs, masses, ωs, law::SourceLaw)
+    K = length(xs)
+    T = eltype(eltype(xs))
+    am = law.model && K > 1 ? _model_accelerations(xs, masses) :
+         [zero(SVector{3,T}) for _ in 1:K]
+    return [begin
                 ω = ωs[A]
-                a + (ω * ω) * (cs[A] - xs[A]) + (2 * ω) * (ċs[A] - vs[A])
+                e, ė = cs[A] - xs[A], ċs[A] - vs[A]
+                law.integral ?
+                am[A] + (3 * ω * ω) * e + (3 * ω) * ė + (ω * ω * ω) * is[A] :
+                am[A] + (ω * ω) * e + (2 * ω) * ė
             end for A in 1:K]
 end
 
 _omegas(::Type{T}, τs) where {T} = [isinf(T(τ)) ? zero(T) : 1 / T(τ) for τ in τs]
 
+# The law from the keywords of the calls that predate it: `newton` was the model.
+_law(law, newton) = law === nothing ? SourceLaw(false, newton) : law
+
 """
-    advance_source_lines(lines, input, masses, τs, t; newton = length(lines) > 1)
+    advance_source_lines(lines, input, masses, τs, t; law = SourceLaw(model = length(lines) > 1))
         -> Vector{SourceLine}
 
 The controlled source lines carried from their time to `t` (added in step B3):
-the loop of [`SourceLine`](@ref) integrated by classical RK4 in steps of at most
-`τ_min/64`, reading the inputs `input(A, s) -> (c, ċ)` — the tracks' position and
-velocity, `s -> track_state(tracks[A], s)` — at each stage's time. `masses` are
-the model's (the holes' own); `τs` the holes' loop times, `Inf` for none (the
-line is then the model's trajectory from its start, a straight line for one
-hole). The same calls in the same order give the same lines, which is what a
-restart relies on; a `t` before the lines' time is refused.
+the loop of [`SourceLine`](@ref) under `law` ([`SourceLaw`](@ref)) integrated by
+classical RK4 in steps of at most `τ_min/64`, reading the inputs `input(A, s) ->
+(c, ċ)` — the tracks' position and velocity, `s -> track_state(tracks[A], s)` —
+at each stage's time. `masses` are the model's (the holes' own); `τs` the holes'
+loop times, `Inf` for none (the line is then the model's trajectory from its
+start, a straight line for one hole). The same calls in the same order give the
+same lines, which is what a restart relies on; a `t` before the lines' time is
+refused. (`newton = …` is the model switch of the law before the PID one.)
 """
 function advance_source_lines(lines::AbstractVector{SourceLine{T}}, input, masses, τs,
-                              t; newton::Bool=length(lines) > 1) where {T}
+                              t; newton::Bool=length(lines) > 1,
+                              law::Union{Nothing,SourceLaw}=nothing) where {T}
+    law = _law(law, newton)
     K = length(lines)
     (K ≥ 1 && length(masses) == K && length(τs) == K) || throw(ArgumentError(
         "advance_source_lines takes one mass and one loop time per line, got " *
@@ -1201,28 +1262,34 @@ function advance_source_lines(lines::AbstractVector{SourceLine{T}}, input, masse
     dt = (t1 - t0) / n
     xs = [l.c for l in lines]
     vs = [l.v for l in lines]
-    acc(s, x, v) = begin
+    is = [l.i for l in lines]
+    # The state's derivative: (ẋ, v̇, i̇) = (v, a, e), the integral's only where
+    # the law has one, so that a PD line's state is the one it was.
+    rhs(s, x, v, i) = begin
         inp = [input(A, s) for A in 1:K]
-        _line_accelerations(x, v, [i[1] for i in inp], [i[2] for i in inp], masses,
-                            ωs, newton)
+        cs = [p[1] for p in inp]
+        a = _line_accelerations(x, v, i, cs, [p[2] for p in inp], masses, ωs, law)
+        di = law.integral ? cs .- x : [zero(SVector{3,T}) for _ in 1:K]
+        (v, a, di)
     end
     for k in 1:n
         s = t0 + (k - 1) * dt
-        k1x, k1v = vs, acc(s, xs, vs)
-        x2, v2 = xs .+ (dt / 2) .* k1x, vs .+ (dt / 2) .* k1v
-        k2x, k2v = v2, acc(s + dt / 2, x2, v2)
-        x3, v3 = xs .+ (dt / 2) .* k2x, vs .+ (dt / 2) .* k2v
-        k3x, k3v = v3, acc(s + dt / 2, x3, v3)
-        x4, v4 = xs .+ dt .* k3x, vs .+ dt .* k3v
-        k4x, k4v = v4, acc(s + dt, x4, v4)
-        xs = xs .+ (dt / 6) .* (k1x .+ 2 .* k2x .+ 2 .* k3x .+ k4x)
-        vs = vs .+ (dt / 6) .* (k1v .+ 2 .* k2v .+ 2 .* k3v .+ k4v)
+        k1 = rhs(s, xs, vs, is)
+        k2 = rhs(s + dt / 2, xs .+ (dt / 2) .* k1[1], vs .+ (dt / 2) .* k1[2],
+                 is .+ (dt / 2) .* k1[3])
+        k3 = rhs(s + dt / 2, xs .+ (dt / 2) .* k2[1], vs .+ (dt / 2) .* k2[2],
+                 is .+ (dt / 2) .* k2[3])
+        k4 = rhs(s + dt, xs .+ dt .* k3[1], vs .+ dt .* k3[2], is .+ dt .* k3[3])
+        xs = xs .+ (dt / 6) .* (k1[1] .+ 2 .* k2[1] .+ 2 .* k3[1] .+ k4[1])
+        vs = vs .+ (dt / 6) .* (k1[2] .+ 2 .* k2[2] .+ 2 .* k3[2] .+ k4[2])
+        law.integral &&
+            (is = is .+ (dt / 6) .* (k1[3] .+ 2 .* k2[3] .+ 2 .* k3[3] .+ k4[3]))
     end
-    return [SourceLine{T}(t1, xs[A], vs[A]) for A in 1:K]
+    return [SourceLine{T}(t1, xs[A], vs[A], is[A]) for A in 1:K]
 end
 
 """
-    source_line_states(lines, input, masses, τs; newton = length(lines) > 1)
+    source_line_states(lines, input, masses, τs; law = SourceLaw(model = length(lines) > 1))
         -> Vector{NTuple{3,SVector{3}}}
 
 Each controlled source line's center, velocity and acceleration at the lines'
@@ -1231,13 +1298,15 @@ so that a piece's [`TrackedHole`](@ref) about that time is the line to second
 order and its `∂_t H` the derivative of the `H` it carries.
 """
 function source_line_states(lines::AbstractVector{SourceLine{T}}, input, masses, τs;
-                            newton::Bool=length(lines) > 1) where {T}
+                            newton::Bool=length(lines) > 1,
+                            law::Union{Nothing,SourceLaw}=nothing) where {T}
+    law = _law(law, newton)
     K = length(lines)
     t = lines[1].t
     inp = [input(A, t) for A in 1:K]
     as = _line_accelerations([l.c for l in lines], [l.v for l in lines],
-                             [i[1] for i in inp], [i[2] for i in inp], masses,
-                             _omegas(T, τs), newton)
+                             [l.i for l in lines], [p[1] for p in inp],
+                             [p[2] for p in inp], masses, _omegas(T, τs), law)
     return [(lines[A].c, lines[A].v, as[A]) for A in 1:K]
 end
 
@@ -1260,7 +1329,8 @@ function lines_source_at(case::GHCase{T}, lines, tracks, t) where {T}
         "the source lines are at t = $(lines[1].t), and the piece's source is asked " *
         "for at t = $t: carry them there first (advance_source_lines)."))
     st = source_line_states(lines, track_input(tracks), [h.mass for h in holes],
-                            [h.interior.control_time for h in holes])
+                            [h.interior.control_time for h in holes];
+                            law=source_law(case))
     return CompositeKerrSchildSource(ntuple(Val(K)) do A
         c, v, a = st[A]
         TrackedHole(T; M=holes[A].mass, spin=holes[A].spin, center=c, velocity=v,
@@ -1307,7 +1377,7 @@ function fed_case_at(case::GHCase{T}, tr::HorizonTrack, t; source_lines=nothing)
             "the source line is at t = $(source_lines[1].t), and the piece's source " *
             "is asked for at t = $t: carry it there first (advance_source_lines)."))
         only(source_line_states(source_lines, track_input([tr]), [M],
-                                [spec.control_time]; newton=false))
+                                [spec.control_time]; law=source_law(case)))
     else
         throw(ArgumentError("fed_case_at was asked for a case whose source is its " *
                             "own (source_feed = :own)."))
@@ -1328,3 +1398,26 @@ source_rows(h::TrackedHole) =
     (source_center=ntuple(d -> tofloat64(h.c0[d]), 3),
      source_velocity=ntuple(d -> tofloat64(h.v0[d]), 3),
      source_acceleration=ntuple(d -> tofloat64(h.acc[d]), 3))
+
+"""
+    source_law(case::GHCase) -> SourceLaw
+
+The law of a case's controlled source lines (amended in step B3's review): its
+tracked hole's spec's, or for several holes their specs', which must agree; one
+hole has no model.
+"""
+function source_law(case::GHCase)
+    if case.interior isa HolesSpec
+        specs = case.interior.specs
+        laws = [SourceLaw(s.control_integral, s.control_model) for s in specs]
+        all(==(laws[1]), laws) || throw(ArgumentError(
+            "a case of several holes carries their source lines under one law, and its " *
+            "holes' TrackedSpecs ask for $(Tuple(laws))."))
+        return laws[1]
+    end
+    spec = case.interior
+    spec isa TrackedSpec || throw(ArgumentError(
+        "source_law reads a tracked case's spec; this case's interior is a " *
+        "$(typeof(spec))."))
+    return SourceLaw(spec.control_integral, false)
+end

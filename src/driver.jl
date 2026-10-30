@@ -688,8 +688,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     line_masses = binary ? T[h.mass for h in case.holes] : T[ks_mass]
     line_τs = binary ? T[h.interior.control_time for h in case.holes] :
               targeted ? T[spec.control_time] : T[]
+    line_law = controlled ? source_law(case) : SourceLaw()
     source_lines = !controlled ? nothing :
-                   saved === nothing ? seed_source_lines(case) :
+                   saved === nothing ? seed_source_lines(case; law=line_law, τs=line_τs) :
                    from_plain(Vector{SourceLine{T}}, saved.source_lines;
                               path="run.source_lines")
     # The case a piece about `t` runs, its source on the feed: the controlled
@@ -699,7 +700,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             source_lines = advance_source_lines(source_lines,
                                                 track_input(binary ? track : [track]),
                                                 line_masses, line_τs, T(t);
-                                                newton=binary)
+                                                law=line_law)
         end
         return binary ? holes_case_at(case, track, T(t); source_lines=source_lines) :
                fed_case_at(case, track, T(t); source_lines=source_lines)

@@ -151,7 +151,10 @@
 #                                   every piece, unfiltered) or controlled (the
 #                                   controlled source line, a critically damped
 #                                   loop of time control_time in M onto the track);
-#                                   every feed but own needs source=composite. The
+#                                   every feed but own needs source=composite;
+#   control_law=pd                  feed=controlled only: the loop, pd (position and
+#                                   velocity) or pid (and the distance's integral;
+#                                   added in step B3's review). The
 #                                   CSV then ends with the track's and the source
 #                                   line's center and velocity along the motion
 #                                   axis and the line's acceleration
@@ -385,7 +388,7 @@ case = if hole
     interior_kind == "tracked" || !any(k -> haskey(OPTIONS, k),
                                        ("prediction", "find_interval", "target_mass",
                                         "target_dv", "target_dx", "seed_dv", "feed",
-                                        "control_time")) ||
+                                        "control_time", "control_law")) ||
         error("prediction=, find_interval=, target_mass=, target_dv=, target_dx=, " *
               "seed_dv=, feed= and control_time= are the tracked analytic target's " *
               "(interior = tracked)")
@@ -428,7 +431,10 @@ case = if hole
                            seed_velocity_offset=along(rat(opt("seed_dv", "0"))),
                            source_feed=Symbol(opt("feed", "own")),
                            control_time=lowercase(opt("control_time", "0")) == "inf" ?
-                                        T(Inf) : T(rat(opt("control_time", "0"))))
+                                        T(Inf) : T(rat(opt("control_time", "0"))),
+                           control_integral=opt("control_law", "pd") == "pid")
+        opt("control_law", "pd") in ("pd", "pid") ||
+            error("control_law is pd or pid, got $(opt("control_law", ""))")
         spec.source_feed == TreeGeneralizedHarmonic.FEED_OWN || gs === :composite ||
             error("feed=$(opt("feed", "own")) rebuilds the one-hole composite source " *
                   "every piece, and needs source=composite")

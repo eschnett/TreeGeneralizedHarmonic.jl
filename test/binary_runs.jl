@@ -37,6 +37,10 @@
 #                                  or (added in step B3) the controlled source lines
 #   control_time=10                feed=controlled only: the loop's time for a hole
 #                                  of mass one, in M (each hole takes it times M_A)
+#   control_law=pd control_model=1 feed=controlled only (added in step B3's review):
+#                                  the loop, pd or pid (with the integral of the
+#                                  line's distance from the track), and the
+#                                  Newtonian model of the other hole, on (1) or off
 #   momentum=superposition|gauge   the initial Π: the data's own, or from C_a = 0
 #   companion=4 attenuation=       the data's companion attenuation λ_B/M_B (0:
 #                                  none) and XCTS's own one (a length; none)
@@ -130,7 +134,11 @@ unit = TrackedSpec(T; r_0=T(rat(opt("r_0", "5/8"))), r_1=T(rat(opt("r_1", "23/16
                    max_interval=T(rat(opt("find_interval", "0"))),
                    control_time=opt("feed", "tracks") != "controlled" ? zero(T) :
                                 lowercase(opt("control_time", "10")) == "inf" ? T(Inf) :
-                                T(rat(opt("control_time", "10"))))
+                                T(rat(opt("control_time", "10"))),
+                   control_integral=opt("control_law", "pd") == "pid",
+                   control_model=opt("control_model", "1") in ("1", "true"))
+opt("control_law", "pd") in ("pd", "pid") ||
+    error("control_law is pd or pid, got $(opt("control_law", ""))")
 holes = head_on_holes(T; d=d_sep, interior=unit)
 companion = rat(opt("companion", "4"))
 attenuation = haskey(OPTIONS, "attenuation") ? T(rat(OPTIONS["attenuation"])) : nothing

@@ -1612,7 +1612,8 @@ end
                 ρ_max = 0, max_misses = 3, lmax_shape = 4, quadratic = true,
                 max_interval = 0, mass_factor = 1, velocity_offset = (0, 0, 0),
                 center_offset = (0, 0, 0), seed_velocity_offset = (0, 0, 0),
-                source_feed = :own, control_time = 0)
+                source_feed = :own, control_time = 0, control_integral = false,
+                control_model = true)
 
 What a [`GHCase`](@ref) holds as its `interior` for the **tracked analytic
 target** (added in step B2; `CODE.md`, "One interior per hole" — "Tracked
@@ -1653,7 +1654,10 @@ background, which a binary will not have.
   :composite`); a case of several holes takes its feed from the case
   ([`binary_case`](@ref)'s `source_feed`), its holes' specs staying at `:own`,
   and the time from its holes' specs, so `control_time` is read only where the
-  line is controlled.
+  line is controlled. `control_integral` and `control_model` are its law
+  ([`SourceLaw`](@ref), amended in step B3's review): the PID loop in place of the
+  PD one, and the Newtonian model of the other holes (several holes only; their
+  specs must agree).
 
 `isbits`, as a case's interior must be; every "use the rule" value is spelled
 `0`.
@@ -1675,6 +1679,8 @@ struct TrackedSpec{T}
     seed_velocity_offset::SVector{3,T}
     source_feed::Int
     control_time::T
+    control_integral::Bool
+    control_model::Bool
 end
 
 # The codes of a tracked hole's source feed (step B3), `isbits` where a symbol is
@@ -1695,7 +1701,8 @@ function TrackedSpec(::Type{T}=Float64; r_0, r_1, w_ramp=T(1 // 2),
                      mass_factor=one(T), velocity_offset=(0, 0, 0),
                      center_offset=(0, 0, 0),
                      seed_velocity_offset=(0, 0, 0), source_feed::Symbol=:own,
-                     control_time=zero(T)) where {T}
+                     control_time=zero(T), control_integral::Bool=false,
+                     control_model::Bool=true) where {T}
     # The sphere's own refusals, once, here rather than at the first piece.
     Interior(T; center=(0, 0, 0), r_0=r_0, r_1=r_1, ρ_max=ρ_max, w_ramp=w_ramp,
              ρ_ramp=ρ_ramp, margin=margin)
@@ -1724,7 +1731,8 @@ function TrackedSpec(::Type{T}=Float64; r_0, r_1, w_ramp=T(1 // 2),
                           T(max_interval), T(mass_factor),
                           vec3(velocity_offset, "velocity_offset"),
                           vec3(center_offset, "center_offset"),
-                          vec3(seed_velocity_offset, "seed_velocity_offset"), feed, τ)
+                          vec3(seed_velocity_offset, "seed_velocity_offset"), feed, τ,
+                          control_integral, control_model)
 end
 
 interior_variant(::TrackedSpec) = :damped

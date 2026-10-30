@@ -126,7 +126,9 @@ function scaled_spec(spec::TrackedSpec{T}, M) where {T}
                        center_offset=spec.center_offset * m,
                        seed_velocity_offset=spec.seed_velocity_offset,
                        source_feed=feed_name(spec.source_feed),
-                       control_time=spec.control_time * m)
+                       control_time=spec.control_time * m,
+                       control_integral=spec.control_integral,
+                       control_model=spec.control_model)
 end
 
 """

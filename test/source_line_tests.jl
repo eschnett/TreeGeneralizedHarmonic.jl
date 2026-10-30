@@ -25,12 +25,14 @@ import AbstractSphericalHarmonics as ASH
     T = Float64
     X(x) = SVector{3,T}(x, 0, 0)
     # A line carried to `t1` in pieces of `Δ`, as the driver carries it.
-    function carry(lines, input, masses, τs, t1; Δ=T(1 // 20), newton=length(lines) > 1)
+    function carry(lines, input, masses, τs, t1; Δ=T(1 // 20), newton=length(lines) > 1,
+                   law=nothing)
         t = lines[1].t
         out = Tuple{T,Vector{SourceLine{T}}}[]
         while t < t1 - sqrt(eps(T))
             t = min(t + Δ, T(t1))
-            lines = advance_source_lines(lines, input, masses, τs, t; newton=newton)
+            lines = advance_source_lines(lines, input, masses, τs, t; newton=newton,
+                                         law=law)
             push!(out, (t, lines))
         end
         return lines, out
@@ -78,6 +80,45 @@ import AbstractSphericalHarmonics as ASH
         gain = sqrt(ω^4 + 4 * ω^2 * Ω^2) / (Ω^2 + ω^2)
         @test sqrt(sum(abs2, ab)) / A ≈ gain rtol = 1e-6
         @info "the loop's gain at the junk's period, τ = 10 (step B3)" gain measured = sqrt(sum(abs2, ab)) / A
+    end
+
+    # Guards the PID loop (step B3's review), what it exists for and what it
+    # costs: with its integral the line follows a steady acceleration it has no
+    # model of with no steady error — the PD loop's `a τ²` is gone, the triple
+    # pole at `−ω` leaving `e = (a/2) t² e^{−ωt}` from a line started at rest —
+    # and it passes the junk with `|T(iΩ)|` of `T = (3ωs² + 3ω²s + ω³)/(s + ω)³`,
+    # more than the PD loop's at the same `τ`. A factor in a gain or an integral
+    # that is not the line's distance shows as another response.
+    @testset "the PID loop follows a steady acceleration with no steady error" begin
+        τ = T(10)
+        ω = 1 / τ
+        pid = SourceLaw(; integral=true, model=false)
+        a = T(1 // 128)
+        parabola = (A, s) -> (X(a * s^2 / 2), X(a * s))
+        _, path = carry([SourceLine{T}(zero(T), X(0), X(0))], parabola, T[1], T[τ], 25τ;
+                        law=pid)
+        worst = maximum(path) do (t, ls)
+            abs(ls[1].c[1] - (a * t^2 / 2 - (a / 2) * t^2 * exp(-ω * t))) / (a * τ^2)
+        end
+        @test worst < 1e-8
+        t1, l1 = path[end]
+        @test abs(a * t1^2 / 2 - l1[1].c[1]) < 1e-6 * a * τ^2
+        @test abs(a * t1 - l1[1].v[1]) < 1e-6 * a * τ
+        @test l1[1].i[1] ≈ a / ω^3 rtol = 1e-6      # the integral holds the acceleration
+        Ω, A = T(2π / 7), T(1 // 50)
+        wave = (B, s) -> (X(A * sin(Ω * s)), X(A * Ω * cos(Ω * s)))
+        _, path = carry([SourceLine{T}(zero(T), X(0), X(A * Ω))], wave, T[1], T[τ],
+                        30τ + 7 * 2π / Ω; law=pid)
+        tail = filter(p -> p[1] > 30τ, path)
+        Sm = [sin(Ω * p[1]) for p in tail]
+        Cm = [cos(Ω * p[1]) for p in tail]
+        y = [p[2][1].c[1] for p in tail]
+        M2 = [sum(Sm .* Sm) sum(Sm .* Cm); sum(Sm .* Cm) sum(Cm .* Cm)]
+        ab = M2 \ [sum(Sm .* y), sum(Cm .* y)]
+        z = im * Ω
+        gain = abs((3ω * z^2 + 3ω^2 * z + ω^3) / (z + ω)^3)
+        @test sqrt(sum(abs2, ab)) / A ≈ gain rtol = 1e-6
+        @info "the PID loop's gain at the junk's period, τ = 10 (step B3's review)" gain
     end
 
     # Guards the loop's input: the line reads the track's position and velocity
@@ -163,13 +204,15 @@ import AbstractSphericalHarmonics as ASH
     # the system is the generalized harmonic system of no `H`, and `C_a` shows
     # it (`src/gauge.jl`). Measured on a pair whose tracks are a cell off the
     # lines, so that the loop and the model both act.
-    @testset "the source's ∂_t H is the time derivative of the source the line carries" begin
-        unit = TrackedSpec(T; r_0=T(3 // 5), r_1=T(7 // 5), margin=4, control_time=4)
+    @testset "the source's ∂_t H is the time derivative of the source the line carries ($(law.integral ? "PID" : "PD")$(law.model ? ", model" : ""))" for law in (SourceLaw(; integral=false, model=true), SourceLaw(; integral=true, model=false))
+        unit = TrackedSpec(T; r_0=T(3 // 5), r_1=T(7 // 5), margin=4, control_time=4,
+                           control_integral=law.integral, control_model=law.model)
         holes = head_on_holes(T; d=8, masses=(1, 1), interior=unit)
         pair = binary_case(T; holes=holes, halfwidth=T(8), chunk=T(1 // 10),
                            horizon=Horizon(T; every=1, N=12, spin=false),
                            source_feed=:controlled)
         @test pair.interior.feed == TreeGeneralizedHarmonic.FEED_CONTROLLED
+        @test source_law(pair) == law
         @test_throws "control_time" binary_case(T; holes=head_on_holes(T; d=8,
                                                                        masses=(1, 1),
                                                                        interior=TrackedSpec(T; r_0=T(3 // 5), r_1=T(7 // 5), margin=4)),
@@ -190,10 +233,11 @@ import AbstractSphericalHarmonics as ASH
         inp = track_input(tracks)
         masses = T[1, 1]
         τs = T[4, 4]
-        lm = advance_source_lines(lines, inp, masses, τs, tp - δ)
-        l0 = advance_source_lines(lm, inp, masses, τs, tp)
-        lp = advance_source_lines(l0, inp, masses, τs, tp + δ)
-        lh = advance_source_lines(l0, inp, masses, τs, tp + δ / 2)
+        lm = advance_source_lines(lines, inp, masses, τs, tp - δ; law=law)
+        l0 = advance_source_lines(lm, inp, masses, τs, tp; law=law)
+        lp = advance_source_lines(l0, inp, masses, τs, tp + δ; law=law)
+        lh = advance_source_lines(l0, inp, masses, τs, tp + δ / 2; law=law)
+        law.integral && @test any(l -> !iszero(l.i), l0)
         Sm, S0, Sp, Sh = (lines_source_at(pair, l, tracks, tt)
                           for (l, tt) in ((lm, tp - δ), (l0, tp), (lp, tp + δ),
                                           (lh, tp + δ / 2)))
@@ -229,10 +273,11 @@ import AbstractSphericalHarmonics as ASH
           gauge_source=:composite, octant=:quadrant,
           horizon=Horizon(T; every=1, N=12, spin=false))
     radii = (; r_0=T(2 // 5), r_1=T(11 // 10))
-    fixture(feed; τ=zero(T), seed_dv=0) =
+    fixture(feed; τ=zero(T), seed_dv=0, pid=false) =
         kerr_schild_case(T; kw...,
                          interior=TrackedSpec(T; radii..., max_interval=T(1 // 20),
                                               source_feed=feed, control_time=τ,
+                                              control_integral=pid,
                                               seed_velocity_offset=(seed_dv, 0, 0)))
     forest = gh_forest(T, fixture(:own); N=12, roots=(4, 2, 2))
     run(c; kw2...) = evolve!(T, c; forest=deepcopy(forest), q=q, ops=ops,
@@ -250,8 +295,11 @@ import AbstractSphericalHarmonics as ASH
         r_own = run(fixture(:own))
         r_seed = run(fixture(:seed))
         r_inf = run(fixture(:controlled; τ=T(Inf)))
+        r_pid = run(fixture(:controlled; τ=T(Inf), pid=true))
         @test isequal(r_own.u, r_seed.u)
         @test isequal(r_own.u, r_inf.u)
+        @test isequal(r_own.u, r_pid.u)
+        @test isequal(r_own.records, map(common, r_pid.records))
         @test isequal(r_own.records, map(common, r_seed.records))
         @test isequal(r_own.records, map(common, r_inf.records))
         @test all(r -> r.source_velocity == (1 / 5, 0.0, 0.0), r_inf.records)
@@ -274,7 +322,7 @@ import AbstractSphericalHarmonics as ASH
     # — measured 2026-10-26 on this fixture at `τ = 1`: the source at `0.255`,
     # the track at `0.252` after `0.3 M` and `0.18` cells off the analytic line,
     # `C_a` `10⁴×` at `t = 0`.
-    @testset "a controlled line restarts bit for bit, and starts on the data's gauge" begin
+    @testset "a controlled line starts on the data's gauge, and restarts bit for bit" begin
         c = fixture(:controlled; τ=T(1), seed_dv=1 // 20)
         a = run(c)
         @test all(r -> r.horizon_success === true && r.finite, a.records)
@@ -285,6 +333,12 @@ import AbstractSphericalHarmonics as ASH
         # Recovering on its finds: measured `0.211` at `0.2 M`, from `0.25`.
         @test abs(vt[end] - 1 / 5) < abs(vt[1] - 1 / 5) / 3
         @test a.records[end].track_offset < 1 // 10
+        # The chain on the PID loop, whose integral is run state too (step B3's
+        # review); the PD loop's state is the PID loop's less it.
+        c = fixture(:controlled; τ=T(1), seed_dv=1 // 20, pid=true)
+        a = run(c)
+        @test all(r -> r.horizon_success === true && r.finite, a.records)
+        @test all(r -> abs(r.source_velocity[1] - 1 / 5) < 1 / 100, a.records)
         pre = joinpath(mktempdir(), "line")
         b = run(c; checkpoint_path_prefix=pre, max_walltime_seconds=1e-9,
                 checkpoint_sync_to_disk=false)
