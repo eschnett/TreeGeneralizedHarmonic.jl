@@ -691,8 +691,10 @@ the record has each piece's `source_center`, `source_velocity`,
 `source_acceleration` (per hole for a pair). **Measured:** on step B2's
 production hole at `1/24` to `20 M` every feed — raw, PD at `τ = 10 M` and `4 M`,
 PID at `10 M` — is `b2t24` to `0.15 %` in `ℋ`, and from B2's recovery seed every
-controlled line reproduces `b2r24`'s `ℋ` and settles back onto the hole's motion,
-`0.0006–0.015` cells off the analytic line at `20 M` (the loop's neutral mode).
+controlled line reproduces `b2r24`'s `ℋ` just outside the horizon and settles back
+onto the hole's motion, `0.0006–0.015` cells off the analytic line at `20 M` (the
+loop's neutral mode) — but raises `ℋ` and `C_a` on the coarsest level and in the
+boundary band about `10³×` (see "Things that will bite").
 On the head-on pair at `1/48` every controlled line runs to `6 M` where the raw
 feed died by `1 M`: every find, `C_a` bounded. **The model term is what put the
 line off the holes**: the PD loop's steady error is `(c̈_tr − a_m) τ²`, and while
@@ -701,9 +703,12 @@ against `a_N = 0.008`) the model added `40–100 %` to the forcing — the line 
 cells off at `τ = 10 M_A`
 and `1.86` at `4 M_A` at `6 M`, against `1.29` and `0.60` without it, and `1.10`
 for the PID loop without it (the line's equation from the measured track
-reproduces every row to `0.05` cells). After `5 M` the holes do accelerate at
-`a_N`, which the PD loop without a model lags by `c̈_tr τ²` and the PID loop does
-not. The residual's rise from `3 M` follows the line's distance (`5.6` at `0.6`
+reproduces every row to `0.05` cells). The tracks' acceleration has not settled
+by `6 M`: it crosses `a_N` between `5` and `5.75 M` and is `1.1–1.7 a_N` and still rising
+at `6 M` on the controlled rows, so the PD loop's `c̈ τ²` lag behind a steady
+acceleration, which the PID loop does not have, is a property of the laws and not
+yet a measurement; running PID at `10 M_A` and PD at `4 M_A` to about `12 M`
+would decide between them (Erik's call, not run). The residual's rise from `3 M` follows the line's distance (`5.6` at `0.6`
 cells, `8.45` at `6.6`) over a floor of about `5.6` that every feed shares.
 **Proposed for B4: the PID loop without the model, integral from zero, `τ = 10
 M_A`** (now the defaults). The holes' coordinate motion is the gauge's and barely
@@ -2359,15 +2364,25 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
 - **No model in the source line, and no integral started at the data's
   acceleration** (step B3's review, second round). The PD loop's steady error is
   `(c̈_tr − a_m) τ²`; in this gauge the holes' coordinate acceleration is `−0.007`
-  to `−0.020` while the transient lasts and the Newtonian `a_N` only after it, so
-  a Newtonian model added `40–100 %` to the forcing and put the line `4.2` cells
-  off the holes at `6 M`
+  to `−0.020` over `1–3.5 M`, then crosses `a_N` and is still rising at `6 M` — the
+  gauge's transient is not over by then — so a Newtonian model added `40–100 %` to
+  the forcing and put the line `4.2` cells off the holes at `6 M`
   (`τ = 10 M_A`), and a PID integral started at `a₀/ω³` held the same model for
   its first `τ` (`3.1` cells). The defaults are the PID loop without the model,
   its integral from zero; a PD line without a model lags a steady acceleration by
   `c̈ τ²`. Before reading a line's offset as the loop's, integrate the law on the
   row's own track (it reproduces every row to `0.05` cells): the offset is the
   response to the forcing's history, not its steady value.
+- **A controlled source line that leaves the data's line costs at the outer
+  boundary** (step B3's review, third look, from the screens' CSVs). The source
+  rides the line everywhere while the Dirichlet data are the analytic hole's, so
+  after a recovery that moved the line (`b3fc24`, `b3fe24`, `b3fpr24`) `ℋ` and
+  `C_a` on the coarsest level and in the boundary band are about `10³×` the
+  analytic source's (`ℋ` on `L0` `800–4100×` from `2 M`), scaling with the line's
+  excursion, while the shell just outside the horizon looks fine. Read `L0` and
+  `_bnd`, not just the shells. B4's boundary has to follow the lines — Dirichlet
+  data from the holes on their lines, the source blended back to the data's gauge
+  far out, or a constraint-preserving boundary (options, not decisions).
 - **A pre-empted `h200preq` job can end `FAILED`, not requeued** (step B2,
   2026-10-26). Two rows (jobs 583003, 583004) got `SIGTERM` after `8–9 min`,
   their `srun` exited `143`, and the jobs ended `FAILED 15:0` with nothing

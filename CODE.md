@@ -7513,7 +7513,8 @@ data's gauge), against `b2r24` — the same seed on the analytic source:
 
 `ℋ` just outside the horizon is `b2r24`'s at every time but the first: its excess
 over `b2t24` (`33×` at `4 M`, `1.1×` at `20 M`) is the first chunk's target on the
-wrong line, which step B2 measured, and the line adds nothing to it. The line is
+wrong line, which step B2 measured, and the line adds nothing to it *there* — far
+from the hole it adds a great deal (below). The line is
 pulled by that first chunk's track (`+0.009` at `τ = 10 M`, `+0.021` at `4 M`),
 carries the hole with it — `0.09` and `0.15` cells off the analytic line at `4 M`
 — and settles back onto the data's motion, its velocity within `10⁻⁴` of `1/5` at
@@ -7531,8 +7532,54 @@ loop's two times: `ℋ` just outside the horizon `0.91–1.01×` `b2r24`'s after
 (`1.44×` at `1 M`), the line pulled `+0.014` by the first chunk, the hole `0.13`
 cells off the analytic line at `4 M` and `−0.015` at `20 M`, the residual against
 its own target `0.12–0.19` from `8 M` on. The law is not broken on one hole, and
-it is not better there either: a hole whose data are exact gives the loop nothing
-to do.
+it is not better there either — a hole whose data are exact gives the loop nothing
+to do — and it costs as much far from the hole as the PD loop does (below).
+
+**What a recovering line costs far from the hole (measured from the screens'
+CSVs in the review's third look, 2026-10-30; no new runs).** The shell just outside
+the horizon is not the whole of it. Once the line has moved off the data's line,
+`ℋ` and `C_a` on the coarsest level (`L0`) and in the boundary band rise about
+`10³` above `b2r24`'s, on both laws:
+
+| row | t | `ℋ` L2 | `ℋ` L2 on `L0` | `C_a` L2 on `L0` | `ℋ` L2 in the boundary band |
+|---|---|---|---|---|---|
+| `b2r24` | 8 | `1.94·10⁻⁶` | `6.32·10⁻¹¹` | `1.23·10⁻¹⁰` | `1.03·10⁻¹¹` |
+| `b2r24` | 12 | `1.01·10⁻⁶` | `6.18·10⁻¹¹` | `1.26·10⁻¹⁰` | `1.02·10⁻¹¹` |
+| `b2r24` | 20 | `6.35·10⁻⁷` | `6.06·10⁻¹¹` | `1.42·10⁻¹⁰` | `1.11·10⁻¹¹` |
+| `b3fc24` (PD) | 8 | `4.18·10⁻⁶` | `1.09·10⁻⁷` | `2.33·10⁻⁷` | `1.29·10⁻⁷` |
+| `b3fc24` (PD) | 12 | `2.43·10⁻⁶` | `1.12·10⁻⁷` | `1.93·10⁻⁷` | `1.32·10⁻⁷` |
+| `b3fc24` (PD) | 20 | `1.22·10⁻⁶` | `8.82·10⁻⁸` | `1.27·10⁻⁷` | `8.13·10⁻⁸` |
+| `b3fpr24` (PID) | 8 | `7.31·10⁻⁶` | `1.60·10⁻⁷` | `3.49·10⁻⁷` | `1.90·10⁻⁷` |
+| `b3fpr24` (PID) | 12 | `4.20·10⁻⁶` | `1.64·10⁻⁷` | `2.94·10⁻⁷` | `1.94·10⁻⁷` |
+| `b3fpr24` (PID) | 20 | `9.73·10⁻⁷` | `1.28·10⁻⁷` | `1.89·10⁻⁷` | `1.19·10⁻⁷` |
+
+- **The mesh's `ℋ`** over `b2r24`'s is `0.99`, `0.89`, `1.13`, `3.78`, `4.14`,
+  `2.81` and `1.53` at `1`, `2`, `4`, `8`, `12`, `16` and `20 M` on `b3fpr24`, and
+  `0.99`, `0.93`, `1.08`, `2.16`, `2.40`, `2.39` and `1.93` on `b3fc24`. `ℋ` on
+  `L0` is `1200–2650×` `b2r24`'s from `2 M` on on `b3fpr24`, `800–1800×` on
+  `b3fc24` and `1800–4100×` on `b3fe24` (PD at `τ = 4 M`).
+- **The composite path itself is clean**: the exact-seed rows (`b3fa24`, `b3fb24`,
+  `b3fd24`, `b3fp24`) are `b2t24` on every level, `L0` and the boundary band
+  included (`ℋ` on `L0` `6.07·10⁻¹¹` against `6.06·10⁻¹¹` at `20 M`). The excess
+  comes with the line having moved off the data's line.
+- **The likely cause, with a check from the CSVs:** the source rides the line
+  everywhere, while the Dirichlet data and the outer region's gauge stay the
+  analytic hole's, so at the faces `C_a` is about the source's change with the
+  line. One hole's source reads the line's velocity and not its center, so that
+  is `(∂H/∂u) δu`; the review's estimate, `∂H · δ ≈ (2M/r³) · 5·10⁻³ M` at `r ≈
+  64`, is `10⁻⁸–10⁻⁷`, the order measured. The
+  excess is there from the first chunk (`1100–2600×` `b2r24`'s at `1 M`), so it is
+  made at the boundary and not carried out from the hole, and across the three
+  recovery rows it scales with the size of the line's excursion: the boundary
+  band's `ℋ` at `8–12 M` is `1.3`, `1.9` and `3.0·10⁻⁷` on `b3fc24`, `b3fpr24` and
+  `b3fe24`, whose lines peaked `+0.0093`, `+0.0136` and `+0.0208` off `1/5` in
+  velocity (`1.39–1.46·10⁻⁵` per unit) and `0.24`, `0.35` and `0.50` cells off
+  the analytic line (`5.4–6.1·10⁻⁷` per cell). These rows move both together, so
+  they do not separate the velocity from the position.
+- **It is invisible on the pair** (`ℋ` L2 `1.2·10⁻³` there), but B4 has to make the
+  outer boundary agree with the source lines. The options, none decided: Dirichlet
+  data from the holes on their source lines; the source blended back to the data's
+  gauge far from the holes; a constraint-preserving boundary.
 
 **The head-on pair on the controlled line (measured in step B3's review**, two
 `h200debugq` links of under an hour a row, `walltime = 3000`, about `1.1`
@@ -7607,14 +7654,19 @@ with the tracks' acceleration read from their velocity every `M/4` (`b3cg48`,
 
 The steady error `e_ss = (c̈_tr − a_N) τ²` is the right formula, and the review's
 reading of it — `c̈_tr ≈ 0` by `5–6 M`, so a line climbing toward `9.4` cells at
-`10 M_A` — had the premise wrong. The track's velocity stays `0.053` below the
-seed's from `4.5 M` on because the seed accelerates at `a_N` too: the tracks
-accelerate inward at `0.006–0.009` from `5 M`, the Newtonian rate, and the late
-forcing is about zero. The line's `4.24` cells at `6 M` is the response, decaying
-on `τ`, to the forcing of `1–3.5 M`, `−0.015` to `−0.028`, when the gauge
-decelerated the holes against the model's pull. The review's conclusion stands:
-the model put the line there. "Within `2–4` cells" was the window's number and not
-the law's.
+`10 M_A` — had the premise wrong for this row. `b3cg48`'s track accelerates inward
+at `0.0058`, `0.0067`, `0.0075`, `0.0081` and `0.0087` over its last five `M/4`
+(corrected in the review's third look, 2026-10-30), crossing the model's `a_N =
+0.0081` near `5.75 M`: its forcing is within `±0.001` over `5.25–6 M`, and the
+line's `4.24` cells at `6 M` is the response, decaying on `τ`, to the forcing of
+`1–3.5 M`, `−0.015` to `−0.028`, when the gauge decelerated the holes against the
+model's pull. Its acceleration has not settled there, though, and neither has any
+other row's: the controlled rows' tracks cross `a_N` between `5` and `5.75 M` and
+are still rising at `6 M`, `0.0087–0.0133` over the last `M/4` (`1.1–1.7 a_N`, the
+`τ = 4 M_A` rows highest); only the seed-fed row stays near `a_N` (`0.0086`). The
+window does not show a settled acceleration, and so no steady error is reached in
+it. The review's conclusion stands: the model put the line there. "Within `2–4`
+cells" was the window's number and not the law's.
 
 **The second round: the model off, and an integral (measured 2026-10-29/30**, on
 `770f0fe` and `b708384`, each row two `h200debugq` links of under an hour: the PD
@@ -7663,9 +7715,14 @@ cadence; only the law changes. Hole 1, cells of `1/48`, `+` toward the companion
   line is the PD line's equal without the model in this window (at most `1.25`
   cells), and the only one of the no-model lines whose offset falls at the end
   (`1.25 → 1.10` over `5–6 M`, where the PD line at the same `τ` rises `1.24 →
-  1.29`): from `5 M` the holes accelerate inward at the Newtonian rate, which the
-  PD loop without a model lags by `c̈_tr τ²` once it settles — `1.7` cells at `4
-  M_A`, `10` at `10 M_A` — and the PID loop does not.
+  1.29`). As a property of the laws, the PD loop without a model lags any steady
+  acceleration by `c̈ τ²` — at `a_N`, `1.7` cells at `4 M_A` and `10` at `10 M_A`
+  — and the PID loop lags none. These rows do not reach a steady acceleration: the
+  tracks' acceleration rises through `a_N` between `5` and `5.75 M` and is `1.1–1.7
+  a_N` and still climbing at `6 M`, a coordinate jerk of about `5·10⁻³` over `4–6
+  M`. So `c̈ τ²`
+  is not a prediction for them, and the lines' offsets at `6 M` are what each law
+  gives on its measured track (the `0.05`-cell agreement above).
 - **The holes' coordinate motion is still the gauge's**: `8.3–8.6` cells outward of
   their seeds at `6 M` without the model, `7.5` with it at `10 M_A`, `6.6` on the
   seeds; the found separation `8.02–8.03` against free fall's `7.715`.
@@ -7678,15 +7735,25 @@ residual (`5.79` at `6 M`) and `ℋ` (`1.18·10⁻³`), and it is the law that d
 lag a steady acceleration: the PD loop without a model lags the fall's `c̈_tr ≈
 a_N` by `c̈_tr τ²`, and an orbit's centripetal `v²/R` the same way — at `d = 10 M`,
 `a = 0.005`, `6` cells at `10 M_A` and `1` at `4 M_A` — where the PID loop lags a
-steady jerk by `J τ³`, about a cell for that orbit (`R Ω³ τ³ = 0.02 M`) and for the
-head-on at `6 M`. It costs a half more of the junk than the PD loop at the same `τ`
+steady jerk by `J τ³`: about a cell for that orbit (`R Ω³ τ³ = 0.02 M`), and about
+a cell for the head-on's *Newtonian* jerk at `6 M` (`2 M_B |ḋ|/d³ ≈ 2·10⁻⁴`). The
+coordinate jerk the gauge's transient puts on the tracks over `4–6 M` is about
+`5·10⁻³`, `25×` that and lasting about `τ`, so it is not steady and `J τ³` predicts
+nothing for these rows; the PID line's `1.10` cells at `6 M` is what its law
+gives on the measured track. It costs a half more of the junk than the PD loop at the same `τ`
 (`0.33` against `0.22`, which `4 M_A` would raise to `0.76`), a state in the
 checkpoint, and a slower forgetting of a wrong start — why its integral starts at
 zero. **The model is not kept**: in this gauge the holes' coordinate acceleration
-is the Newtonian one only after the gauge's transient, from `5 M` here, and during
-it the model added `40–100 %` to the forcing the line answers (`a_N = 0.008`
-against `c̈_tr` from `−0.007` to `−0.020`). The targets stay on the
-tracks. What none of the laws gives is a fall: the coordinate separation is the
+is not the Newtonian one while the gauge's transient lasts — opposite to `a_N`
+until about `4 M`, then rising through it and still rising at `6 M` — and over
+`1–3.5 M` the model added `40–100 %` to the forcing the line answers (`a_N =
+0.008` against `c̈_tr` from `−0.007` to `−0.020`). A model could be right only once
+the transient is over, and it is not over by `6 M`. The targets stay on the
+tracks. **What the window does not decide:** the choice between the PID loop at
+`10 M_A` and the PD loop without the model at `4 M_A` rests on a `6 M` window in
+which the gauge's transient has not ended. Running both pair rows to about `12 M`,
+about four sub-hour `h200debugq` links a row, would decide it; that is Erik's call,
+and it has not been run. What none of the laws gives is a fall: the coordinate separation is the
 gauge's for at least `6 M` whatever the line does, and B7's measure of the fall
 must be gauge-invariant.
 
