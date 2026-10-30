@@ -2844,6 +2844,9 @@ interior a gauge that collapses the lapse where the volume collapses, and
 keeps the projection only as a guard. It is screened on the static `a = 0`
 hole against `:damped` ([`SINGULARITY_HANDLING.md`, "A layer-free interior
 (step I1)"](SINGULARITY_HANDLING.md#a-layer-free-interior-step-i1)).
+**Shelved** (Erik, 2026-10-30): the screen passed with the anchor at `10/M`
+and left the steering, `ΔH` and the guard inert; this exact design is not
+pursued further, similar ones will be, and the promotion is not run.
 
 **The design** (all **proposed in step I1**):
 

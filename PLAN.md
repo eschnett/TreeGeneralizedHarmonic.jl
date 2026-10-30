@@ -40,7 +40,7 @@ Erik's request, turned the model off and added an integral: the PID loop without
 the model is proposed for B4 (`CODE.md`, "The controlled source line"). This file
 stays until G8 is done.
 
-**Step I1 (added 2026-10-30) is implemented and its screen not yet run**
+**Step I1 (added 2026-10-30) is implemented, screened and shelved**
 (branch `claude/step-I1-layer-free-interior`, 2026-10-30): a layer-free
 interior in the spirit of the moving puncture — smoothed data, a lapse
 steered toward collapse inside the horizon, and the range projection as a
@@ -51,7 +51,9 @@ the smoothed state, so the screen was rebuilt around the anchor at
 `ρ_a = 10/M`, which held the ball to `4 M`. That screen ran on H200s the same
 day: the base passes at `8 M` with `ℋ` just outside the horizon at `0.34×`
 `:damped`'s and the error at `0.71×`, and the steering, `ΔH` and the guard
-are inert; the promotion (`1/24`, `1/32`, `24 M`, and `128 M`) is not run. The
+are inert; the promotion (`1/24`, `1/32`, `24 M`, and `128 M`) is not run.
+**Shelved by Erik on 2026-10-30**: this exact design is not pursued further,
+though similar ones will be; the code stays on its branch as a record. The
 screen's command lines and results are in `SINGULARITY_HANDLING.md`, "A
 layer-free interior (step I1)".
 

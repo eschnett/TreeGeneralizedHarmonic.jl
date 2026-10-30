@@ -3903,7 +3903,8 @@ row's, at `d = 3` twice it. Beside step B1's (β), `6–31×` the Kerr-Schild ho
 ## A layer-free interior (step I1)
 
 **Diagnosed on the CPU, the screen rebuilt around the anchor and run on
-H200s (2026-10-30); the promotion not run.** The design is `CODE.md`'s [A layer-free interior (proposed
+H200s (2026-10-30); the promotion not run, and the design shelved by Erik the
+same day** — this exact idea is not pursued further, similar ones will be. The design is `CODE.md`'s [A layer-free interior (proposed
 in step I1)](CODE.md#a-layer-free-interior-proposed-in-step-i1), the brief
 `PLAN.md`'s step I1. Step I1's implementation job built the code, the tests
 and the run tools; the diagnosis below ("Why the smoothed ball dies within
