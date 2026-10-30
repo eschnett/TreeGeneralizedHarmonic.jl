@@ -22,6 +22,7 @@ here; links have been pointed at the right file.
 - [Spin across the motion: the bitant (2026-10-24)](#spin-across-the-motion-the-bitant-2026-10-24)
 - [The damped harmonic gauge rolled on (step B1, 2026-10-25)](#the-damped-harmonic-gauge-rolled-on-step-b1-2026-10-25)
 - [The tracked analytic target (step B2, 2026-10-26)](#the-tracked-analytic-target-step-b2-2026-10-26)
+- [A layer-free interior (step I1)](#a-layer-free-interior-step-i1)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -3898,6 +3899,109 @@ put it — whether a target without the companion's tidal field is good enough l
 in the inspiral — with a scale: at `d = 10` its error is a twentieth of the mass
 row's, at `d = 3` twice it. Beside step B1's (β), `6–31×` the Kerr-Schild hole outside
 `r = 3` at `1/32` and still growing, the numbers favour (α).
+
+## A layer-free interior (step I1)
+
+**Not yet run (2026-10-30).** The design is `CODE.md`'s [A layer-free interior
+(proposed in step I1)](CODE.md#a-layer-free-interior-proposed-in-step-i1), the
+brief `PLAN.md`'s step I1. Step I1's implementation job built the code, the
+tests and the run tools and ran no row of the screen; the lines below are what
+the next session launches, one H200 a row, each study in its own remote
+directory (`CLAUDE.md`: never rsync into a directory whose jobs are running), from
+a copy with `CUDA` added to its `Project.toml`. The rows share the baseline's
+case and mesh — Kerr-Schild `a = 0` on the reflecting octant `[0, 64]³`, root
+brick `2³`, cubes `R = 32, 16, 8`, `h = 1/16` on `[0, 8]³` (9.4 M points),
+`q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, the Gaussian `γ0`, `chunk = 1`, the finder
+every chunk — and the base point R3 is every layer-free knob's default
+(`test/octant_runs.jl`'s header): `ε = 1`, `ΔH` on, V with `p = 1`,
+`μ_α = 4/M`, `μ_β = 0`, the ramp `[1, 3/2)`, the guard's ranges gated at `3/2`,
+no drivers. `R0` is the `:damped` baseline on this commit, to `24 M`; every
+other row is `8 M`.
+
+```bash
+B="julia --project=. test/octant_runs.jl backend=cuda case=ks L=64 roots=2 radii=32,16,8 N=64 chunk=1 cfl=1/2 amplitude=0 group=step-I1"
+$B t_end=24 r_0=3/4 r_1=3/2 out=out/i1/R0
+$B t_end=8 interior=layerfree smooth=0 r_core=1/4 steer=none correction=0 out=out/i1/R1
+$B t_end=8 interior=layerfree steer=none out=out/i1/R2
+$B t_end=8 interior=layerfree out=out/i1/R3
+$B t_end=8 interior=layerfree p=2 out=out/i1/R4
+$B t_end=8 interior=layerfree mu_alpha=1 out=out/i1/R5
+$B t_end=8 interior=layerfree steer=f kappa=1/3 start=collapsed out=out/i1/R6
+$B t_end=8 interior=layerfree steer=f kappa=1/3 start=rolled sigma_g=4 out=out/i1/R7
+$B t_end=8 interior=layerfree mu_beta=1 out=out/i1/R8
+$B t_end=8 interior=layerfree correction=0 out=out/i1/R9
+$B t_end=8 interior=layerfree smooth=3/4 out=out/i1/R10
+$B t_end=8 interior=layerfree smooth=5/4 out=out/i1/R11
+$B t_end=8 interior=layerfree eps_in=2 out=out/i1/R12
+$B t_end=8 interior=layerfree gamma0_near=1/10 out=out/i1/R13
+$B t_end=8 interior=layerfree rho_a=1/10 out=out/i1/R14
+$B t_end=8 interior=layerfree alpha_min=1e-6 out=out/i1/R15
+$B t_end=8 interior=layerfree alpha_min=17/100 lambda_min=1/2 lambda_max=10 K_max=17 out=out/i1/R16
+$B t_end=8 interior=layerfree r_gate=everywhere out=out/i1/R17
+julia test/layerfree_study.jl dir=out/i1 times=1,2,4,8 at=8
+```
+
+| row | what it is |
+|---|---|
+| R0 | `:damped`, `r_0 = 3/4`, `r_1 = 3/2`, the baseline, to `24 M`: must give `ℋ [2, 9/4) = 2.42·10⁻⁵` and the error there `1.08·10⁻⁵` to two digits |
+| R1 | analytic Kerr-Schild through the core rule at `r_0 = 1/4`, the algebraic source, the guard only |
+| R2 | smoothed data and `ΔH`, no steering |
+| R3 | **the base point** |
+| R4, R5 | `p = 2`; `μ_α = 1/M` |
+| R6 | F, `κ = 1/3`, the data pre-collapsed |
+| R7 | F, `κ = 1/3`, the plain data, the steering rolled on over `σ_g = 4 M` |
+| R8 | the shift steering, `μ_β = 1/M`, `β_* = 0` |
+| R9 | without `ΔH` (`Π` from `C_a = 0`, `∂_t α` up to `3.4/M`) |
+| R10, R11 | `ε = 3/4`; `ε = 5/4` |
+| R12, R13 | `ε_in = 2`; `γ0` near the hole `1/(10M)` |
+| R14 | the anchor, `ρ_a = 1/(10M)` |
+| R15 | `α_min = 10⁻⁶` |
+| R16 | tight ranges at `2×` the data's extremes |
+| R17 | the gate everywhere |
+
+**A row passes** (`PLAN.md`) if it reaches `8 M`, its hits per chunk level off
+with the outermost hit at least 8 cells inside the horizon and not moving out,
+and its `ℋ` and error in `[2, 9/4)` are within `3×` R0's, flat or falling from
+`4 M`; `test/layerfree_study.jl` prints that verdict beside the numbers. The
+promotion rows (at most three passing rows at `N = 96` and `128`, `1/24` and
+`1/32`, to `24 M` with `checkpoint=` and `walltime=`) and the best row at
+`128 M` on `ks-octant`'s `[0, 128]³` mesh (`L=128 radii=64,32,16,8 N=32`
+gives `h = 1/16` there) are the same lines; `series=` gives their orders.
+
+**What the start does, measured before the screen** (step I1, on the laptop, on
+`[0, 4]³` with Dirichlet data at `4 M`, chunks of `M/32`): the base point's
+smoothed ball collapses before the steering acts. At `h = 1/16` the least
+`det γ` in the ball is `1, 0.840, 0.460, 0.146, 0.0247, 0.0023` at
+`t = 0, 1/32, …, 5/32 M` and the least lapse `0.347, 0.341, 0.302, 0.230,
+0.142, 0.066`; at `3/16 M` the projection fires on six points, `C_a`'s L2 jumps
+from `0.11` to `25`, the fastest speed from `1.69` to `204`, and the CFL recheck
+ends the run. At `h = 1/8` the same ends at `1/8 M` (`det γ = 0.11` at
+`0.094 M`). **Expect R3 and its neighbours to end in their first chunk at
+`1/16`**; a row that does is the failure signature "the singularity re-forms
+before the gauge collapses" rather than a leak, and the rows that change it —
+F pre-collapsed (R6), the anchor (R14), the rate — are the screen's answer.
+A layer-free run sizes its step as a moving hole's (`1 %` and the previous
+chunk's growth squared), so a slow speed growth does not end it; a fast one
+still does, through the recheck.
+
+**The smoke** (job 586053, `amddebugq`, an EPYC 7532, CPU): each line above,
+with `backend=cuda`, `L`, `roots`, `radii`, `N`, `t_end` and `chunk` replaced by
+the small mesh `L=4 roots=2 radii=2 N=16` (`h = 1/16` on `[0, 2]³`, Dirichlet at
+`4 M`) and one chunk of `1/16 M`, parsed, built its case and wrote its `t = 0`
+row; every row but R1 finished the chunk (`6–8 min` a row with 18 at once on 64
+cores, compilation included), its CSV's 147 columns matching its header, and
+`test/layerfree_study.jl` read the directory. **R1 ended at the end of its first
+chunk**: the analytic hole's core-rule data inside `r_core = 1/4` are not a
+solution (`ℋ` L∞ `4.9·10⁵` at `t = 0`), and at the chunk's end the speed
+kernel's `metric_quantities` took `√(det γ)` of `−1.65·10⁻⁷` at some point (a
+`DomainError` on the CPU; a `NaN`, and the driver's refusal, on a device) — the
+bare conjecture's failure signature on this mesh, not diagnosed further. **A
+caution for every layer-free row:** `metric_quantities` forms `det γ` as
+`det g · g^{tt}`, so its roundoff grows as `1/α²` — about `10⁻⁶` absolute at
+the lapse floor `α = 10⁻³` with `|h| ~ 10` — and the guard's spectrum floor
+`λ ≥ 10⁻³` does not protect a quantity computed that way; a row that collapses
+its lapse to the floor may end the same way. That is the parse and the start,
+not a result.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 

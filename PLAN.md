@@ -40,11 +40,13 @@ Erik's request, turned the model off and added an integral: the PID loop without
 the model is proposed for B4 (`CODE.md`, "The controlled source line"). This file
 stays until G8 is done.
 
-**Step I1 (added 2026-10-30) is proposed and not started**: a layer-free
+**Step I1 (added 2026-10-30) is implemented and its screen not yet run**
+(branch `claude/step-I1-layer-free-interior`, 2026-10-30): a layer-free
 interior in the spirit of the moving puncture — smoothed data, a lapse
 steered toward collapse inside the horizon, and the range projection as a
 guard — screened on the static `a = 0` hole against `:damped`. It builds on
-B1's gauge sources and is independent of B2–B9.
+B1's gauge sources and is independent of B2–B9. The screen's command lines are
+in `SINGULARITY_HANDLING.md`, "A layer-free interior (step I1)".
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each

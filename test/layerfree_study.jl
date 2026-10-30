@@ -138,7 +138,7 @@ for lb in labels
                 at(d, "rough_$nm", t_at))
     end
     if haskey(d, "hits")
-        @printf("\nhits at %.1f: %d (non-finite %d, spectrum %d, shift %d, lapse %d, momentum %d); C_a over the ramp %.3g; α = 1/2 at r = %.4g, α = 1/10 at r = %.4g; M_irr %.9f, r_min %.6f\n\n",
+        @printf("\nhits at %.4g: %d (non-finite %d, spectrum %d, shift %d, lapse %d, momentum %d); C_a over the ramp %.3g; α = 1/2 at r = %.4g, α = 1/10 at r = %.4g; M_irr %.9f, r_min %.6f\n\n",
                 t_at, round(Int, at(d, "hits", t_at)), round(Int, at(d, "hits_nonfinite", t_at)),
                 round(Int, at(d, "hits_spectrum", t_at)), round(Int, at(d, "hits_shift", t_at)),
                 round(Int, at(d, "hits_lapse", t_at)), round(Int, at(d, "hits_momentum", t_at)),
