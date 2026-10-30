@@ -988,7 +988,11 @@ resolves the same branches.
 The MPI workload runs on its own too (added 2026-10-19), from an
 environment that has MPI and the package — `test/mpi_tests.jl` starts
 exactly this from the suite's sandbox, beside the suite where the machine
-has room (`TREEGH_TEST_MPI_CONCURRENT=0` or `1` decides it by hand). It is
+has room and to its end *before* the suite where it has not
+(`TREEGH_TEST_MPI_CONCURRENT=0` or `1` decides it by hand). Before the
+suite is from 2026-10-30: run after it, beside a test process that had
+compiled everything, the ranks put the threaded Linux cell's 16 GB runner
+down in five of its thirteen attempts from 2026-10-23 on. It is
 skipped on a machine with less than 24 GB — three ranks of about 3 GB
 beside the suite, which a macOS runner (7 GB) and the serial Linux runner
 could not hold (2026-10-19) — unless `TREEGH_TEST_MPI=1`, which CI sets for

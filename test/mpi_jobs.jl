@@ -7,10 +7,16 @@
 # compilation-bound — three ranks compiling the driver, the finder and the
 # fit. Where the machine has room for three more processes beside the suite
 # it starts here, at the start of the suite, and compiles on otherwise idle
-# cores while the rest runs; elsewhere — a CI runner — nothing starts here,
-# and `mpi_tests.jl` runs it where it stands. The same launcher is in
-# TreeAMR and TreeHydro, and may move into TreeAMR (noted 2026-10-19;
-# `CODE.md`, "Upstream prerequisites").
+# cores while the rest runs; elsewhere — a CI runner — it runs here to the
+# end *before* the suite, and `mpi_tests.jl` compares what it wrote. Until
+# 2026-10-30 it ran there in `mpi_tests.jl`, after the suite, beside a test
+# process that had compiled every kernel of it: on the threaded Linux cell
+# (four cores, 16 GB) the runner went down under the two in five of its
+# thirteen attempts from 2026-10-23 to 2026-10-30, every time while the
+# ranks ran ("lost communication", "received a shutdown signal"), and
+# always after `type_tests.jl`. The same launcher is in TreeAMR
+# and TreeHydro, and may move into TreeAMR (noted 2026-10-19; `CODE.md`,
+# "Upstream prerequisites").
 
 using MPI: MPI
 
@@ -72,11 +78,23 @@ end
 
 const MPI_JOB = Ref{Any}(nothing)
 
+# The job, started beside the suite, or run to its end before it where the
+# machine has no room for both: the ranks then share it with a process that
+# holds the package and nothing else yet. Waiting throws nothing — a job that
+# failed or overran is reported by `finish_mpi_workload` in `mpi_tests.jl`,
+# inside the suite's testset, as before.
 function start_mpi_job!()
-    (mpi_runnable() && mpi_concurrent()) || return nothing
+    mpi_runnable() || return nothing
     job = launch_mpi_workload()
     MPI_JOB[] = job
     atexit(() -> process_running(job.proc) && kill(job.proc))
+    if !mpi_concurrent()
+        @info "the MPI workload runs before the suite: this machine has no " *
+              "room for its three ranks beside it (TREEGH_TEST_MPI_CONCURRENT=1 " *
+              "runs them together)"
+        timedwait(() -> process_exited(job.proc), job.timeout)
+        @info "the MPI workload ran for $(round(Int, time() - job.start)) s"
+    end
     return nothing
 end
 

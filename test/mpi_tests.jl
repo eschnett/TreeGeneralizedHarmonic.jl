@@ -98,6 +98,10 @@ function mpi_compare(files)
 end
 
 @testset "A distributed run is the serial run, at every rank count" begin
+    # What the ranks would share the machine with had they started here: with
+    # them, more than a 16 GB runner held (amended 2026-10-30, `mpi_jobs.jl`).
+    @info "the suite's process peaked at " *
+          "$(round(Sys.maxrss() / 2^30; digits=1)) GB"
     job = take_mpi_job!()
     job === nothing && @info "the MPI workload is skipped: this machine has " *
                              "less than 24 GB for its three ranks " *

@@ -4017,7 +4017,21 @@ the development machine, MPICH from `MPI.jl`: every line agrees — 81 a group,
 roundoff — in 4m37 for the launch, most of it three ranks compiling; and
 `test/octant_runs.jl mpi=true` at two ranks writes the serial run's CSV
 character for character on the tracked `:fitted` octant hole. The suite with
-the test is 5364 assertions in 16m35 at four threads.**)**
+the test is 5364 assertions in 16m35 at four threads.**)** **(Amended
+2026-10-30.)** Where the machine has no room for the three ranks beside the
+suite — CI's threaded Linux cell, four cores and 16 GB — they run to their end
+*before* the suite (`test/mpi_jobs.jl`), and `mpi_tests.jl` compares what they
+wrote. Until then they ran after it, beside a test process that had compiled
+everything, and that cell's runner went down in five of its thirteen attempts
+from 2026-10-23 to 2026-10-30 ("lost communication", "received a shutdown
+signal"), each time while the ranks ran. Measured on the development machine
+(`/usr/bin/time -l`, macOS): the suite's process peaks at 5.1 GB, and each rank
+at 3.9–4.5 GB resident and 5.4–5.9 GB of footprint with step B3's workload,
+against 4.4–4.9 and 4.8–5.3 GB with step B2's — the pair adds about 0.6 GB of
+footprint a rank, and the ranks together are about 13 GB resident and 17 GB of
+footprint, close to what that runner holds on their own. With the job first, as
+that cell runs it, the suite is 6016 assertions in 17m12 after the job's 879 s
+(which shared the machine with two other launches of the workload).
 
 **On Symmetry's H200s (measured 2026-10-19, job 578514, cn113, four of its
 eight H200s; `bench/symmetry_mpi_gpu.sh`, environments by
