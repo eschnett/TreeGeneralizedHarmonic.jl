@@ -2948,6 +2948,12 @@ hole against `:damped` ([`SINGULARITY_HANDLING.md`, "A layer-free interior
    amplitude, and the **anchor** `−ρ_a χ(r)(u − u_s)` toward the smoothed state
    with `χ = 1 − smoothstep(2r/ε − 1)` — `1` inside `ε/2`, `0` from `ε` out
    (proposed) — with `F` evaluated everywhere: the kernel variant `:anchored`.
+   **The anchor is not optional** (amended after step I1's diagnosis,
+   2026-10-30): without it every start ends within `M/4`, and the rebuilt
+   screen takes `ρ_a = 10/M` as its base. An anchored interior is a damping
+   layer at `r < ε`, relaxing toward a regular state instead of the singular
+   analytic one, so the screen asks whether that beats `:damped`, not whether
+   a layer can be done without.
 
 **What step I1 built** (`src/layerfree.jl`, beside the background in
 `src/initialdata.jl`):
@@ -3012,6 +3018,19 @@ jumps to `25` and the fastest speed to `204`, and the CFL recheck ends the run.
 At `h = 1/8` the same happens at `1/8 M`. So the screen's rows may end in their
 first chunk; the screen says which knobs (the rate, `p`, F's pre-collapse, the
 anchor) change that, and whether `1/16` on the screen's mesh does.
+
+**What ends it, and what holds it (measured after step I1, on Symmetry's
+CPUs, 2026-10-30;** `SINGULARITY_HANDLING.md`, ["Why the smoothed ball dies
+within `M/4`, and what holds
+it"](SINGULARITY_HANDLING.md#why-the-smoothed-ball-dies-within-m4-and-what-holds-it)**).**
+The clock is the ball's own constraint violation, not the gauge: `ℋ` is `1182`
+inside `ε = 1` at `t = 0` and grows at `15–25/M` in every start that is not
+anchored, so each ends at the center within `0.16–0.25 M` — with or without
+`ΔH` (without it the volume does not fall at all), at any steering rate or
+power, pre-collapsed or not, and at `1/32` as at `1/16`. An anchor of
+`ρ_a ≥ 10/M` holds the ball to `4 M` with no hit and a stationary interior
+(`4/M` ends within `M/2`), and outside the horizon such a row is `:damped`'s to
+a few percent on that CPU mesh. The screen was rebuilt around it.
 
 ## Initial data and backgrounds
 

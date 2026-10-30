@@ -45,8 +45,12 @@ stays until G8 is done.
 interior in the spirit of the moving puncture — smoothed data, a lapse
 steered toward collapse inside the horizon, and the range projection as a
 guard — screened on the static `a = 0` hole against `:damped`. It builds on
-B1's gauge sources and is independent of B2–B9. The screen's command lines are
-in `SINGULARITY_HANDLING.md`, "A layer-free interior (step I1)".
+B1's gauge sources and is independent of B2–B9. A CPU diagnosis on Symmetry
+(2026-10-30) found that no start survives `M/4` without a strong anchor toward
+the smoothed state, so the screen was rebuilt around the anchor at
+`ρ_a = 10/M`, which held the ball to `4 M`; no GPU row has run. The screen's
+command lines are in `SINGULARITY_HANDLING.md`, "A layer-free interior (step
+I1)".
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1868,9 +1872,33 @@ Each row changes one thing:
 | R16 | tight ranges at `2×` the data's extremes (`α ≥ 0.17`, `λ(γ) ∈ [1/2, 10]`, the momentum scale `≤ 17/M`, the shift as in the base): does limiting the values help? |
 | R17 | the gate everywhere |
 
+**The screen rebuilt around the anchor (amended 2026-10-30, after the
+diagnosis).** The table above is the first screen. Its start, run on
+Symmetry's CPUs before any GPU row (`SINGULARITY_HANDLING.md`, "Why the
+smoothed ball dies within `M/4`, and what holds it"), ended every row without
+a strong anchor within `M/4`: the ball's own constraint violation (`ℋ = 1182`
+at `ε = 1`) grows at `15–25/M` whatever the gauge, `ΔH` or the resolution
+does. Only the anchor at `ρ_a ≥ 10/M` held it — to `4 M`, with no hit and a
+stationary ball, and outside the horizon at `:damped`'s level on that CPU mesh.
+So R1–R9 and R14 are answered, and the screen is now:
+
+- the **base point** A10: the first base point with the anchor at
+  `ρ_a = 10/M`;
+- R0 as before;
+- A6 and A30 (the anchor's rate; `4/M` ends within `M/2`);
+- A10n (no steering), A10c0 (no `ΔH`);
+- A10e34, A10e54 (`ε = 3/4`, `5/4`) and A30e54;
+- A10t (R16's tight ranges on the anchored base).
+
+An anchored interior is a damping layer at `r < ε` toward a regular state, so
+the question the screen answers is now whether that beats `:damped`'s layer
+toward the singular analytic state, outside the horizon and in cost. The
+command lines are in `SINGULARITY_HANDLING.md`, "A layer-free interior (step
+I1)".
+
 **Cost.** The screen is `8 M` at `1/16`, about five minutes a row, scaled from
 the `9.4 M`-point octant run's `26 s/M`; with R0 at `24 M`, about two
-GPU-hours. A row **passes** if it:
+GPU-hours (about one for the rebuilt screen's ten rows). A row **passes** if it:
 - reaches `8 M`;
 - has hits per chunk that level off, with the outermost hit at least 8 cells
   inside the horizon and not moving outward;

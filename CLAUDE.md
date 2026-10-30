@@ -731,7 +731,13 @@ validity rows by region, the hits by kind (`DIAG_BOUNDS_KIND`, `NDIAG = 18`) and
 `test/octant_runs.jl interior=layerfree` its runs and `test/layerfree_study.jl`
 their reader; `CODE.md`, "A layer-free interior (proposed in step I1)", is the
 design, and `SINGULARITY_HANDLING.md`, "A layer-free interior (step I1)", the
-screen's command lines, not yet run.
+screen's command lines, not yet run. **Without the anchor nothing survives**
+(diagnosed on Symmetry's CPUs, 2026-10-30): the smoothed ball's own `ℋ`
+(`1182` at `ε = 1`) grows at `15–25/M` whatever the gauge does, and every
+unanchored start ends within `M/4`; `rho_a=10` (`10/M`) holds it to `4 M`, so
+the screen was rebuilt around that, and an anchored interior is a damping
+layer at `r < ε` toward a regular state. `rho_a` defaults to `0` in
+`test/octant_runs.jl`: pass it.
 
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
