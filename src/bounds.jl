@@ -509,19 +509,43 @@ that applies it is `gh_bounds_kernel!`; this function is only the ranges.
 """
 @inline function bounds_project(h::SVector{NC,T}, Π::SVector{NC,T},
                                 bd::StateBounds{T}) where {T}
-    h1, Π1, hit, nonfinite = _project_once(h, Π, bd)
+    h1, Π1, hit, nonfinite, _ = bounds_project_kind(h, Π, bd)
+    return h1, Π1, hit, nonfinite
+end
+
+"""
+    bounds_project_kind(h, Π, bounds) -> (h′, Π′, hit, nonfinite, kind)
+
+[`bounds_project`](@ref) and **which** of its steps fired on the state as it came
+(added in step I1, for the record's hits by kind): `kind` is a bit mask,
+`BOUNDS_KIND_NONFINITE = 1`, `BOUNDS_KIND_SPECTRUM = 2`, `BOUNDS_KIND_SHIFT = 4`,
+`BOUNDS_KIND_LAPSE = 8` and `BOUNDS_KIND_MOMENTUM = 16` (the momentum rescaled
+with a raised lapse, or capped), `0` where nothing fired. The re-projections of
+the result do not add to it: they repair the rounding of the first. The state
+it returns is `bounds_project`'s, bit for bit — it is that function's body.
+"""
+@inline function bounds_project_kind(h::SVector{NC,T}, Π::SVector{NC,T},
+                                     bd::StateBounds{T}) where {T}
+    h1, Π1, hit, nonfinite, kind = _project_once(h, Π, bd)
     if hit
         # Verify the result with the next call's own arithmetic, and repair
         # what rounding left outside a range. A healthy point never gets
         # here, so this costs nothing where nothing fired.
         for _ in 1:BOUNDS_PASSES
-            h2, Π2, again, _ = _project_once(h1, Π1, bd)
+            h2, Π2, again, _, _ = _project_once(h1, Π1, bd)
             again || break
             h1, Π1 = h2, Π2
         end
     end
-    return h1, Π1, hit, nonfinite
+    return h1, Π1, hit, nonfinite, kind
 end
+
+# The bits of `bounds_project_kind`'s mask (added in step I1).
+const BOUNDS_KIND_NONFINITE = 1
+const BOUNDS_KIND_SPECTRUM = 2
+const BOUNDS_KIND_SHIFT = 4
+const BOUNDS_KIND_LAPSE = 8
+const BOUNDS_KIND_MOMENTUM = 16
 
 # How many times a fired projection is re-applied to its own result before
 # it is accepted: the guard of a loop that measures one or two, not a
@@ -584,7 +608,10 @@ const BOUNDS_PASSES = 4
 
     h′ = hfire ? _pack10(hm′) : h1
     hit = nonfinite | hfire | raise | Kfire
-    return h′, Π′, hit, nonfinite
+    kind = (nonfinite ? BOUNDS_KIND_NONFINITE : 0) | (γfire ? BOUNDS_KIND_SPECTRUM : 0) |
+           (βfire ? BOUNDS_KIND_SHIFT : 0) | (αfire ? BOUNDS_KIND_LAPSE : 0) |
+           ((raise | Kfire) ? BOUNDS_KIND_MOMENTUM : 0)
+    return h′, Π′, hit, nonfinite, kind
 end
 
 """
@@ -617,7 +644,9 @@ end
 back only where it fired**, and three `diag` slots per point: `1`/`0` in
 `DIAG_BOUNDS` (it fired), `1`/`0` in `DIAG_BOUNDS_NF` (a component was not
 finite), and the point's radius in `DIAG_BOUNDS_R` where it fired (`0`
-elsewhere) — whose maximum is the outermost radius the projection reached.
+elsewhere) — whose maximum is the outermost radius the projection reached —
+and, from step I1, the mask of the steps that fired in `DIAG_BOUNDS_KIND`
+([`bounds_project_kind`](@ref)).
 
 `state` is `statearray(u, U)`: owned points only, no ghosts, so the launch's
 index is the point's index there and nothing is added to it — the split the
@@ -644,7 +673,7 @@ a `NaN` (`CLAUDE.md`).
     if r < bounds.r_gate
         hv = SVector{NC,T}(ntuple(v -> state[c..., v, b], Val(NC)))
         Πv = SVector{NC,T}(ntuple(v -> state[c..., NC + v, b], Val(NC)))
-        h′, Π′, hit, nonfinite = bounds_project(hv, Πv, bounds)
+        h′, Π′, hit, nonfinite, kind = bounds_project_kind(hv, Πv, bounds)
         if hit
             ntuple(Val(NC)) do v
                 state[c..., v, b] = h′[v]
@@ -655,10 +684,12 @@ a `NaN` (`CLAUDE.md`).
         diag[c..., DIAG_BOUNDS, b] = hit ? one(T) : zero(T)
         diag[c..., DIAG_BOUNDS_NF, b] = nonfinite ? one(T) : zero(T)
         diag[c..., DIAG_BOUNDS_R, b] = hit ? r : zero(T)
+        diag[c..., DIAG_BOUNDS_KIND, b] = T(kind)
     else
         diag[c..., DIAG_BOUNDS, b] = zero(T)
         diag[c..., DIAG_BOUNDS_NF, b] = zero(T)
         diag[c..., DIAG_BOUNDS_R, b] = zero(T)
+        diag[c..., DIAG_BOUNDS_KIND, b] = zero(T)
     end
 end
 
@@ -693,9 +724,45 @@ mutable struct BoundsAccounting
     chunk_hits::Int
     chunk_nonfinite::Int
     chunk_r_max::Float64
+    # Step I1's detail, for the chunk (`take_chunk_detail!`): the hits by kind —
+    # non-finite, spectrum, shift, lapse, momentum — and by radius in finest
+    # cells, `BOUNDS_HIST_BINS` bins of one cell, the last open. Filled only for
+    # a problem whose interior asks for it (`_bounds_detail!`); per chunk and
+    # not part of a checkpoint, which is written after the row has taken them.
+    chunk_kinds::Vector{Int}
+    chunk_hist::Vector{Int}
 end
 
+# How many one-cell bins the hit histogram has, the last holding every radius
+# beyond (added in step I1): `3 M` at `h = 1/16`, past the horizon.
+const BOUNDS_HIST_BINS = 48
+
+BoundsAccounting(calls, hits, nonfinite, r_max, first_t, first_r, chunk_hits,
+                 chunk_nonfinite, chunk_r_max) =
+    BoundsAccounting(calls, hits, nonfinite, r_max, first_t, first_r, chunk_hits,
+                     chunk_nonfinite, chunk_r_max, zeros(Int, 5),
+                     zeros(Int, BOUNDS_HIST_BINS))
+
 BoundsAccounting() = BoundsAccounting(0, 0, 0, -1.0, NaN, NaN, 0, 0, -1.0)
+
+"""
+    take_chunk_detail!(acc::BoundsAccounting) -> (kinds, hist)
+
+The projection's hits since the previous call by kind — a named tuple
+`(nonfinite, spectrum, shift, lapse, momentum)`, a point counted once per call
+under every step that fired on it — and by radius, an `NTuple` of
+`BOUNDS_HIST_BINS` counts in finest cells (bin `k` holds `k − 1 ≤ r/h < k`, the
+last every radius beyond), and a reset of both (added in step I1, for the
+layer-free interior's record).
+"""
+function take_chunk_detail!(acc::BoundsAccounting)
+    k = acc.chunk_kinds
+    kinds = (nonfinite=k[1], spectrum=k[2], shift=k[3], lapse=k[4], momentum=k[5])
+    hist = ntuple(i -> acc.chunk_hist[i], Val(BOUNDS_HIST_BINS))
+    fill!(acc.chunk_kinds, 0)
+    fill!(acc.chunk_hist, 0)
+    return (kinds=kinds, hist=hist)
+end
 
 """
     take_chunk!(acc::BoundsAccounting) -> (hits, nonfinite, r_max)
@@ -773,10 +840,17 @@ function _apply_bounds_kernel!(bd::StateBounds, int, p, u, t)
                 acc.first_t = tofloat64(t)
                 acc.first_r = rmax
             end
+            _bounds_detail!(acc, int, p)
         end
     end
     return n
 end
+
+# The hits by kind and by radius (added in step I1): a second fold over the four
+# slots, where something fired and the interior asks for it — the layer-free
+# interior's record (`layerfree.jl`). Nothing for every other interior, so a run
+# with one costs what it did.
+_bounds_detail!(acc, int, p) = nothing
 
 @inline _bounds_counts(acc, p) =
     TreeAMR.combine(acc, (n=Sum(p.u[1]), nf=Sum(p.u[2]), r=Max(p.u[3])))
@@ -914,6 +988,8 @@ function validity_and_nonfinite(p, u, t)
     int = p.interior
     T = eltype(p.U.work)
     int === nothing && return (NO_VALIDITY, evolved_nonfinite(p, u, t))
+    # The layer-free interior's regions (step I1, `layerfree.jl`).
+    int isa LayerFreeInterior && return layerfree_validity(p, u, t)
     h = minimum_spacing(T, p.U.forest)
     G = first(p.U.G)
     # The bands through the interior's own masks (amended in step 8d), so
