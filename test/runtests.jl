@@ -9,8 +9,9 @@ using TreeGeneralizedHarmonic
 
 # The MPI test's `mpiexec` job, started now where the machine has room for
 # it beside the suite, so that its compilation overlaps the files below
-# rather than following them; `mpi_tests.jl` collects it, or runs it then
-# where it was not started (added 2026-10-19). See `mpi_jobs.jl`.
+# rather than following them, and run to its end now where it has not, while
+# this process is small (amended 2026-10-30); `mpi_tests.jl` collects it
+# (added 2026-10-19). See `mpi_jobs.jl`.
 include("mpi_jobs.jl")
 start_mpi_job!()
 
