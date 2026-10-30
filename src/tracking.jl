@@ -1117,17 +1117,19 @@ end
 SourceLine{T}(t, c, v) where {T} = SourceLine{T}(t, c, v, zero(SVector{3,T}))
 
 """
-    SourceLaw(; integral = false, model = true)
+    SourceLaw(; integral = true, model = false)
 
-The controlled source line's law (amended in step B3's review): the PD loop
-(`integral = false`) or the PID loop (`true`), with or without the Newtonian
-model (`model`; one hole has none). `isbits`.
+The controlled source line's law (amended in step B3's review): the PID loop
+(`integral = true`, the default and the proposal for B4) or the PD loop
+(`false`, the loop of 7fea8eb), with or without the Newtonian model (`model`, off
+by default; one hole has none). `isbits`. (The arithmetic's own `newton`
+keyword, which predates it, still means the PD loop with or without the model.)
 """
 struct SourceLaw
     integral::Bool
     model::Bool
 end
-SourceLaw(; integral::Bool=false, model::Bool=true) = SourceLaw(integral, model)
+SourceLaw(; integral::Bool=true, model::Bool=false) = SourceLaw(integral, model)
 
 """
     seed_source_lines(case::GHCase) -> Vector{SourceLine}

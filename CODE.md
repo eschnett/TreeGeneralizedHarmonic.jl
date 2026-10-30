@@ -6807,8 +6807,8 @@ of several holes on Erik's decisions of 2026-10-26, run on a head-on pair from
 rest to `2 M` ([What step B3 built and
 measured](#what-step-b3-built-and-measured-2026-10-26)), and its review the
 controlled source line, run on one moving hole to `20 M` and on the pair to `6 M`
-([The controlled source line](#the-controlled-source-line)) **(amended in steps
-B2 and B3)**. It extends the proof of concept to two black holes that orbit,
+under five laws ([The controlled source line](#the-controlled-source-line))
+**(amended in steps B2 and B3)**. It extends the proof of concept to two black holes that orbit,
 merge and ring down, with the gravitational waves they emit as the result.
 `PLAN.md`'s steps B1–B9 are the work breakdown, and the two milestones are
 under [Milestones G7 and G8](#milestones-g7-and-g8): two holes colliding
@@ -7073,7 +7073,8 @@ spin at every row (`N = 16`) and the ADM monitor at every row, to `2 M`.
   line](#the-controlled-source-line)): to `2 M` the residual is the same `4.5–4.7`
   on every feed, so that part is the superposed target's, and from `3 M` on it
   grows with the source line's distance from the track — to `8.45` at `6 M` on the
-  seeds, saturating at `7.1` and `6.4` on the controlled lines.
+  seeds, saturating at `7.1` and `6.4` on the controlled lines with the model and
+  at `6.0–6.4` without it, over a floor of about `5.6` at `6 M`.
 - **The found separation does not fall as free fall predicts, and the junk moves
   it first (measured in step B3; corrected in its review, 2026-10-26).** Its drop
   over each `M/4` against Newtonian free fall from rest over the same interval:
@@ -7363,9 +7364,10 @@ another `:fitted` depth, and a boundary for its far field.
 decide](#what-this-asks-erik-to-decide): a slow control law for the track-fed
 source, tested on one moving hole fed by its own track first. What follows is the
 law, its time and its measurements; every choice in it is **proposed in step
-B3** (its review), and it is built: `SourceLine`, `advance_source_lines`,
-`source_line_states`, `lines_source_at` and `fed_case_at` in
-`src/tracking.jl`, a `TrackedSpec`'s `source_feed` and `control_time`, a case of
+B3** (its review), and it is built: `SourceLine`, `SourceLaw`, `source_law`, `advance_source_lines`,
+`source_line_states`, `lines_source_at` and `fed_case_at` in `src/tracking.jl`, a
+`TrackedSpec`'s `source_feed`, `control_time`, `control_integral` and
+`control_model`, a case of
 several holes' `source_feed = :controlled`, the lines in the driver's run state
 and checkpoint, and `test/source_line_tests.jl`.
 
@@ -7400,68 +7402,77 @@ time derivative of the source in use.
   reversal by more than `G h/2`: found at `x = −4.0019` at `1 M`, predicted at
   `−3.9637`.
 
-**The law.** Each hole's line obeys
+**The law** (`SourceLaw`; the PD loop with the model built first, the rest added
+in the review's second round, 2026-10-29). With `e = c_tr(t) − c` the line's
+distance from the track's position, `ė = ċ_tr(t) − ċ` from its velocity
+([`track_state`](@ref)), `ω = 1/τ`, and `a_m` the model — the Newtonian pull of
+the other holes on their own lines (`control_model`), or zero, and always zero for
+one hole — each hole's line obeys one of
 
-    c̈ = a_N(c) + ω² (c_tr(t) − c) + 2ω (ċ_tr(t) − ċ),    ω = 1/τ,
+    PD:   c̈ = a_m + ω² e + 2ω ė
+    PID:  c̈ = a_m + 3ω² e + 3ω ė + ω³ i,    i̇ = e   (control_integral)
 
-- a **critically damped second-order loop** onto the track's position and
-  velocity ([`track_state`](@ref)) — not its acceleration, the noisiest of the
-  three and the lead above;
-- with a **model**, the Newtonian pull `a_N` of the other holes on their own lines
-  (zero for one hole): what the line does when the loop has nothing to say, the
-  free fall the seeds' quadratic is the first term of;
+both critically damped, with their two or three poles at `−ω`:
+
+- a loop onto the track's position and velocity — not its acceleration, the
+  noisiest of the three and the raw feed's lead;
 - **started on the case's own source**, the data's gauge — each `HoleSpec`'s center
   and velocity, or one hole's composite — and not on the track's seed: a source
   on another line than the data's violates `C_a` at `t = 0` by the difference, and
   the seed is a guess the finds correct (step B2's recovery seed is `0.05` off);
+  the PID integral starts at zero;
 - integrated on the host by RK4 in steps of at most `τ/64` as the pieces go, on
   every rank from the tracks every rank adopted, and carried by the run state and
-  the checkpoint;
+  the checkpoint, the integral included;
 - handed to each piece as a [`TrackedHole`](@ref) about the piece's time with the
-  line's center, velocity and acceleration — the law's right-hand side there — so
-  that within a piece `∂_t H` is the derivative of the `H` in use, and a piece
-  meets the next to the line's jerk, `O(δ²)` over a piece of `δ`
-  (`source_line_tests.jl`).
+  line's center, velocity and acceleration — the law's right-hand side there,
+  continuous wherever the track is `C¹` — so that within a piece `∂_t H` is the
+  derivative of the `H` in use, and a piece meets the next to the line's jerk,
+  `O(δ²)` over a piece of `δ` (`source_line_tests.jl`, under both laws).
 
-Its response to the track is `T(s) = (2ωs + ω²)/(s + ω)²`: unit gain at zero
-frequency, `12 %` above it at `ω`, `2ω/Ω` well above. A velocity seeded `δv` off
-decays as `δv t e^{−ωt}`; an acceleration the model misses, `Δa`, is followed with
-a **position** lag `Δa τ²` and no velocity lag, the position term being the
-velocity error's integral — and the velocity is what one hole's source reads.
+**What each law holds.** The error obeys `ë + 2ωė + ω²e = c̈_tr − a_m` (PD) and
+`e⃛ + 3ωë + 3ω²ė + ω³e = d/dt (c̈_tr − a_m)` (PID). So for a track whose
+acceleration is steady the **PD line settles at `e_ss = (c̈_tr − a_m) τ²`** — a
+position offset with no velocity offset, the position term being the velocity
+error's integral — and the **PID line at zero**, its integral taking up the
+difference (`ω³ i → c̈_tr − a_m`); the PID line lags a steady *jerk* `J` by `J τ³`
+instead. The model helps the PD loop exactly when the coordinate acceleration is
+the Newtonian one, and the rows below say when that is. From the track the PD
+line is the filter `T(s) = (2ωs + ω²)/(s + ω)²` (unit gain at zero frequency,
+`12 %` above it at `ω`, `2ω/Ω` well above), the PID line `T(s) = (3ωs² + 3ω²s +
+ω³)/(s + ω)³` (`3ω/Ω` well above). A velocity seeded `δv` off decays as `δv t
+e^{−ωt}` on the PD line, a steady acceleration from rest as `(a/2) t² e^{−ωt}` on
+the PID line (both `source_line_tests.jl`, against the closed forms).
 
 **Its time, chosen before the runs: `τ = 10 M_A`** (`control_time = 10` for a
 hole of mass one, scaled by each hole's mass; the pair's rows below prefer `4
-M_A`), from three bounds:
+M_A` for the PD loop), from three bounds:
 
 - **the loop's stability.** In the limit the measurements bound, a hole whose
-  coordinate velocity follows the source's through a lag `τ_g`, the closed loop's
-  characteristic is `s (τ_g s² + (1 + 2ωτ_g) s + ω² τ_g)`: stable at every `ω` and
+  coordinate velocity follows the source's through a lag `τ_g`, the closed PD
+  loop's characteristic is `s (τ_g s² + (1 + 2ωτ_g) s + ω² τ_g)` and the PID
+  loop's `s (τ_g s³ + (1 + 3ωτ_g) s² + 3ω²τ_g s + ω³τ_g)`: stable at every `ω` and
   `τ_g`, with a neutral mode at `s = 0`. With a hole that answers the source's
-  velocity changes with an offset `κ dV/dt` it is stable while `ωκ < ½` and
-  `ωτ_g < 2`. The raw rows' growth, the track's velocity `×3` in `M/4` (`≈ 4.4/M
-  = 2.2/M_A`), is twenty times `ω = 0.1/M_A`, and the loop has no lead.
+  velocity changes with an offset `κ dV/dt` the PD loop is stable while `ωκ < ½`
+  and `ωτ_g < 2`, the PID loop while `ωκ < ⅓`. The raw rows' growth, the track's
+  velocity `×3` in `M/4` (`≈ 4.4/M = 2.2/M_A`, `κ ≲ 0.25 M`), is twenty times `ω =
+  0.1/M_A`, and neither loop has a lead.
 - **the junk's time scale.** The track's velocity against the seed's in step B3's
   rows swings with a period of about `3–4 M`, `7 M_A`, and an amplitude of
-  `0.017–0.038`. At `Ω = 2π/7 M_A` the loop passes `|T(iΩ)| = 0.220`
-  (`source_line_tests.jl` measures `0.220` on the analytic input), so the source
-  sees a fifth of the junk's velocity.
+  `0.017–0.038`. At `Ω = 2π/7 M_A` and `τ = 10 M_A` the PD loop passes `|T(iΩ)| =
+  0.22` of it and the PID loop `0.33` (`4 M_A`: `0.52` and `0.76`;
+  `source_line_tests.jl` measures both on the analytic input).
 - **the find cadence.** The pair finds every `M_A/2`, one hole every `M`:
   `ω Δt_f = 0.05–0.1`, so the loop reads the track many times per `τ`.
-
-The price is the lag of a model error, `Δa τ²` in position: for a head-on pair
-whose coordinate fall lagged Newtonian by half (step B3's rows, after the
-transient), `0.004 × 25 = 0.1 M`, five cells (measured: `4.2` cells at `6 M`,
-below) — harmless to the source, whose one-hole form reads no center and whose
-weights are flat near each hole, and not seen by the targets.
 
 **The targets ride the track, not the line.** Step B2 measured that a target one
 cell off the hole costs `16–26×` its `ℋ` just outside the horizon, and the track
 is where the horizon is (its predictions `10⁻³–10⁻¹` cells off the next find),
-while the line lags the track by the filtered junk and by a model error's `Δa τ²`
-(on the pair, `0.6` cells at `1 M` and `4.2` at `6 M` for `τ = 10 M_A`, below). A target on the line would be step B2's displaced
-target. In steady motion the line's velocity is the track's, so source and target
-ride the same trajectory in what the source reads; they part by the filtered junk
-while it lasts.
+while the line lags the track by the filtered junk and by its law's steady error
+(on the pair from `0.6` cells for the PD loop without the model to `4.2` with it,
+below). A target on the line would be step B2's displaced target. In steady motion
+the line's velocity is the track's, so source and target ride the same trajectory
+in what the source reads; they part by the filtered junk while it lasts.
 
 **One hole fed by its own track (measured in step B3's review**, jobs 583736 and
 583739–583742 in `step-B3-holes`, one H200 a row, `14–15 min` to `20 M`; data in
@@ -7512,6 +7523,17 @@ nothing says where it was meant to be. `τ = 4 M` swings further and ends closer
 The residual against the layer's own target is step B2's `0.12–0.16` from `8 M`
 on; against Kerr-Schild it reads the moved line too (`0.19–0.32` at `τ = 10 M`).
 
+**One hole on the PID loop (the review's second round**, jobs 585660 and 585661,
+on `770f0fe`**).** At `τ = 10 M` it is `b2t24` again to `0.15 %` in `ℋ` in every
+shell and level and in the residual (`b3fp24`), its line within `6·10⁻⁶` cells of
+the track at `20 M`. From the recovery seed (`b3fpr24`) it sits between the PD
+loop's two times: `ℋ` just outside the horizon `0.91–1.01×` `b2r24`'s after `1 M`
+(`1.44×` at `1 M`), the line pulled `+0.014` by the first chunk, the hole `0.13`
+cells off the analytic line at `4 M` and `−0.015` at `20 M`, the residual against
+its own target `0.12–0.19` from `8 M` on. The law is not broken on one hole, and
+it is not better there either: a hole whose data are exact gives the loop nothing
+to do.
+
 **The head-on pair on the controlled line (measured in step B3's review**, two
 `h200debugq` links of under an hour a row, `walltime = 3000`, about `1.1`
 GPU-hours a row to `6 M`: `τ = 10 M_A`, jobs 583932 and 584024 (`b3cg48`);
@@ -7551,7 +7573,8 @@ row at `1/48` with `Π` from `C_a = 0`, to `6 M`. Hole 1's track and line along
   about — it is the layer against a superposed target while the junk moves the
   data. From `3 M` on it grows with the source line's distance from the track, in
   position (the table) and in velocity (`0.043` on the seeds at `6 M`, `0.012` and
-  `−0.008` on the controlled lines).
+  `−0.008` on the controlled lines) — a distance the model term put there (the
+  second round, below).
 - **The holes' coordinate motion is the gauge's, and the line moves it little.**
   In every row the holes fall faster than free fall for `2 M`, stop at `2.2–2.4 M`
   and recede; by `6 M` they are `6.6–8.3` cells outward of their Newtonian seeds
@@ -7566,18 +7589,106 @@ row at `1/48` with `Π` from `C_a = 0`, to `6 M`. Hole 1's track and line along
   (`ℋ` L2 `1.4·10⁻³` at `t = 0`), and the area theorem is a theorem about
   solutions.
 
-**What this proposes (step B3's review).** The controlled line is the feed for a
-pair: it holds where the raw feed died, saturates the residual the seeds let grow,
-and keeps the line within `2–4` cells of the holes. Of the two times the pair
-prefers `τ = 4 M_A` — the residual `15 %` lower and saturating sooner, `ℋ` `5 %`
-lower, the line within `2` cells — at the price of passing `0.52` of the junk's
-velocity against `0.22` and of `10 %` more coordinate recession; one hole is
-`b2t24` at both and recovers from a wrong seed at both (`4 M` swings further and
-ends closer). Proposed for B4: **`τ = 4 M_A`, its first orbit checked at `10
-M_A`**; the targets stay on the tracks, since the line is up to `4` cells from
-the holes here and step B2's target one cell off cost `16–26×` in `ℋ`. What it
-does not give is a fall: a coordinate separation in this gauge is the gauge's
-for at least `6 M`, and B7's measure of the fall must be gauge-invariant.
+**What put the first round's lines where they are (measured in the review's second
+round, 2026-10-29).** Each row's line obeys its law: the line's own equation,
+driven by the row's measured track (its velocity at every row, linear between),
+reproduces the row's line off the track to `0.05` cells at every row of every
+pair run below. For the PD loop with the model the forcing is `f = c̈_tr − a_N`,
+with the tracks' acceleration read from their velocity every `M/4` (`b3cg48`,
+`τ = 10 M_A`; cells of `1/48`):
+
+| | 1 M | 2 M | 3 M | 4 M | 5 M | 6 M |
+|---|---|---|---|---|---|---|
+| the track's acceleration `c̈_tr` (`+` inward) | −0.0073 | −0.0202 | −0.0123 | −0.0008 | +0.0058 | +0.0087 |
+| the model `a_N` on the lines | 0.0078 | 0.0079 | 0.0080 | 0.0080 | 0.0081 | 0.0081 |
+| the forcing `f = c̈_tr − a_N` | −0.0151 | −0.0281 | −0.0203 | −0.0088 | −0.0023 | +0.0006 |
+| the line off the track, measured | −0.61 | −0.34 | +0.82 | +2.26 | +3.46 | +4.24 |
+| the same from the law and the measured track | −0.62 | −0.37 | +0.80 | +2.24 | +3.43 | +4.20 |
+
+The steady error `e_ss = (c̈_tr − a_N) τ²` is the right formula, and the review's
+reading of it — `c̈_tr ≈ 0` by `5–6 M`, so a line climbing toward `9.4` cells at
+`10 M_A` — had the premise wrong. The track's velocity stays `0.053` below the
+seed's from `4.5 M` on because the seed accelerates at `a_N` too: the tracks
+accelerate inward at `0.006–0.009` from `5 M`, the Newtonian rate, and the late
+forcing is about zero. The line's `4.24` cells at `6 M` is the response, decaying
+on `τ`, to the forcing of `1–3.5 M`, `−0.015` to `−0.028`, when the gauge
+decelerated the holes against the model's pull. The review's conclusion stands:
+the model put the line there. "Within `2–4` cells" was the window's number and not
+the law's.
+
+**The second round: the model off, and an integral (measured 2026-10-29/30**, on
+`770f0fe` and `b708384`, each row two `h200debugq` links of under an hour: the PD
+loop without the model at `τ = 4 M_A`, jobs 585662 (`b3nd48`), and at `10 M_A`,
+585663 (`b3ng48`); the PID loop without the model at `10 M_A` with its integral
+started at the data's acceleration `a₀/ω³`, 585664 (`b3ig48`), and started at zero,
+585985 and 586001 (`b3iz48`)**).** The same pair, mesh, layers, momentum and
+cadence; only the law changes. Hole 1, cells of `1/48`, `+` toward the companion:
+
+| | 1 M | 2 M | 3 M | 4 M | 5 M | 6 M |
+|---|---|---|---|---|---|---|
+| the line off the track, PD, model, `10 M_A` (`b3cg48`) | −0.61 | −0.34 | 0.82 | 2.26 | 3.46 | 4.24 |
+| PD, model, `4 M_A` (`b3cd48`) | −0.44 | −0.10 | 0.87 | 1.74 | 2.05 | 1.86 |
+| PD, no model, `10 M_A` (`b3ng48`) | −0.74 | −0.78 | −0.10 | 0.73 | 1.24 | 1.29 |
+| PD, no model, `4 M_A` (`b3nd48`) | −0.55 | −0.43 | 0.27 | 0.86 | 0.96 | 0.60 |
+| PID, no model, `10 M_A`, integral from `a₀/ω³` (`b3ig48`) | −0.55 | −0.22 | 0.88 | 2.10 | 2.88 | 3.11 |
+| PID, no model, `10 M_A`, integral from zero (`b3iz48`) | −0.67 | −0.63 | 0.10 | 0.89 | 1.25 | 1.10 |
+| residual, `b3cg48` | 1.61 | 4.68 | 6.35 | 7.00 | 7.08 | 6.80 |
+| residual, `b3cd48` | 1.75 | 4.74 | 6.16 | 6.30 | 6.08 | 5.78 |
+| residual, `b3ng48` | 1.54 | 4.35 | 5.80 | 6.40 | 6.31 | 6.00 |
+| residual, `b3nd48` | 1.69 | 4.49 | 5.84 | 6.03 | 5.86 | 5.62 |
+| residual, `b3ig48` | 1.66 | 4.72 | 6.29 | 6.76 | 6.59 | 6.17 |
+| residual, `b3iz48` | 1.60 | 4.45 | 5.87 | 6.30 | 6.11 | 5.79 |
+| the track off its seed, `b3ng48` | 0.68 | 0.52 | −0.85 | −3.06 | −5.63 | −8.28 |
+| the track off its seed, `b3nd48` | 0.63 | 0.65 | −0.66 | −3.00 | −5.78 | −8.56 |
+| the track off its seed, `b3iz48` | 0.66 | 0.58 | −0.75 | −3.01 | −5.66 | −8.40 |
+| found separation, `b3ng48`, `b3nd48`, `b3iz48` | 7.922–7.923 | 7.899–7.904 | 7.913–7.921 | 7.955–7.958 | 7.995–8.001 | 8.020–8.031 |
+
+- **Every row holds the pair**: every find of both holes at every row; `C_a` L2
+  the first round's to two digits (`2.70–2.72·10⁻⁴` at `6 M`), `ℋ` L2 lower without
+  the model (`1.17–1.20·10⁻³` at `6 M`, against `1.24·10⁻³` with it at `10 M_A`
+  and `1.38·10⁻³` on the seeds), the areas the same (`13.26` at `6 M`). `C_a` at
+  `t = 0` does not read the source's acceleration: every row starts at
+  `1.622·10⁻⁸`, whether its line starts at the data's acceleration or at none.
+- **Without the model the line stays within `1.3` cells of the track** at either
+  time, and the residual's rise from `3 M` is smaller: peaks `6.05–6.43` on the PD
+  and zero-started PID rows, against `7.10` and `6.36` with the model and `8.45`
+  on the seeds. Across all
+  seven rows the residual at `6 M` follows the line's distance from the track —
+  `5.62` at `0.6` cells, `5.8–6.0` at `1.1–1.9`, `6.2–6.8` at `3.1–4.2`, `8.45` at
+  `6.6` — over a floor of about `5.6`, the superposed target's part that every
+  feed shares (`4.35–4.74` already at `2 M`).
+- **An integral started at the data's acceleration is a model**: `b3ig48`'s
+  integral holds `a_N` from `t = 0` and takes `τ` to forget it, and its line lags
+  as the model's rows did (`3.11` cells at `6 M`). From zero (`b3iz48`) the PID
+  line is the PD line's equal without the model in this window (at most `1.25`
+  cells), and the only one of the no-model lines whose offset falls at the end
+  (`1.25 → 1.10` over `5–6 M`, where the PD line at the same `τ` rises `1.24 →
+  1.29`): from `5 M` the holes accelerate inward at the Newtonian rate, which the
+  PD loop without a model lags by `c̈_tr τ²` once it settles — `1.7` cells at `4
+  M_A`, `10` at `10 M_A` — and the PID loop does not.
+- **The holes' coordinate motion is still the gauge's**: `8.3–8.6` cells outward of
+  their seeds at `6 M` without the model, `7.5` with it at `10 M_A`, `6.6` on the
+  seeds; the found separation `8.02–8.03` against free fall's `7.715`.
+
+**What this proposes for B4 (step B3's review, second round).** **The PID loop
+without the model, its integral starting at zero, `τ = 10 M_A`** — from this round
+the default of `TrackedSpec`, `SourceLaw` and `test/binary_runs.jl`.
+In this window it matches the best no-model PD row in the line's distance, the
+residual (`5.79` at `6 M`) and `ℋ` (`1.18·10⁻³`), and it is the law that does not
+lag a steady acceleration: the PD loop without a model lags the fall's `c̈_tr ≈
+a_N` by `c̈_tr τ²`, and an orbit's centripetal `v²/R` the same way — at `d = 10 M`,
+`a = 0.005`, `6` cells at `10 M_A` and `1` at `4 M_A` — where the PID loop lags a
+steady jerk by `J τ³`, about a cell for that orbit (`R Ω³ τ³ = 0.02 M`) and for the
+head-on at `6 M`. It costs a half more of the junk than the PD loop at the same `τ`
+(`0.33` against `0.22`, which `4 M_A` would raise to `0.76`), a state in the
+checkpoint, and a slower forgetting of a wrong start — why its integral starts at
+zero. **The model is not kept**: in this gauge the holes' coordinate acceleration
+is the Newtonian one only after the gauge's transient, from `5 M` here, and during
+it the model added `40–100 %` to the forcing the line answers (`a_N = 0.008`
+against `c̈_tr` from `−0.007` to `−0.020`). The targets stay on the
+tracks. What none of the laws gives is a fall: the coordinate separation is the
+gauge's for at least `6 M` whatever the line does, and B7's measure of the fall
+must be gauge-invariant.
 
 ### One interior per hole
 
@@ -8236,11 +8347,14 @@ hours on one H200.
    start with one moving hole fed by its own track.** Built and measured in step
    B3's review, its design proposed there: [The controlled source
    line](#the-controlled-source-line) — a critically damped loop onto each
-   track, with the Newtonian pull of the other holes as its model and the targets
-   left on the tracks; `τ = 10 M_A` chosen a priori, `4 M_A` preferred by the
-   pair's rows and proposed for B4. It holds one hole as the analytic source does
-   and the head-on pair to `6 M`; the holes' coordinate motion stays the
-   gauge's.**)**
+   track, the targets left on the tracks. The first round's PD loop with the
+   Newtonian model holds one hole as the analytic source does and the head-on
+   pair to `6 M`, but the model, wrong while the gauge's transient lasts, put its
+   line up to `4.2` cells off the holes; Erik then asked for the model off and an
+   integral term (second round), and the PID loop without the model, its integral
+   from zero, at `τ = 10 M_A`, is proposed for B4: within `1.3` cells of the holes,
+   the residual and `ℋ` at the best rows', and no lag of a steady acceleration.
+   The holes' coordinate motion stays the gauge's.**)**
 
 ## Possible extensions
 

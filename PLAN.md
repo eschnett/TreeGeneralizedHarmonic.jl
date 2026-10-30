@@ -35,8 +35,10 @@ the composite tracked Kerr-Schild source fed by the per-hole tracks with B2's
 tracked `:damped` target per hole — and `GHCase(…; holes)`, and the superposed
 metric kept here. **And on what feeds that source, the same day (`CODE.md`'s item
 7):** a slow control law for the track-fed source, tested on one moving hole fed
-by its own track first — built in B3's review, `CODE.md`, "The controlled source
-line". This file stays until G8 is done.
+by its own track first — built in B3's review, which in its second round, on
+Erik's request, turned the model off and added an integral: the PID loop without
+the model is proposed for B4 (`CODE.md`, "The controlled source line"). This file
+stays until G8 is done.
 
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
