@@ -40,6 +40,12 @@ Erik's request, turned the model off and added an integral: the PID loop without
 the model is proposed for B4 (`CODE.md`, "The controlled source line"). This file
 stays until G8 is done.
 
+**Step I1 (added 2026-10-30) is proposed and not started**: a layer-free
+interior in the spirit of the moving puncture — smoothed data, a lapse
+steered toward collapse inside the horizon, and the range projection as a
+guard — screened on the static `a = 0` hole against `:damped`. It builds on
+B1's gauge sources and is independent of B2–B9.
+
 The steps map onto `CODE.md`'s milestones G0–G6, split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
 is a brief a single agent with a fresh context can carry. The order is
@@ -1637,3 +1643,290 @@ and B3's case.
 
 **Accept:** G8 as `CODE.md` states it. Record the cost per `M` and per run
 beside the prediction under "What it costs".
+
+## Step I1 — A layer-free interior on the static hole (added 2026-10-30)
+
+`CODE.md`: "The interior" (the range projection, its gate and its ranges),
+"Gauge and constraint damping" (the algebraic and the sampled source),
+"Single black holes: recommended settings" (the `a = 0` `:damped` row), and
+"The gauge" under "Binary black holes" (B1's sources).
+`SINGULARITY_HANDLING.md`: "Step 8a" (the leak per cell), "The range
+projection (step 8b)" and "The layer against an inexact target (step 8c)"
+(how an abrupt change of the state ends a run), and "Single holes on the
+octant" (the baseline). TreeBSSN's `CODE.md`, "The smoothed hole", "The
+puncture", "The lapse's floor" and "The comparison with TreeGH", for what
+the moving-puncture side measured.
+
+**Starts from PR #18's branch** (`eschnett-claude/binary-black-hole-setup-f5b05f`,
+tip `b97e72b`), or from `main` once it is merged: it uses B1's
+`AlgebraicGaugeSource`, `RolledGaugeSource`, `gauge_consistent_momentum` and
+`_adm_rates`. Branch `claude/step-I1-layer-free-interior`. One hole, at rest,
+`a = 0`; spin, motion and binaries are out of scope.
+
+**The question.** Can this package hold a black hole the way moving-puncture
+codes do, and what do the constraints outside the horizon look like then?
+That means no damping layer and no analytic target. The Einstein equations
+run everywhere, the interior is made harmless by its data and its gauge, and
+a pointwise limit on the state is the backstop. The conjecture is Erik's
+(2026-10-30). The reasons to expect it and the reasons not to:
+
+- **For.** Every GH characteristic moves at zero or light speed relative to
+  the normal observers. Inside the horizon every one of them points inward,
+  so in the continuum nothing made deep inside reaches the exterior. That is
+  stronger than BSSN's case, whose 1+log gauge speed reaches `√2`. The
+  discrete leak (step 8a) is `0.40–0.51` e-folds per cell at `ε_KO = 1/2`
+  over depths of 2–8 cells (`0.25–0.37` in the 1D model at long times).
+  This interior puts 8–16 cells between what it does and the horizon at
+  `1/16`, and twice that at `1/32`.
+- **Against.** The moving puncture works because its gauge takes the
+  curvature singularity off the slice (a trumpet), and collapses the lapse so
+  that the floored points hardly evolve. TreeBSSN's floors act at a few
+  thousand points per chunk, and a floor above the lapse the gauge wants was
+  "much worse" there (`α_min = 10⁻²` ended its runs in 5–16 M). This
+  package's Kerr-Schild source keeps the singularity on the slice, with
+  `β^r → 1` and `Π ~ 1/r²`. Steps 8b and 8c saw abrupt changes of the state
+  end runs in 2–18 M, by degenerating the evolved points next to them: a
+  failure inside the horizon, with nothing leaking.
+
+So the step takes the singularity off the initial slice, gives the interior
+a gauge that collapses the lapse where the volume collapses, and keeps the
+projection only as a guard.
+
+**The design**, to go into `CODE.md` under "The interior" as "A layer-free
+interior (proposed in step I1)":
+
+1. **Smoothed data.** TreeBSSN's `SmoothedKerrSchild`, which is the Exact
+   thorn's `parabolic` smoothing: inside `ε` the Kerr-Schild radius becomes a
+   `C⁴` polynomial in `r²`. Port it as an `isbits` background, `a = 0` only
+   (at `a ≠ 0` it has a kink on the ring; TreeBSSN's `CODE.md` says why). It
+   is Kerr-Schild exactly for `r ≥ ε` and not vacuum inside: a turducken whose
+   constraint violation is causally hidden. The data's extremes over
+   `r ≤ 3/2` (computed 2026-10-30 on the host by finite differences; confirm
+   them on the grid), with `|β| = √(β_i γ^{ij} β_j)` and the momentum scale
+   as `bounds.jl` reads them:
+
+   | data | min `α` | `λ(γ)` | max `\|β\|` | max `\|(α/√γ)Π\|` |
+   |---|---|---|---|---|
+   | `ε = 3/4` | `0.305` | `[1, 6.18]` | `1.98` | `15.8` |
+   | `ε = 1` | `0.347` | `[1, 4.88]` | `1.68` | `8.44` |
+   | `ε = 5/4` | `0.382` | `[1, 4.11]` | `1.47` | `5.16` |
+   | Kerr-Schild, `r ≥ 1/4` | `0.333` | `[1, 9]` | `2.67` | `28.4` |
+
+   (Kerr-Schild's momentum scale is `10.4` at `r = 2/5`, step 8b's number.)
+2. **A frozen gauge correction, for a gentle start.** The algebraic
+   Kerr-Schild source, evaluated on the smoothed state, is not `−Γ_a` of the
+   smoothed metric. The mismatch reaches `|C_a| = 52` at `r = 0.21` for
+   `ε = 1` (host-side, as above). `gauge_consistent_momentum` would turn that
+   into `∂_t α` up to `3.4/M` and `|∂_t β|` up to `2.3/M` at `t = 0`. So the
+   source is `H_a = H_a^{KS}(h) + ΔH_a(x)`, where
+   `ΔH = −Γ[g_s] − H^{KS}(h_s)` is sampled once, with its gradient, by the
+   nested-dual pass the sampled source already uses.
+   - `ΔH` is identically zero for `r ≥ ε`, where the smoothed metric is
+     Kerr-Schild and the algebraic source is its `−Γ`. So the exterior gauge
+     is the baseline's.
+   - The smoothed static data start with `C_a = 0` and `∂_t α = ∂_t β = 0`.
+   - This is TreeBSSN's explicit gauge form, the frozen sources, in GH.
+3. **Interior lapse steering.** Add
+   `ψ(r) [μ_α log(α_*/α) n_a − μ_β g_ai (β^i − β_*^i)/α]` to `H_a`, with `ψ` a
+   `C²` smoothstep: `1` for `r ≤ r_s0`, `0` for `r ≥ r_s1`.
+   - **Why it steers.** B1's damped harmonic source documents that
+     `μ log(1/α) n_a` drives `α → 1` at the rate `αμ` (`C_t = 0` on flat space,
+     with `γ` fixed and `β = 0`), and that `−μ_S g_ai β^i/α` drives `β → 0` at
+     `αμ_S`. So `log(α_*/α)` drives the lapse to `α_*`. **Test both signs
+     before anything runs.**
+   - **Why there is no 1+log.** A gauge source may read `g` but not `∂g`
+     without changing the principal part, and 1+log reads `K`. With zero
+     shift, harmonic slicing integrates to `α ∝ √γ`; the algebraic stand-in
+     is a target tied to the volume.
+   - **V, volume-coupled:** `α_* = α_s(x) (√γ/√γ_s(x))^p`, with `α_s` and
+     `√γ_s` the smoothed background's, in closed form. It vanishes on the
+     initial data (to roundoff) and collapses the lapse where the volume
+     collapses: `p = 1` like harmonic slicing, `p = 2` more strongly.
+   - **F, fixed:** `α_* = κ α_s(x)`, a pre-collapsed lapse. The data either
+     start at it (lapse scaled by `1 − (1 − κ) ψ`, with `γ` and `K` kept and
+     `Π` from `gauge_consistent_momentum`) or have it rolled on
+     (`RolledGaugeSource` from the unsteered source, over `σ_g`).
+4. **The range projection as a guard** (`bounds.jl`, unchanged in
+   substance). Its ranges catch a state that is about to stop being a
+   metric or to break the step, and never shape a healthy one:
+   - **`α ∈ [10⁻³, 2]`.** TreeBSSN's working floor: `10⁻⁸` died there of a
+     term that divides by `α`, and `10⁻²` fought the gauge. Here only the
+     shift steering divides by `α` (off by default); the floor protects the
+     steering's logarithm and `metric_quantities`, and V is meant to approach
+     it. The lapse inside the horizon never exceeds `0.71`; `α_max = 2` only
+     satisfies the constructor's `1 < α_max`.
+   - **`λ(γ) ∈ [10⁻³, 10³]`.** Under V with `p = 1` the lapse reaches `10⁻³`
+     where the volume has fallen about 300-fold, an isotropic spectrum of
+     `0.02`. The spectrum's floor sits below that, so the lapse floor is met
+     first and the spectrum's catches only a non-metric. The ceiling is 200×
+     the data's.
+   - **`|β| ≤ 3`.** That is `1.8×` the smoothed data's `1.68` (`1.5×` at
+     `ε = 3/4`). The shift is a coordinate speed, and `gh_dt` sizes the step
+     for the far field's `√3`; a shift past 3 is a run about to break its CFL
+     condition.
+   - **`max |(α/√γ)Π| ≤ 100/M`**, `default_bounds`' value: 12× the data's.
+     It shrinks with the lapse.
+   - **The gate** at `r_g = r_s1`, under a rule that replaces the layer's:
+     `r_g ≤ r_h,min − 8h`, since there is no `r_1`. The projection's kink is
+     read by evolved stencils here on purpose. Eight cells keep it, at step
+     8a's rate, about `e^{−3.6}` from the horizon, before the clamp's own
+     region is counted.
+   - **It must not fire on the initial data** (asserted at `t = 0`). A run on
+     which it never fires is then the run without it, bit for bit (the
+     existing control).
+5. **Optional drivers:**
+   - the Kreiss–Oliger amplitude inside (`HorizonDissipation`'s `ε_in`,
+     rising from `r_h` to `r_s0`);
+   - `γ0` near the hole. Its direction is unknown: damping pushes the
+     smoothed region toward vacuum, and a vacuum interior re-forms the
+     singularity;
+   - an **anchor** `−ρ_a χ_ε(r) (u − u_s)` toward the smoothed state inside
+     `ε`, with `F` evaluated everywhere (no `w`). It is the bridge to
+     `:damped`, with a regular target.
+
+**Changes:**
+
+- **The smoothed background** in `src/initialdata.jl`. It is also the error
+  reference; only its exterior, `r ≥ ε`, is Kerr-Schild.
+- **The layer-free interior**, an `isbits` object (`ε`, `r_s0`, `r_s1`,
+  `r_g`, the anchor) that `GHCase`/`hole_case` accept. Its kernel variant is
+  `:none` (or the anchor's), with no frozen core and no `r_1`. It brings:
+  - masks for the norms and the speed, which cover the interior now;
+  - the gate rule above, in place of `check_bounds_gate`'s;
+  - radius checks `r_s1 ≤ r_h,min − 8h` and `ε ≥ 8h` (the ring rule's eight
+    cells across the data's scale), in place of `check_interior_radii`'s;
+  - validity rows by region (the smoothed ball, the steering's ramp, the band
+    inside the horizon) in place of the layer's.
+- **The steered source**, `SteeredSource <: AlgebraicGaugeSource`: the
+  algebraic Kerr-Schild source, plus `ΔH`, plus `ψ` times the steering. `H`
+  and `∂H` go through `_adm_rates`; the code is generic in the number type
+  for the SIMD lanes and closure-free for a device. `ΔH` is zero for
+  `r ≥ ε` through a branch, not a product.
+- **The initial data**: the smoothed metric's own `(h, Π)`; with `κ ≠ 1` the
+  lapse is scaled and `Π` comes from `gauge_consistent_momentum`.
+- **The record**, every chunk:
+  - shells `[0, ε)`, `[ε, r_s1)`, `[r_s1, 2)`, `[2, 9/4)`, `[9/4, 3)`,
+    `[3, 5)`, `[5, 8)`, `r ≥ 8`, each with `ℋ`, `ℳ`, `C_a`, the error, the
+    `h` part of the right-hand side (stationarity), `min α`, `min √γ/√γ_s`,
+    `max λ(γ)` and the 6th-difference roughness (TreeBSSN's
+    `variables.csv`);
+  - the projection's hits by kind (lapse, spectrum, shift, momentum,
+    non-finite), the radius of the outermost hit, and a histogram in cells;
+  - the lapse along `x` and along the diagonal (step 8a found the leak
+    strongest along the axes), and the radii where `α = 1/2` and `α = 1/10`;
+  - `C_a` across the steering's ramp;
+  - `M_irr` and `r_min` from the finder.
+
+  One fold per chunk, as `observe` does now.
+- **Run tools**: a `test/octant_runs.jl` key for every knob, and a reader
+  (`test/layerfree_study.jl`, or `octant_study.jl` extended) that prints the
+  tables below.
+- **Tests, priced as the ground rules ask:**
+  - the steering's two signs;
+  - `H` and `∂H` of the steered source against forward-mode
+    differentiation at random states near the smoothed data;
+  - `ΔH` exactly zero for `r ≥ ε`;
+  - `C_a = 0` at `t = 0` on a small mesh, to roundoff;
+  - V's steering zero on the data, to roundoff;
+  - the gate and radius refusals;
+  - one short run of the fixture on which the projection never fires,
+    `isequal` to the run without it.
+
+**The screen.** The baseline's case and mesh:
+- Kerr-Schild `a = 0` on the reflecting octant `[0, 64]³`, root brick `2³`,
+  cubes `R = 32, 16, 8`, so `h = 4/N` on `[0, 8]³`;
+- `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, the Gaussian `γ0`, `chunk = 1`, the
+  finder every chunk;
+- one H200 a row on Symmetry.
+
+The **base point** is:
+- data: `ε = 1`, with `ΔH` on;
+- steering: V with `p = 1` and `μ_α = 4/M`, `μ_β = 0`, `r_s0 = 1`,
+  `r_s1 = 3/2` (8 cells inside the horizon at `1/16`, as `:damped`'s `r_1`);
+- the guard: the ranges above, gated at `3/2`;
+- no drivers.
+
+Each row changes one thing:
+
+| row | what it is |
+|---|---|
+| R0 | `:damped`, `r_0 = 3/4`, `r_1 = 3/2`, the baseline, on this commit, to `24 M` |
+| R1 | analytic Kerr-Schild through the core rule at `r_0 = 1/4`, the algebraic source, the guard only: the bare conjecture (its data do not fire the guard) |
+| R2 | smoothed data and `ΔH`, no steering: how fast the singularity re-forms |
+| R3 | **the base point** |
+| R4, R5 | `p = 2`; `μ_α = 1/M` |
+| R6 | F, `κ = 1/3`, the data pre-collapsed |
+| R7 | F, `κ = 1/3`, the data not collapsed, rolled on over `σ_g = 4 M` |
+| R8 | the base with the shift steering, `μ_β = 1/M`, `β_* = 0` |
+| R9 | the base without `ΔH` (`gauge_consistent_momentum`'s `∂_t α` up to `3.4/M`): is the gentle start needed? |
+| R10, R11 | `ε = 3/4`; `ε = 5/4` |
+| R12, R13 | `ε_in = 2`; `γ0` near the hole `1/(10M)` |
+| R14 | the anchor, `ρ_a = 1/(10M)` |
+| R15 | `α_min = 10⁻⁶`: does the floor act? |
+| R16 | tight ranges at `2×` the data's extremes (`α ≥ 0.17`, `λ(γ) ∈ [1/2, 10]`, the momentum scale `≤ 17/M`, the shift as in the base): does limiting the values help? |
+| R17 | the gate everywhere |
+
+**Cost.** The screen is `8 M` at `1/16`, about five minutes a row, scaled from
+the `9.4 M`-point octant run's `26 s/M`; with R0 at `24 M`, about two
+GPU-hours. A row **passes** if it:
+- reaches `8 M`;
+- has hits per chunk that level off, with the outermost hit at least 8 cells
+  inside the horizon and not moving outward;
+- has `ℋ` and the error in `[2, 9/4)` within `3×` R0's, flat or falling from
+  `4 M`.
+
+The failure signatures to name are step 8b's and 8c's — the shell error next
+to the smoothed ball or the ramp growing from the first chunk — an outermost
+hit creeping outward, and `M_irr` drifting.
+
+**Promotion.** At most three passing rows go to `1/24` and `1/32` at `24 M`
+(about 45 minutes and 2.2 hours a row). The best of them goes to `128 M` at
+`1/16` on `ks-octant`'s `[0, 128]³` mesh, against job 568189 (`ℋ =
+7.24·10⁻⁶`, the error `5.56·10⁻⁶`, both masked to `r ≥ 3/2`). Long rows run
+with `checkpoint=` and `walltime=`, each study in its own remote directory.
+
+**Accept:**
+
+- The design in `CODE.md` marked (proposed in step I1), and the data's
+  ranges and the start's `C_a` confirmed on the grid, **(measured in step
+  I1)**.
+- R0 reproduces the baseline at `24 M` and `1/16` (`ℋ [2, 9/4) = 2.42·10⁻⁵`,
+  the error there `1.08·10⁻⁵`) to two digits.
+- Every row with its outcome, its records and its failure signature where it
+  failed, in `SINGULARITY_HANDLING.md` under "A layer-free interior (step
+  I1)".
+- For each promoted row:
+  - the order outside the horizon;
+  - `ℋ` and the error per shell against `:damped` at each `h` (`ℋ [2, 9/4)`
+    `2.42·10⁻⁵`, `1.46·10⁻⁶`, `4.30·10⁻⁷` at `1/16`, `1/24`, `1/32`);
+  - `dM_irr/dt` against `:damped`'s `2.09·10⁻⁸`, `4.05·10⁻⁹`, `1.27·10⁻⁹`;
+  - the `128 M` row's stationarity.
+- A recommendation:
+  - **if a row holds:** whether to take it to spin (which needs a smoothing
+    without the ring's kink), to a moving hole (which needs `ΔH` and the
+    reference `α_s`, `√γ_s` to move, so an algebraic form) and to B3's pair;
+  - **if none holds:** what failed, where and when.
+- The suite green at one and four threads.
+
+**Sharp edges for step I1:**
+
+- **The exterior's gauge must stay the baseline's.** Anything that changes
+  `H` for `r ≥ r_s1` changes the comparison; so does a source that is the
+  sampled `−Γ` instead of the algebraic one outside `ε` (the two run alike on
+  the static hole, but they are not the same gauge off the solution).
+- **The error against Kerr-Schild means something only for `r ≥ ε`**, and
+  for `r ≥ r_s1` once the steering has moved the slice inside. Inside, read
+  the error against nothing; read the constraints and the record's ranges.
+- **With no `r_1`, the speed and every norm cover the interior.** The step
+  should not change, since the far field's `√3` is the largest speed and the
+  smoothed interior's is `0.6–1.6`, but check it.
+- **The kernel takes a sampled source or an algebraic one, not both.** `ΔH`
+  sampled beside the algebraic source needs a new gauge-source `Val` (the
+  sampled `Hsrc` holds `H_b` and `∂_a H_b`, 20 variables, `G = 0`), or `ΔH`
+  in closed form from the smoothed metric's derivatives. Decide, and say
+  which.
+- **A projection that fires at `t = 0` means the ranges or the data are
+  wrong.** Fix that before reading a run.
+- **The sampled `ΔH` is static.** That is fine here. A moving hole would be
+  refused, as a moving non-harmonic background with a sampled source is, and
+  needs `ΔH` in closed form: a later step's.
