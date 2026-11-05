@@ -159,6 +159,9 @@ end
         @test_throws BoundsError adm_vars(work, (0, 5, 5), 1)
         @test_throws BoundsError adm_vars(work[:, :, :, 1:10, :], (5, 5, 5), 1, inv(h),
                                           Val(q))
+        # A spacing of another precision than the array's is refused, not
+        # promoted into a mixed-precision `K`.
+        @test_throws MethodError adm_vars(Float32.(work), (5, 5, 5), 1, inv(h), Val(q))
     end
 
     @testset "both methods run in a kernel and allocate nothing" begin

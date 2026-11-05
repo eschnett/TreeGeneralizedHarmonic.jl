@@ -22,8 +22,9 @@ NR sign, `K_ij = −(∂ₜγ_ij − D_iβ_j − D_jβ_i)/(2α)`, as `SpacetimeM
   scattered and ghost-filled by the caller. Only variables `1:20` are read.
 - `I` is the **stored** index `(i, j, k)`, 1-based, ghosts included — what
   `coordinates(fs, b, I)` takes — and `b` the block.
-- `inv_h` is the block's `1/h`, and `q` the order the right-hand side
-  differentiates at.
+- `inv_h` is the block's `1/h`, of the array's element type `T` (a `Float64`
+  spacing with a `Float32` array would make `∂h` and `K` mixed-precision, so it
+  is refused), and `q` the order the right-hand side differentiates at.
 
 `α`, `β`, `sqrtγ` and `γu` are [`metric_quantities`](@ref)'s, the offset-accurate
 path the right-hand side takes, and `γ` is `η + h`'s spatial block. `K` is
@@ -52,7 +53,7 @@ backend. Destructure by name, `(; α, β, γ) = adm_vars(…)`: fields may be ad
 end
 
 @inline function adm_vars(work::AbstractArray{T,5}, I::NTuple{3,Int}, b::Int,
-                          inv_h, ::Val{q}) where {T,q}
+                          inv_h::T, ::Val{q}) where {T,q}
     r = q ÷ 2
     @boundscheck begin
         checkbounds(work, I[1], I[2], I[3], 2NC, b)

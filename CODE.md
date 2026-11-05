@@ -3795,7 +3795,10 @@ adm_vars(work, I, b, inv_h, Val(q)) -> (; α, β, γ, sqrtγ, γu, K)
 - **Arguments.** `work` is the scattered, ghost-filled working array
   `(n, n, n, nvars, nblocks)`. `I` is the **stored** index, ghosts included,
   the index `coordinates` takes. `b` is the block, `inv_h` is the block's
-  `1/h`, and `q` is the right-hand side's order.
+  `1/h`, and `q` is the right-hand side's order. `inv_h` must have the
+  array's element type `T`. A spacing of another precision is refused
+  (amended in review, 2026-11-05), because it would promote `∂h` and make `K`
+  mixed-precision.
 - **Where each method is valid.** The first reads one point and is valid at
   every stored vertex. The second reads the right-hand side's own
   first-derivative stencil, `q/2` points each way. It is valid where
