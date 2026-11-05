@@ -808,28 +808,70 @@ quantity set the apparent-horizon finder consumes.
                                      dxh::SVector{NC,T}, dyh::SVector{NC,T},
                                      dzh::SVector{NC,T}) where {T}
     g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(h))
-    dtg = β[1]*dxh + β[2]*dyh + β[3]*dzh + (α / sqrtγ) * Pi
-    dt4 = _sym4(dtg)
     dx4 = _sym4(dxh); dy4 = _sym4(dyh); dz4 = _sym4(dzh)
-    γ = SMatrix{3,3,T}(g4[i+1, j+1] for i in 1:3, j in 1:3)
+    γ = _spatial3(g4)
     ∂γ = SArray{Tuple{3,3,3},T}(
         (k == 1 ? dx4[i+1, j+1] : k == 2 ? dy4[i+1, j+1] : dz4[i+1, j+1])
         for i in 1:3, j in 1:3, k in 1:3)
-    # Lowered shift and its derivatives: β_j = g_{tj}.
-    βl = SVector{3,T}(g4[1, 2], g4[1, 3], g4[1, 4])
-    dβl = SMatrix{3,3,T}(
-        (i == 1 ? dx4[1, j+1] : i == 2 ? dy4[1, j+1] : dz4[1, j+1])
-        for i in 1:3, j in 1:3)                     # dβl[i,j] = ∂_i β_j
-    # 3-Christoffels Γ^k_{ij} = ½ γ^{kl}(∂_i γ_lj + ∂_j γ_li − ∂_l γ_ij).
-    Γ3 = SArray{Tuple{3,3,3},T}(
-        sum(γu[k, l] * (∂γ[l, j, i] + ∂γ[l, i, j] - ∂γ[i, j, l]) / 2
-            for l in 1:3)
-        for k in 1:3, i in 1:3, j in 1:3)
-    K = SMatrix{3,3,T}(
-        -(dt4[i+1, j+1] - dβl[i, j] - dβl[j, i] +
-          2 * sum(Γ3[k, i, j] * βl[k] for k in 1:3)) / (2α)
-        for i in 1:3, j in 1:3)
-    return γ, ∂γ, (K + K') / 2
+    return γ, ∂γ, _extrinsic_curvature(g4, α, β, γu, sqrtγ, Pi, dxh, dyh, dzh)
+end
+
+# `K_ij` from the state at a point and its spatial gradients — the algebra
+# `adm_vars_from_state` and `adm_vars` share (factored out 2026-11-05, so that
+# the two agree by construction). It is GHSO2's expression term for term, in
+# its summation order:
+#
+#     ∂ₜg_ab  = β^i ∂_i g_ab + (α/√γ) Π_ab
+#     Γ^k_ij  = Σ_l γ^{kl}(∂_i γ_lj + ∂_j γ_li − ∂_l γ_ij)/2      (left fold)
+#     K_ij    = −(∂ₜγ_ij − ∂_iβ_j − ∂_jβ_i + 2 Σ_k Γ^k_ij β_k)/(2α)
+#
+# with `β_j = g_tj`, then symmetrised, `(K_ij + K_ji)/2`. It was written with
+# generators (`SMatrix(f for i, j)`, `sum(… for l)`), which a device compiles as
+# calls; here every loop is `@ntuple` with literal indices, so the index
+# arithmetic folds and nothing is a call. Only the six spatial components of
+# `∂ₜg` are formed, each as it was.
+@inline function _extrinsic_curvature(g4::SMatrix{4,4,T}, α, β, γu, sqrtγ,
+                                      Π::SVector{NC,T}, dxh::SVector{NC,T},
+                                      dyh::SVector{NC,T},
+                                      dzh::SVector{NC,T}) where {T}
+    a_div = α / sqrtγ
+    ∂h = (dxh, dyh, dzh)
+    βl = (g4[1, 2], g4[1, 3], g4[1, 4])
+    Kt = @ntuple 9 n -> _curvature_ij(a_div, α, β, γu, βl, Π, ∂h,
+                                      (n - 1) % 3 + 1, (n - 1) ÷ 3 + 1)
+    return SMatrix{3,3,T}(@ntuple 9 n ->
+        (Kt[n] + Kt[3 * ((n - 1) % 3) + (n - 1) ÷ 3 + 1]) / 2)
+end
+
+# The spatial block `g_ij` of a 4-metric, spelled out (no generator).
+@inline function _spatial3(g4::SMatrix{4,4,T}) where {T}
+    return SMatrix{3,3,T}(g4[2, 2], g4[3, 2], g4[4, 2],
+                          g4[2, 3], g4[3, 3], g4[4, 3],
+                          g4[2, 4], g4[3, 4], g4[4, 4])
+end
+
+# `∂_c γ_ab`, spatial `a, b, c`: the packed slot of `(a, b)` in the gradient
+# along `c`.
+@inline _dγ(∂h, a, b, c) = ∂h[c][_pairindex(a + 1, b + 1)]
+
+# `Γ^k_ij`, the left fold over `l` that `sum` formed.
+@inline function _christoffel3(γu, ∂h, k, i, j)
+    t1 = γu[k, 1] * (_dγ(∂h, 1, j, i) + _dγ(∂h, 1, i, j) - _dγ(∂h, i, j, 1)) / 2
+    t2 = γu[k, 2] * (_dγ(∂h, 2, j, i) + _dγ(∂h, 2, i, j) - _dγ(∂h, i, j, 2)) / 2
+    t3 = γu[k, 3] * (_dγ(∂h, 3, j, i) + _dγ(∂h, 3, i, j) - _dγ(∂h, i, j, 3)) / 2
+    return (t1 + t2) + t3
+end
+
+# One unsymmetrised `K_ij`.
+@inline function _curvature_ij(a_div, α, β, γu, βl, Π, ∂h, i, j)
+    v = _pairindex(i + 1, j + 1)
+    dtγ = β[1] * ∂h[1][v] + β[2] * ∂h[2][v] + β[3] * ∂h[3][v] + a_div * Π[v]
+    ∂iβj = ∂h[i][_pairindex(1, j + 1)]
+    ∂jβi = ∂h[j][_pairindex(1, i + 1)]
+    s = (_christoffel3(γu, ∂h, 1, i, j) * βl[1] +
+         _christoffel3(γu, ∂h, 2, i, j) * βl[2]) +
+        _christoffel3(γu, ∂h, 3, i, j) * βl[3]
+    return -(dtγ - ∂iβj - ∂jβi + 2 * s) / (2α)
 end
 
 """
