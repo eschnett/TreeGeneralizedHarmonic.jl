@@ -635,7 +635,15 @@ alone is fine) on AMD Zen 4/Zen 5 **with AVX-512 exposed** (EPYC 9V45
 always, EPYC 9V74 only on the VMs that expose it), on Julia **1.13.0 and
 1.13.1**, deterministically — a miscompilation, not a bad machine. Zen 3,
 Intel with AVX-512 and nightly (1.14.0-DEV.3386) pass. Keep coverage off
-the Linux cells until a 1.13 release is shown to carry the fix. There is
+the Linux cells until a 1.13 release is shown to carry the fix. **CI runs
+in two tiers** (2026-11-05, Erik, the same in every Tree* repository): a
+pull request runs the two Linux cells only, uninstrumented; a push to
+`main`, a weekly schedule and a manual dispatch add the macOS cell and
+its coverage; Markdown-only changes and tags run nothing. The pull-request
+cells had taken 65–90 min each, against 17–21 min for the suite on the
+laptop, and 61 of the last 80 commits on `main` touched only Markdown.
+So **run the full suite locally before opening a pull request**: that is
+the macOS run the pull request does not get. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.

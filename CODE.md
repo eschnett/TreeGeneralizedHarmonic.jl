@@ -5676,7 +5676,8 @@ physics test costs what its points and its steps cost.
 So the levers, in order of what they return and with what they cost:
 
 1. **Four threads.** Already 1.87× on the whole suite and 3.28× on
-   `driver_tests.jl`, for nothing. CI runs three of its five cells serial.
+   `driver_tests.jl`, for nothing. CI runs one of its two pull-request
+   cells serial, and two of its three cells on `main`.
 2. **The sweep's resolutions.** `Ns = (6, 8, 10)` costs `13.1 + 29.5 +
    59.3 s`, and `N = 10` alone is 58 % of it. At `N^2.95`, `(6, 7, 8)`
    costs 62 % of `(6, 8, 10)` and saves about **38 s**; `N ≥ 2G + 2 = 6` is
