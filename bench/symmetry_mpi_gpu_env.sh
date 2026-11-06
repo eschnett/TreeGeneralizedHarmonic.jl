@@ -37,7 +37,6 @@ ApparentHorizonFinder = {rev = "main", url = "https://github.com/eschnett/Appare
 IMEXRungeKutta = {rev = "main", url = "https://github.com/eschnett/IMEXRungeKutta.jl"}
 KorzynskiSpin = {rev = "main", url = "https://github.com/eschnett/KorzynskiSpin.jl"}
 SpacetimeMetrics = {rev = "main", url = "https://github.com/eschnett/SpacetimeMetrics.jl"}
-TreeIOHDF5 = {rev = "main", url = "https://github.com/eschnett/TreeIOHDF5.jl"}
 EOF
     julia --project="$dir" -e "
         using Pkg
