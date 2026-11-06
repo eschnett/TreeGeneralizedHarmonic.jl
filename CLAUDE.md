@@ -672,7 +672,12 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5687 assertions in 42m17** at four threads after `adm_vars`
+The suite is **5713 assertions in 15m29** at four threads after the wider
+ghost width (2026-11-05, TreeAMR 0.2.7, load 5–6): its 25 new claims are
+`ghostwidth_tests.jl`'s, `13.4 s` inside the suite (most of it the two runs of
+`refinement_tests.jl`'s moving mesh at `G = 2` and `3`), and one more is
+`admvars_tests.jl`'s refusal of a spacing of another precision. It was
+**5687 assertions in 42m17** at four threads after `adm_vars`
 (2026-11-05, a machine loaded 8–9 by other work, and a first try killed
 halfway through. Read the wall clock as the machine's). Its 23 new claims are
 `admvars_tests.jl`'s, `2.4 s` inside the suite. It was **5664 assertions in
@@ -1302,7 +1307,13 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
 - **Off by `G`.** Owned point `i` is stored at `i + G[d]`;
   `coordinates(fs, b, idx)` takes **stored** indices; a kernel launched
   by `map_blocks!` (default range) gets the owned index and adds `G`.
-  Every stencil reaches `±(q/2 + 1)` and `G = q/2 + 1` is exactly that.
+  Every stencil reaches `±(q/2 + 1)`, `stencil_reach(q)`, and that is the
+  least `G`; the state may be **stored wider** (from 2026-11-05,
+  `evolve!(; G)`, TreeGRRMHD's GH-5), so code that means the reach asks
+  `stencil_reach(q)` or `stencil_reach(p)` and never `U.G` — the margin
+  floor, the layer, the level floor and the shell band are all the reach's,
+  and `test/ghostwidth_tests.jl` holds a `G = 3` run at `q = 2` to the
+  `G = 2` run bit for bit.
   Getting this wrong produces plots that look almost right. The
   right-hand-side kernel does the addition **once**, into a linear index,
   and the stencils step by a stride per axis — same element, a quarter of

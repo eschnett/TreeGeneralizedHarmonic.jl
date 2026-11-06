@@ -910,12 +910,18 @@ It is the `p` of SciML's `f!(du, u, p, t)`, and the application writes
 `semidiscretize`-style wrapper, which is TreeAMR's contract and TreeWave's
 pattern.
 
-`q` is the finite-difference order and has no default: it fixes the ghost
-width `G = q/2 + 1`, which the field set was already built with, and the
-prolongation order `p = q + 2` that the schedule's `Operators` must carry
-(`CODE.md`, "The interface-order rule"). The constructor checks the first
-of those; TreeAMR's `check_operators` and step 4's table are what check
-the second.
+`q` is the finite-difference order and has no default: it fixes the
+stencils' reach `q/2 + 1` ([`stencil_reach`](@ref)), the least ghost width
+the field set may have been built with, and the prolongation order
+`p = q + 2` that the schedule's `Operators` must carry (`CODE.md`, "The
+interface-order rule"). The constructor checks the first of those; TreeAMR's
+`check_operators` and step 4's table are what check the second. A field set
+with a **wider** halo is accepted (amended 2026-11-05, TreeGRRMHD's GH-5): a
+coupled code that reads the metric at every stored point of its own wider
+field set builds this one as wide. The kernels step over the halo by `U.G`
+and read only as far as their weights, and TreeAMR's fill writes the same
+values into the inner ghost layers whatever `G` is, so the run is the run at
+`G = q/2 + 1` bit for bit.
 
 The gauge source is **sampled here**, at `t`, because that is what "after
 every regrid" means when every chunk builds a fresh problem — and because
@@ -978,6 +984,14 @@ struct GHProblem{T,G,q,HASH,DISS,INT,W,F,S,H,D,O,V,C,I,A,X,Y}
     valsimd::Val{W}
 end
 
+"""
+    stencil_reach(p::GHProblem) -> Int
+
+The reach `q/2 + 1` of `p`'s scheme, which a field set wider than the scheme
+needs does not change ([`stencil_reach`](@ref)`(q)`).
+"""
+stencil_reach(::GHProblem{T,G,q}) where {T,G,q} = stencil_reach(q)
+
 function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
                    t=zero(T), interior=case.interior, margin_check=true,
                    accounting=nothing, target=nothing, fits=nothing,
@@ -991,13 +1005,14 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
         "the evolved state is h (1:10) and Π (11:20), $(2NC) variables " *
         "(CODE.md, \"Field sets and layout\"), but this field set has " *
         "$(U.nvars)"))
-    all(g -> g == q ÷ 2 + 1, U.G) || throw(ArgumentError(
-        "CODE.md fixes the ghost width at G = q/2 + 1 = $(q ÷ 2 + 1) for " *
-        "q=$q — one more than the derivatives need, because the " *
-        "Kreiss–Oliger operator of order q + 2 reaches one point further — " *
-        "but this field set has G = $(U.G). A narrower halo makes the " *
-        "dissipation read a ghost that was never filled; a wider one is " *
-        "memory the scheme does not use."))
+    all(g -> g ≥ stencil_reach(q), U.G) || throw(ArgumentError(
+        "the scheme of order q=$q reads G = q/2 + 1 = $(stencil_reach(q)) " *
+        "points from each owned point — one more than the derivatives " *
+        "need, because the Kreiss–Oliger operator of order q + 2 reaches " *
+        "one point further (CODE.md, \"Field sets and layout\") — but this " *
+        "field set has G = $(U.G). A narrower halo makes the dissipation " *
+        "read a ghost that was never filled. A wider one is allowed, for a " *
+        "coupled code that reads the state beyond the scheme's reach."))
     all(c -> c === :vertex, U.centering) || throw(ArgumentError(
         "CODE.md fixes this package's field sets as vertex-centered — a " *
         "finite-difference scheme wants restriction along a stagger, which " *
@@ -1061,7 +1076,7 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
     # in order to watch the check fire elsewhere.
     INT = interior_variant(interior)
     if interior !== nothing && margin_check
-        check_interior_radii(U.forest, interior, case.background, q ÷ 2 + 1;
+        check_interior_radii(U.forest, interior, case.background, stencil_reach(q);
                              t=t, center=case.center)
         check_bounds_gate(U.forest, interior, case.bounds, q; t=t)
     end
