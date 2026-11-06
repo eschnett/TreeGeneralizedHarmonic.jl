@@ -635,7 +635,15 @@ alone is fine) on AMD Zen 4/Zen 5 **with AVX-512 exposed** (EPYC 9V45
 always, EPYC 9V74 only on the VMs that expose it), on Julia **1.13.0 and
 1.13.1**, deterministically — a miscompilation, not a bad machine. Zen 3,
 Intel with AVX-512 and nightly (1.14.0-DEV.3386) pass. Keep coverage off
-the Linux cells until a 1.13 release is shown to carry the fix. There is
+the Linux cells until a 1.13 release is shown to carry the fix. **CI runs
+in two tiers** (2026-11-05, Erik, the same in every Tree* repository): a
+pull request runs the two Linux cells only, uninstrumented; a push to
+`main`, a weekly schedule and a manual dispatch add the macOS cell and
+its coverage; Markdown-only changes and tags run nothing. The pull-request
+cells had taken 65–90 min each, against 17–21 min for the suite on the
+laptop, and 61 of the last 80 commits on `main` touched only Markdown.
+So **run the full suite locally before opening a pull request**: that is
+the macOS run the pull request does not get. There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
@@ -802,7 +810,11 @@ resolves the same branches.
 The MPI workload runs on its own too (added 2026-10-19), from an
 environment that has MPI and the package — `test/mpi_tests.jl` starts
 exactly this from the suite's sandbox, beside the suite where the machine
-has room (`TREEGH_TEST_MPI_CONCURRENT=0` or `1` decides it by hand). It is
+has room and to its end *before* the suite where it has not
+(`TREEGH_TEST_MPI_CONCURRENT=0` or `1` decides it by hand). Before the
+suite is from 2026-10-30: run after it, beside a test process that had
+compiled everything, the ranks put the threaded Linux cell's 16 GB runner
+down in five of its thirteen attempts from 2026-10-23 on. It is
 skipped on a machine with less than 24 GB — three ranks of about 3 GB
 beside the suite, which a macOS runner (7 GB) and the serial Linux runner
 could not hold (2026-10-19) — unless `TREEGH_TEST_MPI=1`, which CI sets for
