@@ -26,6 +26,8 @@ using KernelAbstractions: CPU
 using StaticArrays: SVector
 import SpacetimeMetrics as SM
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "The horizon" begin
     T = Float64
     q = 2
@@ -286,7 +288,7 @@ import SpacetimeMetrics as SM
     # (`CLAUDE.md`), and the horizon rows are part of them. The cadence is
     # the case's `k`, counted on the record, so `every = 2` leaves the odd
     # chunks empty rather than repeating the previous answer.
-    @testset "the analysis record carries the horizon rows at the cadence" begin
+    @full_tier @testset "the analysis record carries the horizon rows at the cadence" begin
         case = with_horizon(hole_fixture(T; q=q),
                             Horizon(T; every=2, N=10, r_seed=T(9 // 5)))
         out = gh_hole_run(T, case; N=8, q=q, t_end=T(1 // 5))

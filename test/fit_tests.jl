@@ -663,7 +663,9 @@ end
 
 # --- the kernel half (step 8e-ii) --------------------------------------------------
 
-@testset verbose = true "The fitted variant" begin
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
+@full_tier @testset verbose = true "The fitted variant" begin
     T = Float64
     q = 2
     G = q ÷ 2 + 1

@@ -273,6 +273,8 @@ end
     end
 end
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "The range projection on a mesh" begin
     T = Float64
     q = 2
@@ -432,7 +434,7 @@ end
     # every run with it on a different run from the one without it by an
     # ulp per point per stage, and every later experiment that compares the
     # two would be comparing roundoff.
-    @testset "the control: nothing fires, and the run is bit for bit the run without it" begin
+    @full_tier @testset "the control: nothing fires, and the run is bit for bit the run without it" begin
         out0 = gh_hole_run(T, case0; N=8, q=q, t_end=T(3 // 20))
         out1 = gh_hole_run(T, case; N=8, q=q, t_end=T(3 // 20))
         @test out0.bounds === nothing
