@@ -147,7 +147,7 @@ call_observer(f, p, t, u, row) =
             observer = nothing, perturb = nothing, ρ_max_factor = nothing,
             ρ_max_fixed = nothing, find = find_gh_horizon,
             fit_initial_cont = 1, fit_initial_depth = 0, handover = 0,
-            target_source = :fit, comm = the forest's)
+            target_source = :fit, comm = the forest's, G = q/2 + 1)
 
 **The** time-stepping loop: fill the initial data on `forest`, then evolve
 in chunks of `chunk`, writing `CODE.md`'s analysis record at every chunk
@@ -239,6 +239,15 @@ beside it.
 `q`, `ops`, `t_end` and `chunk` have none either, for `PLAN.md`'s reason —
 the operator order in particular, since this system takes second
 derivatives and a prolongation below `q + 2` costs the scheme an order.
+
+`G` is the ghost width the state is **stored** with, by default the scheme's
+reach `q/2 + 1` ([`stencil_reach`](@ref)), and never narrower (added
+2026-11-05, TreeGRRMHD's GH-5). A wider halo is for a coupled code that reads
+the metric at every stored point of its own wider field set
+([`adm_vars`](@ref)); every rule about the scheme — the interior's margins,
+the level floor, the shell band — stays in the reach, and the run is the run
+at the scheme's own width bit for bit. A restart must pass the `G` it was
+started with: the file's field set records it.
 
 `adapt` runs `CODE.md`'s initial-data cycle before the first chunk: fill,
 flag with [`indicator_flags`](@ref), regrid *without transferring*, and
@@ -456,7 +465,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  checkpoint_interval_seconds=nothing, max_walltime_seconds=nothing,
                  num_checkpoints_keep=2, checkpoint_hdf5_filters=(),
                  checkpoint_sync_to_disk::Bool=true, checkpoint_io=:node,
-                 restart_file=nothing, simd_width=nothing, comm=nothing) where {T}
+                 restart_file=nothing, simd_width=nothing, comm=nothing,
+                 G=nothing) where {T}
     # The job's wall clock starts here: whatever ran before the call —
     # startup, compilation, the queue — is the caller's margin to leave
     # (TreeHydro's rule for `max_walltime_seconds`).
@@ -582,19 +592,27 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         forest = ck.forest
     end
 
-    G = q ÷ 2 + 1
+    # The scheme's reach, which every rule below is stated in, and the halo
+    # the state stores, which may be wider (`G`, amended 2026-11-05).
+    reach = stencil_reach(q)
+    G_store = G === nothing ? reach : Int(G)
+    G_store ≥ reach || throw(ArgumentError(
+        "G = $G_store is narrower than the reach q/2 + 1 = $reach of the " *
+        "scheme at q = $q: the dissipation would read a ghost that was never " *
+        "filled. Leave G unset for the scheme's own width, or pass a wider " *
+        "one for a coupled code that reads the state beyond it."))
     U = if ck === nothing
-        FieldSet{T}(forest, 2NC; G=G, centering=vertexcentered(3),
+        FieldSet{T}(forest, 2NC; G=G_store, centering=vertexcentered(3),
                     parity=state_parity(forest), rotation=state_rotation(forest),
                     backend=backend)
     else
         # The loaded field set's layout is the file's; it is checked against
         # the run's, since every kernel and the schedule assume this one.
-        (ck.U.nvars == 2NC && all(==(G), ck.U.G) &&
+        (ck.U.nvars == 2NC && all(==(G_store), ck.U.G) &&
          ck.U.centering == vertexcentered(3)) || throw(ArgumentError(
             "restart_file $(repr(restart_file)) holds a field set of " *
             "$(ck.U.nvars) variables with ghost widths $(ck.U.G) and centering " *
-            "$(ck.U.centering), where this run at q = $q needs $(2NC), G = $G and " *
+            "$(ck.U.centering), where this run at q = $q needs $(2NC), G = $G_store and " *
             "a vertex-centered set: the file was not written by evolve!, or is " *
             "damaged."))
         ck.U
@@ -630,9 +648,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
          from_plain(HorizonTrack{T}, saved.track; path="run.track")
     n_L = !fitted ? 0 :
           spec.n_L > 0 ? spec.n_L :
-          layer_cells(G, ρ_max_fixed === nothing ? default_relaxation_rate(case) :
+          layer_cells(reach, ρ_max_fixed === nothing ? default_relaxation_rate(case) :
                          ρ_max_fixed, hole_mass(case.background))
-    geometry(f, t, track) = fitted_interior(spec, track, f, G; t=T(t), n_L=n_L)
+    geometry(f, t, track) = fitted_interior(spec, track, f, reach; t=T(t), n_L=n_L)
     # On a restart, the geometry the next chunk runs on: `record!`'s
     # `track!` built it from the updated track at the checkpoint's time, on
     # the mesh the checkpoint holds, which is the one the file has.
@@ -717,7 +735,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             # mesh — so that a chart whose analytic interior is singular, G5's,
             # has a cycle at all. See `adapt_fitted_initial_data!`.
             schedule, passes, converged, geom = adapt_fitted_initial_data!(
-                U, ops, case, g -> geometry(g, zero(T), tr); G=G,
+                U, ops, case, g -> geometry(g, zero(T), tr); G=reach,
                 buffer=bufferwidth, travel=travel, maxpasses=maxpasses,
                 cont=fit_initial_cont, depth=d_init, backend=backend,
                 blend=fit_initial_blend)
@@ -745,8 +763,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             # spinning charts by name.
             acycle(g) = fitmode ? with_variant(g, :damped) : g
             fitmode && check_interior_radii(forest, acycle(geom), case.background,
-                                            G; t=zero(T), center=case.center)
-            criterion(fs) = indicator_flags(fs, case, zero(T); G=G,
+                                            reach; t=zero(T), center=case.center)
+            criterion(fs) = indicator_flags(fs, case, zero(T); G=reach,
                                             buffer=bufferwidth, travel=travel,
                                             interior=fitted ?
                                                      acycle(geometry(fs.forest,
@@ -1021,7 +1039,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         lost = nothing
         tr′, geom′ = tr, geom
         try
-            tr′ = update_track(tr, hz, t; max_misses=spec.max_misses, G=G,
+            tr′ = update_track(tr, hz, t; max_misses=spec.max_misses, G=reach,
                                h=geom.h)
         catch e
             e isa TrackLostError || rethrow()
@@ -1030,7 +1048,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         end
         if lost === nothing
             geom′ = geometry(mesh, t, tr′)
-            check_interior_radii(mesh, kgeom(geom′, T(t)), case.background, G;
+            check_interior_radii(mesh, kgeom(geom′, T(t)), case.background, reach;
                                  t=T(t), center=case.center)
             check_bounds_gate(mesh, geom′, case.bounds, q; t=T(t))
         end

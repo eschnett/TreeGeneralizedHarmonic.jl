@@ -443,6 +443,30 @@ permits**)**, the proof-of-concept runs `N = 16` or `32`. The working array is
 reason `N = 32` is expected to be the default **(predicted; G6 measures
 it against the RHS throughput)**.
 
+**`G = q/2 + 1` is the least ghost width, not the only one** (amended
+2026-11-05, TreeGRRMHD's GH-5). TreeGRRMHD keeps its matter on a `G = 3` set
+and reads this package's metric at every one of its stored points through
+`adm_vars`, with a fourth-order vertex-to-cell interpolation; at `q = 2` a
+`G = 2` state cannot give it the outer layer. So `GHProblem` takes any
+`G ≥ q/2 + 1` and `evolve!` takes `G`. Two widths are kept apart from then
+on: the **stored** width `U.G`, which every kernel steps over (`Val(U.G)`,
+`I + G − 1` into a linear index) and which costs memory and fill time only,
+and the scheme's **reach** `q/2 + 1` (`stencil_reach`), which every rule
+about the scheme is stated in — the interior's margin floor `m ≥ G + 1` and
+its layer `2(G + 1)` cells, the level floor, the validity rows' shell band,
+the track's jump tolerance. Nothing reads `U.G` as the reach. TreeAMR writes
+the same values into the inner ghost layers whatever the stored width is:
+each prolongation window is fixed by the physical offset, and `G ≥ p/2 − 1`
+with `N ≥ 2G + 2` keep its clamp from firing (TreeAMR 0.2.7,
+`schedule.jl`). So a run at `G = 3` and `q = 2` is the run at `G = 2` **bit
+for bit** — record rows, mesh and owned state, through a regrid that moves
+the mesh (`test/ghostwidth_tests.jl`). TreeAMR's `interpolate` is the one
+place a wider set can differ: its window is `floor(t + G + 1)`, which can
+round differently for a query within an ulp or two of a vertex, and is
+clamped on the domain's upper face at `G < n/2`. Elsewhere it reads the same
+points with the same weights. So a horizon row of a wider run is claimed
+only to roundoff; the test's run finds no horizon.
+
 ### Finite-difference stencils
 
 Centered stencils of even order `q ∈ {2, 4, 6, 8}` as a `Val` parameter
@@ -3802,8 +3826,10 @@ adm_vars(work, I, b, inv_h, Val(q)) -> (; α, β, γ, sqrtγ, γu, K)
 - **Where each method is valid.** The first reads one point and is valid at
   every stored vertex. The second reads the right-hand side's own
   first-derivative stencil, `q/2` points each way. It is valid where
-  `q/2 < I[d] ≤ n − q/2`, which is the owned vertices and one ghost layer,
-  since `G = q/2 + 1`. A `@boundscheck` throws the `BoundsError` of the
+  `q/2 < I[d] ≤ n − q/2`, which is the owned vertices and the inner
+  `G − q/2` ghost layers: one at the scheme's own width `G = q/2 + 1`, two
+  for TreeGRRMHD's `G = 3` at `q = 2` (amended 2026-11-05, "Field sets and
+  layout"). A `@boundscheck` throws the `BoundsError` of the
   farthest point the stencil would read, because `work` is read linearly and
   a stencil past the `i` edge would otherwise read the previous row in
   silence.
@@ -5950,7 +5976,7 @@ So the suite has **tiers** (`test/tiers.jl`), chosen by
 | Tier | What it runs | Where |
 |------|--------------|-------|
 | `full` (default) | everything | the workstation before a pull request; Symmetry; GitHub weekly |
-| `quick` | all but the 26 `@full_tier` testsets | GitHub, every pull request and push |
+| `quick` | all but the `@full_tier` testsets | GitHub, every pull request and push |
 | `mpi` | `mpi_tests.jl` alone | GitHub, a job of its own |
 
 The quick tier keeps what only CI can see: x86-64 and its contractions,

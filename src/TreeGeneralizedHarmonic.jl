@@ -87,7 +87,7 @@ export gh_node_rhs, gh_node_source, gh_node_rhs_expanded
 export gh_node_source_lean, metric_divergences
 
 # Stencils
-export derivative_weights, dissipation_weights, dissipation_rank
+export derivative_weights, dissipation_weights, dissipation_rank, stencil_reach
 export apply_stencil, apply_mixed_stencil
 
 # Gauge sources
