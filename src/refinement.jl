@@ -898,7 +898,7 @@ function refinement_buffer(forest::Forest, maxlevel_cap::Integer, travel::Real)
 end
 
 """
-    indicator_flags(U::FieldSet, case::GHCase, t; scratch = nothing, G = U.G,
+    indicator_flags(U::FieldSet, case::GHCase, t; G, scratch = nothing,
                     buffer = 0) -> (flags, τ_max, centroid, nfiring, scale)
 
 `CODE.md`'s masked Löhner verdict for every leaf, with the level floor and
@@ -922,13 +922,18 @@ an evolution, so that the record and the marks read one number, and a fresh
 set per pass during the cycle, where the forest is still changing and a set
 built before the pass would have the wrong number of blocks.
 
+`G` is the scheme's reach `q/2 + 1` ([`stencil_reach`](@ref)), which the
+level floor's layer rule is stated in. It has no default (amended
+2026-11-05): `U` may store a wider halo than its scheme reads, so `U.G` is
+not it, and a field set does not know its `q`.
+
 `buffer` is the travelling margin in cells, and it is applied **here**
 rather than by `regrid!` — see [`refine_flags`](@ref) for why. A caller that
 passes it here passes `buffer = 0` to `regrid!` and to
 `adapt_to_initial_data!`.
 """
 function indicator_flags(U::FieldSet{T,3}, case::GHCase{T}, t;
-                         scratch=nothing, G::Integer=first(U.G),
+                         scratch=nothing, G::Integer,
                          buffer::Integer=0, interior=case.interior,
                          travel=zero(T)) where {T}
     ref = case.refinement
@@ -973,6 +978,6 @@ and a stale ghost corrupts the verdict silently.
 function gh_indicator!(p::GHProblem{T}, u, t; buffer::Integer=0,
                        travel=zero(T)) where {T}
     _prepare_monitor!(p, u, t)
-    return indicator_flags(p.U, p.case, T(t); scratch=p.diag, G=first(p.U.G),
+    return indicator_flags(p.U, p.case, T(t); scratch=p.diag, G=stencil_reach(p),
                            buffer=buffer, interior=p.interior, travel=travel)
 end

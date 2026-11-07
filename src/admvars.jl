@@ -33,8 +33,9 @@ right-hand side's own first-derivative stencil, in its summation order.
 
 **Where it is valid.** The first method reads one point and is valid at every
 stored vertex. The second reads `q/2` points along each axis on each side, so it
-is valid where `q/2 < I[d] ≤ n − q/2`: the owned vertices and, since `G = q/2 + 1`,
-one layer of ghosts. A `@boundscheck` refuses any other `I` with the
+is valid where `q/2 < I[d] ≤ n − q/2`: the owned vertices and the inner `G − q/2`
+ghost layers — one at the scheme's own width `G = q/2 + 1`, more for a state
+stored wider ([`evolve!`](@ref)'s `G`, TreeGRRMHD's GH-5). A `@boundscheck` refuses any other `I` with the
 `BoundsError` of the farthest point the stencil would read; `@inbounds` at the call
 site elides it. Inside a black hole's core the stored data are stale by design
 (`CODE.md`, "The interior") and the result means nothing there.

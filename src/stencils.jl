@@ -304,7 +304,25 @@ dissipation's stencil is the widest one an evaluation takes, reaching `r`
 points where the derivatives reach `q/2` **(proposed in step 2** — the
 relation is `CODE.md`'s, only the spelling is new**)**.
 """
-@inline dissipation_rank(::Val{q}) where {q} = Val(q ÷ 2 + 1)
+@inline dissipation_rank(::Val{q}) where {q} = Val(stencil_reach(q))
+
+"""
+    stencil_reach(q) -> Int
+
+How far the scheme of order `q` reads from a point, in points along an axis:
+`q/2 + 1`, the dissipation's rank, which reaches one point further than the
+derivatives' `q/2` ([`dissipation_rank`](@ref)). It is the ghost width the
+scheme *needs*, and the number every rule that is about the scheme's reach —
+the interior's margin floor `m ≥ G + 1`, its layer, the shell band, the level
+floor, the track's jump tolerance — is stated in.
+
+The ghost width a field set *stores* may be larger (amended 2026-11-05,
+TreeGRRMHD's GH-5): a coupled code that reads the state beyond the scheme's
+reach builds it wider, and every kernel steps over the halo by the stored
+`G` and reads only as far as its weights. So code that wants the reach asks
+this function and never `U.G`.
+"""
+stencil_reach(q::Integer) = Int(q) ÷ 2 + 1
 
 """
     apply_stencil(w, u::AbstractVector, i) -> scalar

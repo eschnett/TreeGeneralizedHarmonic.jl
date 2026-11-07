@@ -194,7 +194,7 @@ end
 # derivative's `√2 · q/2` along a diagonal — which is the larger of the two
 # from `q = 6` on (`4.24` against `4`).
 _stencil_reach(q::Integer, ::Type{T}) where {T} =
-    max(T(q ÷ 2 + 1), sqrt(T(2)) * T(q ÷ 2))
+    max(T(stencil_reach(q)), sqrt(T(2)) * T(q ÷ 2))
 
 """
     check_bounds_gate(forest, interior, bounds, q; t = 0)
@@ -911,7 +911,9 @@ function validity_and_nonfinite(p, u, t)
     T = eltype(p.U.work)
     int === nothing && return (NO_VALIDITY, evolved_nonfinite(p, u, t))
     h = minimum_spacing(T, p.U.forest)
-    G = first(p.U.G)
+    # The band is the scheme's reach outside the layer, not the stored halo,
+    # which may be wider (amended 2026-11-05).
+    G = stencil_reach(p)
     # The bands through the interior's own masks (amended in step 8d), so
     # that the tracked geometry's layer and shell are its surface's bands and
     # the sphere's are step 8b's `ShellMask`s, value for value; and the whole
