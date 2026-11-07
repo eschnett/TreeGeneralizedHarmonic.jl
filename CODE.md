@@ -90,6 +90,7 @@ research project; the inherited documents live in `notes/`.
 - [Refinement and regridding](#refinement-and-regridding)
 - [Time integration](#time-integration)
 - [Analysis quantities](#analysis-quantities)
+- [Public access to the vertex metric (added 2026-11-05)](#public-access-to-the-vertex-metric-added-2026-11-05)
 - [Precision, threads, devices](#precision-threads-devices)
 - [Running distributed](#running-distributed)
 - [I/O and viewers](#io-and-viewers)
@@ -3777,6 +3778,75 @@ kernel costs about `30` right-hand sides, inferred from whole runs, and a
 find under a second: [The analysis cadence on an
 H200](#the-analysis-cadence-on-an-h200-measured-2026-10-22). A production run
 takes its analysis row every `M`.**)**
+
+## Public access to the vertex metric (added 2026-11-05)
+
+A code that couples to this package's metric — TreeGRRMHD, whose GH-1 asks
+for it — reads `α`, `β^i`, `γ_ij` and `K_ij` at the vertices of the GH field
+set. It does so through one exported function, `src/admvars.jl`'s `adm_vars`,
+rather than through the packing helpers, the variable layout of `U.work` and
+the stencils, none of which become public:
+
+```julia
+adm_vars(work, I, b)              -> (; α, β, γ, sqrtγ, γu)
+adm_vars(work, I, b, inv_h, Val(q)) -> (; α, β, γ, sqrtγ, γu, K)
+```
+
+- **Arguments.** `work` is the scattered, ghost-filled working array
+  `(n, n, n, nvars, nblocks)`. `I` is the **stored** index, ghosts included,
+  the index `coordinates` takes. `b` is the block, `inv_h` is the block's
+  `1/h`, and `q` is the right-hand side's order. `inv_h` must have the
+  array's element type `T`. A spacing of another precision is refused
+  (amended in review, 2026-11-05), because it would promote `∂h` and make `K`
+  mixed-precision.
+- **Where each method is valid.** The first reads one point and is valid at
+  every stored vertex. The second reads the right-hand side's own
+  first-derivative stencil, `q/2` points each way. It is valid where
+  `q/2 < I[d] ≤ n − q/2`, which is the owned vertices and one ghost layer,
+  since `G = q/2 + 1`. A `@boundscheck` throws the `BoundsError` of the
+  farthest point the stencil would read, because `work` is read linearly and
+  a stencil past the `i` edge would otherwise read the previous row in
+  silence.
+- **Definitions.** `α`, `β`, `√γ` and `γ^{ij}` are `metric_quantities`', the
+  offset-accurate path the right-hand side takes. `γ` is `η + h`'s spatial
+  block. `K` (the NR sign, SpacetimeMetrics' `ExtrinsicCurvature`) comes from
+  `Π` and from `∂_i h` formed exactly as `gh_rhs_head` forms it. The `K`
+  algebra is `pointwise.jl`'s `_extrinsic_curvature`, which
+  `adm_vars_from_state` shares. It is GHSO2's expression term for term,
+  written with `@ntuple` instead of generators, and is bit for bit the old
+  expression on the same inputs (measured on 20 000 random states at
+  `Float64` and `Float32`). The two functions still differ in the last
+  places, because `metric_quantities` is inlined into two call sites ("Two
+  spellings…" in `CLAUDE.md`).
+- **The interior is the caller's.** Inside a hole's core the stored data are
+  stale and the result means nothing.
+
+A downstream code decodes once per vertex and interpolates the ADM variables
+(16 values, or 17 with `√γ`) to cells, faces and edges itself. With no mesh
+filler here, it writes its own `map_blocks!` into an ADM field set of its
+own, which it can ghost-fill at any `G` it needs.
+
+**Measured (2026-11-05).**
+
+- **On the CPU.** On a boosted spinning Kerr-Schild hole (`a = 1/2`,
+  `v = (1/5, −1/10, 0)`), the metric agrees with `adm_decompose` to under
+  `64 eps` at every stored vertex.
+- **Convergence.** `K` converges to `ExtrinsicCurvature` at order 2.00,
+  4.00 and 5.99 at `q = 2`, 4 and 6 (`h = 1/8 … 1/32`, `|K| ≈ 0.13`). The
+  error at `h = 1/32` is `8.6e−6`, `6.4e−9` and `2.3e−12`.
+- **Allocation.** Neither method allocates.
+- **Metal.** On Metal at `Float32`, both methods in one kernel agree with
+  the CPU to `2.5 eps`.
+- **H200 values** (Symmetry jobs 590175 and 590181). At both precisions and
+  at `q = 2, 4, 6`, the metric agrees with the CPU to `7 eps`. `K` agrees to
+  `0.03–0.36` of its stencil's roundoff, `eps · max|u| · Σ|w|/h`. Measured
+  relative to `|K|`, that is up to `900 eps` at `q = 6`, which is
+  cancellation, not error.
+- **H200 SASS.** Each kernel is one function. Its `CALL`s are CUDA's
+  division, reciprocal and `sqrt` slow paths, `sqrt`'s `DomainError`, the
+  bounds checks and the exception reporting. There is no call into Julia
+  code. The `K` method stores 36 values to local memory with `@inbounds`
+  (43 without), and the metric method 9.
 
 ## Precision, threads, devices
 

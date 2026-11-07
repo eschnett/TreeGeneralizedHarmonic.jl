@@ -570,6 +570,18 @@ not converge. The finder's `J` offset is the resting hole's
 (`SINGULARITY_HANDLING.md`, "Spin across the motion"). `1/40` at `a = 1/2`
 and `1/96` at `a = 9/10`, `v = 1/2` need several GPUs.
 
+From 2026-11-05 a downstream code can **read the metric at a vertex in ADM
+variables**: `src/admvars.jl`'s `adm_vars(work, I, b)` gives `α`, `β^i`,
+`γ_ij`, `sqrtγ` and `γu` at every stored vertex, and `adm_vars(work, I, b,
+inv_h, Val(q))` adds `K_ij`, valid where the RHS's first-derivative stencil
+reaches (`q/2 < I[d] ≤ n − q/2`, a `@boundscheck` refuses the rest). It is
+TreeGRRMHD's GH-1, in place of exporting the packing and the layout of
+`U.work`. `I` is the **stored** index. Both are device-clean and allocate
+nothing. The `K` algebra moved into `pointwise.jl`'s `_extrinsic_curvature`,
+which `adm_vars_from_state` now calls too (bit for bit the old expression on
+the same inputs). `test/admvars_tests.jl` is its file (`CODE.md`, "Public
+access to the vertex metric").
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -660,7 +672,11 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **5664 assertions in 14m12** at four threads after the bitant
+The suite is **5687 assertions in 42m17** at four threads after `adm_vars`
+(2026-11-05, a machine loaded 8–9 by other work, and a first try killed
+halfway through. Read the wall clock as the machine's). Its 23 new claims are
+`admvars_tests.jl`'s, `2.4 s` inside the suite. It was **5664 assertions in
+14m12** at four threads after the bitant
 (2026-10-24, TreeAMR 0.2.6): its 47 new claims are `boosted_tests.jl`'s four
 bitant testsets (the domain and its refusals, the exact least radius against
 the sampled surface, the source of a hole moving across its spin, and the
