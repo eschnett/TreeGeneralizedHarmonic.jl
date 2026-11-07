@@ -21,6 +21,8 @@ import SpacetimeMetrics as SM
 
 const TGHh = TreeGeneralizedHarmonic
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "Several holes in one case (step B3)" begin
     T = Float64
     q = 2
@@ -214,7 +216,7 @@ const TGHh = TreeGeneralizedHarmonic
     # it bit for bit — the state after two chunks and every record row — on the
     # suite's static fixture with its sampled source and on step B2's moving
     # quadrant hole with the algebraic one.
-    @testset "one hole is the case it was, bit for bit" begin
+    @full_tier @testset "one hole is the case it was, bit for bit" begin
         function as_holes(c)
             spec = HoleSpec(T; mass=1, spin=(0, 0, 0), center=c.center.c0,
                             velocity=c.center.v, interior=c.interior)
@@ -256,7 +258,7 @@ const TGHh = TreeGeneralizedHarmonic
     # pair, and a chain of restarts — one chunk a job — that is the
     # uninterrupted run bit for bit, the two tracks, their horizon offsets and
     # the finder's seeds included.
-    @testset "a pair evolves, finds both holes and restarts bit for bit" begin
+    @full_tier @testset "a pair evolves, finds both holes and restarts bit for bit" begin
         pre = joinpath(mktempdir(), "pair")
         common = (q=q, ops=ops, t_end=T(2 // 10), checkpoint_sync_to_disk=false)
         a = evolve!(T, pair; forest=deepcopy(pair_forest), common...)

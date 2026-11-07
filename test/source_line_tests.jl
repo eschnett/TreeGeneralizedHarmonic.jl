@@ -21,6 +21,8 @@ using TreeGeneralizedHarmonic
 using StaticArrays: SVector
 import AbstractSphericalHarmonics as ASH
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "The controlled source line (step B3)" begin
     T = Float64
     X(x) = SVector{3,T}(x, 0, 0)
@@ -291,7 +293,7 @@ import AbstractSphericalHarmonics as ASH
     # center, and a line without acceleration is `KerrSchildSource`'s arithmetic —
     # so any difference is the driver's: a piece handed the wrong case, a source
     # rebuilt at the wrong time, the lines advanced out of order.
-    @testset "one hole fed on its seed's line, or on a line never corrected, is the analytic run bit for bit" begin
+    @full_tier @testset "one hole fed on its seed's line, or on a line never corrected, is the analytic run bit for bit" begin
         r_own = run(fixture(:own))
         r_seed = run(fixture(:seed))
         r_inf = run(fixture(:controlled; τ=T(Inf)))
@@ -322,7 +324,7 @@ import AbstractSphericalHarmonics as ASH
     # — measured 2026-10-26 on this fixture at `τ = 1`: the source at `0.255`,
     # the track at `0.252` after `0.3 M` and `0.18` cells off the analytic line,
     # `C_a` `10⁴×` at `t = 0`.
-    @testset "a controlled line starts on the data's gauge, and restarts bit for bit" begin
+    @full_tier @testset "a controlled line starts on the data's gauge, and restarts bit for bit" begin
         c = fixture(:controlled; τ=T(1), seed_dv=1 // 20)
         a = run(c)
         @test all(r -> r.horizon_success === true && r.finite, a.records)

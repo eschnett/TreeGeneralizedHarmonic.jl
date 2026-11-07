@@ -5901,7 +5901,7 @@ So the suite has **tiers** (`test/tiers.jl`), chosen by
 | Tier | What it runs | Where |
 |------|--------------|-------|
 | `full` (default) | everything | the workstation before a pull request; Symmetry; GitHub weekly |
-| `quick` | all but the 26 `@full_tier` testsets | GitHub, every pull request and push |
+| `quick` | all but the 33 `@full_tier` testsets | GitHub, every pull request and push |
 | `mpi` | `mpi_tests.jl` alone | GitHub, a job of its own |
 
 The quick tier keeps what only CI can see: x86-64 and its contractions,
@@ -5911,7 +5911,14 @@ invariance, and one short hole run through `evolve!` (the record's). A
 left-out testset is a testset there holding one skipped test, so the summary
 counts it as "Broken" and `runtests.jl` lists the names. Measured on the
 development machine at four threads: **5035 assertions in 10–11 minutes**,
-against the full suite's 16–24. On GitHub (PR #23, 2026-11-07) the serial
+against the full suite's 16–24. (Amended on the merge with steps B1–B3,
+2026-11-06: their seven hole runs are `@full_tier` too — the tracked target's
+two runs and its chain, the single hole as a case of one hole, the pair's run
+and chain, and the source line's two — which makes 33; the composite
+right-hand side against the nearer hole's kernel, the step-B1 sources on
+lanes and on the moving quadrant, and the host-side track and line stay.
+**5274 assertions and 34 skipped in 12m49**, the 34th the MPI comparison left
+to its own job, on a machine loaded 8.) On GitHub (PR #23, 2026-11-07) the serial
 cell's suite went from **72 to 32 minutes** and the threaded cell's from 51
 to 24, and the MPI job took 16 on its own runner, so a pull request waits
 **34 minutes instead of 75**. What the quick tier still pays most for is

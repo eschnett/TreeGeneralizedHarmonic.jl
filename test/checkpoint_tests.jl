@@ -273,7 +273,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
     # its blend, the finds at the pieces' boundaries between two rows, and the
     # sphere the row ran on — built at the chunk's end from the track before the
     # row's find, which is what the restart rebuilds it from.
-    @testset "a chain on the tracked analytic target is the run" begin
+    @full_tier @testset "a chain on the tracked analytic target is the run" begin
         case = kerr_schild_case(T; halfwidth=T(5 // 2), chunk=T(1 // 20), x0=-1 // 4,
                                 v=1 // 5, gauge_source=:algebraic, octant=:quadrant,
                                 horizon=Horizon(T; every=1, N=12, spin=false),

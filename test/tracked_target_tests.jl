@@ -20,6 +20,8 @@ using TreeAMR
 using TreeGeneralizedHarmonic
 using StaticArrays: SVector
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "The tracked analytic target (step B2)" begin
     T = Float64
     q = 2
@@ -66,7 +68,7 @@ using StaticArrays: SVector
     # 2026-10-26 at `t = 0.3 M`, the masked error `5.534e−3` against `5.547e−3`,
     # the residual `3.04` against `2.98`, the track `3·10⁻⁴` cells off the
     # analytic center.
-    @testset "the tracked target holds the moving hole as the analytic layer does" begin
+    @full_tier @testset "the tracked target holds the moving hole as the analytic layer does" begin
         ra = evolve!(T, ana; forest=deepcopy(forest), q=q, ops=ops, t_end=T(3 // 10))
         rt = evolve!(T, trk; forest=deepcopy(forest), q=q, ops=ops, t_end=T(3 // 10))
         @test all(r -> r.horizon_success === true, rt.records)
@@ -90,7 +92,7 @@ using StaticArrays: SVector
     # Guards the recovery the track must make on its own: a seed whose velocity
     # is off predicts the first finds off by `δv Δt`, the chord of the second
     # and third finds is the hole's, and the run goes on with no refusal.
-    @testset "a track seeded 0.05 too fast recovers within a few finds" begin
+    @full_tier @testset "a track seeded 0.05 too fast recovers within a few finds" begin
         off = kerr_schild_case(T; kw...,
                                interior=TrackedSpec(T; radii..., max_interval=T(1 // 20),
                                                     seed_velocity_offset=(1 // 20, 0, 0)))
