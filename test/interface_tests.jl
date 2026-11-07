@@ -200,11 +200,13 @@ end
               "blocks=$(nleaves(forest)) points=$points " *
               "ns_per_point=$(rhs / points * 1e9) " *
               "ghost_fraction=$(ghosts / rhs)"
-        # The fill is part of the evaluation. At `p = 6` on the refined mesh
-        # it is nearly all of it, and two timings of a shared runner can
-        # cross: 0.1667 s against 0.1664 s on macOS-latest (2026-10-19). Hence
-        # the tenth.
-        @test ghosts < 11 * rhs / 10
+        # The fraction is recorded, not asserted (amended 2026-11-07). The
+        # fill is part of the evaluation, so it is below one wherever the
+        # two are timed alike, but two timings of a shared runner are not:
+        # they crossed at `p = 6` on macOS-latest (0.1667 s against 0.1664 s,
+        # 2026-10-19), and at `p = 4` on an ubuntu-latest runner whose
+        # right-hand side ran a third faster than another's while its fill
+        # took the same time (1.19, 2026-11-07). Here it is 0.6–0.8.
         @test all(isfinite, du)
     end
 end

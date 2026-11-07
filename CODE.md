@@ -748,7 +748,11 @@ against **1399 ns** on the unrefined mesh — and the ghost fill alone is
 **79 %** of the evaluation at `p = 6`, **56 %** at `p = 4` and **22 %**
 unrefined. The 216 coarse points per fine ghost point are real. This is
 why `test/interface_tests.jl` is the most expensive file in the suite and
-why its runs are as short as a clean rate allows.
+why its runs are as short as a clean rate allows. The suite prints the
+fraction on every run and asserts nothing about it (amended 2026-11-07): it
+is the ratio of two timings on a shared machine, and on GitHub's runners it
+crossed one at `p = 6` (macOS, 2026-10-19) and reached 1.19 at `p = 4`
+(Linux, 2026-11-07).
 
 ### One right-hand-side evaluation
 
