@@ -22,6 +22,8 @@ import SpacetimeMetrics as SMg
 
 const TGHg = TreeGeneralizedHarmonic
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "A ghost width wider than the scheme's reach" begin
     T = Float64
     q = 2
@@ -52,7 +54,7 @@ const TGHg = TreeGeneralizedHarmonic
     # coarsens a block, so prolongation, restriction and the transfer), the
     # indicator and its level floor, the interior's radii checked on the new
     # mesh, and the record's validity rows with their shell band.
-    @testset "a run with a wider halo is the run at the scheme's width" begin
+    @full_tier @testset "a run with a wider halo is the run at the scheme's width" begin
         function moved_mesh_run(G)
             case = adaptive_hole_fixture(T)
             forest = gh_forest(T, case; N=8, roots=4)

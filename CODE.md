@@ -5976,7 +5976,7 @@ So the suite has **tiers** (`test/tiers.jl`), chosen by
 | Tier | What it runs | Where |
 |------|--------------|-------|
 | `full` (default) | everything | the workstation before a pull request; Symmetry; GitHub weekly |
-| `quick` | all but the 26 `@full_tier` testsets | GitHub, every pull request and push |
+| `quick` | all but the `@full_tier` testsets | GitHub, every pull request and push |
 | `mpi` | `mpi_tests.jl` alone | GitHub, a job of its own |
 
 The quick tier keeps what only CI can see: x86-64 and its contractions,

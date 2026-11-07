@@ -657,8 +657,8 @@ laptop, and 61 of the last 80 commits on `main` touched only Markdown.
 So **run the full suite locally before opening a pull request**: that is
 the macOS run the pull request does not get. **From 2026-11-06 GitHub runs
 the quick tier** (Erik: a free runner is not where black holes are
-evolved). `TREEGH_TEST_TIER=quick` leaves out the 26 testsets marked
-`@full_tier` (`test/tiers.jl`), the hole evolutions that were about 42 of
+evolved). `TREEGH_TEST_TIER=quick` leaves out the testsets marked `@full_tier`
+(`test/tiers.jl`), the hole evolutions — 26 of them, about 42 of
 the serial Linux cell's 72 minutes (on GitHub the serial cell's suite went
 from 72 to 32 minutes and a pull request from 75 to 34; here at four threads
 5035 assertions in 10–11 minutes, against the full suite's 16–24); `full` is the default, so `Pkg.test()` is
