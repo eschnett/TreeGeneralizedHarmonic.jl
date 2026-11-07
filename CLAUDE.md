@@ -717,6 +717,18 @@ the line's: in every row they fall faster than free fall for `2 M`, stop near
 `test/binary_runs.jl feed=controlled` its runs, `test/fed_study.jl` and
 `test/binary_study.jl` their tables.
 
+From 2026-11-05 a downstream code can **read the metric at a vertex in ADM
+variables**: `src/admvars.jl`'s `adm_vars(work, I, b)` gives `α`, `β^i`,
+`γ_ij`, `sqrtγ` and `γu` at every stored vertex, and `adm_vars(work, I, b,
+inv_h, Val(q))` adds `K_ij`, valid where the RHS's first-derivative stencil
+reaches (`q/2 < I[d] ≤ n − q/2`, a `@boundscheck` refuses the rest). It is
+TreeGRRMHD's GH-1, in place of exporting the packing and the layout of
+`U.work`. `I` is the **stored** index. Both are device-clean and allocate
+nothing. The `K` algebra moved into `pointwise.jl`'s `_extrinsic_curvature`,
+which `adm_vars_from_state` now calls too (bit for bit the old expression on
+the same inputs). `test/admvars_tests.jl` is its file (`CODE.md`, "Public
+access to the vertex metric").
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on
@@ -809,7 +821,14 @@ no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
 
-The suite is **6016 assertions in 17m26** at four threads and **6008 in 20m59**
+The suite is **6037 assertions in 21m26** at four threads on the merge of
+`adm_vars` with steps B1–B3 (2026-11-07, a machine loaded 7–12): the review's
+6016, `admvars_tests.jl`'s 24 and three fewer in `interface_tests.jl`, whose
+ghost fractions are recorded now rather than asserted. On `main` before that merge it was **5687 assertions in 42m17** at four
+threads after `adm_vars` (2026-11-05, a machine loaded 8–9 by other work, and a
+first try killed halfway through. Read the wall clock as the machine's). Its 23
+new claims are `admvars_tests.jl`'s, `2.4 s` inside the suite. On steps B1–B3's
+branch it was **6016 assertions in 17m26** at four threads and **6008 in 20m59**
 at one after the review's second round (2026-10-30, the PID law): its 24 new claims
 are `source_line_tests.jl`'s, `16.3 s` and `20.7 s` inside the suite — the PID
 loop against its closed form and the junk, `∂_t H` under the PID law, a PID line

@@ -38,6 +38,7 @@ else
         include("gauge_tests.jl")
         include("initialdata_tests.jl")
         include("evolution_tests.jl")
+        include("admvars_tests.jl")     # 2026-11-05: the vertex metric for TreeGRRMHD
         # `evolution_cases.jl` is a helper, not a test file: the two studies
         # below are runs, and the runs are written once (TreeAMR includes
         # `test/wave.jl` the same way).

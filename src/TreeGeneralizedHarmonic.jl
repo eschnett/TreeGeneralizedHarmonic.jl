@@ -82,7 +82,7 @@ export hostcopy
 # Pointwise algebra
 export pack_g, pack_sym
 export metric_quantities, metric_derivatives, metric_derivatives_along
-export adm_from_metric, adm_vars_from_state, gauge_constraint_at_node
+export adm_from_metric, adm_vars_from_state, adm_vars, gauge_constraint_at_node
 export gh_node_rhs, gh_node_source, gh_node_rhs_expanded
 export gh_node_source_lean, metric_divergences
 
@@ -229,6 +229,7 @@ include("boundaries.jl")
 # (added 2026-10-05).
 include("lanes.jl")
 include("evolution.jl")
+include("admvars.jl")      # 2026-11-05: the vertex metric in ADM variables
 # After `evolution.jl` and `bounds.jl`: the integrator couples `gh_rhs!` to
 # the two limiters (added 2026-09-26, replacing OrdinaryDiffEq's RK4).
 include("stepping.jl")
