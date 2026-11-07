@@ -24,6 +24,8 @@ import SpacetimeMetrics as SM
 
 const TGHm = TreeGeneralizedHarmonic
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "The moving hole (step 8)" begin
     T = Float64
     q = 2
@@ -123,7 +125,7 @@ const TGHm = TreeGeneralizedHarmonic
     # track included. A fit at rest must fill the cache it filled before, and
     # the kernel with the rate must be the kernel without it where the rate
     # is zero.
-    @testset "the cache's slope is the moving fit's rate at a point" begin
+    @full_tier @testset "the cache's slope is the moving fit's rate at a point" begin
         cf = fitted_fixture(T; variant=:fitted)
         forest = hole_fixture_forest(T, cf; N=8)
         tr = seed_track(cf, 0)
@@ -240,7 +242,7 @@ const TGHm = TreeGeneralizedHarmonic
     # which x86-64 under coverage fuses differently — amended 2026-09-27), the
     # fit inside it, with the floor holding the layer at the level its geometry was built
     # at.
-    @testset "a :fitted case's cycle flags on its own data, on G5's chart" begin
+    @full_tier @testset "a :fitted case's cycle flags on its own data, on G5's chart" begin
         spec = FittedSpec(T; variant=:fitted, margin=4, lmax_shape=12)
         # The box of step 8f's refusal test, half-width 5/4 around a horizon
         # whose equator is at 1: too small for a ceiling (the floor's shell

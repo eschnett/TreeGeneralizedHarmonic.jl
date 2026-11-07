@@ -643,7 +643,19 @@ its coverage; Markdown-only changes and tags run nothing. The pull-request
 cells had taken 65–90 min each, against 17–21 min for the suite on the
 laptop, and 61 of the last 80 commits on `main` touched only Markdown.
 So **run the full suite locally before opening a pull request**: that is
-the macOS run the pull request does not get. There is
+the macOS run the pull request does not get. **From 2026-11-06 GitHub runs
+the quick tier** (Erik: a free runner is not where black holes are
+evolved). `TREEGH_TEST_TIER=quick` leaves out the 26 testsets marked
+`@full_tier` (`test/tiers.jl`), the hole evolutions that were about 42 of
+the serial Linux cell's 72 minutes (on GitHub the serial cell's suite went
+from 72 to 32 minutes and a pull request from 75 to 34; here at four threads
+5035 assertions in 10–11 minutes, against the full suite's 16–24); `full` is the default, so `Pkg.test()` is
+unchanged, and the weekly schedule and a dispatch with `tier = full` run it
+on GitHub too. The MPI comparison is a CI job of its own
+(`TREEGH_TEST_TIER=mpi`), no longer 17.5 minutes in front of the threaded
+cell's suite. The full suite's result goes on the commit as a status,
+`full-suite/<host>`, through `ci/full-suite.sh --post` (the workstation)
+and `ci/full-suite-symmetry.sh` (an `amdq` job); see "Commands". There is
 no `Manifest.toml` (deliberately, and permanently: it is what makes the
 clean-checkout check below mean something), no `bin/`, and there is now a
 remote — `git@github.com:eschnett/TreeGeneralizedHarmonic.jl.git`.
@@ -807,6 +819,36 @@ It runs from a git worktree as happily as from the checkout, which is how
 the per-step agents work; the `[sources]` pins mean every worktree
 resolves the same branches.
 
+The quick tier, which is what GitHub CI runs (added 2026-11-06,
+`test/tiers.jl`): every testset but the hole evolutions, each of which is
+then one skipped test, counted as "Broken" and listed at the end:
+
+```bash
+TREEGH_TEST_TIER=quick julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])'
+```
+
+The full suite as a commit status (added 2026-11-06): `ci/full-suite.sh`
+runs the clean-checkout check above on a commit at four threads and, with
+`--post`, sets the commit's status `full-suite/<host>` to pending and then
+to the result — the count, the time, the threads and the CPU. Posting is
+public: ask Erik each time, as for a push. The commit must be on GitHub.
+`ci/full-suite-symmetry.sh submit` does the same on an `amdq` node (one fixed
+tree under `/home/eschnetter/claude/full-suite/`, the log and the result under
+`/mnt/beegfs/eschnetter/claude/full-suite/<sha>/`), and `collect` posts its
+result afterwards, since the cluster has no `gh`:
+
+```bash
+ci/full-suite.sh --post
+```
+
+```bash
+ci/full-suite-symmetry.sh submit --post
+```
+
+```bash
+ci/full-suite-symmetry.sh collect --post
+```
+
 The MPI workload runs on its own too (added 2026-10-19), from an
 environment that has MPI and the package — `test/mpi_tests.jl` starts
 exactly this from the suite's sandbox, beside the suite where the machine
@@ -818,7 +860,8 @@ down in five of its thirteen attempts from 2026-10-23 on. It is
 skipped on a machine with less than 24 GB — three ranks of about 3 GB
 beside the suite, which a macOS runner (7 GB) and the serial Linux runner
 could not hold (2026-10-19) — unless `TREEGH_TEST_MPI=1`, which CI sets for
-its threaded Linux cell only. It
+its `mpi` job (from 2026-11-06; its threaded Linux cell before). That job
+runs `TREEGH_TEST_TIER=mpi`, the comparison and nothing else. It
 writes `OUTDIR/n0.txt` … `n3.txt`, the serial run and the three rank counts:
 
 ```bash
@@ -2003,6 +2046,15 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   before trusting a "failed" status. Correct the status by hand
   (`status = "finished"` and a `message` saying what happened), and keep the
   peak memory and wall time elsewhere, since the log is gone.
+
+- **A test that evolves a hole is `@full_tier`** (2026-11-06). GitHub CI
+  runs the quick tier, so a new testset that runs `evolve!` or `gh_solve` on
+  a hole for more than a few seconds gets `@full_tier @testset "…"`, with a
+  literal name (a looped testset goes inside a literal-named one; see
+  `tracking_tests.jl`). Keep the quick tier honest the other way too: what
+  only CI can see — x86-64, bounds checks, the kernel on every branch, the
+  thread invariance — stays out of it. A file that marks a testset includes
+  `tiers.jl` if `runtests.jl` did not, as `mpi_tests.jl` does `mpi_jobs.jl`.
 
 ## Conventions
 

@@ -33,6 +33,8 @@ import SpacetimeMetrics as SM
 
 const TGHb = TreeGeneralizedHarmonic
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "A boosted Kerr-Schild hole on the quadrant" begin
     T = Float64
     v, x0 = 1 // 5, -4
@@ -211,7 +213,7 @@ const TGHb = TreeGeneralizedHarmonic
         end
     end
 
-    @testset "a moving :damped core relaxes toward the analytic solution at its current core position, and a resting one does not move" begin
+    @full_tier @testset "a moving :damped core relaxes toward the analytic solution at its current core position, and a resting one does not move" begin
         # Guards the core of a moving analytic sphere (amended 2026-10-20). A
         # core with `du = 0` keeps the solution about `c(0)` and releases it
         # into the layer on the trailing side — the boosted hole's residual grew
@@ -378,7 +380,7 @@ const TGHb = TreeGeneralizedHarmonic
         @test isfinite(now) && stale > 1e-3 && now ≤ 4 // 5 * stale
     end
 
-    @testset "the moving analytic solution is a steady state of the moving :damped layer" begin
+    @full_tier @testset "the moving analytic solution is a steady state of the moving :damped layer" begin
         # Guards the target's rate of a moving analytic sphere (amended
         # 2026-10-20). Without `(1 − w) ∂_t u_exact` in the layer it trails
         # the moving solution by `|∂_t u_exact|/ρ_max`, a residual of `6.5`
@@ -509,7 +511,7 @@ const TGHb = TreeGeneralizedHarmonic
         @test isfinite(res[1]) && res[1] ≤ 2 * res[2]
     end
 
-    @testset "a moving :damped core stays a metric where the center passes close by" begin
+    @full_tier @testset "a moving :damped core stays a metric where the center passes close by" begin
         # Guards the target's rate in the core (amended 2026-10-22): added in
         # `h` to the relaxation's ADM rate mapped to `h`, it is the target's
         # ADM rate pushed through the chain rule at the target rather than at
@@ -745,7 +747,7 @@ const TGHb = TreeGeneralizedHarmonic
             bg, wrong, T; center=(0, 0, T(-1)), scale=1)
     end
 
-    @testset "the spinning hole moving along z on the rotating quadrant is the hole in the box" begin
+    @full_tier @testset "the spinning hole moving along z on the rotating quadrant is the hole in the box" begin
         # Guards the seam under a hole that moves: the quarter turn of a state
         # whose `h_tz`, `h_xz` and `h_yz` are all nonzero, the seam's two owned
         # planes evolved side by side, the moving core and layer about the

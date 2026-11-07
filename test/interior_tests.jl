@@ -579,6 +579,8 @@ end
 # The interior as the kernel sees it: one right-hand-side evaluation, and
 # the two claims that can only be made on a mesh — that `(INTERIOR)` is
 # the term `CODE.md` writes, and that `F` is not evaluated in the core.
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "The (INTERIOR) term on a mesh" begin
     T = Float64
     q = 2
@@ -761,7 +763,7 @@ end
 
     # `:pasted` is the one variant that writes the state, and it writes
     # exactly the ball `r < r_1` and nothing else.
-    @testset ":pasted writes the ball r < r_1 and nothing outside it" begin
+    @full_tier @testset ":pasted writes the ball r < r_1 and nothing outside it" begin
         pasted = hole_fixture(T; q=q, variant=:pasted)
         p_p = GHProblem(fs, sched, pasted; q=q,
                         interior=with_ρ_max(pasted.interior, ρ_max))
@@ -821,7 +823,7 @@ end
     # comparison of a wrong target against it compares a recompilation — and
     # a wrong target must move the right-hand side only where `(INTERIOR)`
     # reads `u_exact`: the layer, and nowhere an evolved stencil sits.
-    @testset "the layer target reaches the layer and nothing else" begin
+    @full_tier @testset "the layer target reaches the layer and nothing else" begin
         own = Interior(T; center=(0, 0, 0), r_0=int.r_0, r_1=int.r_1,
                        ρ_max=ρ_max, target=case.background)
         du_own = similar(u)
@@ -855,7 +857,7 @@ end
     # is that number at every point, so the kernel's arithmetic must be the
     # number's bit for bit; one that rises from the horizon must move `du`
     # only inside it.
-    @testset "the dissipation profile is the number where it equals it" begin
+    @full_tier @testset "the dissipation profile is the number where it equals it" begin
         flat = HorizonDissipation(T; ε_out=case.ε_KO, ε_in=case.ε_KO,
                                   r_1=int.r_1,
                                   r_h=horizon_min_radius(case.background),

@@ -99,6 +99,7 @@ research project; the inherited documents live in `notes/`.
 - [Milestones](#milestones)
 - [Measured results](#measured-results)
   - [What the suite costs, and where (measured 2026-09-19 on Symmetry)](#what-the-suite-costs-and-where-measured-2026-09-19-on-symmetry)
+  - [The suite's tiers, and where each runs (2026-11-06)](#the-suites-tiers-and-where-each-runs-2026-11-06)
   - [Steps 8b–8′: the generic interior and the moving hole](#steps-8b8-the-generic-interior-and-the-moving-hole) (moved to [`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md))
   - [Robust stability on the octant (measured 2026-10-02)](#robust-stability-on-the-octant-measured-2026-10-02)
   - [Single black holes: recommended settings (added 2026-10-08)](#single-black-holes-recommended-settings-added-2026-10-08)
@@ -5855,6 +5856,57 @@ One run of three took `61.6` min against a `43.6` min serial sibling —
 that is a bad runner, not a property of the matrix, and three samples with
 a 2.7× spread are not enough to act on.
 
+
+### The suite's tiers, and where each runs (2026-11-06)
+
+Evolving a black hole is what this package is for, and it is work for a
+workstation or Symmetry, not for a free GitHub runner (Erik, 2026-11-06).
+On GitHub's four-core Linux runners, with `julia-runtest`'s
+`--check-bounds=yes`, the suite had grown to **72 minutes serial** and
+**51 at four threads**, the threaded cell another 17.5 in front of that for
+the MPI workload. Two factors separate that from the development machine's
+14–24 minutes. A runner is about **1.7×** slower, and bounds checks cost
+another **1.65×**: `driver_tests.jl` and `checkpoint_tests.jl` took 8m38
+with them and 5m12 without, at one thread here. Of the 72 minutes, about
+**42 were 26 testsets that evolve a hole**: the driver's convergence and
+variants, the `:fitted` variant, the tracked runs, the checkpoint chains,
+the moving `:damped` core and layer, the moving fit's rate, the regrid
+that moves the mesh, the octant hole, the `Float32` hole and the three
+mesh evaluations of `(INTERIOR)` with their own kernel specialisations.
+
+So the suite has **tiers** (`test/tiers.jl`), chosen by
+`TREEGH_TEST_TIER`:
+
+| Tier | What it runs | Where |
+|------|--------------|-------|
+| `full` (default) | everything | the workstation before a pull request; Symmetry; GitHub weekly |
+| `quick` | all but the 26 `@full_tier` testsets | GitHub, every pull request and push |
+| `mpi` | `mpi_tests.jl` alone | GitHub, a job of its own |
+
+The quick tier keeps what only CI can see: x86-64 and its contractions,
+bounds checks, a clean environment, the kernels on every branch (the SIMD
+lanes on the hole fixture and the octant hole included), the thread
+invariance, and one short hole run through `evolve!` (the record's). A
+left-out testset is a testset there holding one skipped test, so the summary
+counts it as "Broken" and `runtests.jl` lists the names. Measured on the
+development machine at four threads: **5035 assertions in 10–11 minutes**,
+against the full suite's 16–24. On GitHub (PR #23, 2026-11-07) the serial
+cell's suite went from **72 to 32 minutes** and the threaded cell's from 51
+to 24, and the MPI job took 16 on its own runner, so a pull request waits
+**34 minutes instead of 75**. What the quick tier still pays most for is
+compilation that the left-out testsets used to pay first: the octant hole
+against the box (`rotation_tests.jl`) and the moving hole on the quadrant
+against the box (`boosted_tests.jl`), 105 and 91 s serial, which stay
+because a mirror or a seam that is wrong only on x86-64 is what CI is for.
+
+The full tier's result is put on the commit, so a pull request shows it:
+`ci/full-suite.sh --post` tests a clean `git archive` of a commit and sets
+its status `full-suite/<host>`, and `ci/full-suite-symmetry.sh` does the
+same through an `amdq` job, posting its result from the workstation
+(`CLAUDE.md`, "Commands"). A self-hosted GitHub runner would do this
+unasked, but on a public repository it runs any fork's pull request on the
+machine, and a runner daemon on Symmetry's login node is the
+administrators' to allow.
 
 ### Steps 8b–8′: the generic interior and the moving hole
 
