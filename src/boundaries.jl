@@ -46,7 +46,15 @@ function dirichlet(case::GHCase{T}, t) where {T}
     has_outer_face(case) || return nothing
     bg = case.background
     int = boundary_interior(case.interior)
-    tt = T(t)
+    # A case of several holes writes its data at `t = 0`, frozen (step B3;
+    # `CODE.md`, "The outer boundary", option 1): a superposition is not a
+    # solution, and has nothing to say at a later time.
+    tt = case.interior isa HolesSpec ? zero(T) : T(t)
+    if case.interior isa HolesSpec && case.interior.gauge_momentum
+        # The initial data's own rule, under the source at `t = 0` (step B3).
+        src = holes_source(T, case.holes)
+        return CellBoundary(AllVariables((x, δ) -> gauge_state_tuple(bg, src, int, tt, x)))
+    end
     return CellBoundary(AllVariables((x, δ) -> case_state_tuple(bg, int, tt, x)))
 end
 
@@ -57,6 +65,8 @@ end
 # then written as the identity rather than computed.
 boundary_interior(int) = int
 boundary_interior(::FittedSpec) = nothing
+boundary_interior(::TrackedSpec) = nothing
+boundary_interior(::HolesSpec) = nothing
 
 """
     has_outer_face(case::GHCase) -> Bool

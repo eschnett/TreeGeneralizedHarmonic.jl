@@ -93,6 +93,10 @@ export apply_stencil, apply_mixed_stencil
 # Gauge sources
 export isharmonic, isstatic, sample_gauge_source!
 export KerrSchildSource, algebraic_gauge_source, gauge_source, check_gauge_source
+# Step B1: more algebraic sources, and the momentum that satisfies C_a = 0.
+export AlgebraicGaugeSource, TrackedHole, CompositeKerrSchildSource, composite_weights
+export DampedHarmonicSource, RolledGaugeSource, rollon_weight, effective_source
+export gauge_consistent_momentum, convert_source, gauge_scale, tracked_hole
 
 # Cases, backgrounds and initial data
 export GHCase, with_interior, with_refinement, with_horizon, with_dissipation
@@ -120,12 +124,28 @@ export geometry_radii, layer_radii
 # masks and its checks — and, in `tracking.jl`, the track it is built from
 export real_harmonic_index, real_from_complex, complex_from_real
 export shape_series, shape_bounds, shape_sample_directions
-export analytic_horizon_radius, FittedSpec, layer_cells
+export analytic_horizon_radius, FittedSpec, TrackedSpec, layer_cells
 export FittedInterior, shape_radius, interior_point, fitted_geometry
 export ShapeMask, ShapeBand, geometry_spacing
 export HorizonTrack, TrackLostError, seed_track, update_track, track_center
+export TrackLine, TRACK_FIT_FINDS, track_state, track_position, seeded_track
+export fit_track_quadratic, find_count, find_interval, tracked_interior
 export real_shape, analytic_shape, fitted_interior, surface_shift
 export axis_dispersion, margin_efolds
+
+# Several holes in one case (step B3): the hole, the superposed data, the
+# composite interior and its masks, the per-hole profiles, and the builders that
+# feed them from the tracks
+export HoleSpec, scaled_spec, initial_line, hole_metric, kerr_schild_on_line
+export SuperposedMetric, superposed_kerr_schild, HolesSpec, HoleInteriors
+export layer_coordinate, acting_interior, outside_all, HolesMask, AnyMask
+export HolesDamping, holes_damping, holes_center, HolesDissipation
+export binary_case, head_on_holes, holes_source, check_holes_source, holes_forest
+export seed_tracks, holes_interior, holes_source_at, holes_seed_source_at, holes_case_at
+export with_case, gauge_consistent_state
+export SourceLine, SourceLaw, source_law, seed_source_lines, advance_source_lines
+export source_line_states
+export track_input, lines_source_at, fed_case_at
 
 # The fitted target (step 8e): the fit's variables, the solid harmonics, the
 # samplers, the fit, its sweep and its evaluator
@@ -200,6 +220,9 @@ include("interior.jl")
 # `diag` slots and `point_position`, which are resolved when they compile.
 include("bounds.jl")
 include("gauge.jl")
+# After `interior.jl` and `gauge.jl`, whose layers and profiles it composes, and
+# before `initialdata.jl`, whose `GHCase` holds the holes (added in step B3).
+include("holes.jl")
 include("initialdata.jl")
 include("boundaries.jl")
 # Before `evolution.jl`, whose kernel evaluates `W` points at a time through it

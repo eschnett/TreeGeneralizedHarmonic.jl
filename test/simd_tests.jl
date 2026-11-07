@@ -60,8 +60,9 @@ end
 end
 
 # `du` from the scalar kernel and from the host's lanes on the same filled state, with
-# the size of the terms at a sample of points in every block.
-function lanes_against_scalar(::Type{T}, case, forest; q) where {T}
+# the size of the terms at a sample of points in every block, at time `t` (added in
+# step B1, for a gauge source that depends on it).
+function lanes_against_scalar(::Type{T}, case, forest; q, t=zero(T)) where {T}
     ops = Operators(prolongation=q + 2, restriction=q + 2)
     fs = FieldSet{T}(forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3),
                      parity=state_parity(forest))
@@ -78,7 +79,7 @@ function lanes_against_scalar(::Type{T}, case, forest; q) where {T}
     end
     dus = map(probs) do p
         du = fill!(similar(u), T(NaN))
-        gh_rhs!(du, u, p, zero(T))
+        gh_rhs!(du, u, p, T(t))
         du
     end
     # The scale at points the kernel evolves: inside a hole's layer the stale core
@@ -86,7 +87,7 @@ function lanes_against_scalar(::Type{T}, case, forest; q) where {T}
     N = forest.N
     int = probs[1].interior
     evolved(b, o) = int === nothing ||
-        is_outside(int, interior_point(int, zero(T),
+        is_outside(int, interior_point(int, T(t),
                                        point_position(probs[1].origins, probs[1].spacings,
                                                       b, o)))
     S = maximum(rhs_scale(fs, b, ntuple(d -> o[d] + fs.G[d], Val(3)), q)
@@ -96,29 +97,46 @@ function lanes_against_scalar(::Type{T}, case, forest; q) where {T}
 end
 
 @testset "The lanes are the scalar kernel, every point written: $label" for
-    (label, T, q, make) in (
+    (label, T, q, make, t) in (
         ("gauge wave, N = 8", Float64, 4,
          T -> (c = gauge_wave_case(T; ε_KO=T(1 // 2), γ0=one(T), γ2=T(-1 // 2));
-               (c, gh_forest(T, c; N=8, roots=2)))),
+               (c, gh_forest(T, c; N=8, roots=2))), 0),
         ("gauge wave, N = 10 (an overlapping group)", Float64, 4,
          T -> (c = gauge_wave_case(T; ε_KO=T(1 // 2), γ0=one(T), γ2=T(-1 // 2));
-               (c, gh_forest(T, c; N=10, roots=2)))),
+               (c, gh_forest(T, c; N=10, roots=2))), 0),
         ("gauge wave, Float32, N = 12", Float32, 4,
          T -> (c = gauge_wave_case(T; ε_KO=T(1 // 2), γ0=one(T), γ2=T(-1 // 2));
-               (c, gh_forest(T, c; N=12, roots=2)))),
+               (c, gh_forest(T, c; N=12, roots=2))), 0),
         ("the hole fixture: sampled source, layer, core, N = 10", Float64, 2,
-         T -> (c = hole_fixture(T; q=2); (c, hole_fixture_forest(T, c; N=10)))),
+         T -> (c = hole_fixture(T; q=2); (c, hole_fixture_forest(T, c; N=10))), 0),
         ("the octant hole, algebraic source", Float64, 2,
          T -> (c = kerr_schild_case(T; halfwidth=T(5 // 2), r_0=T(2 // 5),
                                     r_1=T(23 // 20), chunk=T(1 // 10), octant=true,
                                     gauge_source=:algebraic);
-               (c, gh_forest(T, c; N=12, roots=2)))))
+               (c, gh_forest(T, c; N=12, roots=2))), 0),
+        # Added in step B1: the damped harmonic gauge rolled on from the moving
+        # quadrant hole's own source, half way — both sources and the blend on
+        # lanes, the Gaussian at each lane's position. (The composite's weights
+        # and an accelerating hole's rate are the next testset's, lane by lane:
+        # no case takes a source that does not make its background exact.)
+        ("the moving quadrant hole, the roll-on to the damped harmonic gauge half way",
+         Float64, 2,
+         T -> (c0 = kerr_schild_case(T; halfwidth=T(5 // 2), r_0=T(2 // 5),
+                                     r_1=T(11 // 10), chunk=T(1 // 10), v=1 // 5,
+                                     x0=-1 // 4, octant=:quadrant, gauge_source=:algebraic);
+               c = kerr_schild_case(T; halfwidth=T(5 // 2), r_0=T(2 // 5),
+                                    r_1=T(11 // 10), chunk=T(1 // 10), v=1 // 5,
+                                    x0=-1 // 4, octant=:quadrant,
+                                    gauge_source=RolledGaugeSource(
+                                        c0.gauge, DampedHarmonicSource(T; σ_r=32);
+                                        σ_g=1, t_0=1));
+               (c, gh_forest(T, c; N=12, roots=(4, 2, 2)))), 2))
     # Guards the lane kernel on every branch it takes: a lane read at the wrong
     # offset, a group that skips or overruns its row's end, a hole's group sent down
     # the lanes with a point inside the layer, a gauge source read for the wrong
     # point. Each of those is an error of the size of a term, not of its roundoff.
     case, forest = make(T)
-    r = lanes_against_scalar(T, case, forest; q=q)
+    r = lanes_against_scalar(T, case, forest; q=q, t=t)
     @test r.W === Val(default_simd_width(T, CPU(), forest.N))
     @test r.W !== Val(1)
     @test !any(isnan, r.scalar)
@@ -152,5 +170,48 @@ end
         scale = 1 + maximum(abs, Hs) + maximum(abs, dHs)
         @test maximum(abs.(map(x -> x[l], Hv) .- Hs)) ≤ 16 * eps(T) * scale
         @test maximum(abs.(map(x -> x[l], dHv) .- dHs)) ≤ 16 * eps(T) * scale
+    end
+end
+
+@testset "The step-B1 sources on lanes are the scalar sources, lane by lane" begin
+    # Guards what the lanes add to the new sources (added in step B1): a position
+    # that is one `Vec` per axis (the composite's weights, the damped harmonic
+    # gauge's Gaussian), `log` and `exp` of lane values, the integer powers, and
+    # the scalar time beside them (the tracks, the roll-on). A lane read at
+    # another lane's position, or a branch taken for all lanes at once, is an
+    # error of the size of the source.
+    T = Float64
+    rng = Xoshiro(25)
+    holes = (TrackedHole(T; M=1 // 2, spin=(0, 1 // 10, 2 // 5), center=(4, 1 // 2, 0),
+                         velocity=(1 // 20, 9 // 50, 0), acceleration=(-3 // 250, 0, 0),
+                         t_p=1 // 2),
+             TrackedHole(T; M=9 // 20, spin=(0, 0, -1 // 5), center=(-4, -1 // 2, 0),
+                         velocity=(0, -1 // 5, 0), acceleration=(1 // 80, 0, 0),
+                         t_p=1 // 2))
+    dh = DampedHarmonicSource(T; σ_r=8, A_L2=1 // 2, e_L2=1, center=(1, 0, 0))
+    srcs = (("two tracked holes", CompositeKerrSchildSource(holes...)),
+            ("one accelerating hole", CompositeKerrSchildSource(holes[1])),
+            ("damped harmonic", dh),
+            ("roll-on half way", RolledGaugeSource(CompositeKerrSchildSource(holes...), dh;
+                                                   σ_g=1)))
+    lane(xs, c) = Vec(ntuple(l -> xs[l][c], 4))
+    hs = [SVector{10,T}(randn(rng, T, 10) / 10) for _ in 1:4]
+    ds = [ntuple(_ -> SVector{10,T}(randn(rng, T, 10) / 10), 4) for _ in 1:4]
+    xs = [SVector{3,T}(4 * randn(rng, T, 3)) for _ in 1:4]
+    hv = SVector{10}(ntuple(c -> lane(hs, c), 10))
+    dv = ntuple(a -> SVector{10}(ntuple(c -> lane([d[a] for d in ds], c), 10)), 4)
+    xv = (lane(xs, 1), lane(xs, 2), lane(xs, 3))
+    t = T(3 // 2)
+    for (label, src) in srcs
+        Hv, dHv = algebraic_gauge_source(src, xv, t, hv, dv[1], (dv[2], dv[3], dv[4]))
+        worst = 0.0
+        for l in 1:4
+            Hs, dHs = algebraic_gauge_source(src, Tuple(xs[l]), t, hs[l], ds[l][1],
+                                             (ds[l][2], ds[l][3], ds[l][4]))
+            scale = 1 + maximum(abs, Hs) + maximum(abs, dHs)
+            worst = max(worst, maximum(abs.(map(x -> x[l], Hv) .- Hs)) / scale,
+                        maximum(abs.(map(x -> x[l], dHv) .- dHs)) / scale)
+        end
+        @test worst ≤ 16 * eps(T)
     end
 end

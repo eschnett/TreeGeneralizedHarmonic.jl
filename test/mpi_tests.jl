@@ -64,6 +64,9 @@ function mpi_compare(files)
     @test all(l -> occursin("horizon_success=true", l), tracked[2:end])
     @test all(l -> occursin("fit_valid=true", l), tracked[2:end])
     @test count(l -> startswith(l, "hole finished=true"), serial) == 2
+    # Two holes (step B3): both found at both rows.
+    pair = filter(l -> startswith(l, "pair row="), serial)
+    @test length(pair) == 2 && all(l -> occursin("horizon_success=true", l), pair)
     stop = only(filter(startswith("stop "), serial))
     @test occursin("finished=false", stop) && occursin("written=1", stop)
 

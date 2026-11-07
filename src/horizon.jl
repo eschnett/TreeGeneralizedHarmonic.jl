@@ -225,6 +225,25 @@ end
     return false
 end
 
+# Several holes (step B3): the unevolved region is the union of the holes', so a
+# footprint hits it exactly when it hits one of them, each by its own exact
+# method. Unrolled over the holes, as the masks are.
+@inline TreeAMR.stencil_hits(r::UnevolvedRegion{<:HolesMask}, origin::NTuple{3}, h,
+                             base, off, ::Val{n}) where {n} =
+    _hits_any(r.mask.masks, origin, h, base, off, Val(n))
+
+@inline _hits_any(::Tuple{}, origin, h, base, off, ::Val{n}) where {n} = false
+@inline _hits_any(ms::Tuple, origin, h, base, off, ::Val{n}) where {n} =
+    TreeAMR.stencil_hits(UnevolvedRegion(first(ms)), origin, h, base, off, Val(n)) ||
+    _hits_any(Base.tail(ms), origin, h, base, off, Val(n))
+
+footprint_error(m::HolesMask, x, n) = ArgumentError(
+    "the interpolation footprint of $(Tuple(x)) reaches inside the layer of one of " *
+    "$(length(m.masks)) holes: the $(n)³ points this query would read are not all in " *
+    "the evolved region, which is outside every hole's layer (CODE.md, \"One " *
+    "interior per hole\"). Each horizon lies outside its layer by the margin m, and " *
+    "so must everything interpolated from the state.")
+
 # The refusal, dispatched on the mask so that the trivial one carries no
 # message about a radius it does not have.
 footprint_error(::AllPoints, x, n) = ErrorException("unreachable")
