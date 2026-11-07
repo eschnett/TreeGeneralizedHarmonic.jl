@@ -84,6 +84,8 @@ function ansatz_along(C, L, cont, ξ)
     return f, f1, f2
 end
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "The fitted target" begin
     # The fit shares 8d's real harmonics so that its evaluator is the shape's
     # recurrence; a sign or a √2 off is a target rotated by a mode, and a
@@ -520,7 +522,7 @@ end
     # toward; if it differed from the analytic fit by more than the state
     # differs from the analytic solution, the fit would be adding an error
     # of its own.
-    @testset "the evolved state's fit is the analytic fit, to the run's error" begin
+    @full_tier @testset "the evolved state's fit is the analytic fit, to the run's error" begin
         T = Float64
         (; case, q, out) = tracked_fixture_run()
         p = out.problem
@@ -662,8 +664,6 @@ end
 end
 
 # --- the kernel half (step 8e-ii) --------------------------------------------------
-
-isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
 
 @full_tier @testset verbose = true "The fitted variant" begin
     T = Float64

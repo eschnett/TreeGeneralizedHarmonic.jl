@@ -5868,7 +5868,7 @@ the MPI workload. Two factors separate that from the development machine's
 14–24 minutes. A runner is about **1.7×** slower, and bounds checks cost
 another **1.65×**: `driver_tests.jl` and `checkpoint_tests.jl` took 8m38
 with them and 5m12 without, at one thread here. Of the 72 minutes, about
-**42 were 25 testsets that evolve a hole**: the driver's convergence and
+**42 were 26 testsets that evolve a hole**: the driver's convergence and
 variants, the `:fitted` variant, the tracked runs, the checkpoint chains,
 the moving `:damped` core and layer, the moving fit's rate, the regrid
 that moves the mesh, the octant hole, the `Float32` hole and the three
@@ -5880,7 +5880,7 @@ So the suite has **tiers** (`test/tiers.jl`), chosen by
 | Tier | What it runs | Where |
 |------|--------------|-------|
 | `full` (default) | everything | the workstation before a pull request; Symmetry; GitHub weekly |
-| `quick` | all but the 25 `@full_tier` testsets | GitHub, every pull request and push |
+| `quick` | all but the 26 `@full_tier` testsets | GitHub, every pull request and push |
 | `mpi` | `mpi_tests.jl` alone | GitHub, a job of its own |
 
 The quick tier keeps what only CI can see: x86-64 and its contractions,
@@ -5889,8 +5889,15 @@ lanes on the hole fixture and the octant hole included), the thread
 invariance, and one short hole run through `evolve!` (the record's). A
 left-out testset is a testset there holding one skipped test, so the summary
 counts it as "Broken" and `runtests.jl` lists the names. Measured on the
-development machine at four threads: **5040 assertions in 9m57**, against
-the full suite's 24 minutes.
+development machine at four threads: **5035 assertions in 10–11 minutes**,
+against the full suite's 16–24. On GitHub (PR #23, 2026-11-07) the serial
+cell's suite went from **72 to 32 minutes** and the threaded cell's from 51
+to 24, and the MPI job took 16 on its own runner, so a pull request waits
+**34 minutes instead of 75**. What the quick tier still pays most for is
+compilation that the left-out testsets used to pay first: the octant hole
+against the box (`rotation_tests.jl`) and the moving hole on the quadrant
+against the box (`boosted_tests.jl`), 105 and 91 s serial, which stay
+because a mirror or a seam that is wrong only on x86-64 is what CI is for.
 
 The full tier's result is put on the commit, so a pull request shows it:
 `ci/full-suite.sh --post` tests a clean `git archive` of a commit and sets
