@@ -16,6 +16,8 @@ using TreeGeneralizedHarmonic
 using Random: Xoshiro
 import SpacetimeMetrics as SM
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "Reflecting faces" begin
     T = Float64
     q = 4
@@ -276,7 +278,7 @@ import SpacetimeMetrics as SM
         @test ref.records[end].ham_l2 > 0
     end
 
-    @testset "a Kerr-Schild hole on the octant is the hole in the box" begin
+    @full_tier @testset "a Kerr-Schild hole on the octant is the hole in the box" begin
         # Guards the hole's own machinery under the mirrors: the frozen core
         # and the damping layer straddling the three symmetry planes, the
         # sampled gauge source, the Gaussian `γ0` about the corner, the

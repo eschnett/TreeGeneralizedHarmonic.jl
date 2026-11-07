@@ -27,6 +27,8 @@ using TreeGeneralizedHarmonic: DIAG_TAU, NDIAG
 using KernelAbstractions: CPU
 using StaticArrays: SVector
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "The refinement indicator" begin
     T = Float64
     q = 2
@@ -453,7 +455,7 @@ using StaticArrays: SVector
     # schedule, the problem (which re-samples the gauge source and
     # re-asserts the interior's radii on the new mesh) and the state
     # vector. G5's moving hole is this branch at every chunk.
-    @testset "a regrid that moves the mesh rebuilds everything behind it" begin
+    @full_tier @testset "a regrid that moves the mesh rebuilds everything behind it" begin
         case = adaptive_hole_fixture(T)
         forest = gh_forest(T, case; N=8, roots=4)
         targets = filter(forest.leaves) do k

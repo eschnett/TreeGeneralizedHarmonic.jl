@@ -7,6 +7,15 @@ name: CI
 # schedule and a manual dispatch run the whole matrix, macOS and coverage
 # included. Markdown-only changes run nothing, since no test reads them.
 # Tags are not tested: a release tags a commit that has passed on `main`.
+#
+# Every cell runs the *quick tier* of the suite (`TREEGH_TEST_TIER=quick`,
+# 2026-11-06): everything but the testsets that evolve a black hole, which
+# `test/tiers.jl` marks. Evolving a hole is workstation and Symmetry work --
+# the serial cell took 72 minutes here, 46 of them in those testsets -- and
+# the full suite runs there, before a pull request, reported on the commit as
+# a `full-suite/<host>` status by `ci/full-suite.sh`. The weekly schedule
+# runs the full tier here too, off anyone's critical path, and a manual
+# dispatch takes the tier as an input. The MPI comparison is a job of its own.
 on:
   push:
     branches: [main]
@@ -20,15 +29,29 @@ on:
   schedule:
     - cron: "40 5 * * 1"
   workflow_dispatch:
+    inputs:
+      tier:
+        description: "The test tier: quick, or full (the hole evolutions too)"
+        type: choice
+        options: [quick, full]
+        default: quick
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # `quick` unless the weekly schedule or a dispatch asks for `full`.
+  TREEGH_TEST_TIER: ${{ github.event.inputs.tier || (github.event_name == 'schedule' && 'full') || 'quick' }}
+
 jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.threads }} thread(s)
     runs-on: ${{ matrix.os }}
+    # The quick tier is about half an hour on the serial cell; the full tier
+    # was 72 minutes on Linux and is given room for the instrumented macOS
+    # cell.
+    timeout-minutes: ${{ (github.event.inputs.tier == 'full' || github.event_name == 'schedule') && 180 || 60 }}
     strategy:
       fail-fast: false
       matrix:
@@ -108,16 +131,10 @@ jobs:
           # 4; the entry is here from the start so that the threaded path
           # is exercised while it is being written.)
           JULIA_NUM_THREADS: ${{ matrix.threads }}
-          # The MPI test (added 2026-10-19) runs `mpiexec -n 3` beside the
-          # suite's own process, three ranks of about 3 GB each: more than
-          # a macOS runner has (7 GB, where it ran past its hour), and on
-          # the serial Linux cell the runner went down mid-test. It needs a
-          # machine with room (`mpi_jobs.jl`), and is forced on here for the
-          # threaded Linux cell, where it passed in 17 minutes. There it
-          # runs before the suite (amended 2026-10-30): after it, beside a
-          # test process that had compiled everything, the runner went down
-          # in five of thirteen attempts.
-          TREEGH_TEST_MPI: ${{ matrix.threads == 4 && '1' || '' }}
+          # The MPI comparison is the `mpi` job below (2026-11-06). Until then
+          # it ran inside the threaded Linux cell, first, for 17.5 of that
+          # cell's 71 minutes.
+          TREEGH_TEST_MPI: "0"
       - uses: julia-actions/julia-processcoverage@v1
         if: env.COVERAGE == 'true'
       - uses: codecov/codecov-action@v7
@@ -127,6 +144,32 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           # A Codecov outage should not turn a green test run red.
           fail_ci_if_error: false
+
+  # The MPI comparison (added 2026-10-19; a job of its own from 2026-11-06):
+  # `mpiexec -n 3` of `test/mpi_workload.jl` against its serial run, three
+  # ranks of about 3 GB each. It was in the threaded Linux cell until then,
+  # run before the suite because beside it the 16 GB runner went down in five
+  # of thirteen attempts; on a runner of its own it is neither beside nor
+  # before anything, and the cells do not wait for it. `TREEGH_TEST_TIER=mpi`
+  # runs `test/mpi_tests.jl` alone, and `TREEGH_TEST_MPI=1` forces the job on
+  # a machine with less than the 24 GB `test/mpi_jobs.jl` asks for.
+  mpi:
+    name: Julia 1.13 - ubuntu-latest - MPI, 3 ranks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: "1.13"
+      - uses: julia-actions/cache@v3
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
+        env:
+          TREEGH_TEST_TIER: mpi
+          TREEGH_TEST_MPI: "1"
 
   # There is deliberately no viewer job and no figure job yet. TreeWave has
   # both because `bin/` is a second environment with its own copies of the

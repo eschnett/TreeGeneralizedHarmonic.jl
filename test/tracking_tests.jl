@@ -337,6 +337,8 @@ end
     end
 end
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "The tracked geometry on a mesh" begin
     T = Float64
     q = 2
@@ -355,54 +357,56 @@ end
     # is the claim every comparison of the two geometries rests on: if it
     # were a tolerance, a difference between a tracked run and an analytic
     # one could be the arithmetic and not the geometry.
-    @testset "a fitted sphere is step 5's layer, bit for bit (:$variant)" for variant in
-                                                                               (:damped,
-                                                                                :frozen,
-                                                                                :pasted)
-        case = hole_fixture(T; q=q, variant=variant)
-        int = with_ρ_max(case.interior, T(37 // 5))
-        p = GHProblem(fs, sched, case; q=q, interior=int)
-        # The monopole whose series is `R = 2` *exactly*: the series is
-        # `a_00 q_00`, so the coefficient is `R / q_00` or the float next to
-        # it, and the test says which rather than trusting the division.
-        R = T(2)
-        q00 = inv(sqrt(4 * T(π)))
-        a00 = R / q00
-        for k in (1, -1, 2, -2)
-            a00 * q00 == R && break
-            a00 = k > 0 ? nextfloat(R / q00, k) : prevfloat(R / q00, -k)
+    @full_tier @testset "a fitted sphere is step 5's layer, bit for bit" begin
+        @testset "a fitted sphere is step 5's layer, bit for bit (:$variant)" for variant in
+                                                                                   (:damped,
+                                                                                    :frozen,
+                                                                                    :pasted)
+            case = hole_fixture(T; q=q, variant=variant)
+            int = with_ρ_max(case.interior, T(37 // 5))
+            p = GHProblem(fs, sched, case; q=q, interior=int)
+            # The monopole whose series is `R = 2` *exactly*: the series is
+            # `a_00 q_00`, so the coefficient is `R / q_00` or the float next to
+            # it, and the test says which rather than trusting the division.
+            R = T(2)
+            q00 = inv(sqrt(4 * T(π)))
+            a00 = R / q00
+            for k in (1, -1, 2, -2)
+                a00 * q00 == R && break
+                a00 = k > 0 ? nextfloat(R / q00, k) : prevfloat(R / q00, -k)
+            end
+            @test a00 * q00 == R
+            fit = FittedInterior(T; center=case.center, shape=[a00; zeros(T, 24)],
+                                 lmax=4, offset=R - int.r_1,
+                                 thickness=int.r_1 - int.r_0, ρ_max=int.ρ_max,
+                                 variant=variant, w_ramp=int.w_ramp,
+                                 ρ_ramp=int.ρ_ramp, margin=int.margin)
+            # The preconditions, stated: the two surfaces are the sphere's radii
+            # to the last bit.
+            @test layer_radii(fit) === (int.r_0, int.r_1)
+            u = copy(u0)
+            for i in eachindex(u)
+                u[i] += T(1 // 1000) * sin(T(i))
+            end
+            du_s = similar(u)
+            du_f = similar(u)
+            gh_rhs!(du_s, u, p, zero(T))
+            gh_rhs!(du_f, u, with_interior(p, fit), zero(T))
+            @test isequal(du_s, du_f)
+            # The paste writes the same bits, and the masks count the same points.
+            us = copy(u)
+            uf = copy(u)
+            paste_interior!(p, us, zero(T))
+            paste_interior!(with_interior(p, fit), uf, zero(T))
+            @test isequal(us, uf)
+            xs = [coordinates(fs, b, (i + G, j + G, k + G))
+                  for b in 1:nblocks(fs) for k in 1:8 for j in 1:8 for i in 1:8]
+            @test all(x -> in_layer(int, 0, x) == in_layer(fit, 0, x), xs)
+            @test all(x -> is_evolved(interior_mask(int, 0), x) ==
+                           is_evolved(interior_mask(fit, 0), x), xs)
+            @test all(x -> core_position(int, 0, x) === core_position(fit, 0, x), xs)
+            @test count(x -> in_layer(fit, 0, x), xs) > 0
         end
-        @test a00 * q00 == R
-        fit = FittedInterior(T; center=case.center, shape=[a00; zeros(T, 24)],
-                             lmax=4, offset=R - int.r_1,
-                             thickness=int.r_1 - int.r_0, ρ_max=int.ρ_max,
-                             variant=variant, w_ramp=int.w_ramp,
-                             ρ_ramp=int.ρ_ramp, margin=int.margin)
-        # The preconditions, stated: the two surfaces are the sphere's radii
-        # to the last bit.
-        @test layer_radii(fit) === (int.r_0, int.r_1)
-        u = copy(u0)
-        for i in eachindex(u)
-            u[i] += T(1 // 1000) * sin(T(i))
-        end
-        du_s = similar(u)
-        du_f = similar(u)
-        gh_rhs!(du_s, u, p, zero(T))
-        gh_rhs!(du_f, u, with_interior(p, fit), zero(T))
-        @test isequal(du_s, du_f)
-        # The paste writes the same bits, and the masks count the same points.
-        us = copy(u)
-        uf = copy(u)
-        paste_interior!(p, us, zero(T))
-        paste_interior!(with_interior(p, fit), uf, zero(T))
-        @test isequal(us, uf)
-        xs = [coordinates(fs, b, (i + G, j + G, k + G))
-              for b in 1:nblocks(fs) for k in 1:8 for j in 1:8 for i in 1:8]
-        @test all(x -> in_layer(int, 0, x) == in_layer(fit, 0, x), xs)
-        @test all(x -> is_evolved(interior_mask(int, 0), x) ==
-                       is_evolved(interior_mask(fit, 0), x), xs)
-        @test all(x -> core_position(int, 0, x) === core_position(fit, 0, x), xs)
-        @test count(x -> in_layer(fit, 0, x), xs) > 0
     end
 
     # The shape evaluation is a series at every layer point of every
@@ -506,7 +510,7 @@ end
     end
 end
 
-@testset verbose = true "The tracked hole" begin
+@full_tier @testset verbose = true "The tracked hole" begin
     T = Float64
     q = 2
     G = q ÷ 2 + 1

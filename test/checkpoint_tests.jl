@@ -22,6 +22,8 @@ import SpacetimeMetrics as SM
 
 const TGHc = TreeGeneralizedHarmonic
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "Checkpoint and restart" begin
     T = Float64
     q = 2
@@ -144,7 +146,7 @@ const TGHc = TreeGeneralizedHarmonic
     # every parameter that differs, and the extension of a finished run whose
     # end lies on a chunk boundary — which is what a restart point after the
     # last chunk is for.
-    @testset "a chain on the static hole is the uninterrupted run" begin
+    @full_tier @testset "a chain on the static hole is the uninterrupted run" begin
         case0 = hole_fixture(T; q=q, chunk=T(1 // 20))
         forest = hole_fixture_forest(T, case0; N=8)
         case = with_bounds(case0, default_bounds(T; M=1,
@@ -189,7 +191,7 @@ const TGHc = TreeGeneralizedHarmonic
     # blocks, `refinement_tests.jl`): the checkpoint is written before that
     # regrid, so the restart regrids first — and with a changed criterion it
     # regrids differently, which is the point of saving there.
-    @testset "a restart regrids first, with the criterion it is given" begin
+    @full_tier @testset "a restart regrids first, with the criterion it is given" begin
         case = adaptive_hole_fixture(T)
         forest = gh_forest(T, case; N=8, roots=4)
         targets = filter(forest.leaves) do k
@@ -229,7 +231,7 @@ const TGHc = TreeGeneralizedHarmonic
     # first regrid coarsens: the track, both fits, the finder's seed, the
     # gauge source's sample (Kerr-Schild is not harmonic) and the geometry
     # rebuilt on the new mesh all cross the restarts.
-    @testset "a chain on a tracked :fitted hole that regrids is the run" begin
+    @full_tier @testset "a chain on a tracked :fitted hole that regrids is the run" begin
         case = adaptive_hole_fixture(T; interior=FittedSpec(T; variant=:fitted,
                                                             margin=4, n_L=6),
                                      r_0=nothing, r_1=nothing,
@@ -252,7 +254,7 @@ const TGHc = TreeGeneralizedHarmonic
     # A boosted hole whose layer follows it: the speed growth that sizes the
     # next chunk's step, the track's velocity that splits a chunk into
     # refills, and step 8′'s trailing ramp.
-    @testset "a chain on a moving :fitted hole is the run" begin
+    @full_tier @testset "a chain on a moving :fitted hole is the run" begin
         bg = SM.boost(SM.Harmonic(one(T), zero(T)), SVector{3,T}(T(3 // 10), 0, 0))
         case = hole_case(T, bg; halfwidth=T(5 // 2), chunk=T(1 // 20),
                          interior=FittedSpec(T; variant=:fitted, margin=4, n_L=6),

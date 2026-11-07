@@ -21,6 +21,8 @@ using TreeAMR
 using TreeGeneralizedHarmonic
 using KernelAbstractions: CPU
 
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
 @testset verbose = true "The driver and the static hole" begin
     T = Float64
     q = 2
@@ -205,7 +207,7 @@ using KernelAbstractions: CPU
     # and `N` is raised, so every spacing shrinks and nothing else moves.
     # The claim is the *masked* error — outside `r_1`, where the equations
     # are the Einstein equations and nothing else.
-    @testset "the masked error converges at order q on the frozen hierarchy" begin
+    @full_tier @testset "the masked error converges at order q on the frozen hierarchy" begin
         case = hole_fixture(T; q=q)
         Ns = (6, 8, 10)
         hs = T[]
@@ -273,7 +275,7 @@ using KernelAbstractions: CPU
     # surface failure step 5 measured at `17 M`, starting — which is a claim
     # about the paste and not the one this testset makes. `:pasted`'s
     # residual is zero at every time, so it stops at the shell's time.
-    @testset "the three interior variants, in the G points outside r_1" begin
+    @full_tier @testset "the three interior variants, in the G points outside r_1" begin
         t_shell = T(1 // 10)
         t_res = 2 / default_relaxation_rate(hole_fixture(T; q=q))
         rows = NamedTuple[]
@@ -320,7 +322,7 @@ using KernelAbstractions: CPU
     # excised hole under prescribed sources, `≈ 0.14/M`, and `CODE.md`
     # predicts exact interior and boundary data lower it without removing
     # it. What a run of this length can say is the rate it sees.
-    @testset "the gauge drift at the horizon is measured" begin
+    @full_tier @testset "the gauge drift at the horizon is measured" begin
         case = hole_fixture(T; q=q, chunk=T(1 // 20))
         out = gh_hole_run(T, case; N=8, q=q, t_end=T(1 // 5))
         ts = [T(r.t) for r in out.records]
@@ -339,7 +341,7 @@ using KernelAbstractions: CPU
     # `CODE.md` keeps GHSO2's discrete-gradient `Π` as a post-pass option
     # and asks G4 whether it changes a hole's stationarity visibly
     # **(predicted: not beyond the first chunk)**.
-    @testset "the discrete-gradient Π post-pass is measured" begin
+    @full_tier @testset "the discrete-gradient Π post-pass is measured" begin
         case = hole_fixture(T; q=q)
         G = q ÷ 2 + 1
         forest = hole_fixture_forest(T, case; N=8)

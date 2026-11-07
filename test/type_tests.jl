@@ -234,7 +234,9 @@ end
     end
 end
 
-@testset "Float32 runs the static hole with its layer end to end" begin
+isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
+
+@full_tier @testset "Float32 runs the static hole with its layer end to end" begin
     # `PLAN.md`'s step-5 acceptance: the same static-hole run in `Float32`
     # on `CPU()`, reaching the same result to `Float32` accuracy. This is
     # the sharpest `Float32` test in the package, because a hole is where
