@@ -582,6 +582,18 @@ which `adm_vars_from_state` now calls too (bit for bit the old expression on
 the same inputs). `test/admvars_tests.jl` is its file (`CODE.md`, "Public
 access to the vertex metric").
 
+From 2026-11-08 the **coupling contract with TreeGRRMHD is 3+1 variables
+at this package's vertices, in both directions** (Erik's redesign).
+`(α, β^i, γ_ij, K_ij)` goes out, and `(ρ, S_i, S_ij)` comes in. Every
+conversion between centerings is TreeGRRMHD's. So GH-1 is `adm_vars` behind a
+bound adapter, valid at owned vertices only, and GH-3 assembles `T_ab` here
+from the ADM matter (`CODE.md`, "The coupling contract with TreeGRRMHD").
+The adapter is built: `ADMMetric(p, u, t)` (or `ADMMetric(p)`) on the host,
+bound to the consumer's vertex set, `at = adm(M)`, gives an object that is
+`isbits` once adapted, called as `at(n, b)` at an **owned** index. Adapt is a
+direct dependency for its `@adapt_structure`. Its 17 claims are in
+`admvars_tests.jl`; it also ran on Metal. GH-3 and GH-4 are not started.
+
 What exists in `test/` is `precision_tests.jl`, `prerequisite_tests.jl`
 (the pinned TreeAMR still exports the names the design calls, a
 `SpacetimeMetrics` background compiles and runs as a kernel argument on

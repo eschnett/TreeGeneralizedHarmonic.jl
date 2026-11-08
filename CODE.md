@@ -90,6 +90,10 @@ research project; the inherited documents live in `notes/`.
 - [Refinement and regridding](#refinement-and-regridding)
 - [Time integration](#time-integration)
 - [Analysis quantities](#analysis-quantities)
+- [The coupling contract with TreeGRRMHD (redesigned 2026-11-08)](#the-coupling-contract-with-treegrrmhd-redesigned-2026-11-08)
+  - [What this package provides (GH-1)](#what-this-package-provides-gh-1)
+  - [What this package takes (GH-3)](#what-this-package-takes-gh-3)
+  - [Why 3+1 variables at the vertices](#why-31-variables-at-the-vertices)
 - [Public access to the vertex metric (added 2026-11-05)](#public-access-to-the-vertex-metric-added-2026-11-05)
 - [Precision, threads, devices](#precision-threads-devices)
 - [Running distributed](#running-distributed)
@@ -170,7 +174,10 @@ research project; the inherited documents live in `notes/`.
 ## Scope and non-goals
 
 - **Vacuum only.** No matter, no scalar field. The reduced source keeps
-  the algebraic slot where a stress-energy term would enter.
+  the algebraic slot where a stress-energy term would enter. *(Amended
+  2026-11-08:)* TreeGRRMHD's GH-3 will fill that slot from `(ρ, S_i, S_ij)`
+  ([The coupling contract with
+  TreeGRRMHD](#the-coupling-contract-with-treegrrmhd-redesigned-2026-11-08)).
 - **Second order in space, first order in time** (decided; see
   [The equations](#the-equations)). The fully first-order
   Lindblom–Scheel–Kidder–Owen–Rinne system is not implemented: it was
@@ -3782,6 +3789,210 @@ kernel costs about `30` right-hand sides, inferred from whole runs, and a
 find under a second: [The analysis cadence on an
 H200](#the-analysis-cadence-on-an-h200-measured-2026-10-22). A production run
 takes its analysis row every `M`.**)**
+
+## The coupling contract with TreeGRRMHD (redesigned 2026-11-08)
+
+TreeGRRMHD evolves general-relativistic MHD on this package's spacetime.
+Neither package depends on the other. A short script owns the loop and
+calls each package's verbs (`prepare!`, `rhs!`, the limiters) in the order
+the data flows (TreeGRRMHD's `CODE.md`, "The coupling contract", decided by
+Erik 2026-11-05). On 2026-11-08 Erik redesigned what crosses between the two
+packages, and where:
+
+- **Both directions cross at this package's vertices, in 3+1 variables**
+  (decided by Erik 2026-11-08).
+  - The metric crosses as `(α, β^i, γ_ij, K_ij)`, 16 values a vertex.
+  - The matter crosses as `(ρ, S_i, S_ij)`, 10 values a vertex:
+    `ρ = n^a n^b T_ab`, `S_i = −γ_i^a n^b T_ab` and
+    `S_ij = γ_i^a γ_j^b T_ab`. They are covariant, not densitized, in
+    `G = c = 1` and the metric's length unit.
+- **Every conversion between centerings is TreeGRRMHD's** (Erik,
+  2026-11-08, from TreeGRRMHD's proposal). TreeGRRMHD is the only package
+  with mixed centerings, so it owns these conversions:
+  - it interpolates the vertex metric to its cells, faces and edges;
+  - it differentiates its own interpolant for `∂α`, `∂β` and `∂γ`;
+  - it averages `(ρ, S_i, S_ij)` from its cells to these vertices.
+
+  This package interpolates nothing and fills none of TreeGRRMHD's sets. It
+  knows neither TreeGRRMHD's centerings nor its ghost widths.
+
+This reverses TreeGRRMHD's amendment of 2026-11-06. That amendment made
+GH-1 a `FourMetric` adapter here, answering `g_ab` and `∂_c g_ab` at every
+point of every consumer centering, 4th order in the outermost ghost layer of
+a `G = 3` cell set, and it made GH-3 a covariant `T_ab`. The redesign also
+reverses the metric half of 2026-11-05's "each interpolating its own data".
+GH-5 stays withdrawn: nothing is asked of this package's ghost width.
+
+### What this package provides (GH-1)
+
+`adm_vars(work, I, b, inv_h, Val(q))` already returns those 16 values at a
+stored vertex ([below](#public-access-to-the-vertex-metric-added-2026-11-05)),
+so GH-1 needed no new algebra, only its form in the contract. *(Built
+2026-11-08, `src/admvars.jl`:)*
+
+```julia
+adm = ADMMetric(p, u, t)        # scatter and ghost fill, as gh_rhs! does
+adm = ADMMetric(p)              # or the field set as the caller filled it
+at  = adm(M)                    # bound to the consumer's vertex set M
+(; α, β, γ, K) = at(n, b)       # at an owned vertex
+```
+
+- **Two objects.** `ADMMetric` is the host side: it holds the forest, this
+  package's working array, the block spacings and `Val(q)`, and is never
+  passed to a kernel. Binding returns the kernel side, which holds the
+  arrays, `Val(G)` and `Val(q)`, and is `isbits` once adapted to the backend
+  (`Adapt.@adapt_structure`, which a KernelAbstractions launch applies; Adapt
+  became a direct dependency for it, at the version KernelAbstractions
+  already loads). The consumer needs none of the arrays, `G` or `q`.
+- **Binding.** `M` must be vertex-centered and on the same forest (`===`),
+  which fixes `N` and the blocks. Otherwise binding throws an
+  `ArgumentError`.
+- **The index is the owned index** `n`, with `1 ≤ n[d] ≤ N`, as
+  `map_blocks!` hands it to a kernel over the default range; `b` is the
+  local block. The adapter adds this package's `G` and reads the block's
+  own `1/h`. An owned index is the same in every vertex-centered set on the
+  forest, so the consumer's `G` never enters. A `@boundscheck` refuses any
+  other `n`, or a block out of range, with a `BoundsError`.
+- **Accuracy.** `α`, `β` and `γ` are the decode of the stored state, exact
+  to roundoff and the same bits as the right-hand side's
+  `metric_quantities`. `K` comes from the right-hand side's own
+  first-derivative stencil and converges at order `q` (measured: 2.00, 4.00,
+  5.99). The contract's 4th order therefore needs `q ≥ 4`.
+- **Valid at the owned vertices.** `K`'s stencil reaches `q/2` points.
+  With `G = q/2 + 1` it is defined one ghost layer out and no further. The
+  contract promises the owned vertices only; the consumer's ghosts are its
+  own. The shared upper plane `n = N + 1` is a neighbour's owned plane, or
+  at the outer boundary the consumer's hook's.
+- **A snapshot.** The adapter reads this package's working array in place
+  and is valid until this package's state changes. A regrid replaces the
+  field set: rebuild and rebind after one.
+- **Extra fields.** It returns `sqrtγ` and `γu` too, as `adm_vars` does.
+  Destructure by name.
+- **The consumer's set needs `N ≥ 10` at `G = 4`.** TreeAMR's vertex
+  invariant is `N ≥ 2G + 2`, so a 16-variable set wide enough for a
+  4th-order interpolation to the outermost ghost cell of a `G = 3` cell set
+  refuses `N = 8` (found 2026-11-08, building the test). TreeGRRMHD's TOV
+  runs use `N = 16`.
+
+**Measured (2026-11-08).**
+
+- **On the CPU** (`test/admvars_tests.jl`, two testsets, 17 claims, about
+  10 s inside the file). On a Kerr-Schild hole at `a = 1/2` on a two-level
+  mesh at `N = 10`, the adapter is `adm_vars` bit for bit at every owned
+  vertex of both levels, after its own scatter and fill of a working array
+  set to `NaN`. In a consumer's `map_blocks!` over a `G = 4` set, the
+  metric is the host's bit for bit and `K` agrees to 5.6 eps of its largest
+  value: the kernel is another call site ("Two spellings…" in `CLAUDE.md`).
+  A call allocates nothing, and `Adapt` reaches both arrays.
+- **On Metal at `Float32`** (a scratch environment with Metal added, the
+  same mesh and kernel). The metric agrees with the CPU to 0.76 eps of its
+  scale and `K` to 36 eps of its largest value, the stencil's roundoff.
+
+**What `K` costs and buys** over the `Π_ij/√γ` that TreeGRRMHD proposed.
+
+- **The cost.** `Π_ij/√γ` needs no stencil here. It could have been
+  decoded in every ghost layer, so with `G ≥ 4` the consumer could have read
+  this package's own ghosts and skipped a fill. `K` reaches only one ghost
+  layer. So the consumer fills its vertex set itself, once each time it reads
+  the metric. That fill is about the size of this package's own: 16
+  variables at `G = 4` against 20 at `G = 3`, 1.03× at `N = 16` (estimated,
+  not measured).
+- **It buys a contract that is not GHSO2's.** These are the 3+1 variables
+  a BSSN or Z4c code evolves and is sourced by. TreeBSSN, vertex-centered at
+  `G = q/2 + 1` on the same mesh, decodes the same 16 values with no stencil
+  at all (`γ_ij = e^{4φ} γ̃_ij`, `K_ij = e^{4φ}(Ã_ij + γ̃_ij K/3)`). Its matter
+  terms are `(ρ, S_i, S_ij)` exactly. TreeGRRMHD never sees this package's
+  `Π_ab = (√γ/α)(∂ₜ − β^k ∂_k) g_ab`, a normalization that is GHSO2's.
+- **The matter reads `K` where it needs it.** `K_ij` enters the energy
+  equation's source (`S^ij K_ij`). Holding a static star in equilibrium is
+  the momentum source's job, which reads `∂α` and `∂γ` from TreeGRRMHD's own
+  interpolant either way. For the TOV star `K = 0`.
+
+### What this package takes (GH-3)
+
+```julia
+TreeGH.rhs!(du, p, t; matter = nothing)   # GH-4's verb
+at = matter(U)                            # bound to this package's vertex set
+(; ρ, S, Sij) = at(n, b)                  # at an owned vertex
+```
+
+- **The adapter.** `matter` is `nothing` or TreeGRRMHD's adapter. The
+  kernel calls it at its owned vertices with the owned index, and never
+  stores the result. `S` is an `SVector{3,T}`, `Sij` a symmetric
+  `SMatrix{3,3,T}`. It adds a seventh kernel `Val`, `HASMATTER`
+  (`W` became the sixth on 2026-10-05). With `false` the kernel is bit for bit
+  today's.
+- **The term.** The head's `metric_quantities` give this point's `α`, `β^i`
+  and `γ^ij`. With them the covariant `T_ab` is
+  ```
+  T_tt = α² ρ − 2α β^i S_i + β^i β^j S_ij
+  T_ti = −α S_i + β^j S_ij
+  T_ij = S_ij
+  T    = γ^ij S_ij − ρ
+  ```
+  and the source gains `16π α √γ (T_ab − g_ab T/2)` in the packed order.
+  The reasoning is GH-3's, from `notes/formulation.md` §1: `R_ab = 8π(T_ab −
+  g_ab T/2)` moves `S0` by `−16π T̄_ab`, and the source enters as
+  `−α√γ S0`. The acceptance test below is what pins the sign. Inside an
+  interior layer the term is weighted by `w`, like the rest of `F`. `∂ₜh` is
+  unchanged.
+- **The monitors** subtract `16πρ` from `ℋ` and `8πS_i` from `ℳ_i`
+  directly; these are the quantities that cross. The ADM monitor
+  reconstructs `∂ₜ∂ₜg` from `∂ₜΠ`, which carries the term. It needs the
+  matter at the point only, so the owned vertices suffice. `gh_constraint!`
+  is unchanged.
+- **The kernel price.** The adapter runs inside the right-hand side's
+  kernel, the hottest code here.
+  - It must be device-clean in the sense of `CLAUDE.md`'s "On a device a
+    closure is a call". An uninlined call with `SVector` arguments costs what
+    took the kernel from 8.5 to 1.1 ns a point on the H200.
+  - On the CPU it is called once per SIMD lane, and the `W` results are
+    packed into `Vec`s.
+  - Its 10 values add to the head's live set. Where the term is formed in
+    streaming order is GH-3's to measure, in the SASS's spills.
+- **Acceptance** is GH-3's, with the matter in its new form.
+  - `HASMATTER = false` is bit for bit today's kernel.
+  - Take a static non-vacuum metric. Pass as matter the projections
+    `(ρ, S_i, S_ij)` of `G_ab/8π`, from SpacetimeMetrics' `EinsteinTensor`.
+    The right-hand side then vanishes at order `q`. The matter-corrected `ℋ`
+    and `ℳ_i` vanish at order `q`, and do not without the matter.
+
+### Why 3+1 variables at the vertices
+
+- **Positivity survives the averages.** The mean of `ρ` over eight cells
+  is a convex combination, so `ρ ≥ 0` holds at the vertex exactly. `T_ab` is
+  then assembled with the vertex's own `α` and `β`, the metric this package
+  evolves. The alternative averaged eight cells' `T_ab`, each assembled with
+  that cell's interpolated lapse and shift.
+- **TreeGRRMHD can keep the metric's signature.** Multilinear weights make
+  `(α, γ_ij)` a convex combination of the corners, so its fallback keeps
+  `α > 0` and `γ` positive definite where the 4th-order interpolant does
+  not. An `(α, β, γ)` with those properties always rebuilds a Lorentzian
+  metric. Interpolating `g_ab` could not promise that.
+
+**What TreeGRRMHD does with it** (proposed; its `CODE.md` has the details):
+
+- **A vertex set of its own.** It keeps a 16-variable vertex set on the same
+  forest, which needs `N ≥ 10`. The owned points come from `ADMMetric`;
+  TreeAMR fills the ghosts at `G ≥ 4`, with an outer-boundary hook of
+  TreeGRRMHD's own. The prolongation
+  must keep the derivatives it takes 4th order next to a coarse-fine face:
+  this package's interface rule, `p = q + 2` for second derivatives, gives
+  `p ≥ q + 1` for first derivatives.
+- **Lagrange interpolation, with a fallback.** It interpolates with 4, 16
+  and 64 points to edges, faces and cells. Where the result has `α ≤ 0`, or
+  a `γ` that fails a Cholesky factorization, it falls back to multilinear
+  weights, and counts the fallbacks.
+- **Matter at the cells.** It forms `(ρ, S_i, S_ij)` at the cells, then
+  averages them to the vertices.
+
+**Open on this side:**
+
+- the adapter's name (`ADMMetric`; `ADMVars` is ApparentHorizonFinder's);
+- whether GH-4's `prepare!` returns the adapter, or `ADMMetric(p, u, t)` stays
+  the way to fill and wrap at once;
+- the implementation of GH-3 and GH-4, which is not started;
+- an H200 run of the adapter (Metal only so far).
 
 ## Public access to the vertex metric (added 2026-11-05)
 
