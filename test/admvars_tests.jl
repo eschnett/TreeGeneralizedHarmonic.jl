@@ -64,6 +64,36 @@ end
     out[i, j, k, 5] = a.K[3, 3]
 end
 
+# What a consumer does with the contract's adapter: one `map_blocks!` over the
+# owned vertices of a 16-variable set of its own, at its own `G`.
+@kernel function admmetric_test_kernel!(mw, at, ::Val{GM}) where {GM}
+    i, j, k, b = @index(Global, NTuple)
+    a = at((i, j, k), b)
+    I = (i + GM, j + GM, k + GM)
+    mw[I..., 1, b] = a.α
+    mw[I..., 2, b] = a.β[1]
+    mw[I..., 3, b] = a.β[2]
+    mw[I..., 4, b] = a.β[3]
+    mw[I..., 5, b] = a.γ[1, 1]
+    mw[I..., 6, b] = a.γ[1, 2]
+    mw[I..., 7, b] = a.γ[1, 3]
+    mw[I..., 8, b] = a.γ[2, 2]
+    mw[I..., 9, b] = a.γ[2, 3]
+    mw[I..., 10, b] = a.γ[3, 3]
+    mw[I..., 11, b] = a.K[1, 1]
+    mw[I..., 12, b] = a.K[1, 2]
+    mw[I..., 13, b] = a.K[1, 3]
+    mw[I..., 14, b] = a.K[2, 2]
+    mw[I..., 15, b] = a.K[2, 3]
+    mw[I..., 16, b] = a.K[3, 3]
+end
+
+# An adaptor that turns every array into a view, so that a test on the CPU can
+# see `Adapt` reach the arrays a device would convert.
+struct AdmToView end
+TreeGeneralizedHarmonic.Adapt.adapt_storage(::AdmToView, a::Array) =
+    view(a, ntuple(_ -> Colon(), ndims(a))...)
+
 @testset verbose = true "adm_vars: the vertex metric in ADM variables" begin
     T = Float64
     bg = admvars_background(T)
@@ -217,5 +247,108 @@ end
         end
         @test npts > 1000
         @test worst < 64eps(T)
+    end
+
+    @testset "ADMMetric is adm_vars at the owned vertices of a two-level mesh" begin
+        # Guards the contract's adapter (`CODE.md`, "The coupling contract
+        # with TreeGRRMHD"): the owned index plus this package's `G` (an offset
+        # by one reads the neighbouring vertex, which looks like a metric), each
+        # block's own `1/h` on a mesh with two levels (a root spacing on the
+        # fine block halves its `∂h`), the scatter and fill the adapter does
+        # before it reads, and a consumer's kernel over a set of its own `G`.
+        # `N = 10`: TreeAMR's vertex invariant `N ≥ 2G + 2` refuses the
+        # consumer's `G = 4` at `N = 8`.
+        q, N = 4, 10
+        G = q ÷ 2 + 1
+        case = kerr_schild_case(T; a=T(1 // 2), halfwidth=T(4), r_0=T(5 // 8),
+                                r_1=T(23 // 16), chunk=T(1 // 2))
+        forest = gh_forest(T, case; N=N, roots=2, refined=true)
+        ops = Operators(prolongation=q + 2, restriction=q + 2)
+        fs = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3))
+        # The radius checks would refuse this coarse mesh's layer, which no
+        # claim here reads.
+        p = GHProblem(fs, GhostSchedule(fs, ops), case; q=q, margin_check=false)
+        ref = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3))
+        fill_exact!(ref, case, zero(T))
+        u = statevector(ref)
+        gather!(u, ref)
+        fs.work .= T(NaN)                       # the adapter must fill what it reads
+        M = FieldSet{T}(forest, 16; G=4, centering=vertexcentered(3))
+        at = ADMMetric(p, u, zero(T))(M)
+        hs = block_spacings(forest, T)
+        @test length(unique(hs)) == 2           # a test of the per-block `1/h`
+        same, worst, worstK, scaleK, npts = true, zero(T), zero(T), zero(T), 0
+        for b in 1:nblocks(fs), k in 1:N, j in 1:N, i in 1:N
+            n = (i, j, k)
+            I = (i + G, j + G, k + G)
+            a = at(n, b)
+            same &= isequal(a, adm_vars(fs.work, I, b, inv(hs[b]), Val(q)))
+            x = coordinates(fs, b, I)
+            sqrt(sum(abs2, x)) > 5 // 2 || continue
+            pt = SVector{4,T}(0, x...)
+            α, β, γ = SMa.adm_decompose(case.background, pt)
+            Kx = SMa.ExtrinsicCurvature(case.background, pt)
+            worst = max(worst, abs(a.α - α), maximum(abs, a.β - β), maximum(abs, a.γ - γ))
+            worstK = max(worstK, maximum(abs, a.K - Kx))
+            scaleK = max(scaleK, maximum(abs, Kx))
+            npts += 1
+        end
+        @test same
+        @test npts > 1000
+        @test worst < 64eps(T)
+        @test worstK < scaleK / 10
+        @test keys(at((1, 1, 1), 1)) == (:α, :β, :γ, :sqrtγ, :γu, :K)
+
+        # In the consumer's kernel the metric is the host's bit for bit; `K`
+        # is formed at another call site, which contracts differently, and
+        # agrees to roundoff of its scale (measured: 5.6 eps; `CLAUDE.md`,
+        # "Two spellings…").
+        mw = fill!(similar(M.work), T(NaN))
+        map_blocks!(admmetric_test_kernel!, M, mw, at, Val(4))
+        msame, dK, sK = true, zero(T), zero(T)
+        for b in 1:nblocks(M), k in 1:N, j in 1:N, i in 1:N
+            a = at((i, j, k), b)
+            v = mw[i + 4, j + 4, k + 4, :, b]
+            msame &= v[1:10] == [a.α; a.β; a.γ[1, 1]; a.γ[1, 2]; a.γ[1, 3];
+                                 a.γ[2, 2]; a.γ[2, 3]; a.γ[3, 3]]
+            dK = max(dK, maximum(abs, v[11:16] - [a.K[1, 1], a.K[1, 2], a.K[1, 3],
+                                                  a.K[2, 2], a.K[2, 3], a.K[3, 3]]))
+            sK = max(sK, maximum(abs, a.K))
+        end
+        @test msame
+        @test dK <= 32eps(T) * sK
+    end
+
+    @testset "ADMMetric refuses another forest, another centering, a ghost" begin
+        # Guards the binding, which is the only check that an owned index
+        # names the point the consumer thinks, and the owned range, which is
+        # all the contract promises; and the device discipline: no
+        # allocation, and `Adapt` reaching both arrays.
+        q, N = 4, 8
+        case = kerr_schild_case(T; a=T(1 // 2), halfwidth=T(4), r_0=T(5 // 8),
+                                r_1=T(23 // 16), chunk=T(1 // 2))
+        forest = gh_forest(T, case; N=N, roots=2)
+        fs = FieldSet{T}(forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3))
+        p = GHProblem(fs, GhostSchedule(fs, Operators(prolongation=q + 2,
+                                                      restriction=q + 2)),
+                      case; q=q, margin_check=false)
+        fill_exact!(fs, case, zero(T))
+        adm = ADMMetric(p)
+        other = gh_forest(T, case; N=N, roots=2)
+        @test_throws ArgumentError adm(FieldSet{T}(other, 16; G=4,
+                                                   centering=vertexcentered(3)))
+        @test_throws ArgumentError adm(FieldSet{T}(forest, 16; G=3,
+                                                   centering=cellcentered(3)))
+        at = adm(FieldSet{T}(forest, 16; G=1, centering=vertexcentered(3)))
+        @test at((1, 1, N), 1).α > 0
+        @test_throws BoundsError at((0, 1, 1), 1)
+        @test_throws BoundsError at((1, N + 1, 1), 1)
+        @test_throws BoundsError at((1, 1, 1), nblocks(fs) + 1)
+        f(a, n, b) = a(n, b)
+        f(at, (2, 3, 4), 5)
+        @test @allocated(f(at, (2, 3, 4), 5)) == 0
+        av = TreeGeneralizedHarmonic.Adapt.adapt(AdmToView(), at)
+        @test av.work isa SubArray && av.spacings isa SubArray
+        @test isequal(av((2, 3, 4), 5), at((2, 3, 4), 5))
     end
 end
