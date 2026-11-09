@@ -6,7 +6,9 @@
 `TreeGeneralizedHarmonic` solves the vacuum Einstein equations in the
 generalized harmonic formulation — second order in space, first order in
 time — on [TreeAMR](https://github.com/eschnett/TreeAMR.jl)'s octree of
-uniform blocks.
+uniform blocks. A coupled matter code can supply a stress-energy source
+through `gh_rhs!`'s `matter` keyword, at this package's vertices
+(`CODE.md`, "The coupling contract with TreeGRRMHD").
 
 That is `∂ₜh_ab = β^i ∂_i h_ab + (α/√γ) Π_ab` and the second-order
 reduction of `R_ab = 0` for `Π_ab`, with `h_ab = g_ab − η_ab` the offset

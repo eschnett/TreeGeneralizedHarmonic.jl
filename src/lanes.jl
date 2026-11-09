@@ -109,3 +109,18 @@ end
 # any lane, and a choice is made lane by lane.
 @inline _anynonzero(x::Vec) = any(x != zero(x))
 @inline _select(c::Vec{W,Bool}, x, y) where {W} = vifelse(c, x, y)
+
+# The matter adapter on lanes (GH-3, added 2026-11-09): the adapter answers one
+# point, so it is called once per lane — at the `W` neighbouring owned points along
+# the first axis that the group evaluates — and its three fields are packed into
+# `Vec`s, component by component. The CPU only, where a closure is no cost.
+@inline function matter_at(::Type{Vec{W,T}}, at, inner, b::Int) where {W,T}
+    i, j, k = inner
+    ms = ntuple(l -> at((i + l - 1, j, k), b), Val(W))
+    ρ = Vec{W,T}(ntuple(l -> T(ms[l].ρ), Val(W)))
+    S = SVector{3,Vec{W,T}}(ntuple(c -> Vec{W,T}(ntuple(l -> T(ms[l].S[c]), Val(W))),
+                                   Val(3)))
+    Sij = SMatrix{3,3,Vec{W,T}}(ntuple(c -> Vec{W,T}(ntuple(l -> T(ms[l].Sij[c]),
+                                                            Val(W))), Val(9)))
+    return (; ρ, S, Sij)
+end

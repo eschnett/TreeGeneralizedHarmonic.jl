@@ -638,6 +638,65 @@ algebra, tested against the second as the second is against the port.
     return _scale(-(α * sqrtγ), S)
 end
 
+"""
+    matter_source(g4, α, β, γu, sqrtγ, ρ, S, Sij) -> SVector{10}
+
+The stress-energy's term in `∂ₜΠ`, `16π α√γ (T_ab − g_ab T/2)` in the packed
+order (added 2026-11-09, GH-3; `CODE.md`, "What this package takes (GH-3)").
+
+The matter arrives as its 3+1 projections at the point — `ρ = n^a n^b T_ab`,
+`S_i = −γ_i^a n^b T_ab` (`SVector{3}`), `S_ij = γ_i^a γ_j^b T_ab` (a symmetric
+`SMatrix{3,3}`) — and `T_ab` is assembled with this point's own `α`, `β^i` and
+`γ^{ij}` ([`metric_quantities`](@ref)'s):
+
+    T_tt = α² ρ − 2α β^i S_i + β^i β^j S_ij
+    T_ti = −α S_i + β^j S_ij
+    T_ij = S_ij
+    T    = γ^{ij} S_ij − ρ
+
+`R_ab = 8π (T_ab − g_ab T/2)` moves the reduced source `S0` by `−16π (T_ab − g_ab
+T/2)`, and the source enters `∂ₜΠ` as `−α√γ S0` ([`gh_node_source_lean`](@ref)),
+hence the sign; the acceptance test is what pins it (`test/matter_tests.jl`).
+Written as `α√γ (16π T_ab − 8π g_ab T)`, so that nothing is halved.
+
+Generic in the number type, as the kernel's algebra is (`CODE.md`, "The
+right-hand side on a CPU"): every product is a scalar of the lane type, `2` is an
+`Int`, and `8π` and `16π` are formed in the element type and multiply a lane as a
+scalar.
+"""
+@inline function matter_source(g4::SMatrix{4,4,T}, α::T, β::SVector{3,T},
+                               γu::SMatrix{3,3,T}, sqrtγ::T, ρ::T, S::SVector{3,T},
+                               Sij::SMatrix{3,3,T}) where {T}
+    E = eltype(T)                         # `T` itself, or a lane's element type
+    c8 = 8 * E(π)
+    c16 = 16 * E(π)
+    S11, S21, S31 = Sij[1, 1], Sij[2, 1], Sij[3, 1]
+    S22, S32, S33 = Sij[2, 2], Sij[3, 2], Sij[3, 3]
+    # β^j S_ij, then the three components of T_ab that read it.
+    Sβ1 = S11 * β[1] + S21 * β[2] + S31 * β[3]
+    Sβ2 = S21 * β[1] + S22 * β[2] + S32 * β[3]
+    Sβ3 = S31 * β[1] + S32 * β[2] + S33 * β[3]
+    βS = β[1] * S[1] + β[2] * S[2] + β[3] * S[3]
+    Ttt = α * α * ρ - 2 * (α * βS) + (β[1] * Sβ1 + β[2] * Sβ2 + β[3] * Sβ3)
+    Tt1 = Sβ1 - α * S[1]
+    Tt2 = Sβ2 - α * S[2]
+    Tt3 = Sβ3 - α * S[3]
+    trS = γu[1, 1] * S11 + γu[2, 2] * S22 + γu[3, 3] * S33 +
+          2 * (γu[2, 1] * S21 + γu[3, 1] * S31 + γu[3, 2] * S32)
+    tr8 = c8 * (trS - ρ)
+    a = α * sqrtγ
+    return SVector{NC,T}(a * (c16 * Ttt - g4[1, 1] * tr8),
+                         a * (c16 * Tt1 - g4[2, 1] * tr8),
+                         a * (c16 * Tt2 - g4[3, 1] * tr8),
+                         a * (c16 * Tt3 - g4[4, 1] * tr8),
+                         a * (c16 * S11 - g4[2, 2] * tr8),
+                         a * (c16 * S21 - g4[3, 2] * tr8),
+                         a * (c16 * S31 - g4[4, 2] * tr8),
+                         a * (c16 * S22 - g4[3, 3] * tr8),
+                         a * (c16 * S32 - g4[4, 3] * tr8),
+                         a * (c16 * S33 - g4[4, 4] * tr8))
+end
+
 # The `a`-th row and column of `C2 + C2ᵀ`, with `C2[a, b] = Σ_μν Cuu_μν ∂_μ g_νb` and
 # `Cuu = G ∂_a g G` (symmetric: ten values) — the only place `Cuu` exists.
 @inline function _lean_c2(Gp::SVector{NC,T}, D, ::Val{a}) where {T,a}

@@ -86,7 +86,7 @@ export metric_quantities, metric_derivatives, metric_derivatives_along
 export adm_from_metric, adm_vars_from_state, adm_vars, gauge_constraint_at_node
 export ADMMetric
 export gh_node_rhs, gh_node_source, gh_node_rhs_expanded
-export gh_node_source_lean, metric_divergences
+export gh_node_source_lean, metric_divergences, matter_source
 
 # Stencils
 export derivative_weights, dissipation_weights, dissipation_rank

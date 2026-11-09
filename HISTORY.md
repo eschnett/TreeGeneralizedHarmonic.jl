@@ -86,7 +86,7 @@ The briefs of the finished steps are under
 - [The coupling contract with TreeGRRMHD](CODE.md#the-coupling-contract-with-treegrrmhd)
   - [The redesign of 2026-11-08](#the-redesign-of-2026-11-08)
   - [Building GH-1 (2026-11-08)](#building-gh-1-2026-11-08)
-  - [GH-3's kernel `Val`](#gh-3s-kernel-val)
+  - [Building GH-3 (2026-11-09)](#building-gh-3-2026-11-09)
 - [Public access to the vertex metric](CODE.md#public-access-to-the-vertex-metric)
 - [Precision, threads, devices](CODE.md#precision-threads-devices)
   - [The thread workload](#the-thread-workload)
@@ -219,6 +219,8 @@ The briefs of the finished steps are under
   (superposed Kerr-Schild, then XCTS through a file).
 - **2026-11-08.** "Vacuum only" was amended: TreeGRRMHD's GH-3 will fill
   the stress-energy slot from `(ρ, S_i, S_ij)`.
+- **2026-11-09.** GH-3 was built: the non-goal became "Vacuum, unless a
+  coupled code supplies the matter", through `gh_rhs!`'s `matter`.
 
 ## Lineage: what is inherited and what changes
 
@@ -1013,9 +1015,39 @@ This reverses TreeGRRMHD's amendment of 2026-11-06. That amendment made GH-1 a `
 
 GH-1's adapter, `ADMMetric`, was built 2026-11-08 in `src/admvars.jl`, and the CPU and Metal measurements under "What this package provides (GH-1)" are of that day. That the consumer's set needs `N ≥ 10` at `G = 4` was found 2026-11-08, building the test.
 
-### GH-3's kernel `Val`
+### Building GH-3 (2026-11-09)
 
-`W`, the SIMD width, became the right-hand-side kernel's sixth `Val` on 2026-10-05; GH-3's `HASMATTER` is to be the seventh.
+GH-3, the matter term, was built 2026-11-09. Its parts are `matter_source` in
+`src/pointwise.jl`, the head's call in `src/evolution.jl`, the lanes' adapter
+call in `src/lanes.jl`, the ADM monitor's half in `src/constraints.jl`, and
+`matter` on the integrator in `src/stepping.jl`. The measurements under "What
+this package takes (GH-3)" are of that day.
+
+- **The entry point is a keyword on `gh_rhs!`**, `gh_rhs!(du, u, p, t; matter
+  = nothing)`, decided by Erik 2026-11-09. The alternative was a field of
+  `GHProblem`, set by a `with_matter`. It was rejected for two reasons.
+  - The adapter is a snapshot that a coupled run replaces at every stage.
+  - A field would have had to pass through `with_interior`, `refill_target`
+    and the checkpoint's carried state.
+
+  GH-4's `rhs!` is to forward to the keyword.
+- **The seventh `Val`.** `W`, the SIMD width, became the right-hand-side
+  kernel's sixth `Val` on 2026-10-05, and GH-3's `HASMATTER` became the
+  seventh on 2026-11-09.
+  - It is the one `Val` not built in `GHProblem`'s constructor: `gh_rhs!`
+    builds it from the bound adapter's type.
+  - It goes last in the kernel's arguments with the adapter, so that
+    `bench/rhs_cpu_lab.jl`, which slices the argument list by position, kept
+    working.
+- **The physical test** was added at Erik's request, 2026-11-09: "anti-Cowling",
+  the matter held fixed and the spacetime evolved, on an analytic static star
+  in the quick tier (Erik's choice over a TOV star solved in the test).
+  - The acceptance first used a separate bump metric, a lapse, conformal and
+    shift bump on `(−2, 2)³`.
+  - It was replaced by the same star in a tilted slicing, because
+    `EinsteinTensor` costs 75 s to compile per metric type.
+  - The star's first box, `(−4, 4)³`, was too coarse for `N = 8 … 16`: `ℳ_i`
+    converged at 3.29 there.
 
 ## Public access to the vertex metric
 

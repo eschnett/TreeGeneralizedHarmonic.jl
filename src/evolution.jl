@@ -241,7 +241,8 @@ is a call on a device whether or not inlining is forced.
 """
 @inline function gh_rhs_head(::Type{T}, work, Hwork, inner, b::Int, var::Int, st,
                              sv::Int, inv_h, γ0, γ2, εh, ::Val{q}, ::Val{HASH},
-                             ::Val{DISS}) where {T,q,HASH,DISS}
+                             ::Val{DISS}, mat=nothing,
+                             ::Val{HASMATTER}=Val(false)) where {T,q,HASH,DISS,HASMATTER}
     w1 = derivative_weights(T, Val(q), Val(1))
     wD = dissipation_weights(T, dissipation_rank(Val(q)))
 
@@ -265,6 +266,13 @@ is a call on a device whether or not inlining is forced.
     #     (added 2026-10-02).
     Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), hv, ∂ₜh, ∂h)
     msrc = gh_node_source_lean(g4, gu4, α, sqrtγ, ∂ₜh, ∂h, Hl, dHl, γ0, γ2)
+    # The matter's term (GH-3, added 2026-11-09): the adapter is called here, where
+    # the source is formed, so that its ten values are live only while they are
+    # added in; `T_ab` is assembled with this point's own lapse and shift.
+    if HASMATTER
+        m = matter_at(T, mat, inner, b)
+        msrc = msrc + matter_source(g4, α, β, γu, sqrtγ, m.ρ, m.S, m.Sij)
+    end
 
     # (4) the coefficients of the Π components.
     A = _scale(α * sqrtγ, γu)                     # A^{jk} = α√γ γ^{jk}
@@ -347,9 +355,11 @@ against 8.5 for step 3's kernel (`CODE.md`, "The right-hand side on an H200").
 """
 @inline function gh_rhs_store!(du, o::Int, sd::Int, ::Type{T}, work, Hwork, inner,
                                b::Int, var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
-                               ::Val{q}, ::Val{HASH}, ::Val{DISS}) where {T,q,HASH,DISS}
+                               ::Val{q}, ::Val{HASH}, ::Val{DISS}, mat=nothing,
+                               ::Val{HASMATTER}=Val(false)) where {T,q,HASH,DISS,
+                                                                  HASMATTER}
     head = gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
-                       Val(q), Val(HASH), Val(DISS))
+                       Val(q), Val(HASH), Val(DISS), mat, Val(HASMATTER))
     ∂ₜh = head.∂ₜh
     @nexprs 10 v -> (@inbounds du[o + (v - 1) * sd] = ∂ₜh[v])
     msrc = head.msrc
@@ -397,9 +407,11 @@ contracted into fused multiply-adds differently (`CODE.md`, "Measured results").
 @inline function gh_rhs_at_point(::Type{T}, work, Hwork, inner, b::Int,
                                  var::Int, st, sv::Int, inv_h, γ0, γ2, εh,
                                  ::Val{q}, ::Val{HASH},
-                                 ::Val{DISS}) where {T,q,HASH,DISS}
+                                 ::Val{DISS}, mat=nothing,
+                                 ::Val{HASMATTER}=Val(false)) where {T,q,HASH,DISS,
+                                                                    HASMATTER}
     head = gh_rhs_head(T, work, Hwork, inner, b, var, st, sv, inv_h, γ0, γ2, εh,
-                       Val(q), Val(HASH), Val(DISS))
+                       Val(q), Val(HASH), Val(DISS), mat, Val(HASMATTER))
     msrc = head.msrc
     ∂ₜΠ = SVector{NC,T}(@ntuple 10 v ->
         gh_rhs_pi(T, work, var, st, sv, v, inv_h, εh, head, Val(q), Val(DISS)) + msrc[v])
@@ -420,7 +432,9 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
 @inline function gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2,
                                ε_KO, interior, t, tw, t_f, rate, trail, fitp, I,
                                ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS},
-                               ::Val{INT}) where {G,q,HASH,DISS,INT}
+                               ::Val{INT}, mat=nothing,
+                               ::Val{HASMATTER}=Val(false)) where {G,q,HASH,DISS,INT,
+                                                                  HASMATTER}
     b = I[4]
     inner = (I[1], I[2], I[3])                    # state-layout index
     T = eltype(du)
@@ -462,7 +476,7 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
         # backend forces inlining (`CODE.md`, "The right-hand side on an H200").
         o, sd = state_offset(du, I)
         gh_rhs_store!(du, o, sd, T, work, Hwork, inner, b, var, st, sv, inv_h, γ0,
-                      γ2, εh, Val(q), Val(HASH), Val(DISS))
+                      γ2, εh, Val(q), Val(HASH), Val(DISS), mat, Val(HASMATTER))
     else
         # The interior's view of the point (step 8d): the radius for step
         # 5's sphere, and for the tracked geometry the radius with the two
@@ -552,7 +566,7 @@ no lanes for) or for each point of a group of `W` that straddles the hole's laye
         else
             ∂ₜh, ∂ₜΠ = gh_rhs_at_point(T, work, Hwork, inner, b, var, st, sv,
                                        inv_h, γ0, γ2, εh, Val(q), Val(HASH),
-                                       Val(DISS))
+                                       Val(DISS), mat, Val(HASMATTER))
             if is_outside(interior, g)
                 ntuple(Val(NC)) do v
                     du[inner..., v, b] = ∂ₜh[v]
@@ -686,7 +700,9 @@ speed check read it.
 @inline function gh_rhs_lanes!(du, work, Hwork, origins, spacings, bg, damping, γ2,
                                ε_KO, interior, t, tw, t_f, rate, trail, fitp, I,
                                ::Val{W}, ::Val{G}, ::Val{q}, ::Val{HASH}, ::Val{DISS},
-                               ::Val{INT}) where {W,G,q,HASH,DISS,INT}
+                               ::Val{INT}, mat=nothing,
+                               ::Val{HASMATTER}=Val(false)) where {W,G,q,HASH,DISS,INT,
+                                                                  HASMATTER}
     b = I[4]
     inner = (I[1], I[2], I[3])                    # the first lane's index
     T = eltype(du)
@@ -707,11 +723,12 @@ speed check read it.
     o, sd = state_offset(du, I)
     if INT === :none
         gh_rhs_store!(dl, o, sd, V, wl, Hl, inner, b, var, st, sv, inv_h, γ0, V(γ2),
-                      εh, Val(q), Val(HASH), Val(DISS))
+                      εh, Val(q), Val(HASH), Val(DISS), mat, Val(HASMATTER))
     elseif all(ntuple(l -> is_outside(interior, interior_point(interior, t, xs[l])),
                       Val(W)))
         ∂ₜh, ∂ₜΠ = gh_rhs_at_point(V, wl, Hl, inner, b, var, st, sv, inv_h, γ0, V(γ2),
-                                   εh, Val(q), Val(HASH), Val(DISS))
+                                   εh, Val(q), Val(HASH), Val(DISS), mat,
+                                   Val(HASMATTER))
         @nexprs 10 v -> (dl[o + (v - 1) * sd] = ∂ₜh[v])
         @nexprs 10 v -> (dl[o + (NC + v - 1) * sd] = ∂ₜΠ[v])
     else
@@ -719,7 +736,7 @@ speed check read it.
             gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
                           interior, t, tw, t_f, rate, trail, fitp,
                           (I[1] + l - 1, I[2], I[3], b), Val(G), Val(q), Val(HASH),
-                          Val(DISS), Val(INT))
+                          Val(DISS), Val(INT), mat, Val(HASMATTER))
         end
     end
     return nothing
@@ -728,7 +745,8 @@ end
 """
     gh_rhs_kernel!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
                    interior, t, tw, t_f, rate, trail, fitp, ::Val{G}, ::Val{q},
-                   ::Val{HASH}, ::Val{DISS}, ::Val{INT}, ::Val{W})
+                   ::Val{HASH}, ::Val{DISS}, ::Val{INT}, ::Val{W}, mat,
+                   ::Val{HASMATTER})
 
 The right-hand side at one owned point: `F(u)`, modified inside the hole by
 `CODE.md`'s `(INTERIOR)`,
@@ -744,13 +762,20 @@ terms.
 comes); `work` is the ghosted working array (so the same index plus `G`).
 `Hwork` is the gauge source's working array or `nothing`.
 
-The **six** `Val`s are built once per chunk in [`GHProblem`](@ref) and
+The first **six** `Val`s are built once per chunk in [`GHProblem`](@ref) and
 resolved when the kernel compiles: the ghost width, the difference order,
 whether there is a gauge source, whether there is dissipation, — added
 in step 5 — which of `CODE.md`'s interior variants is running, `:none`
 meaning there is no hole, and — added 2026-10-05 — the SIMD width `W`. Building
 them per evaluation would recompile or dispatch dynamically at every RK stage
-(`CLAUDE.md`).
+(`CLAUDE.md`). The **seventh**, `HASMATTER` (added 2026-11-09, GH-3), says whether
+`mat` is a bound matter adapter or `nothing`; [`gh_rhs!`](@ref) builds it from the
+adapter's *type*, so it is as static as the other six. With `false` the kernel is
+today's, bit for bit; with `true` the head adds [`matter_source`](@ref) to the
+source, so the matter is part of `F` — weighted by `w` in a layer, never asked for
+in a frozen core (`CODE.md`, "What this package takes (GH-3)"). `mat` and its
+`Val` come last, after `W`, so that the benchmarks that slice the argument list
+keep their positions.
 
 **`W` points at a time on the CPU** (added 2026-10-05; `CODE.md`, "The right-hand
 side on a CPU"). With `W = 1` — every device, and the types SIMD.jl has no lanes
@@ -796,16 +821,17 @@ evolved region — `u_exact` is evaluated in the layer and nowhere else.
                                 interior, t, tw, t_f, rate, trail, fitp,
                                 ::Val{G}, ::Val{q},
                                 ::Val{HASH}, ::Val{DISS},
-                                ::Val{INT}, ::Val{W}) where {G,q,HASH,DISS,INT,W}
+                                ::Val{INT}, ::Val{W}, mat,
+                                ::Val{HASMATTER}) where {G,q,HASH,DISS,INT,W,HASMATTER}
     I = @index(Global, NTuple)                    # (i1, i2, i3, block)
     if W == 1
         gh_rhs_point!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
                       interior, t, tw, t_f, rate, trail, fitp, I, Val(G), Val(q),
-                      Val(HASH), Val(DISS), Val(INT))
+                      Val(HASH), Val(DISS), Val(INT), mat, Val(HASMATTER))
     elseif is_lane_leader(I[1], size(du, 1), W)
         gh_rhs_lanes!(du, work, Hwork, origins, spacings, bg, damping, γ2, ε_KO,
                       interior, t, tw, t_f, rate, trail, fitp, I, Val(W), Val(G),
-                      Val(q), Val(HASH), Val(DISS), Val(INT))
+                      Val(q), Val(HASH), Val(DISS), Val(INT), mat, Val(HASMATTER))
     end
 end
 
@@ -1187,12 +1213,30 @@ gauge_work(fs::FieldSet) = fs.work
 gauge_work(src::KerrSchildSource) = src
 
 """
-    gh_rhs!(du, u, p::GHProblem, t)
+    gh_rhs!(du, u, p::GHProblem, t; matter = nothing)
 
 One right-hand-side evaluation, in SciML's `f!(du, u, p, t)` signature:
 scatter the state into the working array, fill the ghosts (with the
 Dirichlet hook of this `t`, where the case has a physical boundary), and
 launch the fused kernel.
+
+**`matter`** (added 2026-11-09; GH-3 of the coupling contract with TreeGRRMHD,
+`CODE.md`, "What this package takes (GH-3)") is `nothing` — vacuum, the kernel
+of before, bit for bit — or a matter adapter: a host object that, bound to this
+package's field set,
+
+```julia
+at = matter(p.U)              # once per call, here
+(; ρ, S, Sij) = at(n, b)      # in the kernel, at an owned vertex
+```
+
+returns the stress-energy's 3+1 projections at the owned index `n` (`1 ≤ n[d] ≤
+N`) of local block `b`: `ρ = n^a n^b T_ab`, `S_i = −γ_i^a n^b T_ab` as an
+`SVector{3}` and `S_ij = γ_i^a γ_j^b T_ab` as a symmetric `SMatrix{3,3}`, of the
+state's element type, covariant and not densitized. The bound object is a kernel
+argument: `isbits` once adapted to the backend, and device-clean — on a device it
+is called inside the hottest kernel there is. On the CPU's lanes it is called once
+per lane. The term it feeds is [`matter_source`](@ref).
 
 Three steps and nothing between them — TreeAMR's contract, `CODE.md`'s
 "One right-hand-side evaluation". **`u` is never mutated**: the working
@@ -1204,24 +1248,42 @@ That is not a cost worth avoiding — it is a closure over two `isbits`
 values — and the alternative is a boundary that lags the solution by up to
 a chunk (`CLAUDE.md`, "Hooks depend on time").
 """
-function gh_rhs!(du, u, p::GHProblem, t)
+function gh_rhs!(du, u, p::GHProblem, t; matter=nothing)
     scatter!(p.U, u)
     if p.hasdirichlet
         fill_ghosts!(p.U, p.schedule; boundary=dirichlet(p.case, t))
     else
         fill_ghosts!(p.U, p.schedule)
     end
-    map_blocks!(gh_rhs_kernel!, p.U, gh_rhs_kernel_args(p, du, t)...)
+    map_blocks!(gh_rhs_kernel!, p.U,
+                gh_rhs_kernel_args(p, du, t, bind_matter(matter, p.U))...)
     return nothing
 end
 
 # The kernel's arguments, in one place (added 2026-10-05): `gh_rhs!` and the
-# benchmarks that launch the kernel by itself (`bench/`) build them alike.
-gh_rhs_kernel_args(p::GHProblem, du, t) =
+# benchmarks that launch the kernel by itself (`bench/`) build them alike. The
+# bound matter adapter and its `Val` come last (added 2026-11-09).
+gh_rhs_kernel_args(p::GHProblem, du, t, at=nothing) =
     (statearray(du, p.U), p.U.work, gauge_work(p.Hsrc), p.origins, p.spacings,
      p.case.background, p.case.γ0, p.case.γ2, p.case.ε_KO, p.interior,
      eltype(p.U.work)(t), target_work(p.target), p.t_target, p.target_rate, p.trail,
-     _exact_fit(p), p.valG, p.valq, p.valH, p.valdiss, p.valint, p.valsimd)
+     _exact_fit(p), p.valG, p.valq, p.valH, p.valdiss, p.valint, p.valsimd,
+     at, has_matter(at))
+
+# A matter adapter bound to the state's field set, or `nothing` for vacuum
+# (GH-3, added 2026-11-09). The binding is the adapter's own — it checks that the
+# field set is one it can answer for — and happens on the host, once per call.
+bind_matter(::Nothing, U) = nothing
+bind_matter(matter, U) = matter(U)
+
+# The kernel's seventh `Val`, from the bound adapter's type, so that it folds.
+has_matter(::Nothing) = Val(false)
+has_matter(at) = Val(true)
+
+# The matter at one point, `(; ρ, S, Sij)` (GH-3). For a scalar type the adapter is
+# called once, directly: on a device that is the whole path, with no closure. The
+# CPU's lanes have their own method in `lanes.jl`.
+@inline matter_at(::Type{T}, at, inner, b::Int) where {T} = at(inner, b)
 
 """
     gh_step_limiter!(u, integrator, p::GHProblem, t)

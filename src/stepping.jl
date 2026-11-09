@@ -93,8 +93,18 @@ end
 _gh_rhs_ref!(du, u, r::ProblemRef, t) = gh_rhs!(du, u, r.p, t)
 _gh_limiter_ref!(u, integ, r::ProblemRef, t) = gh_limiter!(u, integ, r.p, t)
 
+# The right-hand side with a matter adapter held fixed (GH-3, added 2026-11-09):
+# what [`gh_integrator`](@ref) passes in place of `gh_rhs!` when it is given
+# `matter`. A struct and not a closure, so that its type names the adapter's.
+struct MatterRHS{M}
+    matter::M
+end
+(f::MatterRHS)(du, u, p::GHProblem, t) = gh_rhs!(du, u, p, t; matter=f.matter)
+(f::MatterRHS)(du, u, r::ProblemRef, t) = gh_rhs!(du, u, r.p, t; matter=f.matter)
+
 """
-    gh_integrator(p::GHProblem, u, tspan; dt, alias_u0 = false, swappable = false)
+    gh_integrator(p::GHProblem, u, tspan; dt, alias_u0 = false, swappable = false,
+                  matter = nothing)
 
 A fixed-step RK4 integrator for `p` from `u` over `tspan = (t0, t1)`, in
 steps of at most `dt` — IMEXRungeKutta's `init(IMEXProblem(gh_rhs!, nothing,
@@ -135,32 +145,43 @@ regrid. The two share the scratch and must not step at the same time.
 steps (`integ.p.p = p′`) — how [`evolve!`](@ref) refills a moving hole's
 target within one chunk on one integrator. `p′` must be a problem on the
 same field set.
+
+**`matter`** (GH-3, added 2026-11-09) is [`gh_rhs!`](@ref)'s: a matter adapter that
+every right-hand side of the integration binds and reads, or `nothing` for vacuum,
+which is the integrator of before. It is **held fixed**: the adapter answers with
+whatever it holds, at every stage and every step, so an integration with matter is
+the spacetime evolving under a stress-energy that does not — the "anti-Cowling"
+setting `test/matter_tests.jl` runs. A coupled run, whose matter moves, calls
+`gh_rhs!` stage by stage itself.
 """
 function gh_integrator(p::GHProblem{T}, u, tspan; dt, alias_u0::Bool=false,
-                       swappable::Bool=false, reuse=nothing) where {T}
+                       swappable::Bool=false, reuse=nothing,
+                       matter=nothing) where {T}
     t0, t1 = T(tspan[1]), T(tspan[2])
     part = state_partition(p.U, u)
     if swappable
-        return IRK.init(IRK.IMEXProblem(_gh_rhs_ref!, nothing, u, (t0, t1),
+        f = matter === nothing ? _gh_rhs_ref! : MatterRHS(matter)
+        return IRK.init(IRK.IMEXProblem(f, nothing, u, (t0, t1),
                                         ProblemRef(p)), IRK.RK4();
                         dt=T(dt), stage_limiter=_gh_limiter_ref!,
                         step_limiter=_gh_limiter_ref!, partition=part,
                         alias_u0=alias_u0, reuse=reuse)
     end
-    return IRK.init(IRK.IMEXProblem(gh_rhs!, nothing, u, (t0, t1), p), IRK.RK4();
+    f = matter === nothing ? gh_rhs! : MatterRHS(matter)
+    return IRK.init(IRK.IMEXProblem(f, nothing, u, (t0, t1), p), IRK.RK4();
                     dt=T(dt), stage_limiter=gh_limiter!, step_limiter=gh_limiter!,
                     partition=part, alias_u0=alias_u0, reuse=reuse)
 end
 
 """
-    gh_solve(p::GHProblem, u, tspan; dt, alias_u0 = false) -> u′
+    gh_solve(p::GHProblem, u, tspan; dt, alias_u0 = false, matter = nothing) -> u′
 
 Integrate `p` from `u` over `tspan` with [`gh_integrator`](@ref) and return
 the state at `tspan[2]`: a fresh vector, or `u` itself, updated in place,
-with `alias_u0 = true`.
+with `alias_u0 = true`. `matter` is the integrator's, held fixed.
 """
-function gh_solve(p::GHProblem, u, tspan; dt, alias_u0::Bool=false)
-    integ = gh_integrator(p, u, tspan; dt=dt, alias_u0=alias_u0)
+function gh_solve(p::GHProblem, u, tspan; dt, alias_u0::Bool=false, matter=nothing)
+    integ = gh_integrator(p, u, tspan; dt=dt, alias_u0=alias_u0, matter=matter)
     IRK.solve!(integ)
     return integ.u
 end

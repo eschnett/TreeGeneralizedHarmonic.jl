@@ -150,8 +150,10 @@ research project; the inherited documents live in `notes/`.
 
 ## Scope and non-goals
 
-- **Vacuum only.** No matter, no scalar field. The reduced source keeps
-  the algebraic slot where a stress-energy term would enter. TreeGRRMHD's GH-3 will fill that slot from `(ρ, S_i, S_ij)`
+- **Vacuum, unless a coupled code supplies the matter.** This package
+  evolves no matter and no scalar field of its own. The reduced source has
+  the algebraic slot where a stress-energy term enters, and TreeGRRMHD's
+  GH-3 fills it from `(ρ, S_i, S_ij)`, through `gh_rhs!`'s `matter`
   ([The coupling contract with
   TreeGRRMHD](#the-coupling-contract-with-treegrrmhd)).
 - **Second order in space, first order in time** (see
@@ -903,7 +905,8 @@ CPU](#the-right-hand-side-on-a-cpu).
 The kernel's body is `gh_rhs_point!` (one point) and `gh_rhs_lanes!` (a
 group). `W` is the sixth kernel `Val`, `1` on a device or for a software
 type, and `simd_width = 1` asks for the scalar kernel, also through
-`evolve!`.
+`evolve!`. The seventh, `HASMATTER`, says whether a matter adapter is
+passed ([What this package takes (GH-3)](#what-this-package-takes-gh-3)).
 
 ### The time step
 
@@ -3880,51 +3883,133 @@ at  = adm(M)                    # bound to the consumer's vertex set M
 ### What this package takes (GH-3)
 
 ```julia
-TreeGH.rhs!(du, p, t; matter = nothing)   # GH-4's verb
-at = matter(U)                            # bound to this package's vertex set
-(; ρ, S, Sij) = at(n, b)                  # at an owned vertex
+gh_rhs!(du, u, p, t; matter = nothing)     # GH-4's `rhs!` will forward to it
+at = matter(p.U)                           # bound to this package's field set, once a call
+(; ρ, S, Sij) = at(n, b)                   # in the kernel, at an owned vertex
 ```
 
-- **The adapter.** `matter` is `nothing` or TreeGRRMHD's adapter. The
-  kernel calls it at its owned vertices with the owned index, and never
-  stores the result. `S` is an `SVector{3,T}`, `Sij` a symmetric
-  `SMatrix{3,3,T}`. It adds a seventh kernel `Val`, `HASMATTER`
-  (`W` is the sixth). With `false` the kernel is bit for bit
-  today's.
-- **The term.** The head's `metric_quantities` give this point's `α`, `β^i`
-  and `γ^ij`. With them the covariant `T_ab` is
+The matter enters through a keyword on `gh_rhs!` and not through `GHProblem`
+([history](HISTORY.md#building-gh-3-2026-11-09)). The adapter is a snapshot
+of TreeGRRMHD's state, and a coupled run passes a new one at every stage.
+
+- **The adapter.**
+  - `matter` is `nothing` (vacuum) or TreeGRRMHD's adapter.
+  - `gh_rhs!` binds it to the state's field set on the host, and the
+    binding checks that it can answer for that set.
+  - The kernel calls the bound object at its owned vertices with the owned
+    index and never stores the result. `S` is an `SVector{3,T}` and `Sij` a
+    symmetric `SMatrix{3,3,T}`.
+  - It is the kernel's seventh `Val`, `HASMATTER` (`W` is the sixth). Unlike
+    the other six it is built in `gh_rhs!`, from the bound adapter's *type*,
+    so it is just as static. `mat` and its `Val` are the kernel's last two
+    arguments, after `W`, so the benchmarks that slice the argument list keep
+    their positions.
+  - With `false` the kernel is the vacuum one, bit for bit (measured below).
+- **The term** is `matter_source` (`src/pointwise.jl`). The head's
+  `metric_quantities` give this point's `α`, `β^i` and `γ^ij`. With them the
+  covariant `T_ab` is
   ```
   T_tt = α² ρ − 2α β^i S_i + β^i β^j S_ij
   T_ti = −α S_i + β^j S_ij
   T_ij = S_ij
   T    = γ^ij S_ij − ρ
   ```
-  and the source gains `16π α √γ (T_ab − g_ab T/2)` in the packed order.
-  The reasoning is GH-3's, from `notes/formulation.md` §1: `R_ab = 8π(T_ab −
-  g_ab T/2)` moves `S0` by `−16π T̄_ab`, and the source enters as
-  `−α√γ S0`. The acceptance test below is what pins the sign. Inside an
-  interior layer the term is weighted by `w`, like the rest of `F`. `∂ₜh` is
-  unchanged.
-- **The monitors** subtract `16πρ` from `ℋ` and `8πS_i` from `ℳ_i`
-  directly; these are the quantities that cross. The ADM monitor
-  reconstructs `∂ₜ∂ₜg` from `∂ₜΠ`, which carries the term. It needs the
-  matter at the point only, so the owned vertices suffice. `gh_constraint!`
-  is unchanged.
+  and the source gains `16π α√γ (T_ab − g_ab T/2)` in the packed order.
+  - It is written as `α√γ (16π T_ab − 8π g_ab T)`, so that nothing is halved.
+  - The reasoning comes from `notes/formulation.md` §1. `R_ab = 8π(T_ab −
+    g_ab T/2)` moves `S0` by `−16π T̄_ab`, and the source enters as
+    `−α√γ S0`. The acceptance test is what pins the sign.
+  - `gh_rhs_head` adds the term right after `gh_node_source_lean`, so it is
+    part of `F`. Inside an interior layer it is weighted by `w`, like the rest
+    of `F`. In a frozen core `F` is not evaluated, so the adapter is never
+    asked there. `∂ₜh` is unchanged.
+- **The monitors.** `adm_constraint!(p, u, t; matter)` takes the same keyword.
+  - It subtracts `16πρ` from `ℋ` and `8πS_i` from `ℳ_i` directly; these are
+    the quantities that cross.
+  - The ADM monitor reconstructs `∂ₜ∂ₜg` from `∂ₜΠ`, and that `∂ₜΠ` gains the
+    same `matter_source`. The term is added outside `gh_node_rhs_expanded`, so
+    the three spellings of the vacuum source stay as `pointwise_identity_tests`
+    compares them.
+  - It needs the matter at the point only, so the owned vertices suffice.
+  - `gh_constraint!` is unchanged, and so is the driver's record, which runs
+    in vacuum.
+- **The integrator.** `gh_integrator` and `gh_solve` take `matter` too.
+  - They pass `gh_rhs!` with the adapter **held fixed** at every stage of
+    every step. That is a spacetime evolving under a stress-energy that does
+    not change: the anti-Cowling test below, and nothing a coupled run uses.
+  - A coupled run's script calls `gh_rhs!` stage by stage itself.
 - **The kernel price.** The adapter runs inside the right-hand side's
   kernel, the hottest code here.
   - It must be device-clean in the sense of `CLAUDE.md`'s "On a device a
     closure is a call". An uninlined call with `SVector` arguments costs what
-    took the kernel from 8.5 to 1.1 ns a point on the H200.
+    took the kernel from 8.5 to 1.1 ns a point on the H200. On a device the
+    head calls it directly, with no closure.
   - On the CPU it is called once per SIMD lane, and the `W` results are
-    packed into `Vec`s.
-  - Its 10 values add to the head's live set. Where the term is formed in
-    streaming order is GH-3's to measure, in the SASS's spills.
-- **Acceptance** is GH-3's, with the matter in its new form.
-  - `HASMATTER = false` is bit for bit today's kernel.
-  - Take a static non-vacuum metric. Pass as matter the projections
-    `(ρ, S_i, S_ij)` of `G_ab/8π`, from SpacetimeMetrics' `EinsteinTensor`.
-    The right-hand side then vanishes at order `q`. The matter-corrected `ℋ`
-    and `ℳ_i` vanish at order `q`, and do not without the matter.
+    packed into `Vec`s (`matter_at` in `src/lanes.jl`).
+  - Its 10 values add to the head's live set. The head calls the adapter
+    where it forms the source, so the 10 values are live only while they are
+    added in. On the H200 that costs no time (measured below).
+
+**Measured** (2026-11-09, `test/matter_tests.jl`, four testsets and 20
+claims, quick tier).
+
+- **Vacuum is bit for bit the kernel of before.** `du` was hashed before and
+  after the change at `simd_width = 1` and at the default width on four
+  cases: the gauge wave, the hole fixture (`:damped`, a sampled source), the
+  octant hole (the algebraic source) and a static non-harmonic bump. The ADM
+  monitor's `diag` was hashed on two of them. Every hash agrees.
+- **The fixture.** A static star: Plummer's mass function and potential in
+  areal coordinates, `M = 1/10`, `R = 1`, in the box `(−2, 2)³`. Its matter is
+  `G_ab/8π` from SpacetimeMetrics' `EinsteinTensor`, sampled at the owned
+  vertices by a test adapter. For the acceptance the slicing is tilted,
+  `t → t + λ√(r² + R²)` with `λ = 3/10`, which makes the shift, `K_ij` and `S_i`
+  nonzero.
+- **Acceptance.** On the exact data, with its matter, these vanish at order
+  `q = 4`:
+  - the right-hand side, with rates 3.76, 3.87 and 3.92 pair by pair from
+    `N = 8` to `20` (`roots = 2`);
+  - the matter-corrected `ℋ`: 3.75, 3.87, 3.92;
+  - `ℳ_i`: 3.71, 3.85, 3.91.
+
+  Without the matter all three stay at the matter's size (rates within
+  `0.01` of zero), 870–2450 times larger at `N = 16`.
+- **SIMD.** With matter at `W = 4`, the lanes and the scalar kernel agree
+  bit for bit on aarch64. On Symmetry's EPYC 7543 (AVX2) they agree to
+  0.56 eps of the terms; there the two contract FMAs differently.
+- **Anti-Cowling.** The star's exact data, at rest (`λ = 0`) and at the
+  recipe's `ε_KO = 1/2`, evolved to `t = 4` (two light-crossing times of
+  `2R`) with the matter held fixed:
+  - they stay on the star at an error converging at 3.81 and 4.00 pair by
+    pair from `N = 8` to `16`;
+  - the constraints converge at 3.60–3.87 pair by pair.
+
+  The same data evolved without the matter end `4800×` further from the star
+  at `N = 16` (`1.4 × 10⁻²` against `2.9 × 10⁻⁶`): the matter is what holds
+  the star static.
+- **On an H200** (Symmetry jobs 594179 and 594183, `Float64`, the star at
+  `q = 4`, `ε_KO = 1/2`, a sampled gauge source):
+  - **The kernel's price.** It runs at `1.47` ns a point with matter and
+    `1.52` without, on 64 blocks of `32³` (2.1 M points): no measurable cost.
+  - **The SASS.** Both kernels use 253 registers. With matter the kernel has
+    6672 instructions against 6464, and its spill traffic is `STL` 339 and
+    `LDL` 424 against 328 and 421; the vacuum kernel already spills on this
+    case. There is no `CALL` into the adapter, only CUDA's division, `sqrt`
+    and reciprocal slow paths and the exception paths, as in vacuum.
+  - **Against the CPU.** `du` with matter agrees with the CPU's scalar kernel
+    to `2.2e−14`. That is 1.18 times one second-derivative stencil's roundoff,
+    `eps · max|u| · Σ|w₂|/h²`, and the right-hand side sums six such
+    stencils. The matter-corrected `ℋ` and `ℳ_i` agree to 36 eps of the
+    vacuum constraints.
+  - **Anti-Cowling on the device.** The run to `t = 4` reproduces the CPU's
+    errors to `2.3 × 10⁻¹³` relative, converging at 3.89.
+- **The full suite on Symmetry** (job 594178, EPYC 7543, four threads)
+  passes 5721 of 5721 in 25m21, with this file in about 2 minutes.
+- **Cost.** The file takes 75 s inside the quick tier at four threads (12m22
+  for the whole tier), or 2m35 when run alone. Most of it is compiling
+  `EinsteinTensor` for the star's type (about 75 s alone, three layers of
+  duals). That is why
+  one metric type serves every testset: a second type would cost another
+  75 s.
 
 ### Why 3+1 variables at the vertices
 
@@ -3960,8 +4045,9 @@ at = matter(U)                            # bound to this package's vertex set
 - the adapter's name (`ADMMetric`; `ADMVars` is ApparentHorizonFinder's);
 - whether GH-4's `prepare!` returns the adapter, or `ADMMetric(p, u, t)` stays
   the way to fill and wrap at once;
-- the implementation of GH-3 and GH-4, which is not started;
-- an H200 run of the adapter (Metal only so far).
+- the implementation of GH-4, which is not started; GH-3 is done (above);
+- an H200 run of the metric adapter (Metal only so far); the matter term
+  has run there (above).
 
 ## Public access to the vertex metric
 
@@ -4758,7 +4844,7 @@ says that TreeAMR's `[compat]` selects **0.1.1**.
 | `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host |
 | `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source`, and `metric_derivatives_along` — the same chain rule along **one** direction, returning `∂√γ` and `∂γ^{jk}` rather than the assembled `∂(α√γγ^{jk})`, which is what the constraint monitors need along *time* — and `_pairindex`, the packed slot of a symmetric index pair, so that the file has one packing convention used on two index pairs; `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q`: `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2`; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions the streaming kernel has to agree with |
-| `src/evolution.jl` | the fused RHS kernel in streaming order, the linear-index stencil contractions it evaluates, `GHProblem` with the **six** `Val`s (the SIMD width the sixth) and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. The streaming body is split out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and the file has `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
+| `src/evolution.jl` | the fused RHS kernel in streaming order, the linear-index stencil contractions it evaluates, `GHProblem` with the **six** `Val`s (the SIMD width the sixth) and the per-chunk geometry, `gh_rhs!` (whose `matter` adds the kernel's seventh, `HASMATTER`, GH-3), the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. The streaming body is split out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and the file has `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
 | `src/lanes.jl` | the right-hand-side kernel's SIMD lanes on the CPU: `default_simd_width` and `check_simd_width`, `Lanes` (an array read and written `W` consecutive elements at a time, with the `Const` wrapper unwrapped), `is_lane_leader` (every `W`-th item, and the overlapping last group of a row), and the `Vec` methods of `pointwise.jl`'s `_anynonzero` and `_select`; the kernel's group is `evolution.jl`'s `gh_rhs_lanes!` |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is; the two `γ0` profiles and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook, and the declarations TreeAMR's symmetries ask of every field set: the parities of the reflecting faces (`state_parity`, `even_parity`) and the signed maps of the rotating seam (`state_rotation`, `identity_rotation`) |
@@ -4774,7 +4860,7 @@ says that TreeAMR's `[compat]` selects **0.1.1**.
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's. `GHCase` is in `initialdata.jl` |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop (after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions. The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl`: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. The hole has `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here (following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`). The range projection has `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. The layer's calibration has the E3 target `CurvatureTarget` in `evolution_cases.jl`, its claims in `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. The tracked geometry has `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and `evolution_cases.jl`'s shell norms are the interior's own `shell_mask`. The fitted target has `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and `fitted_fixture` is in `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` has a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`) |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop (after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions. The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl`: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. The hole has `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here (following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`). The range projection has `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. The layer's calibration has the E3 target `CurvatureTarget` in `evolution_cases.jl`, its claims in `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. The tracked geometry has `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and `evolution_cases.jl`'s shell norms are the interior's own `shell_mask`. The fitted target has `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and `fitted_fixture` is in `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` has a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`); GH-3's matter term has `matter_tests.jl` — the acceptance on a static star with its `EinsteinTensor` matter, the lanes with matter, the anti-Cowling run, and a test adapter (`SampledMatter`) shaped as TreeGRRMHD's will be |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 **Inconsistent:** the `test/` row says `prerequisite_tests.jl` checks what
