@@ -1,6 +1,6 @@
 # Robust stability: white noise on flat space, a thousand steps.
 #
-# `CODE.md`, milestone G2, and the second of GHSO2's findings under
+# `PLAN.md`, milestone G2, and the second of GHSO2's findings under
 # "sonic-surface instability" (`notes/methods-ghso2.md`): the
 # generalized-harmonic system on a finite-difference mesh grows a
 # grid-scale mode that Kreiss–Oliger dissipation at `ε_KO ≈ 0.5` removes.

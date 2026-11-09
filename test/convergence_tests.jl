@@ -1,7 +1,7 @@
 # The order of the scheme, measured by evolving solutions that are known
 # exactly.
 #
-# `CODE.md`, milestone G2. This is the file the whole of steps 1–3 exists
+# `PLAN.md`, milestone G2. This is the file the whole of steps 1–3 exists
 # to make possible: the pointwise algebra, the stencils and the streaming
 # kernel are all correct in the only sense that matters here, which is
 # that the error against an analytic solution falls like `h^q`.

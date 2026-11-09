@@ -7,7 +7,7 @@
 # own chart — harmonic Kerr at `a = 7/10`, whose analytic core cuts the
 # singular disk — has one.
 #
-# `CODE.md`, milestone G5, "Refinement and regridding" (what follows for the
+# `PLAN.md`, milestone G5; `CODE.md`, "Refinement and regridding" (what follows for the
 # hole) and "Boundaries: Dirichlet"; `PLAN.md`'s step 8. The runs that cross
 # the box are `test/hole_runs.jl moving`, minutes to hours on a node, and not
 # here. Every claim below is host-side or one initial-data cycle; the one
