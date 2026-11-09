@@ -2,7 +2,7 @@
 # vanish where the solution is exact, and that they converge where it is
 # not.
 #
-# `CODE.md`, "Analysis quantities", and milestone G3. A monitor is only
+# `CODE.md`, "Analysis quantities", and `PLAN.md`'s milestone G3. A monitor is only
 # worth recording if it is zero on a solution and order `q` on a
 # discretization of one, and the two halves need different settings to say
 # so:

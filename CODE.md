@@ -9,7 +9,7 @@ finite-difference scheme, no conservation) and
 [TreeHydro](../TreeHydro) (a finite-volume scheme, conservation at
 coarse-fine faces). Its end goal is a production code; what this
 document specifies is the **proof of concept** that comes first, and
-the milestones below stop where the proof is made.
+the milestones in [`PLAN.md`](PLAN.md) stop where the proof is made.
 
 The physics is not new to this author's packages: the formulation, the
 pointwise algebra, the constraint damping, the gauge sources and the
@@ -20,36 +20,27 @@ citable, so the documents this design rests on are **copied verbatim
 into [`notes/`](notes/README.md)** and cited from there. What is new is
 the mesh: finite differences with ghost zones on an octree of uniform
 blocks, a global time step, regridding driven by an error indicator, and
-— through the mesh — threads, GPUs and MPI (TreeAMR's M7, in use from
-2026-10-19), without this package writing any of that itself.
+— through the mesh — threads, GPUs and MPI (TreeAMR's M7), without this package writing any of that itself.
 
-*Status: milestones G0–G3 are done and their numbers are in this file —
-the pointwise algebra, the stencils, the fused right-hand side, coarse-fine
-faces, the constraint monitors and the thread and precision invariants. A
-black hole arrives with G4.* (The line here said "nothing implemented,
-nothing measured" through step 3, which stopped being true at step 1;
-corrected in step 4.) Markers: **(decided)** is inherited from TreeAMR,
-TreeWave/TreeHydro or GHSO2, or was settled in review; **(proposed)** is
+Markers: **(proposed)** is
 a decision this document makes and still wants confirmed;
 **(predicted)** is a number a milestone will measure; **(open)** points
 at [Open questions](#open-questions). What this package needs from
 TreeAMR is under [Upstream prerequisites](#upstream-prerequisites).
 
-**Settled in review** (2026-09-16, three rounds): the expanded form of
+**Settled:** the expanded form of
 the momentum equation, not the flux form; three spatial dimensions only;
 no excision — inside the horizon the solution is *driven to the analytic
 one* by a pointwise damping layer and frozen around the singularity,
 with nothing in that decision knowing about blocks or levels; the
 proof-of-concept target is a **single black hole with nonzero boost and
-spin**; time integration through IMEXRungeKutta's RK4 by block owner
-(through OrdinaryDiffEq until 2026-09-26); the analysis quantities
+spin**; time integration through IMEXRungeKutta's RK4 by block owner; the analysis quantities
 (constraints, horizon location, area, mass and spin) are part of the
 deliverable; refinement is driven by an **error indicator**, not by
 prescribed spheres; `Float64` on Symmetry's H200 is the device
-requirement and `Float32` on a device is desirable, not required; no
-checkpointing **(amended 2026-10-01**, Erik's decision: checkpoint and
-restart through TreeAMR 0.1.4's M9a, see [Checkpoint and
-restart](#checkpoint-and-restart)**)**; GPU kernel efficiency is a later
+requirement and `Float32` on a device is desirable, not required; checkpoint and
+restart, see [Checkpoint and
+restart](#checkpoint-and-restart); GPU kernel efficiency is a later
 research project; the inherited documents live in `notes/`.
 
 **Contents**
@@ -69,32 +60,21 @@ research project; the inherited documents live in `notes/`.
 - [Boundaries](#boundaries)
   - [Periodic](#periodic)
   - [Outer boundary: Dirichlet from the background, at the current time](#outer-boundary-dirichlet-from-the-background-at-the-current-time)
-  - [Reflecting faces: symmetry planes (added 2026-10-02)](#reflecting-faces-symmetry-planes-added-2026-10-02)
-  - [The rotating octant: a quarter turn about `z` (added 2026-10-04)](#the-rotating-octant-a-quarter-turn-about-z-added-2026-10-04)
-  - [The quadrant: a hole moving along `x` (added 2026-10-20)](#the-quadrant-a-hole-moving-along-x-added-2026-10-20)
-  - [The rotating quadrant: a hole moving along its spin axis (added 2026-10-21)](#the-rotating-quadrant-a-hole-moving-along-its-spin-axis-added-2026-10-21)
-  - [The bitant: a hole moving across its spin (added 2026-10-24)](#the-bitant-a-hole-moving-across-its-spin-added-2026-10-24)
+  - [Reflecting faces: symmetry planes](#reflecting-faces-symmetry-planes)
+  - [The rotating octant: a quarter turn about `z`](#the-rotating-octant-a-quarter-turn-about-z)
+  - [The quadrant: a hole moving along `x`](#the-quadrant-a-hole-moving-along-x)
+  - [The rotating quadrant: a hole moving along its spin axis](#the-rotating-quadrant-a-hole-moving-along-its-spin-axis)
+  - [The bitant: a hole moving across its spin](#the-bitant-a-hole-moving-across-its-spin)
   - [The interior: a pointwise damping layer](#the-interior-a-pointwise-damping-layer)
-    - [The design, as steps 8a–8f leave it (rewritten in step 8f)](#the-design-as-steps-8a8f-leave-it-rewritten-in-step-8f)
-    - [Step 5's layer: the analytic control](#step-5s-layer-the-analytic-control)
-    - [The margin](#the-margin)
-    - [The spinning harmonic chart](#the-spinning-harmonic-chart)
-    - [Why touch the interior, and why relax](#why-touch-the-interior-and-why-relax)
-    - [The profiles and the rate](#the-profiles-and-the-rate)
-    - [The layer for an inexact target](#the-layer-for-an-inexact-target)
-    - [The range projection](#the-range-projection)
-    - [The tracked geometry](#the-tracked-geometry)
-    - [The fitted target](#the-fitted-target)
-    - [What the layer costs](#what-the-layer-costs)
 - [Initial data and backgrounds](#initial-data-and-backgrounds)
 - [Refinement and regridding](#refinement-and-regridding)
 - [Time integration](#time-integration)
 - [Analysis quantities](#analysis-quantities)
-- [The coupling contract with TreeGRRMHD (redesigned 2026-11-08)](#the-coupling-contract-with-treegrrmhd-redesigned-2026-11-08)
+- [The coupling contract with TreeGRRMHD](#the-coupling-contract-with-treegrrmhd)
   - [What this package provides (GH-1)](#what-this-package-provides-gh-1)
   - [What this package takes (GH-3)](#what-this-package-takes-gh-3)
   - [Why 3+1 variables at the vertices](#why-31-variables-at-the-vertices)
-- [Public access to the vertex metric (added 2026-11-05)](#public-access-to-the-vertex-metric-added-2026-11-05)
+- [Public access to the vertex metric](#public-access-to-the-vertex-metric)
 - [Precision, threads, devices](#precision-threads-devices)
 - [Running distributed](#running-distributed)
 - [I/O and viewers](#io-and-viewers)
@@ -103,15 +83,14 @@ research project; the inherited documents live in `notes/`.
 - [File layout](#file-layout)
 - [Milestones](#milestones)
 - [Measured results](#measured-results)
-  - [What the suite costs, and where (measured 2026-09-19 on Symmetry)](#what-the-suite-costs-and-where-measured-2026-09-19-on-symmetry)
-  - [The suite's tiers, and where each runs (2026-11-06)](#the-suites-tiers-and-where-each-runs-2026-11-06)
-  - [Steps 8b–8′: the generic interior and the moving hole](#steps-8b8-the-generic-interior-and-the-moving-hole) (moved to [`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md))
-  - [Robust stability on the octant (measured 2026-10-02)](#robust-stability-on-the-octant-measured-2026-10-02)
-  - [Single black holes: recommended settings (added 2026-10-08)](#single-black-holes-recommended-settings-added-2026-10-08)
-  - [The analysis cadence on an H200 (measured 2026-10-22)](#the-analysis-cadence-on-an-h200-measured-2026-10-22)
-  - [The right-hand side on an H200 (measured 2026-10-05)](#the-right-hand-side-on-an-h200-measured-2026-10-05)
-  - [The right-hand side on a CPU (measured 2026-10-05)](#the-right-hand-side-on-a-cpu-measured-2026-10-05)
-- [Binary black holes (proposed 2026-10-25)](#binary-black-holes-proposed-2026-10-25)
+  - [What the suite costs, and where](#what-the-suite-costs-and-where)
+  - [The suite's tiers, and where each runs](#the-suites-tiers-and-where-each-runs)
+  - [Robust stability on the octant](#robust-stability-on-the-octant)
+  - [Single black holes: recommended settings](#single-black-holes-recommended-settings)
+  - [The analysis cadence on an H200](#the-analysis-cadence-on-an-h200)
+  - [The right-hand side on an H200](#the-right-hand-side-on-an-h200)
+  - [The right-hand side on a CPU](#the-right-hand-side-on-a-cpu)
+- [Binary black holes (proposed)](#binary-black-holes-proposed)
   - [What the single holes hand over](#what-the-single-holes-hand-over)
   - [A case without a background](#a-case-without-a-background)
   - [The gauge](#the-gauge)
@@ -126,7 +105,6 @@ research project; the inherited documents live in `notes/`.
   - [The record](#the-record)
   - [What it costs (predicted)](#what-it-costs-predicted)
   - [Validation](#validation)
-  - [Milestones G7 and G8](#milestones-g7-and-g8)
   - [What this asks Erik to decide](#what-this-asks-erik-to-decide)
 - [Possible extensions](#possible-extensions)
 - [Open questions](#open-questions)
@@ -143,10 +121,10 @@ research project; the inherited documents live in `notes/`.
   — binaries, excision, a dynamical gauge, radiative boundaries,
   an efficient GPU kernel — is under
   [Possible extensions](#possible-extensions), each with the design note
-  that would start it. **(Amended 2026-10-25:** binaries, with the gauge,
+  that would start it. Binaries, with the gauge,
   the boundary and the waveform they need, are designed under [Binary black
-  holes](#binary-black-holes-proposed-2026-10-25), with milestones G7 and
-  G8 beyond the proof.**)**
+  holes](#binary-black-holes-proposed), with milestones G7 and
+  G8 beyond the proof.
 - **GPU-efficient, meaning memory-bandwidth-frugal.** GHSO2's goal
   statement carries over verbatim: reduce storage and memory bandwidth
   as far as the formulation allows. That is why the second-order-in-space
@@ -155,8 +133,7 @@ research project; the inherited documents live in `notes/`.
   that needs the fewest ghost layers. What the design does *not*
   promise is an efficient GPU *kernel*: a GPU has few registers,
   especially for `Float64`, and a straightforward kernel of this size
-  spills. Kernel efficiency is a **later research project** (decided in
-  review); the design commits only to a kernel structure that does not
+  spills. Kernel efficiency is a **later research project**; the design commits only to a kernel structure that does not
   foreclose it, to a short list of black-box attempts, and to measuring
   the result — see [One right-hand-side
   evaluation](#one-right-hand-side-evaluation) and
@@ -174,16 +151,15 @@ research project; the inherited documents live in `notes/`.
 ## Scope and non-goals
 
 - **Vacuum only.** No matter, no scalar field. The reduced source keeps
-  the algebraic slot where a stress-energy term would enter. *(Amended
-  2026-11-08:)* TreeGRRMHD's GH-3 will fill that slot from `(ρ, S_i, S_ij)`
+  the algebraic slot where a stress-energy term would enter. TreeGRRMHD's GH-3 will fill that slot from `(ρ, S_i, S_ij)`
   ([The coupling contract with
-  TreeGRRMHD](#the-coupling-contract-with-treegrrmhd-redesigned-2026-11-08)).
-- **Second order in space, first order in time** (decided; see
+  TreeGRRMHD](#the-coupling-contract-with-treegrrmhd)).
+- **Second order in space, first order in time** (see
   [The equations](#the-equations)). The fully first-order
   Lindblom–Scheel–Kidder–Owen–Rinne system is not implemented: it was
   the candidate cure for an excision instability that GHSO2 resolved
   inside the second-order form, and this package does not excise.
-- **Three spatial dimensions only** (decided). TreeAMR is `D`-generic
+- **Three spatial dimensions only**. TreeAMR is `D`-generic
   and its siblings test in `D = 1, 2`; this package fixes `D = 3`, the
   spacetime metric has 10 components, and GHSO2's four-dimensional
   pointwise algebra is used as it stands. The cost is that every test is
@@ -196,15 +172,14 @@ research project; the inherited documents live in `notes/`.
   finite-difference GH code since Pretorius (2005), on centered stencils
   plus Kreiss–Oliger dissipation, and is *measured* (robust-stability
   tests) rather than proven.
-- **No singularity handling** (decided). Nothing is excised. Where a
+- **No singularity handling**. Nothing is excised. Where a
   run has a black hole, the right-hand side inside the horizon is
   modified point by point: driven toward the analytic solution in a
   layer well inside the horizon, switched off around the singularity
   (see [The interior](#the-interior-a-pointwise-damping-layer)). This
   restricts black-hole runs to spacetimes with a known analytic
   solution — which is the proof-of-concept target, and exactly what an
-  excision milestone would be measured against. **(Amended 2026-09-23,
-  PLAN.md steps 8a–8g.)** The restriction is lifted by the *generic*
+  excision milestone would be measured against. The restriction is lifted by the *generic*
   interior: the tracked apparent horizon supplies the geometry, a regular
   fit of the evolved state the relaxation target, and a range projection
   deep inside the insurance that reports where either fails. Nothing is
@@ -218,24 +193,16 @@ research project; the inherited documents live in `notes/`.
   Everything `SpacetimeMetrics` provides: Minkowski, the gauge wave,
   shifted Minkowski, Kerr-Schild, Kerr in harmonic coordinates, and
   translations, rotations and boosts of these. Constraint-satisfying
-  binary data from an elliptic solver is an extension. **(Amended
-  2026-10-25:** proposed under [Initial data](#initial-data) for binaries:
-  superposed Kerr-Schild, then XCTS through a file.**)**
-- **No checkpoint and restart** (decided in review). A proof of concept
-  runs to completion; checkpointing arrives with TreeAMR's M9 or as a
-  production extension. **(Amended 2026-10-01**, Erik's decision: it
-  arrived with TreeAMR 0.1.4's M9a, and G5's runs — `38`–`149 h` for
+  binary data from an elliptic solver is an extension. Proposed under [Initial data](#initial-data) for binaries:
+  superposed Kerr-Schild, then XCTS through a file.
+- **Checkpoint and restart are in scope**: G5's runs — `38`–`149 h` for
   harmonic `a = 9/10`, eleven hours for step 8′'s crossing — outlast a
   queue's day, so `evolve!` checkpoints and restarts; see [Checkpoint and
-  restart](#checkpoint-and-restart).**)**
+  restart](#checkpoint-and-restart).
 - **No mesh machinery.** Trees, ghosts, interpolation, regrid transfer
-  and reductions are TreeAMR's. The one thing this package writes that
-  arguably belongs upstream — point interpolation from a field set, for
-  the horizon finder — is written as a stopgap and listed under
-  [Upstream prerequisites](#upstream-prerequisites). **(Amended
-  2026-09-26:** it went upstream — TreeAMR 0.1.3's M11 — and the stopgap
-  is gone; what this package keeps is the order `q + 2` and the footprint
-  guard, as a TreeAMR `Region`.**)**
+  and reductions are TreeAMR's. Point interpolation from a field set, for
+  the horizon finder, went upstream — TreeAMR's M11 — and what this package keeps is the order `q + 2` and the footprint
+  guard, as a TreeAMR `Region`.
 - **No subcycling, one global `dt`**, which suits a black-hole run
   badly in principle (the coarse outer levels are advanced at the
   horizon's time step) and is accepted here for the reasons TreeAMR
@@ -266,7 +233,7 @@ From **GHSO2**, verbatim, with the text in `notes/`:
   (`notes/ghaccel-bench.jl`).
 
 From **TreeWave and TreeHydro**: the right-hand-side contract, fixed-step
-RK4 (from OrdinaryDiffEq, and from IMEXRungeKutta since 2026-09-26, as in
+RK4 (from IMEXRungeKutta, as in
 TreeAMR's own examples), the chunked regrid-and-restart driver with
 cases as data, the `observer` hook, `precision.jl` and `device.jl`, the
 Löhner refinement indicator with its global noise floor and two
@@ -274,22 +241,24 @@ thresholds, the thread-workload digest test, the `[sources]` pin to
 TreeAMR's `main`, and the spec-first workflow with measured numbers
 recorded in this file.
 
+**Inconsistent:** the `[sources]` pin to TreeAMR's `main` listed above contradicts `CLAUDE.md`, "Things that will bite" (its first item), which says TreeAMR comes from the General registry and not from a `[sources]` pin.
+
 What **changes** because the mesh changes:
 
 | GHSO2 (SBP-SAT elements) | here (TreeAMR blocks) |
 |---|---|
 | gradient / divergence as two-pass kernels with face traces | centered stencils reading ghost zones; one fused kernel per RHS |
-| flux-conservative `∂_i F^i` for the energy estimate | the expanded form with compact second-derivative stencils (decided) |
+| flux-conservative `∂_i F^i` for the energy estimate | the expanded form with compact second-derivative stencils |
 | SAT penalties for boundaries; excision faces | ghost-filling boundary hooks; a pointwise damping layer inside the horizon instead of excision |
 | `ε μ⁻⁵ D⁶` dissipation normalised by the SBP spectral radius | the standard Kreiss–Oliger operator of order `q + 2` on a uniform block |
 | one mesh for the whole run | error-driven regridding that follows the hole; a fresh problem per chunk |
-| Tsit5 / Vern6–9 matched to the element order; a native stepper | RK4, fixed step (decided): OrdinaryDiffEq's until 2026-09-26, IMEXRungeKutta's by block owner since |
+| Tsit5 / Vern6–9 matched to the element order; a native stepper | RK4, fixed step: IMEXRungeKutta's, by block owner |
 | `Float32`/`Float64`/`Float64x2`, CPU/Metal/CUDA | `Float64` on CUDA as the requirement; the rest inherited from TreeAMR |
 
 ## The equations
 
 The vacuum Einstein equations in generalized harmonic form, **second
-order in space, first order in time** (decided; `notes/methods-ghso2.md`,
+order in space, first order in time** (`notes/methods-ghso2.md`,
 "Formulation", and `notes/formulation.md` for the symmetrizer and the
 well-posedness argument). The evolved state per point is 20 fields:
 
@@ -297,8 +266,7 @@ well-posedness argument). The evolved state per point is 20 fields:
     Π_ab = (√γ/α)(∂_t − β^i ∂_i) g_ab = √γ n^μ ∂_μ g_ab   (10)
 
 in GHSO2's packed order `(tt, tx, ty, tz, xx, xy, xz, yy, yz, zz)`.
-The weight on the normal derivative is `√γ`, not `√|g|` (amended
-2026-10-09): with `n^μ = (1/α, −β^i/α)` and `√|g| = α√γ`, `√|g| n^μ ∂_μ
+The weight on the normal derivative is `√γ`, not `√|g|`: with `n^μ = (1/α, −β^i/α)` and `√|g| = α√γ`, `√|g| n^μ ∂_μ
 g_ab` is `α Π_ab`. `notes/methods-ghso2.md` (equation (10) and the sign
 of the source) and `notes/pointwise-ghso2.jl`'s header write `√|g|`; the
 first form, `(√γ/α)(∂_t − β^i ∂_i) g_ab`, is the one the code evolves, and
@@ -327,7 +295,7 @@ GHSO2's predecessor found by measurement to be O(1) off harmonic gauge
 (`notes/formulation.md`, §2). The time derivative `∂_t g_ab` inside `S0`
 is the first equation.
 
-**The expanded form** (decided). On a finite-difference mesh the
+**The expanded form**. On a finite-difference mesh the
 divergence in `(FLUX)` is a derivative of a computed quantity: it costs
 either a second ghost exchange of `F^i` or ghost zones twice as wide, so
 that `F^i` can be formed `q/2` points into the ghosts before the
@@ -358,9 +326,9 @@ the reason GHSO2 chose it, and it does not carry over: with overlapping
 stencils through interpolated ghosts there is no discrete
 summation-by-parts identity across block or level boundaries to
 preserve, so the flux form would cost ghosts and buy nothing this mesh
-can use (decided in review).
+can use.
 
-**(Measured in step 1.)** Both hold. On the six backgrounds of the table
+Both hold. On the six backgrounds of the table
 at two points each, in `Float64`, the residual of `∂_tΠ − ∂_iF^i − msrc`
 on analytic data is between `2e−11` and `4e−8` relative to the size of
 the terms that make it up, and it falls by a factor of **16** when the
@@ -379,9 +347,7 @@ forward-mode dual pass through `metric_quantities` to **0.6 `eps`** of
 and **0.3 `eps`** of the terms that build them, with `H_a` and `∂_aH_b`
 under **2.4 `eps`** on each of the four harmonic rows.
 
-The shapes follow, and step 3's kernel is written against them
-**(proposed in step 1**, since `PLAN.md` fixed the argument list but not
-its spelling**)**. `metric_derivatives` returns the *full*
+The shapes follow, and the kernel is written against them. `metric_derivatives` returns the *full*
 `(∂_iα, ∂_iβ^j, ∂_i(α√γγ^{jk}))` rather than the four contractions
 `(EXPANDED)` needs, because that is what a dual pass can be compared
 against; the caller contracts, and the components it does not ask for
@@ -411,9 +377,9 @@ notices — to roundoff rather than bit for bit, for the reason under
 
 ### Field sets and layout
 
-One forest, vertex-centered field sets **(decided** for a
-finite-difference scheme: TreeWave's argument — restriction along a
-stagger is injection, exact for any data — applies unchanged**)**:
+One forest, vertex-centered field sets (for a
+finite-difference scheme, TreeWave's argument — restriction along a
+stagger is injection, exact for any data — applies unchanged):
 
 | set | `nvars` | `G` | state vector | at a regrid |
 |---|---|---|---|---|
@@ -421,17 +387,16 @@ stagger is injection, exact for any data — applies unchanged**)**:
 | `Hsrc`, gauge source `H_b` and `∂_a H_b`, non-harmonic backgrounds only | `20` | `0` | no | `Hsrc => nothing`, then re-sampled: a function of position |
 | `diag`, constraints, speeds, masked errors, the indicator, on demand | small | `0` | no | `diag => nothing` |
 
-`diag` holds **ten** slots from step 4 **(proposed in step 4**, which is
-where the set first had to be written down**)**: the characteristic speed,
+`diag` holds the characteristic speed,
 the four components of `C_a`, the ADM Hamiltonian, the three components of
 `ℳ_i`, and the `1`/`0` mask indicator the masked norms divide by. `C_a`
 and `ℳ_i` occupy contiguous runs on purpose — `block_mapreduce` reduces a
 contiguous range of variables and a device cannot be handed an arbitrary
-index vector cell by cell. Steps 5 and 6 add the masked error, the
-interior residual and the indicator beside them.
+index vector cell by cell. The masked error, the
+interior residual and the indicator sit beside them.
 
 The field sets are **vertex-centered and `GHProblem` refuses anything
-else** (added in step 4). The table above already decided it; what made it
+else**. The table above already decided it; what made it
 an assertion is that the masks and the interior profiles turn an owned
 index into a position — `point_position`, written to reproduce TreeAMR's
 `coordinates` expression bit for bit — and a staggered set would be
@@ -441,14 +406,21 @@ evaluated half a cell from where its values sit.
 the Kreiss–Oliger operator of order `q + 2` reaches one point further
 than the derivatives do. TreeAMR's vertex invariant `N ≥ 2G + 2` then
 puts `N ≥ 8, 10, 12` at `q = 4, 6, 8`; the tests use `N = 8` where that
-allows it and `N = 10` at `q = 6` **(amended in step 3**, where the
-invariant bit: `FieldSet` refuses `N = 8` at `q = 6`, so `PLAN.md`'s "the
-gauge wave at `q = 2, 4, 6` on `N = 8`" was one row wider than the mesh
-permits**)**, the proof-of-concept runs `N = 16` or `32`. The working array is
+allows it and `N = 10` at `q = 6` (`FieldSet` refuses `N = 8` at `q = 6`), the proof-of-concept runs `N = 16` or `32`. The working array is
 `((N + 2G + 1)/N)^3` times the state: 2.6 at `N = 16, G = 3`, 1.7 at
 `N = 32`, which is the price of wide ghosts on small blocks and the
 reason `N = 32` is expected to be the default **(predicted; G6 measures
 it against the RHS throughput)**.
+
+**The `diag` slots are a contiguous-range interface.** `block_mapreduce`
+  and `mesh_fold` read an integer or a *contiguous* range of variables and refuse
+  anything else — a device cannot be handed an arbitrary index vector cell
+  by cell, which is why the runs of `C_a` and `ℳ_i` must not move.
+
+**The shared upper plane.** The stored size is `N + 2G + 1` per axis, and the
+  point at `N + 2G + 1` belongs to no owned range: `map_blocks!` never
+  reaches it and the Dirichlet hook or a neighbour's ghost exchange fills
+  it.
 
 ### Finite-difference stencils
 
@@ -465,9 +437,7 @@ a unigrid).
 
 `derivative_weights(T, Val(q), Val(m))` returns the weights for **unit
 spacing**, in the offset order `−q/2 … q/2`; the `1/h^m` is the caller's,
-read once per point as a per-block coefficient **(decided in step 2**,
-which is where the formula had to be split between the weights and the
-kernel; `CODE.md` had said only that the weights exist**)**. One weight
+read once per point as a per-block coefficient. One weight
 vector therefore serves every refinement level. Both are `@generated`, so
 the `Rational{BigInt}` construction happens while the method compiles and
 what it emits is each weight's exact numerator and denominator as `Int`
@@ -475,14 +445,14 @@ literals with one division between them — an `SVector` a device kernel
 holds in registers, with no rational and no `BigInt` anywhere in it, and at
 `Float64` and `Float32` no division either once LLVM has folded it. The
 conversion is emitted rather than performed in the generator for a reason
-that cost step 2 a debugging session; see [Measured
+given under [Measured
 results](#measured-results).
 
 The mixed derivative has no weights of its own — it is the product of two
 first-derivative vectors, and the sum over the *second* axis is the inner
-one **(decided in step 2**: the two orders are equal in exact arithmetic
+one: the two orders are equal in exact arithmetic
 and differ in the last place in floating point, so which one it is belongs
-to the operator and not to the implementation**)**. Measured in step 2 on
+to the operator and not to the implementation. Measured on
 `exp(sin x)·cos(y/2)`: the tensor product converges at the same rate as
 the one-dimensional first derivative, 2.0, 3.98, 5.95, 7.79 at `q = 2, 4,
 6, 8`.
@@ -502,9 +472,9 @@ same ghosted working array, and has no separate launch.
 `dissipation_weights(T, Val(r))` carries `(−1)^{r+1}`, the `2^{−2r}` and
 the undivided `(Δ_+Δ_−)^r`; the caller applies `ε` and a **single**
 `1/h_d`, which is what `h_d^{2r−1}` against `(Δ_+Δ_−)^r`'s own `h_d^{−2r}`
-leaves **(decided in step 2**, the same split as the derivative weights
-above**)**. So `Q_d u = (ε/h_d) · (the contraction)`, and two consequences
-are measured rather than asserted (step 2, in `Rational`, exactly): the
+leaves (the same split as the derivative weights
+above). So `Q_d u = (ε/h_d) · (the contraction)`, and two consequences
+are measured rather than asserted (in `Rational`, exactly): the
 center weight is `−binom(2r, r)/2^{2r} < 0` and the grid-scale mode
 `u_j = (−1)^j` is an eigenvector with eigenvalue exactly `−1`, so
 **the sign is damping** and Nyquist is damped at exactly `ε/h_d`. On a
@@ -516,13 +486,13 @@ GHSO2's second finding under "sonic-surface instability"
 (`notes/methods-ghso2.md`): the grid-scale layer of that instability on
 a black hole whose horizon lies in the evolved domain is cured by
 dissipation at `ε ≈ 0.5`; smooth runs without a hole need little or
-none. `ε` is a case parameter — a number, or from step 8c a profile of the
+none. `ε` is a case parameter — a number, or a profile of the
 distance to the hole that rises from the horizon inward
 (`HorizonDissipation`; measured under [The
 interior](#the-interior-a-pointwise-damping-layer), where it is off by
 default).
 
-**(Measured in step 3.)** Both halves hold on the mesh. The gauge wave at
+Both halves hold on the mesh. The gauge wave at
 `q = 4` converges at **4.12** with `ε_KO = 0.5` against **3.95** without
 it, so the term is `O(h^{q+1})` as claimed and costs the scheme nothing;
 and white noise of amplitude `1e−8` on flat space, over a thousand steps
@@ -533,8 +503,7 @@ The kernel compiles the dissipation away entirely when `ε_KO = 0`
 (1106 against 1409 ns per point at `q = 4`), and a run with
 `ε_KO = 1e−300` gives the same numbers as one with the term compiled out.
 
-**What the dissipation has to do inside a horizon (measured in step 8a,
-`test/dispersion.jl`).** The discrete scheme is not causal at the grid
+**What the dissipation has to do inside a horizon (`test/dispersion.jl`).** The discrete scheme is not causal at the grid
 scale, and the dissipation is the only thing that stands in for causality
 there. Frozen at a point, with the lower-order terms dropped, the principal
 part of every component along a direction `x` is
@@ -545,10 +514,7 @@ part of every component along a direction `x` is
 characteristic speeds are `−b ± a` and both are negative inside the horizon
 — for `KerrSchild(1, 0)` along a radius `b = H/(1+H)` and `a = 1/(1+H)`
 with `H = 2M/r`, so `b = 0.571`, `a = 0.429` at `r = 1.5 M`, which the
-script reads from the metric through `metric_quantities` and checks
-**(amended in step 8a**: `PLAN.md`'s finding 4 writes the operator as
-`(∂_t + b ∂_x)²` with `b = β^r` and the speeds `−b ± a`, and the three are
-consistent only with the minus sign**)**. With the package's own weights on
+script reads from the metric through `metric_quantities` and checks. With the package's own weights on
 unit spacing, a mode `e^{i(kx − ωt)}`, `θ = kh`, has the two branches
 
     ω = (−b s(θ) ∓ a √c(θ))/h − i ε sin^{2r}(θ/2)/h,
@@ -625,8 +591,8 @@ interior](#the-interior-a-pointwise-damping-layer), and what a 3D run does
 with it is under [step
 8a](SINGULARITY_HANDLING.md#step-8a-what-crosses-the-horizon-from-inside-it).
 
-**The spinning holes (measured in step 8a, `test/dispersion.jl` sections 1b
-and 1c).** Step 8d keys the layer on the found horizon's offset surface
+**The spinning holes (`test/dispersion.jl` sections 1b
+and 1c).** The tracked geometry keys the layer on the found horizon's offset surface
 `r_1(n̂) = r_h(n̂) − m h`, and `PLAN.md`'s finding 3 puts harmonic Kerr at
 `a = 9/10` at `h = 5/256`, where its equator leaves `0.1 M` — 5.1 cells —
 between the singular disk and the horizon. The same numbers along the spin
@@ -695,6 +661,13 @@ measurement the bound is conservative: at
 3D runs measured `4.6` at `2 M` and the one-dimensional model `2.9` in the
 long run.
 
+`gauge.jl` has
+`HorizonDissipation`, the `ε_KO(r)` profile (`ε_out` at and outside
+`r_h,min`, rising `C²` to `ε_in ≤ 4` at `r_1`), which `GHCase` takes in place of a
+number — `ε_KO` is a type parameter, `dissipation_rate` the
+identity on a number and `has_dissipation` the kernel's `Val{DISS}`;
+`with_dissipation` and `horizon_dissipation` build it from a case.
+
 ### The interface-order rule, and what it costs a second-order system
 
 TreeAMR's measured rule (its `CODE.md`, "Operators"): a ghost filled by
@@ -715,14 +688,14 @@ batches it into one kernel per stencil kind, but it is a real
 difference from a unigrid code and one reason to expect `q = 4` or `6`
 to be the order of choice rather than `8` **(predicted; G6)**.
 
-**(Measured in step 4.)** The prediction holds, on the gauge wave
+The prediction holds, on the gauge wave
 (`A = 1/20`, one wavelength cubed, periodic) at `q = 4` on the two-level
 mesh — a `2³` root grid with **one root block refined**, so that each of
 its six faces is a coarse-fine face — held **frozen** while `N` runs over
 `8, 10, 12` (15 leaves at every resolution, every spacing shrinking with
 `N` and the block layout unchanged), a sixteenth of a crossing at
 `cfl = 1/4`. Both the mesh and the
-resolutions are a budget **(proposed in step 4)**: TreeWave's `wave_forest`
+resolutions are a budget: TreeWave's `wave_forest`
 refines a middle sub-box, which at `roots = 2` is every block or none, and
 a fourth resolution or a longer run is `N⁴` of ghost filling at 216 coarse
 points per fine ghost point. What is run measures the rate cleanly in both
@@ -756,20 +729,20 @@ against **1399 ns** on the unrefined mesh — and the ghost fill alone is
 unrefined. The 216 coarse points per fine ghost point are real. This is
 why `test/interface_tests.jl` is the most expensive file in the suite and
 why its runs are as short as a clean rate allows. The suite prints the
-fraction on every run and asserts nothing about it (amended 2026-11-07): it
+fraction on every run and asserts nothing about it: it
 is the ratio of two timings on a shared machine, and on GitHub's runners it
-crossed one at `p = 6` (macOS, 2026-10-19) and reached 1.19 at `p = 4`
-(Linux, 2026-11-07).
+has crossed one at `p = 6` and reached 1.19 at `p = 4`
+([history](HISTORY.md#the-interface-order-rule-and-what-it-costs-a-second-order-system)).
 
 ### One right-hand-side evaluation
 
-TreeAMR's contract, three steps and nothing between them (decided):
+TreeAMR's contract, three steps and nothing between them:
 
     scatter!(U, u)                                             # (0) state → working array
     fill_ghosts!(U, schedule; boundary = dirichlet(case, t))   # (1) copies, restrictions, hook, prolongations
     map_blocks!(gh_rhs_kernel!, U, statearray(du, U), U.work, Hsrc.work, …)   # (2)
 
-Step (2) is **one fused kernel** per owned point **(proposed)**, and
+Step (2) is **one fused kernel** per owned point, and
 its internal order is a design commitment, because it is what decides
 whether the kernel fits in a GPU's registers. Written naively — load
 the 20 fields on the footprint, form all of `∂_i h` (30), `∂_i Π` (30),
@@ -781,79 +754,10 @@ pointwise kernel — would cost a scratch field set of 120 values per
 point, six times the state's memory traffic. The kernel is therefore
 written in **streaming order**:
 
-1. load `h` and `Π` at the point; form the coefficient set once —
-   `g^{ab}`, `α`, `β^i`, `√γ`, `γ^{ij}`, and `∂_iβ^i`, `∂_i(α√γγ^{ij})`
-   from the closed-form chain rule — about 30 values, after forming
-   the 30 first derivatives `∂_i h`, which are kept;
-2. loop over the 10 components: form `∂_i Π_ab` (3 stencils) and
-   `∂_i∂_j h_ab` (6 stencils) and the dissipation of `h_ab` and `Π_ab`
-   *on the fly*, contract them immediately into `∂_t h_ab` and the
-   principal and advective part of `∂_t Π_ab`, and drop them; only two
-   accumulators per component survive;
-3. add the source `S0 + Z` from `h`, `∂_i h`, `∂_t h` and the
-   coefficients — GHSO2's algebra, which GHAccel's generated code of
-   the same shape ran without spilling — and the interior profiles of
-   the next section; write 20 values of `du`.
-
-The principal part is the same scalar wave operator for every
-component, which is what makes step 2 a loop with a small live set;
-the coupling between components is entirely in the coefficients and
-the source. Recompute rather than store is the rule throughout: the
-effective stencil weights (metric coefficient times finite-difference
-weight) are formed where they are used, and nothing that can be
-rebuilt from `h` and `∂_i h` is kept. The pointwise algebra is
-scalarised straight-line code — GHAccel found that the compiler does
-not register-allocate a large `SVector` expression well unless every
-element is spelled out, and generated its kernel for that reason; this
-package does the same, by hand or by generation, and the choice is an
-implementation detail of G1. **(Decided in step 1: by hand.)** The
-expanded form is written as elementwise `SVector{10}` combinations of the
-stencils and the coefficients, which `StaticArrays` unrolls into scalar
-arithmetic with no loop and no branch; `test/pointwise_tests.jl` asserts
-that every pointwise function allocates **zero bytes**, which is the part
-of "kernel-safe" a host test can settle. Whether that unrolling is also
-the register schedule GHAccel needed is a question about `ptxas` output
-and belongs to G6, which measures it; generating the code is the fallback
-the milestone leaves open, not a thing to do before there is a
-measurement.
-
-This is the whole of the design's commitment to GPU kernel efficiency.
-Beyond it, the **black-box attempts** G6 makes and records are: the
-split into a stencil kernel (steps 1–2, `du` written) and an algebra
-kernel (step 3, `du` accumulated), costing one extra read and write of
-`du` and a recomputation of `∂_i h`; `Float32` where a device has it,
-which halves the register footprint; and the launch configuration
-(workgroup shape), which GHAccel measured as worth 10 % of peak.
-Everything further — shared-memory staging of one variable's ghosted
-block at a time, fusing the scatter, the ghost fill or the integrator's
-stage update into the kernel, code generation for the register schedule
-— is the research project under
-[Possible extensions](#possible-extensions), and nothing here is built
-in a way that would prevent it. `G`, `q` and the switches (dissipation,
-gauge source present or not, an interior present or not) are `Val`
-parameters, resolved once per chunk in the problem constructor, never
-per evaluation. **(Amended in step 5:** the interior's `Val` carries the
-*variant* rather than a `Bool` — `:none`, `:damped`, `:pasted`,
-`:frozen`. `PLAN.md` calls it "has interior"; it has to say *which* as
-well, because the three variants differ inside the kernel, so a `Bool`
-would have needed a second parameter beside it.**)**
-
-**(Measured on the H200 2026-10-05**, in [The right-hand side on an
-H200](#the-right-hand-side-on-an-h200-measured-2026-10-05)**.)**
-
-- The black-box attempts are worth little: the workgroup shape under 10 %; the
-  split 6 % once the source fits in registers.
-- What the kernel needed was inlining forced on the device and a register-lean
-  spelling of the source: 8.5 → 1.2 ns a point.
-- The order above changes once the source is lean: the source moves before the Π
-  components (step 3 becomes step 2), and the per-component streaming stays.
-
-**(Implemented 2026-10-05.)** The kernel's order is now:
-
 1. **The head.** Load `h` and `Π` at the point, form the thirty `∂_i h` and the
    coefficient set.
 2. **`∂ₜh`, complete with its dissipation,** stored at once.
-3. **The source**, [`gh_node_source_lean`](#the-right-hand-side-on-an-h200-measured-2026-10-05),
+3. **The source**, [`gh_node_source_lean`](#the-right-hand-side-on-an-h200),
    from `∂ₜh`.
 4. **`∂_i β^i` and `∂_i(α√γγ^{ij})`** from `metric_divergences`, which forms only
    those four numbers.
@@ -876,7 +780,59 @@ Nothing in the kernel without an interior forms a closure:
 So a device compiles it without a single call into Julia code whether or not the
 backend forces inlining. Measured: 8.48 → 1.08 ns a point on the H200; the
 numbers are under [The right-hand side on an
-H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).
+H200](#the-right-hand-side-on-an-h200).
+
+The principal part is the same scalar wave operator for every
+component, which is what makes step 5 a loop with a small live set;
+the coupling between components is entirely in the coefficients and
+the source. Recompute rather than store is the rule throughout: the
+effective stencil weights (metric coefficient times finite-difference
+weight) are formed where they are used, and nothing that can be
+rebuilt from `h` and `∂_i h` is kept. The pointwise algebra is
+scalarised straight-line code — GHAccel found that the compiler does
+not register-allocate a large `SVector` expression well unless every
+element is spelled out, and generated its kernel for that reason; this
+package does the same, by hand. The
+expanded form is written as elementwise `SVector{10}` combinations of the
+stencils and the coefficients, which `StaticArrays` unrolls into scalar
+arithmetic with no loop and no branch; `test/pointwise_tests.jl` asserts
+that every pointwise function allocates **zero bytes**, which is the part
+of "kernel-safe" a host test can settle. Whether that unrolling is also
+the register schedule GHAccel needed is a question about `ptxas` output
+and belongs to G6, which measures it; generating the code is the fallback
+the milestone leaves open, not a thing to do before there is a
+measurement.
+
+This is the whole of the design's commitment to GPU kernel efficiency.
+Beyond it, the **black-box attempts** G6 makes and records are: the
+split into a stencil kernel (the stencils, `du` written) and an algebra
+kernel (the source, `du` accumulated), costing one extra read and write of
+`du` and a recomputation of `∂_i h`; `Float32` where a device has it,
+which halves the register footprint; and the launch configuration
+(workgroup shape), which GHAccel measured as worth 10 % of peak.
+Everything further — shared-memory staging of one variable's ghosted
+block at a time, fusing the scatter, the ghost fill or the integrator's
+stage update into the kernel, code generation for the register schedule
+— is the research project under
+[Possible extensions](#possible-extensions), and nothing here is built
+in a way that would prevent it. `G`, `q` and the switches (dissipation,
+gauge source present or not, an interior present or not) are `Val`
+parameters, resolved once per chunk in the problem constructor, never
+per evaluation. The interior's `Val` carries the
+*variant* rather than a `Bool` — `:none`, `:damped`, `:pasted`,
+`:frozen`. `PLAN.md` calls it "has interior"; it has to say *which* as
+well, because the three variants differ inside the kernel, so a `Bool`
+would have needed a second parameter beside it.
+
+**Inconsistent:** the list of variants above (`:none`, `:damped`, `:pasted`, `:frozen`, "the three variants") leaves out `:fitted`, which [The fitted target](#the-fitted-target), item 10, says `INTERIOR_VARIANTS` has.
+
+Measured on the H200, in [The right-hand side on an
+H200](#the-right-hand-side-on-an-h200):
+
+- The black-box attempts are worth little: the workgroup shape under 10 %; the
+  split 6 % once the source fits in registers.
+- What the kernel needed was inlining forced on the device and a register-lean
+  spelling of the source: 8.5 → 1.2 ns a point.
 
 The kernel is *block-local*: it reads its own block's stored points and
 nothing else, so it runs on every backend unchanged. Per-block spacings
@@ -888,13 +844,7 @@ The RHS never mutates `u`, and it is a pure function of `(u, t)`
 (TreeAMR's contract): the interior treatment below is a term *in* the
 right-hand side, not a write to the state.
 
-**(Implemented and measured in step 3.)** The kernel is the order above,
-written by hand: `h`, `Π` and the thirty `∂_i h` at the point; the
-coefficient set and its two contractions `∂_iβ^i`, `∂_i(α√γγ^{ij})`;
-then `ntuple(Val(10))` over the components, each forming three `∂_iΠ`,
-three compact and three tensor-product second derivatives and, where
-there is dissipation, six more contractions — all consumed into two
-accumulators before the next component starts; then `gh_node_source`. It agrees with
+The kernel agrees with
 `gh_node_rhs_expanded` on analytic data, on three backgrounds and at
 `q = 2, 4, 6` with and without dissipation, to **under 1e−12** of the size
 of the terms, and Minkowski's `du` is **exactly** zero at every order.
@@ -902,7 +852,7 @@ of the terms, and Minkowski's `du` is **exactly** zero at every order.
 Two things the writing settled that the design had left open:
 
 - **The `∂_t g` the source is given is the accumulated `∂ₜh`, dissipation
-  included** (recorded in step 3). Two accumulators per component is what
+  included**. Two accumulators per component is what
   the order above budgets, and keeping an undissipated copy would be ten
   more live values; it is also the honest answer, since the reduced
   source's `−Γ^ν ∂_ν g_ab` means the time derivative of the solution
@@ -938,7 +888,7 @@ host: the kernel's arithmetic and the mesh pattern around it are of the
 same order, and neither dominates. Threading is worth 3.6–3.9× on four
 threads, and the numbers above are what G6 measures the H200 against.
 
-**On the CPU the kernel evaluates `W` points at a time (added 2026-10-05).**
+**On the CPU the kernel evaluates `W` points at a time.**
 The algebra above is generic in its number type, so on the CPU step (2) runs it on
 SIMD.jl's `Vec{W,T}`: `W` neighbouring points along the first axis, every stencil a
 contiguous vector load and every store a vector store. The launch is unchanged —
@@ -948,7 +898,12 @@ overlaps the one before it and stores the shared points again. In a hole's evolv
 region a group with a point in the layer or the core runs the scalar code point by
 point. `W` is chosen by `GHProblem` — four `Float64` on AVX2 and aarch64, eight with
 AVX-512, one on a device. Why and what it buys: [The right-hand side on a
-CPU](#the-right-hand-side-on-a-cpu-measured-2026-10-05).
+CPU](#the-right-hand-side-on-a-cpu).
+
+The kernel's body is `gh_rhs_point!` (one point) and `gh_rhs_lanes!` (a
+group). `W` is the sixth kernel `Val`, `1` on a device or for a software
+type, and `simd_width = 1` asks for the scalar kernel, also through
+`evolve!`.
 
 ### The time step
 
@@ -957,22 +912,20 @@ CPU](#the-right-hand-side-on-a-cpu-measured-2026-10-05).
 
 GHSO2's conservative bound on the coordinate characteristic speed, taken
 once per chunk from a speed slot in `diag` (a kernel writes it,
-`block_mapreduce(max)` reduces it — `mesh_mapreduce(max)` from 2026-10-01)
+`mesh_mapreduce(max)` reduces it)
 and re-checked at the chunk's end as
 TreeHydro does — throw, do not warn, if the step used violated the bound.
 `cfl = 1/4` **(proposed** default, GHSO2's**)**.
 
-**(Measured in step 3.)** `λ_max` is exactly `√3` on flat space — the
+`λ_max` is exactly `√3` on flat space — the
 conservative bound, not the physical speed 1 — and larger wherever there
-is a shift. Every run of step 3 took its step from it at `cfl = 1/4` and
+is a shift. Every run measured here took its step from it at `cfl = 1/4` and
 none needed a smaller one: the gauge wave at `q = 2, 4, 6`, shifted
-Minkowski through a Dirichlet face, and a thousand steps of noise. The
-re-check at the chunk's end arrives with the driver in step 5; the speed
-kernel, `max_speed` and `gh_dt` are in `evolution.jl` now.
+Minkowski through a Dirichlet face, and a thousand steps of noise. The speed
+kernel, `max_speed` and `gh_dt` are in `evolution.jl`.
 
-**(Measured in step 5.)** Two things a hole adds. First, **the speed
-kernel takes the mask like every other analysis kernel** — this section
-had not said so and the one above it had; the frozen core holds data that
+Two things a hole adds. First, **the speed
+kernel takes the mask like every other analysis kernel**: the frozen core holds data that
 is not a numerical solution, and a *degenerate* metric there, which is
 what a stale core looks like after a regrid has interpolated it, gives a
 `NaN` speed that would then set the step for the whole hierarchy. It is
@@ -991,19 +944,25 @@ configuration to `t = 50 M`. This is the one measurement in the package
 that would not exist without the check, which is the argument for having
 it throw.
 
-**(Amended in step 8.)** A moving hole's step is sized from `λ` times the
-square of the growth the previous chunk measured (step 8f) **and never by
+A moving hole's step is sized from `λ` times the
+square of the growth the previous chunk measured **and never by
 less than 1 %**: once the hole crosses a mesh finer than step 8f's capsule
-the growth is not monotonic, and on step 8's uniform `5/128` control of the
+the growth is not monotonic, and on the uniform `5/128` control of the
 boosted `a = 0` hole the speed grew `0.27 %` in chunk 4 after a quieter
 chunk 3 — the recheck stopped the run at `0.75 M` with a CFL number of
-`0.20003` against the requested `0.2` (measured in step 8). The margin costs
+`0.20003` against the requested `0.2`. The margin costs
 1 % of the steps of a moving run and nothing on a static one, whose step is
-unchanged bit for bit; the recheck stays **(proposed in step 8)**.
+unchanged bit for bit; the recheck stays **(proposed)**.
+
+`driver.jl` sizes a moving hole's step from `λ` times the
+square of the previous chunk's growth `λ_end/λ` (a static hole's step is
+unchanged bit for bit): the fastest speed of a hole crossing the box grows
+by 0.1–0.3 % a chunk, and the CFL recheck stopped every boosted row at
+`cfl = 1/4` and at `1/5` without it.
 
 ## Gauge and constraint damping
 
-**Prescribed gauge sources** (decided). `H_a(x)` is sampled from the
+**Prescribed gauge sources**. `H_a(x)` is sampled from the
 background, `H^a = −Γ^a[g_exact]`, together with `∂_a H_b`, so that the
 background is a stationary point of the discrete system. The 20 values
 live in the `Hsrc` field set with `G = 0`, are read by the RHS kernel at
@@ -1026,12 +985,12 @@ Two consequences shape the case list:
   represent and an in-kernel evaluation (nested duals per point per
   evaluation) would price at about one RHS. The driver refuses a
   non-harmonic background that is not static when it is given no source,
-  and says why. **(Amended 2026-10-20.)** A boosted Kerr-Schild hole runs
+  and says why. A boosted Kerr-Schild hole runs
   with the algebraic source below, `KerrSchildSource` with the hole's lab
   velocity, which moves with the hole: `kerr_schild_case(; v, x0,
   gauge_source = :algebraic)` builds it (`test/boosted_tests.jl`).
 
-**How the two questions are answered** (step 3, `src/gauge.jl`), because
+**How the two questions are answered** (`src/gauge.jl`), because
 they are not the same kind of question. **Harmonicity is a table** over
 the background types, not a measurement: it decides a `Val` parameter and
 whether an `Hsrc` field set exists at all, so it has to be exactly right,
@@ -1050,8 +1009,7 @@ every row, which is also what would notice if one of `SpacetimeMetrics`'
 unexported wrapper types were renamed on `main` — they are listed in
 `prerequisite_tests.jl` for that reason.
 
-**The algebraic Kerr-Schild source (built 2026-10-02**, proposed under
-[Open questions](#open-questions) the same day**)**. A case may carry
+**The algebraic Kerr-Schild source** ([history](HISTORY.md#the-prescribed-and-algebraic-gauge-sources)). A case may carry
 `gauge_source = KerrSchildSource(T; M, spin, velocity)` (or `:algebraic`
 through `hole_case` for an unboosted, unrotated `KerrSchild`): `H_a = −K w_a
 / (M + √(M² − s²))` with `w_a = k_ab u^b`, `K = u·w`, `s = S·w`, evaluated in
@@ -1065,7 +1023,7 @@ nested-dual sampling and no re-sampling after a regrid. `GHCase` refuses a
 source that does not reproduce the background's own `−Γ_a` and its gradient
 at twelve points (`check_gauge_source`), and with one the refusal of a moving
 non-harmonic background is lifted, because the source moves with the hole.
-**(Measured 2026-10-02.)** The closed form is `gauge_source_grad`'s `H_a`
+The closed form is `gauge_source_grad`'s `H_a`
 and `∂_a H_b` to `2–4·10⁻¹⁵` for Kerr-Schild at rest (`a = 0`, `0.9`),
 translated, and boosted along `x` and in a general direction with spin
 (`test/gauge_source_tests.jl`). On the static `a = 0` hole (octant `[0, 3]³`,
@@ -1075,24 +1033,22 @@ sampled source does — masked error `1.44·10⁻⁵` against `1.11·10⁻⁵`, 
 `62 s` against `90 s`; `cfl = 1/2` reproduces `cfl = 1/4` to six digits at
 every row to `4 M`.
 
-**Constraint damping** (decided): the Gundlach–Pretorius term `Z_ab`,
+**Constraint damping**: the Gundlach–Pretorius term `Z_ab`,
 with `γ0(x)` a *function of position* — a Gaussian of width a few `M`
 around the hole's analytic center, tapered to a small value in the wave
 zone, an `isbits` closure over `(center(t), M)` in the problem — and a
 constant `γ2 > −1`. `γ0 ≈ 1/M` near the hole is GHSO2's measured
 requirement for a stable evolution with the horizon in the domain.
 
-**(Implemented in step 5**, `src/gauge.jl`.**)** The profile is
+The profile (`src/gauge.jl`) is
 `γ0(x) = far + (near − far) exp(−r²/2w²)` with `r = |x − c(t)|`, and the
-three numbers are `near = 1/M`, `far = 1/(10 M)`, `width = 3 M`
-**(proposed in step 5**: `CODE.md` asked for "a Gaussian of width a few
-`M` … tapered to a small value in the wave zone" and left them open**)**.
+three numbers are `near = 1/M`, `far = 1/(10 M)`, `width = 3 M`.
 A Gaussian rather than a compactly supported bump because nothing depends
 on it vanishing exactly — `far` is the wave zone's rate, not zero — and
 because `C^∞` costs one `exp` per point either way. Two consequences for
 the code around it: `GHCase`'s `γ0` field now holds a *profile* and not a
 number (a bare number is wrapped in `ConstantDamping`, so every
-flat-space case of steps 3 and 4 is the arithmetic it was), and the
+flat-space case is the arithmetic it was), and the
 right-hand-side kernel therefore forms the point's position
 unconditionally — three fused multiply-adds, which the compiler drops
 where the profile is constant and there is no interior.
@@ -1102,8 +1058,7 @@ where the profile is constant and there is no interior.
 ### Periodic
 
 Free, through the tree. The gauge wave and the robust-stability tests are
-periodic in every dimension. **Shifted Minkowski is not** (amended in step
-3): its profile `ψ′(x) = A sech²(x/w)` is a function of `x` alone and is
+periodic in every dimension. **Shifted Minkowski is not**: its profile `ψ′(x) = A sech²(x/w)` is a function of `x` alone and is
 *even* in it, so closing the box in `x` would join two equal values with
 opposite gradients — a kink, which no stencil resolves and which every
 error norm would then report as truncation error. That case is therefore
@@ -1133,7 +1088,7 @@ for a solution that is *not* known at the boundary needs a hook that
 reads the interior, which TreeAMR's device form cannot do — see
 [Possible extensions](#possible-extensions).
 
-**(Measured in step 3.)** The hook writes the analytic state into the
+The hook writes the analytic state into the
 outer ghosts and into the shared upper plane **bit for bit** — the same
 numbers `state_tuple` gives on the host at `coordinates(fs, b, idx)`,
 because TreeAMR's boundary kernel builds its position the same way
@@ -1144,15 +1099,20 @@ Dirichlet face costs the scheme nothing. `dirichlet(case, t)` returns
 right-hand side branches once on a `Bool` the problem stores rather than
 handing `fill_ghosts!` an argument whose type depends on the case.
 
-**(Measured in step 8.)** For G5's own background, `boost(Harmonic(1,
+For G5's own background, `boost(Harmonic(1,
 7/10), 0.3 x̂)`, the hook built at `t = 7/10` writes the analytic state
 into the outer ghost planes, the shared upper plane and a corner **bit for
 bit** (`test/moving_tests.jl`), where the same points at `t = 0` differ by
 more than `10⁻³`: the time dependence of a hole that moves reaches the
-boundary through the hook's `t` and nothing else. Every moving run of step
-8 fills its boundary this way at every stage.
+boundary through the hook's `t` and nothing else.
 
-### Reflecting faces: symmetry planes (added 2026-10-02)
+**Hooks depend on time.** `dirichlet(case, t)` is built at each call.
+  It goes to `fill_ghosts!` inside the RHS, to `regrid!`, and to
+  `adapt_to_initial_data!`, each with that call's `t`. Forgetting the
+  second is the bug that arrives one chunk late; passing a stale `t` is
+  the bug that arrives as a boundary reflection.
+
+### Reflecting faces: symmetry planes
 
 A case's `reflecting` is TreeAMR's M10 (`(lo, hi)` per dimension, refused
 together with `periodic` in one dimension): a face across which the
@@ -1176,7 +1136,7 @@ and nothing reads. Over a forest without a reflecting face both are
 **The low wall plane is evolved, and an odd variable is not forced to zero
 on it** (TreeAMR's rule): it stays zero to roundoff if it starts zero.
 `add_noise!` therefore projects its noise onto the parity on the wall
-planes. **(Measured 2026-10-02**, `test/reflection_tests.jl`**.)** A
+planes. In `test/reflection_tests.jl` a
 uniform octant `[0, 4]³` is the box `[−4, 4]³` with the noise extended by
 parity, to `1.1·10⁻¹⁵` relative after 32 steps; on a three-level octant
 the odd components stay on their walls at `7·10⁻¹⁸` relative after 20
@@ -1188,10 +1148,10 @@ and `x = +R` on the coarse one, so the box's discretization has no mirror
 symmetry at a refinement boundary and the octant's is a different (and
 symmetric) discretization of the same problem.
 
-**A hole on the octant** (`hole_case(; octant = true)`, added 2026-10-02)
+**A hole on the octant** (`hole_case(; octant = true)`)
 needs one that is its own mirror image in all three planes — at the origin,
 at rest, `a = 0` — and refuses any other: a spin along `z` keeps only the
-`z` mirror and a boost breaks its own axis. **(Measured 2026-10-02.)**
+`z` mirror and a boost breaks its own axis.
 Kerr-Schild `a = 0` with the `:damped` layer (`r_0 = 3/4`, `r_1 = 3/2`),
 `q = 4`, uniform at `h = 1/16` on `[0, 3]³` against `[−3, 3]³`: after 224
 steps (`t = 2 M`, past the layer's saturation at `M/2`) the two agree to
@@ -1203,7 +1163,15 @@ frozen core, the layer, the sampled gauge source and the `γ0` profile need
 nothing of their own at the walls. The suite's version is the `q = 2`
 fixture to `1/5 M` (`3.6·10⁻¹⁴`).
 
-### The rotating octant: a quarter turn about `z` (added 2026-10-04)
+Beside `hole_case(; octant = true)` there are `minkowski_octant_case` and
+`hole_forest(; shape = :cube)` for nested boxes.
+
+**An octant's corner is in the core, and its stale data is not of definite
+  parity**: the core rule maps the origin to a point of the
+  sphere `r_0` off the walls, so it holds `h_tx ≠ 0` on a wall. Never project
+  or perturb the core; `add_noise!(; exclude)` skips it.
+
+### The rotating octant: a quarter turn about `z`
 
 A spinning hole has no mirror in `x` or `y`, so the octant above refuses it.
 It does have every rotation about its axis, and TreeAMR 0.1.7's M12 makes
@@ -1241,7 +1209,7 @@ projects odd components to zero on a mirror's wall: independent draws there
 would be a solution that disagrees with itself. The refinement ceiling
 skips the seam's faces as it skips reflecting ones.
 
-**(Measured 2026-10-04**, `test/rotation_tests.jl`**.)** Kerr-Schild at
+In `test/rotation_tests.jl`, Kerr-Schild at
 `a = 3/10` (the ring inside `r_0 = 7/20`, `r_1 = 11/10` eight cells inside
 `r₊ = 1.954`), `q = 2`, uniform at `h = 5/48`: the analytic state is its own
 image under the map to `2·10⁻¹⁶`; after one ghost fill every stored point
@@ -1256,7 +1224,10 @@ TreeAMR's `interpolate` turns the finder's sphere into the quadrant, and
 Kerr's `0.3`). A restart chain on the rotating octant is the uninterrupted
 run bit for bit (checked by hand, not in the suite).
 
-### The quadrant: a hole moving along `x` (added 2026-10-20)
+`gh_forest` passes a case's `rotating` on to the forest, and `hostcopy`
+keeps a field set's rotation, as it keeps its parities.
+
+### The quadrant: a hole moving along `x`
 
 A non-spinning hole on the `x` axis, moving along it, is its own mirror image
 in `y = 0` and in `z = 0` at every time, and in nothing else: the boost breaks
@@ -1282,17 +1253,18 @@ hole — the shells, the noise's excluded core, the finder's guess, the
 boundary check — about `c(t)`, and splits each shell into its trailing and
 leading half.
 
-**(Measured 2026-10-20**, `test/boosted_tests.jl`**.)** The boosted
+In `test/boosted_tests.jl`, the boosted
 Kerr-Schild hole (`v = 1/5` from `x = −1/4`, `:damped` at `4/M`, the algebraic
 source, `q = 2`, uniform `h = 5/48`) on the quadrant `[−5/2, 5/2] × [0, 5/2]²`
 against the box `[−5/2, 5/2]³`: after 16 RK4 steps the two agree to
-`5.8·10⁻¹⁶` relative at every point outside the core. As for the octant,
+`3.8·10⁻¹¹` at every point outside the core, the moving layer's target
+rate's roundoff ([the rotating quadrant](#the-rotating-quadrant-a-hole-moving-along-its-spin-axis); [history](HISTORY.md#the-quadrants-mirror-test)). As for the octant,
 only a uniform quadrant is the box's restriction; a refined one is a
 different, symmetric discretization of the same problem. The runs are under
 [the boosted Kerr-Schild hole at binary
 speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20).
 
-### The rotating quadrant: a hole moving along its spin axis (added 2026-10-21)
+### The rotating quadrant: a hole moving along its spin axis
 
 A Kerr hole spinning about `z` and moving along `z` has no mirror plane: the
 motion breaks `z → −z`, the spin `x → −x` and `y → −y`. It is its own image
@@ -1314,7 +1286,7 @@ component along the spin, `J n̂_z` with `n̂` the finder's spin axis (`hz_J`;
 the magnitude on every other domain), and the horizon's extent along `z` over
 its extent across, against `√(1 − v²) r₊/√(r₊² + a²)`.
 
-**(Measured 2026-10-21**, `test/boosted_tests.jl`**.)** Kerr-Schild at
+In `test/boosted_tests.jl`, Kerr-Schild at
 `a = 1/5` moving along `z` at `v = 1/5` from `z = −1/4` (`:damped` at `4/M`,
 `r_0 = 2/5`, `r_1 = 11/10`, the algebraic source, `q = 2`, uniform
 `h = 5/48`) on `[0, 5/2]² × [−5/2, 5/2]` against the box `[−5/2, 5/2]³`,
@@ -1327,11 +1299,18 @@ four-fold symmetric only to `56 ε`, and the moving layer's target rate, a
 centered difference over `δ = ε^{1/3} r_0`, divides that asymmetry by `δ` and
 injects it every step, while the quadrant's ghosts across the seam are the turn
 exactly. The claim bounds the difference by `nsteps · dt` times the rate's
-measured asymmetry. The `x` quadrant's mirror test has met the same mechanism
-since the rate: `3.8·10⁻¹¹`, where it was `5.8·10⁻¹⁶` above. The runs are under [a spinning hole along its
+measured asymmetry. The `x` quadrant's mirror test meets the same mechanism
+([the quadrant](#the-quadrant-a-hole-moving-along-x)). The runs are under [a spinning hole along its
 axis](SINGULARITY_HANDLING.md#a-spinning-hole-along-its-axis-2026-10-21).
 
-### The bitant: a hole moving across its spin (added 2026-10-24)
+**`hz_J` is a component on the rotating quadrant and a magnitude elsewhere**:
+  `test/octant_runs.jl` writes `J n̂_z` there (`n̂` the finder's
+  spin axis) and the Korzyński `|J|` on every other domain, which cannot go
+  negative or show a flipped axis; `records.csv`'s `J` is the magnitude
+  everywhere. On the `a = 1/2` runs the two agree to the CSV's ten digits.
+  Say which one a comparison reads.
+
+### The bitant: a hole moving across its spin
 
 A Kerr hole spinning about `z` and moving along `x` is its own image under the
 mirror `z → −z` and under nothing else. A mirror keeps a velocity in its plane
@@ -1352,7 +1331,7 @@ capsule along `x`. The parities are the octant's. `test/octant_runs.jl
 octant=bitant` records `J`'s component along `z` as `hz_J`, as the rotating
 quadrant does.
 
-**The least horizon radius across the spin (amended 2026-10-24).**
+**The least horizon radius across the spin.**
 `horizon_min_radius` of a boosted hole was the rest frame's least radius times
 `√(1 − v²)` in every direction. That is exact along the spin, or without
 spin. Across the spin it is far too low: the contraction acts on the
@@ -1367,15 +1346,15 @@ every speed. Along the spin the contracted pole at `v = 1/2` forces `9/8`,
 which grows at rest ([aligned spin and
 velocity](SINGULARITY_HANDLING.md#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22)).
 
-**(Measured 2026-10-24**, `test/boosted_tests.jl`**.)** Kerr-Schild at
+In `test/boosted_tests.jl`, Kerr-Schild at
 `a = 1/5` moving along `x` at `v = 1/5` from `x = −1/4` (`:damped` at `4/M`,
 `r_0 = 2/5`, `r_1 = 11/10`, the algebraic source, `q = 2`, uniform
 `h = 5/48`) on `[−5/2, 5/2]² × [0, 5/2]` against the box `[−5/2, 5/2]³`: after
 16 RK4 steps they agree to `7.6·10⁻¹¹` of `127` at every point outside the
 core, which is the moving layer's target rate's roundoff, as on the quadrants.
 
-**(Measured 2026-10-25**, [spin across the
-motion](SINGULARITY_HANDLING.md#spin-across-the-motion-the-bitant-2026-10-24)**.)**
+From [spin across the
+motion](SINGULARITY_HANDLING.md#spin-across-the-motion-the-bitant-2026-10-24):
 Kerr-Schild `a ∈ {0, 1/2, 9/10}` × `v ∈ {0, 1/5, 1/2}` along `x`, 23 rows on
 one H200 each to `20 M`: every row is stable, and every cell converges at
 order four outside the horizon except `a = 1/2` at `v = 1/2`, which is not yet
@@ -1387,16 +1366,16 @@ The source of a hole moving across its spin has the rest frame's spin 4-vector,
 
 ### The interior: a pointwise damping layer
 
-#### The design, as steps 8a–8f leave it (rewritten in step 8f)
+#### The design
 
 Inside the horizon the right-hand side is modified point by point, and the
 modification is four independent choices; everything below this summary is
 the history that made each of them, kept because its numbers are the
-evidence (**rewritten in step 8f** around these four; step 5's design is
-the first row of each and stays as the analytic control):
+evidence (step 5's design is the first row of each and stays as the
+analytic control; [history](HISTORY.md#the-design)):
 
 1. **The geometry — where the layer is.** Either step 5's **sphere** about
-   the analytic center, `r_1 ≤ r_h,min − m h` (`Interior`), or step 8d's
+   the analytic center, `r_1 ≤ r_h,min − m h` (`Interior`), or the
    **tracked offset surface**, the depth `d = r_h(n̂) − m h − |x − c(t)|`
    below the horizon the finder found about the center it found
    (`FittedSpec` in the case, a `FittedInterior` rebuilt every chunk). The
@@ -1406,32 +1385,38 @@ the first row of each and stays as the analytic control):
    Kerr's flat singular disk inside an oblate horizon.
 2. **The target — what the layer relaxes toward.** Either the **analytic**
    solution (`:damped`, `:pasted`; an optional `target` metric for studies)
-   or step 8e's **fit** of the evolved state on the offset surface,
+   or a **fit** of the evolved state on the offset surface,
    continued inward as a polynomial in `x` and cached on the grid
    (`:fitted`). The analytic target needs the chart's singular set inside
    the core surface; the fitted one needs nothing inside, and is the only
-   target for harmonic Kerr at `a = 7/10`, G5's chart (step 8f: the analytic
+   target for harmonic Kerr at `a = 7/10`, G5's chart (the analytic
    core there cuts the disk at every `h` the proof of concept can afford).
-   The fit is made in `(log α, β^i, γ_ij, Π̃_ab)`, `Π̃ = (α/√γ)Π` from step
-   8f (**proposed in step 8f**).
+   The fit is made in `(log α, β^i, γ_ij, Π̃_ab)`, `Π̃ = (α/√γ)Π`.
 3. **The ramp — how wide.** `ρ` rises from `0` at the offset surface to
    `ρ_max` over `n_L = max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)` cells, `w` turning
-   over in the inner half (step 8c's rule, measured at `q = 2`, **proposed**
+   over in the inner half (measured at `q = 2`, **proposed**
    for other orders); a margin of `m ≥ G + 1` cells (the stencil margin)
-   and, for grid-scale leakage, as many more as step 8a's path integral asks.
-4. **The rate — how hard.** `ρ_max` is a physical rate, **`4/M` (decided
-   2026-09-23)**, not the grid rate `1/dt` step 5 started with, which only
-   an exact target survives. **A moving analytic layer wants more (measured
-   in step 8f)**: its core is frozen, a point crosses an eight-cell layer at
+   and, for grid-scale leakage, as many more as the leakage margin's path integral asks
+   ([the margin](#the-margin)).
+4. **The rate — how hard.** `ρ_max` is a physical rate, **`4/M`**, not the grid rate `1/dt`, which only
+   an exact target survives. **A moving analytic layer wants more**: its core is frozen, a point crosses an eight-cell layer at
    `v = 0.3` in about `M`, and at `4/M` what the core held is relaxed by
    `e^{−2}` before the layer releases it on the trailing side — the boosted
    `:damped` rows end at `1.0–1.5 M` at `4/M` and reach `5 M` at `20/M`
-   **(proposed in step 8f: `ρ_max ≳ 20/M` for a moving analytic layer)**;
+   **(proposed: `ρ_max ≳ 20/M` for a moving analytic layer)**;
    the `:fitted` core relaxes toward a target that moves with the track and
    reaches `5 M` at `4/M` ([the measurement
    matrix](SINGULARITY_HANDLING.md#the-generic-interior-the-measurement-matrix-step-8f)).
 
-**What step 8f's matrix decides (proposed in step 8f).** The `:fitted`
+**Inconsistent:** item 4 says a moving analytic layer's core is frozen and
+proposes `ρ_max ≳ 20/M` for it, while [the analytic
+layer](#step-5s-layer-the-analytic-control) below (its table, and "Why touch
+the interior") says a moving `:damped` core relaxes toward `u_exact` and the
+moving layer adds its target's rate, and `CLAUDE.md` ("A relaxation toward a
+moving target needs the target's rate") says `4/M` is the moving hole's
+setting again.
+
+**What the measurement matrix decides.** The `:fitted`
 target on the tracked geometry holds every hole the package has that the
 mesh resolves — Kerr-Schild `a = 0` to `50 M`, `a = 9/10` and harmonic
 `a = 0` to the ends of their rows (`20 M`, `10 M`), harmonic `a = 7/10` at
@@ -1443,43 +1428,42 @@ default wherever the chart's singular set fits inside the core, and
 `:fitted` is for the charts where it does not**, G5's included.
 
 **The runs behind these choices are in
-[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md) (moved 2026-10-08)**,
+[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md)**,
 and the settings they recommend for a single hole at `a ≤ 9/10` are under
 [Single black holes: recommended
-settings](#single-black-holes-recommended-settings-added-2026-10-08).
+settings](#single-black-holes-recommended-settings).
 
 #### Step 5's layer: the analytic control
 
-**No excision** (decided). Inside the horizon the solution is not left
+**No excision**. Inside the horizon the solution is not left
 to the Einstein equations alone: in a layer well inside the horizon it
 is *driven to the analytic solution*, and around the singularity the
 evolution is *switched off*. Both are decisions made **point by point**,
 as functions of the distance `r = |x − c(t)|` to the hole's analytic
 center `c(t) = c_0 + v t`, and neither knows anything about blocks,
-ghost zones or refinement levels (decided in review). **(Amended in step
-8d:** or, for a case that asks for it, as functions of the *depth* below
+ghost zones or refinement levels. (Or, for a case that asks for it, as functions of the *depth* below
 the tracked horizon's offset surface about the *tracked* center — "The
 tracked geometry" below, of which this section's sphere is the `l = 0`
-case.**)** The right-hand side at every point is
+case.) The right-hand side at every point is
 
     ∂_t u = w(r) · F(u)  −  ρ(r) · (u − u_exact(x, t))                (INTERIOR)
 
 with `F` the GH right-hand side `(EXPANDED)` including the dissipation,
 `u_exact` the background's `(h, Π)` at `(x, t)`, and two smooth
-profiles. **(Amended 2026-10-20:** for a moving hole the `:damped` layer
+profiles. (For a moving hole the `:damped` layer
 adds the target's rate where `F` is switched off,
 
     ∂_t u = w F(u)  +  (1 − w) ∂_t u_exact  −  ρ (u − u_exact)
 
-— the `:fitted` layer's `target_rate` (step 8) for the analytic target —
+— the `:fitted` layer's `target_rate` for the analytic target —
 because without it the moving solution is not a solution of `(INTERIOR)`;
-"Why touch the interior" below.**)**
+"Why touch the interior" below.)
 
 | region | radii | `w` | `ρ` | what happens |
 |---|---|---|---|---|
 | evolved | `r ≥ r_1` | 1 | 0 | the Einstein equations, untouched |
-| damping layer | `r_0 ≤ r < r_1` | 1, ramping to 0 at its inner edge | 0 at `r_1`, rising smoothly to `ρ_max` | the equations plus a relaxation toward the analytic solution (and, for a moving `:damped` hole, `(1 − w) ∂_t u_exact`, amended 2026-10-20) |
-| frozen core | `r < r_0` | 0 | 0 (`ρ_max` for a moving `:damped` hole, amended 2026-10-20) | nothing: `du = 0`, `F` not evaluated; a moving `:damped` core relaxes toward `u_exact` at the core rule's point, following its rate in the outer half `r > r_0/4` |
+| damping layer | `r_0 ≤ r < r_1` | 1, ramping to 0 at its inner edge | 0 at `r_1`, rising smoothly to `ρ_max` | the equations plus a relaxation toward the analytic solution (and, for a moving `:damped` hole, `(1 − w) ∂_t u_exact`) |
+| frozen core | `r < r_0` | 0 | 0 (`ρ_max` for a moving `:damped` hole) | nothing: `du = 0`, `F` not evaluated; a moving `:damped` core relaxes toward `u_exact` at the core rule's point, following its rate in the outer half `r > r_0/4` |
 
 The layer's outer radius sits inside the horizon with a margin: with
 `r_h,min(t)` the smallest coordinate distance from `c(t)` to the
@@ -1505,15 +1489,18 @@ finest spacing the refinement must reach (about `0.02 M` there); the
 level floor under [Refinement](#refinement-and-regridding) is what
 guarantees it.
 
+**Inconsistent:** this paragraph gives `r_h,min` under a boost as the rest
+frame's value times `√(1 − v²)`, while [the bitant](#the-bitant-a-hole-moving-across-its-spin) above says
+that bound is far too low across the spin and that the least radius is now
+the boosted ellipsoid's shortest semi-axis (`horizon_ellipsoid`).
+
 #### The margin
 
-**The margin `m` does two jobs, and they have different sizes (proposed in
-step 8a).** Inside the horizon the continuum lets nothing out, but the
+**The margin `m` does two jobs, and they have different sizes
+(proposed).** Inside the horizon the continuum lets nothing out, but the
 discrete scheme lets grid-scale content out, held back by the dissipation
-alone ([Kreiss–Oliger dissipation](#kreissoliger-dissipation), step 8a's
-table), and every interior treatment is a source of such content at `r_1`.
-So there are two rules, both **(proposed in step 8a)** for the reviewer to
-confirm:
+alone ([Kreiss–Oliger dissipation](#kreissoliger-dissipation)), and every interior treatment is a source of such content at `r_1`.
+So there are two rules, both **(proposed)**:
 
 1. **The stencil margin, `m ≥ G + 1`** — the bound above, unchanged and now
    named: no stencil of a point on or outside the horizon reaches a point
@@ -1539,7 +1526,7 @@ confirm:
    cells lies ever closer to the sonic surface.
 
 **The `0.1 M` on harmonic Kerr's equator is not too thin; the spin axis is
-what binds (measured in step 8a, frozen-coefficient).** Toward the disk
+what binds (frozen-coefficient).** Toward the disk
 every characteristic speed falls to zero, so `ℓ_max` drops below a cell and
 a margin of `m = 4` at `h = 5/256` buys `7.3` e-folds at `q = 2` and `9.7`
 at `q = 4` at `ε_KO = 1/2`, while the same hole's axis gets `0.9` and `1.9`
@@ -1562,11 +1549,11 @@ source at `2 M` in 3D and **4–6 %** by `10 M` in 1D: `m = 8` is `e^{−2.9}`
 to `e^{−4.6}` at this resolution, not the `e^{−8/ℓ}` a constant `ℓ` would
 suggest, and `e^{−5}` needs `m ≈ 10–15` here (the `q = 2` formula says
 `12`) and more at finer `h`. What `n_e` has to be is set by the amplitude
-of what the interior makes, which step 8c's inexact targets measure; so the
+of what the interior makes, which the inexact targets measure
+([the layer for an inexact target](#the-layer-for-an-inexact-target)); so the
 rules are stated and **the default `m = 8` is not changed**.
 
-**`ε_KO` rising inside the layer does not buy margin (proposed in step
-8a).** The leakage the margin is for is made at or outside `r_1` and crosses
+**`ε_KO` rising inside the layer does not buy margin.** The leakage the margin is for is made at or outside `r_1` and crosses
 `r_1 ≤ r < r_h`, where a profile that rises only inside the layer still has
 the exterior's value: in the one-dimensional model to `10 M`, `ε_in = 1, 2,
 4` inside the layer changes the transmission from every depth by at most
@@ -1575,8 +1562,8 @@ the exterior's value: in the one-dimensional model to `10 M`, `ε_in = 1, 2,
 `ε_in = 4` it cuts the transmission from depth 8 by **4–15×** (`q = 2, 4`,
 `λ = 2h, 4h`), five to nine cells' worth at the long-time rate, and does not
 help a source within two cells of the horizon; doubling `ε_KO` everywhere,
-measured in 3D, cuts it by 1.7–2.5×. The recommendation to step 8c is
-therefore to start its `ε_KO(r)` profile's rise **at the horizon rather
+measured in 3D, cuts it by 1.7–2.5×. The recommendation is
+therefore to start the `ε_KO(r)` profile's rise **at the horizon rather
 than at `r_1`** — the region is causally disconnected from the exterior in
 the continuum, and the dissipation is `O(h^{q+1})` whatever `ε` is — with
 `ε_in ≤ 4`, inside RK4's real-axis limit of about `6` on the 3D corner mode
@@ -1584,13 +1571,13 @@ at `cfl = 1/4` (`3 ε dt/h ≤ 2.8`); and, if `n_e` must exceed about 5 at this
 resolution, to widen the margin as well, since neither lever alone is
 enough.
 
-**A hard step inside the horizon does get out, at the rate 8a measured
-(measured in step 8c).** `:pasted` onto `KerrSchild(6/5, 0)` (E0) holds a 20 %
-step — `|δh| = 0.348` — at `r_1`, `10.9` cells below the horizon, on 8a's
+**A hard step inside the horizon does get out, at the rate the leakage
+study measured.** `:pasted` onto `KerrSchild(6/5, 0)` (E0) holds a 20 %
+step — `|δh| = 0.348` — at `r_1`, `10.9` cells below the horizon, on the leakage study's
 uniform 512-block mesh, and the first shell outside the horizon carries,
 against the same run with the exact target, **`4.2e−3` of it at `2 M` and
 `2.2e−2` at `5 M`, still rising** at `ε_KO = 1` everywhere; `0.35–0.39`
-e-folds per cell outside. That is 8a's *measured* attenuation — its ripple
+e-folds per cell outside. That is the leakage study's *measured* attenuation — its ripple
 from depth 8 continued at its own per-cell rate puts `2.6–3.1e−3` at
 `10.9` cells at `2 M` and `ε_KO = 1/2`, where E0 has `2.5e−3` at `1.5 M` — and
 140× the frozen-coefficient `e^{−d/ℓ_max(r_1)} = 3e−5`. At `ε_KO ≤ 1/2`
@@ -1599,18 +1586,18 @@ shell next to it; with the `ε_KO(r)` profile rising from `1/2` at the horizon
 to `ε_in = 2` or `4` at `r_1` it survives, with a masked error L∞ of `8.1` and
 `6.3` against `244` at `ε_KO = 1` everywhere, and transmits **no less at
 `2 M`** (`2.6e−3`, `3.5e−3`) and 1.4–2.3× less by `5 M` (`1.6e−2`,
-`9.5e−3`) — not the 4–15× of 8a's one-dimensional model. So `m = 8` holds a
+`9.5e−3`) — not the 4–15× of the leakage study's one-dimensional model. So `m = 8` holds a
 discontinuity back to a percent or two over a few `M`, and nothing holds the
 exterior together against one for long: the answer to a discontinuous
 interior is a smooth one, rule 2 of [the layer for an inexact
 target](#the-interior-a-pointwise-damping-layer), whose smooth wrong targets
 leave the exterior indistinguishable from the exact one — and **the default
-`m = 8` stays (proposed in step 8c)**.
+`m = 8` stays**.
 
 #### The spinning harmonic chart
 
 **A ball cannot hide Kerr's singularity in the harmonic chart at
-`a = 9/10` (found in step 5, and this is the proof-of-concept case).**
+`a = 9/10`.**
 The frozen core is a *ball* of radius `r_0`, and what it has to contain is
 not a point: both `KerrSchild` and `Harmonic` solve
 `R⁴ − R²(x²+y²+z²−a²) − a²z² = 0` for their radial coordinate, so on the
@@ -1630,8 +1617,7 @@ This does not touch the static holes of G4 at `a = 0`, and it does not
 touch `a = 9/10` in Kerr-Schild, which runs. It **does** stand between
 here and the proof-of-concept case, which is `boost(Harmonic(M, 9/10), v)`
 — harmonic because a sampled gauge source cannot be time-dependent. Two
-ways out, neither built and neither chosen here **(open question, raised
-in step 5)**:
+ways out, neither built and neither chosen here **(open question)**:
 
 1. **Key the interior on the chart's own radial coordinate.** `w` and `ρ`
    become functions of `R`, the spheroidal radius the metric already
@@ -1650,6 +1636,13 @@ in step 5)**:
    and `a = 0.9` does not. G5 at `a = 0.7` is a weaker proof of concept
    and a true one.
 
+**Inconsistent:** this paragraph calls `boost(Harmonic(M, 9/10), v)` the
+proof-of-concept case and its way out an open question, while `README.md`'s
+[Status](README.md#status) says G5 runs at `a = 7/10` and
+[the design](#the-design) above
+names the tracked offset surface as the geometry that can hold harmonic
+Kerr's flat singular disk inside an oblate horizon.
+
 #### Why touch the interior, and why relax
 
 **Why it is correct to touch the interior at all.** Inside the horizon
@@ -1665,7 +1658,7 @@ The analytic solution is an **exact solution of `(INTERIOR)`** wherever
 it is regular: `F(u_exact) = ∂_t u_exact` and the relaxation term
 vanishes on it, so a static hole is an equilibrium and a boosted hole is
 an exact time-dependent solution, in the layer as much as outside.
-**(Amended 2026-10-20: not for the boosted hole.** Where `w < 1`,
+(Not for the boosted hole: where `w < 1`,
 `w F(u_exact) = w ∂_t u_exact` falls short of `∂_t u_exact` by `(1 − w)
 ∂_t u_exact`, and the layer trails a moving target by about `|∂_t
 u_exact|/ρ`: the boosted Kerr-Schild hole at `v = 1/5` had a layer residual
@@ -1679,10 +1672,9 @@ difference of that pass at `t ± δ`, `δ = ε^{1/3} r_0`
 (`background_state_rate`) — `10⁻¹⁰` of `|∂_t Π|`, and generic in the target,
 where `ddmetric` would put a second nested dual pass in every interior
 kernel. Its roundoff, `ε^{2/3}`, is what a moving hole's quadrant and box
-now agree to.**)**
+now agree to.)
 
-**Why a relaxation and not a slowed evolution alone** (decided in
-review; the pure mask `ρ = 0` was the first proposal and stays as a
+**Why a relaxation and not a slowed evolution alone** (the pure mask `ρ = 0` was the first proposal and stays as a
 measured variant). With `ρ = 0`, `∂_t u = w F(u)` slows the evolution
 where `w < 1` and stops it where `w = 0`: the characteristic speeds
 scale with `w`, and perturbations that enter the ramp from outside —
@@ -1704,7 +1696,7 @@ neither is true — the frozen values are stale where the core has moved
 away, and the exact boosted solution is *not* a solution of `w F` in
 the ramp.
 
-**Why a smooth layer and not a hard paste** (decided in review; the
+**Why a smooth layer and not a hard paste** (the
 hard paste stays as the second measured variant). Overwriting a ball
 with the analytic solution is `(INTERIOR)` in the limit `ρ → ∞` on a
 step profile, and can be implemented exactly through RK4's
@@ -1721,8 +1713,7 @@ the right-hand side, where the integrator sees a pure function of
 
 **The profiles and their parameters.** `w` and `ρ` are `C²` smoothstep
 polynomials of `r`, `isbits` closures over `(c(t), r_0, r_1, ρ_max)` and
-the ramp widths, evaluated per point in the kernel. **`ρ_max = 4/M`
-(decided 2026-09-23)**, `M` the hole's mass parameter: the layer's
+the ramp widths, evaluated per point in the kernel. **`ρ_max = 4/M`**, `M` the hole's mass parameter: the layer's
 relaxation rate for every run and every target, the analytic `:damped`
 layer included (`:pasted` and `:frozen` do not read it). `evolve!` given no
 rate keyword relaxes at `default_relaxation_rate(case) =
@@ -1734,15 +1725,12 @@ It is `16 κ`, and the layer forgets a perturbation in `M/4`. `ρ_max` is
 bounded by the explicit integrator — RK4 is stable on the negative real
 axis to about `2.8/dt` — and the driver refuses a fixed rate, the
 default's included, above `1/dt` at the chunk that would take it; on every
-hole the suite evolves the default is `0.036/dt` to `0.092/dt` **(measured
-in step 8c′)**, so the refusal is a statement that the mesh does not
+hole the suite evolves the default is `0.036/dt` to `0.092/dt`, so the refusal is a statement that the mesh does not
 resolve `M/4`.
 
 **The grid rate `ρ_max · dt = 1` stays as the option `ρ_max_factor`**, and
-is no longer what a run gets by default (amended in step 8c′). It was the
-default from step 5, **(proposed)** there because it relaxes by a factor
-`e` per step and looked as strong as a layer needs to be; step 8c measured
-why it is not: `1/dt` is a *grid* rate, about `107/M` on the suite's
+is not what a run gets by default ([history](HISTORY.md#the-interiors-profiles-and-rate)):
+`1/dt` is a *grid* rate, about `107/M` on the suite's
 fixture at `cfl = 1/5`, and a paste two cells deep, which every inexact
 target ends its run against on every ramp up to eight cells, and even on
 the exact solution it ends a `50 M` run with six times the error of `4/M` —
@@ -1752,7 +1740,7 @@ target](#the-interior-a-pointwise-damping-layer) below). `ρ_max_factor = 1`
 reproduces step 5's numbers, which is what it is kept for; `ρ_max_fixed`
 is any other rate, and the two are refused together.
 
-**What the default costs the layer (measured in step 8c′).** A relaxation
+**What the default costs the layer.** A relaxation
 at a fixed rate holds the layer to the analytic solution to `τ/ρ_max`, `τ`
 the truncation error of `F` there, where the grid rate held it to `τ · dt`:
 on the suite's fixture the `:damped` residual — the layer's L∞ distance
@@ -1761,30 +1749,38 @@ from the truth — saturates at `1.42` by `1/2 M` against the grid rate's
 where `|Π|` is `60`, and it converges at order `q` (`2.03` over `N = 6, 8,
 10`) where the grid rate's extra `1/h` made it `2.81`. The exterior does not
 see it: the masked error outside `r_1` is `2.26e−3` against `2.27e−3` at
-`1/10 M` and `1.51e−2` against `1.61e−2` at `1 M`, and at `50 M` it is step
-8c's row, `0.027` against `0.160`. The residual is a statement about the
+`1/10 M` and `1.51e−2` against `1.61e−2` at `1 M`, and at `50 M` it is the
+row above, `0.027` against `0.160`. The residual is a statement about the
 layer's own health and not about the solution, and at `4/M` it is the
 larger one.
 
-**(Implemented in step 5**, `src/interior.jl`.**)** The smoothstep is the
+The smoothstep (`src/interior.jl`) is the
 quintic `10s³ − 15s⁴ + 6s⁵`, whose value, first *and* second derivatives
 match the constants it joins. The two ramp widths are **halves of the
-layer (proposed in step 5)**, measured from opposite ends: `w` rises from
+layer**, measured from opposite ends: `w` rises from
 `0` at `r_0` to `1` at the layer's midpoint and stays there, `ρ` falls
 from `ρ_max` at the midpoint to `0` at `r_1`. They are complementary, so
 no point is both frozen and undamped, and the outer half of the layer is
 the unmodified equations *plus* a relaxation — which is what makes the
 data the evolved stencils reach into the analytic solution to truncation
-order. The smoothstep **clamps its result as well as its argument
-(measured in step 5)**: the polynomial has a triple root at `s = 1`, and
+order. The smoothstep **clamps its result as well as its argument**: the polynomial has a triple root at `s = 1`, and
 its Horner form at `s = 1 − 2⁻⁵³` returns `1 + 1.3e−15`, so without the
 clamp `w` would exceed one just inside `r_1` and amplify `F` where this
 section says the equations are untouched.
 
+The grid rate `ρ_max · dt = 1` is the option
+`ρ_max_factor = 1` — it is what reproduces step 5's tables, which `CODE.md`
+keeps as history — and `hole_runs.jl`'s `calibration` (`:grid`) and `bounds`
+sections ask for it by name.
+
+**Inconsistent:** the sentence above says `CODE.md` keeps step 5's
+tables as history; "The design" says the runs
+behind the interior are in `SINGULARITY_HANDLING.md`.
+
 #### The layer for an inexact target
 
-**The layer for an inexact target (added in step 8c).** Step 8e's target is
-a fit of the evolved state, not a solution, so step 8c calibrated the layer
+**The layer for an inexact target.** The fitted target is
+a fit of the evolved state, not a solution, so the layer is calibrated
 against targets that are wrong on purpose, with three knobs and no new
 `Val`: an `Interior` carries an optional `target` metric (`isbits`,
 default `nothing` = the case's background, resolved by `layer_target`)
@@ -1794,27 +1790,26 @@ Dirichlet hook, the gauge source and the error reference stay on the truth
 and the record's `residual` is the layer's distance *from the truth*;
 `evolve!(…; ρ_max_fixed)` relaxes at a rate in the case's units instead of
 `ρ_max_factor/dt` (the two are refused together, and a fixed rate above
-`1/dt` is refused at the chunk that would take it, **(proposed in step
-8c)**; from step 8c′ a run with neither relaxes at the default `4/M`, and
+`1/dt` is refused at the chunk that would take it, **(proposed)**; a run
+with neither relaxes at the default `4/M`, and
 the grid rate is asked for as `ρ_max_factor = 1`); and `HorizonDissipation`,
 the `ε_KO(r)` profile below. The targets:
 **E1** `KerrSchild(6/5, 0)`, a valid metric that is not a solution; **E2**
 `translate(KerrSchild(1, 0), (0, δ, 0, 0))`, `δ = h, 4h`, a tracking error;
 **E3** the solution with `h_tt` off by `−2(r − r_1)²χ(r)/M²`, value and slope
-right at `r_1` and curvature wrong by `4/M²` (the sign is **(proposed in
-step 8c)**: `+2/M²` drives the target's `α²` through zero in any layer of
+right at `r_1` and curvature wrong by `4/M²` (the sign is **(proposed)**: `+2/M²` drives the target's `α²` through zero in any layer of
 eight or more cells, which is finding 2's non-metric and not a curvature
 error). The ramp's width `n_L` is the width over which `ρ` rises from `0`
 at `r_1` to `ρ_max` — `ρ_ramp = 1`, `r_0 = r_1 − n_L h`, `w` turning over
-in the inner half **(proposed in step 8c**, since finding 1's prediction is
+in the inner half **(proposed**, since finding 1's prediction is
 a statement about that width**)**. On the suite's fixture (Kerr-Schild
 `a = 0`, `q = 2`, `h = 5/64`, `cfl = 1/5`, `ε_KO = 1/2`, the range projection
 on) to `50 M`, the numbers under [Measured
 results](SINGULARITY_HANDLING.md#the-layer-against-an-inexact-target-step-8c)
 decide:
 
-1. **`ρ_max` is a physical rate, `4/M` (measured in step 8c**, and the
-   default from step 8c′, decided 2026-09-23**).** At the grid
+1. **`ρ_max` is a physical rate, `4/M`, and the
+   default.** At the grid
    rate every inexact target ends its run on every ramp up to 8 cells — E1
    in `2–4 M`, E2 at `δ = h` in `3–5 M`, E3 in `6–15 M` — degenerating in the
    shell outside `r_1` as step 8b saw step 5's failures do; on 12 cells E1
@@ -1826,8 +1821,7 @@ decide:
    inside* — the shell healthy to the end, the projection firing at
    `r = 0.55` — a deep layer that a weak relaxation does not hold against a
    target that is not a solution.
-2. **The ramp is at least `4G = 8` cells at that rate (measured in step
-   8c).** At `n_L = 8` and `12`, `ρ_max = 4/M`, every target the layer can
+2. **The ramp is at least `4G = 8` cells at that rate.** At `n_L = 8` and `12`, `ρ_max = 4/M`, every target the layer can
    contain — E1, E2 at `δ = h`, E3 — holds the hole to `50 M` with the
    `G`-point shell's `C_a` L2 at `0.029–0.039` and the masked error L2 at
    `0.027–0.032`, both flat from `10 M` on, `M_irr` within `0.3 %` of `M`,
@@ -1837,34 +1831,32 @@ decide:
    more. Step 5's layer on the exact solution at the grid rate ends at
    `0.181` and `0.160`.
 3. **Finding 1's `n_L ≳ G (10 ρ_max M)^{1/3}` is confirmed for `ρ_max M ≥ 4`
-   and is not sufficient below it (measured in step 8c).** It asks for `6.8`
+   and is not sufficient below it.** It asks for `6.8`
    and `9.3` cells at `4/M` and `10/M`; the scan's thinnest ramp that holds
    is `8` and `12`, and one row thinner costs 2–4× in the shell (`n_L = 6` at
    `4/M`, `8` at `10/M`). At `1/M` it would allow `4.3` cells, and the
    ramps of 4–6 cells are 2.5× the best while the 12-cell one fails from
    the inside: the rule is the prediction **and** `ρ_max ≳ 4/M`. Stated for
    other orders and spacings — `n_L = max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)` cells
-   at `ρ_max = 4/M`, `4/M` being `16 κ` — it is **(proposed in step 8c)**:
+   at `ρ_max = 4/M`, `4/M` being `16 κ` — it is **(proposed)**:
    one fixture, one order, one spacing measured it.
-4. **`ε_KO` stays constant for a smooth target (measured in step 8c).** The
+4. **`ε_KO` stays constant for a smooth target.** The
    profile below, raised across the margin as step 8a recommended, makes the
    shell *worse* in proportion to `ε_in` — at `n_L = 12`, `4/M`: `0.029`,
    `0.032`, `0.045`, `0.065` for `ε_in = 1/2` (constant), `1, 2, 4` —
    and changes no survival where the ramp is right; where it is wrong (the
    grid rate at `n_L = 8`) it delays the end from `15 M` to `22 M`. It is
    what keeps a *hard step* alive (E0, above), so it stays built, as the
-   remedy for a target that can jump, and off by default **(proposed in step
-   8c)**.
-5. **The tracking error the layer absorbs is about `h` (measured in step
-   8c).** E2 at `δ = h` is the exact target's `0.029` at both good ramps;
+   remedy for a target that can jump, and off by default **(proposed)**.
+5. **The tracking error the layer absorbs is about `h`.** E2 at `δ = h` is the exact target's `0.029` at both good ramps;
    at `δ = 4h = 0.31 M` only `n_L = 8`, `4/M` holds near the rule's error
    (`0.041`), `n_L = 6` at `4/M` and `8` at `10/M` reach `50 M` at 3–4× it
    (`0.160`, `0.123`), the others end in `1–6 M`, and at `n_L = 12` the
    displaced singular point
    lies *on a grid point of the layer* and the run throws at `t = 0` — a
    target's singular set must be inside `r_0` exactly as the background's
-   must, and nothing checks it. Step 8d's tracked center has to be good to
-   a cell for this layer to be the rule's **(proposed in step 8c)**.
+   must, and nothing checks it. The tracked center has to be good to
+   a cell for this layer to be the rule's **(proposed)**.
 
 `r_0` is chosen where the analytic
 solution is still moderate — `|h| ≲ 10`, a fraction of the horizon
@@ -1879,8 +1871,8 @@ because the core holds finite but arbitrary data on which `F` may be
 initial-data callback fills it with the analytic solution evaluated on
 the sphere `r_0` along the ray (continuous at `r_0`, finite everywhere),
 `du = 0` there, nothing else writes it, and the regrid transfer
-interpolates it like any other data. **(Amended 2026-10-20: a moving hole's
-`:damped` core follows its target.)** A core with `du = 0` keeps its `t = 0`
+interpolates it like any other data. **A moving hole's
+`:damped` core follows its target.** A core with `du = 0` keeps its `t = 0`
 data, the solution about `c(0)`, and when the hole moves its trailing side
 releases them into the layer, off the current solution by an amount that
 grows with the distance travelled. A boosted Kerr-Schild hole on the
@@ -1902,8 +1894,7 @@ straight line in `g` between Kerr-Schild at `±r_0 x̂` passes through
 `η + (2M/r_0) diag(1, n n)`, which is Euclidean (`g_tt = 2.2` at
 `r_0 = 5/8 M`) — the constraint monitor's `sqrt` threw there. Positive `α²`
 and positive-definite `γ` are convex, so the ADM path is a metric
-throughout, and near the target the two rates agree to first order. **(Amended
-2026-10-20:** in its outer half the core carries its target's rate too,
+throughout, and near the target the two rates agree to first order. In its outer half the core carries its target's rate too,
 `s(r) ∂_t u_exact(t, c(t) + r_0 n̂)` with `s` rising `C²` from 0 at `r_0/4`
 to 1 at `r_0/2` (`core_target_rate`, `core_rate_weight`), a centered
 difference along the core rule's moving point. Without it the core lags its
@@ -1913,7 +1904,7 @@ the layer's rate alone took the residual after 32 steps from `34.6` to
 `12.3`, with the core's `3.3` against the resting hole's `2.6`. Not near the
 center: `n̂` turns at `v/r` and jumps where the center's path crosses a grid
 point; a point spends `(r_0/2)/v` in the outer half, many `1/ρ_max`, before
-it leaves.**)** **(Amended 2026-10-22:** the metric's part of that rate is
+it leaves. The metric's part of that rate is
 an ADM rate too — the target's `∂_t h` read as `∂_t (α², β, γ)` at the target
 and added to the relaxation's before the one chain rule at the state
 (`core_relaxation_rate(h, h_t, ρ, ∂ₜh_t)`). Added in `h`, it is the target's
@@ -1923,8 +1914,8 @@ fraction of itself, that drove `α²` through zero: the campaign's `a = 0`,
 `v = 1/2` hole (`r_0 = 1/2`, `h = 1/16` and `1/32`, rotating quadrant) ended
 in its first chunk in the constraint monitor's `sqrt` at a core point
 `(2h, h, −3h)` from the center, `α² = −1.2·10⁻³` against its target's least
-`0.088`. With the fix the core's `α²` never falls below that least.**)**
-**(Amended 2026-10-22, the core's rate:** a moving core relaxes at
+`0.088`. With the fix the core's `α²` never falls below that least.
+**The core's rate:** a moving core relaxes at
 `max(ρ_max, κ |v|/r_0)`, `κ = 12` (`core_rate`); the layer keeps `ρ_max`. The
 core rule's target jumps where the center's path crosses a point, from the
 leading side of the sphere `r_0` to the trailing side — `Π_tt` from `5.2` to
@@ -1953,7 +1944,7 @@ constant along rays, so its rate there is the tangential part of `−v · ∇u`,
 the layer's is all of it; the rate jumps by `(v · n̂) ∂_r u_exact` across `r_0`,
 and RK4 integrates a step that holds the crossing to first order. It converges,
 and a core target that matches `∂_r u_exact` at `r_0` would remove it — a
-change to the core rule, not made.**)** A hole at rest keeps `du = 0`
+change to the core rule, not made. A hole at rest keeps `du = 0`
 bit for bit (the kernel branches on `v` first, `core_follows`); `:frozen`
 keeps it too, being the variant that is measured to fail, and `:pasted`
 overwrites its core anyway. The tracked geometry is not changed: its
@@ -1965,11 +1956,11 @@ be reported as one or refined for its own sake. The apparent horizon
 lies outside `r_1` by the margin, and so must the interpolation
 footprint of the horizon finder (checked).
 
-**(Implemented in step 5.)** Three things the writing of the core rule
+Three things the writing of the core rule
 settled, each stated where it is made in `src/interior.jl`:
 
 - **At the center the ray is undefined and `+ẑ` is taken
-  (proposed in step 5)**. It is not an arbitrary tie-break: the harmonic
+  (proposed)**. It is not an arbitrary tie-break: the harmonic
   chart is singular on the disk `z = 0, x² + y² ≤ a²` and regular on the
   axis, so the axis is the direction whose value is safest to smear over
   a ball.
@@ -1981,10 +1972,8 @@ settled, each stated where it is made in `src/interior.jl`:
   sampled at every owned point including the core, and at the center
   `KerrSchild`'s `k^i = (…, z/r)` divides by zero. The right-hand side
   never reads it there, because the kernel branches on the core first;
-  the constraint monitors do, and what they then report is `NaN`
-  (fixed in step 5).
-- **A masked slot is written through a branch, not multiplied by zero
-  (fixed in step 5).** Step 4's kernels wrote `keep * value` with `keep`
+  the constraint monitors do, and what they then report is `NaN`.
+- **A masked slot is written through a branch, not multiplied by zero.** Step 4's kernels wrote `keep * value` with `keep`
   a `1`/`0`; that is the same number for every mask that exists when
   nothing is masked, and it is not the same number once the interior is,
   because `0 · NaN = NaN`. This is `CLAUDE.md`'s trap met in the
@@ -2003,10 +1992,16 @@ with a growing layer of compressed features at the freezing radius
 whose amplitude the dissipation may or may not saturate; on the moving
 hole `:frozen` fails and the other two agree.
 
+**A tracked `:damped` core is still frozen**: `core_follows`
+  is false for a `FittedInterior`, so `variant = :damped` on the tracked
+  geometry — the screen before a new `:fitted` depth — dies at
+  `r_core/v` on a moving hole, as step 8's `:frozen` did. Screen a moving
+  depth for less than that, or with `:fitted`.
+
 #### The range projection
 
-**The range projection: the third and last writer of the state (added in
-step 8b**, `src/bounds.jl`**).** Every interior treatment above is a
+**The range projection: the third and last writer of the state**
+(`src/bounds.jl`). Every interior treatment above is a
 *source* of states the equations cannot continue from — step 5 measured
 two of the three ending in "`√(det γ)` of a state that is no longer a
 metric" — and the generic interior of steps 8c–8e will be more so, since
@@ -2055,26 +2050,23 @@ substance, for two reasons that are both findings of the design review:
 the ball `r < r_1`, from the step limiter, is the second; the range
 projection, from the stage limiter, is the third. Both limiters are
 integrator keywords (`stage_limiter`, `step_limiter`); under
-IMEXRungeKutta (from 2026-09-26) **both writers are one limiter,
+IMEXRungeKutta **both writers are one limiter,
 `gh_limiter!` — the projection, then the paste — passed as the stage and
-the step limiter alike** (decided 2026-09-26 by Erik: the limiter applies to
+the step limiter alike** (the limiter applies to
 every state vector), so every stage value the right-hand side reads and
 every step's result is projected and pasted — see [Time
 integration](#time-integration). The projection also runs
 once on the initial data and once after every regrid transfer, before the
 paste, which is the order RK4 applies the two — neither state went
 through a stage, and a prolongation into a fresh fine block is unlimited
-(TreeHydro's reason for the same call) **(proposed in step 8b**, for the
+(TreeHydro's reason for the same call) **(proposed**, for the
 initial data**)**.
 
 **Why a stage limiter and not a step limiter**: what it guards against is
 `F` evaluated on a stage vector that is not a metric, and a `NaN` in a
 stage is a `NaN` in the next stage's `F` at every point whose stencil
-reads it. Read against `OrdinaryDiffEqLowOrderRK` 2.2.5, RK4 calls the
-stage limiter on its three intermediate stages and then on `u`, before
-the FSAL evaluation and before the step limiter: four calls per step.
-**(Amended 2026-09-26.)** Under IMEXRungeKutta's RK4 the same four
-projections happen, each followed by the paste: three as the stage limiter,
+reads it. Under IMEXRungeKutta's RK4 four
+projections happen a step, each followed by the paste: three as the stage limiter,
 on the stage values the right-hand side reads, and the fourth as the step
 limiter, on the result.
 
@@ -2085,14 +2077,14 @@ and `check_bounds_gate` asserts at every regrid, beside the interior's
 radius checks, that `r_gate ≤ r_1 − R h` with `R` the stencils' Euclidean
 reach in spacings (`G` for `q ≤ 4`, the mixed derivative's `√2 · q/2` from
 `q = 6`). The proposed gate is **`r_gate = r_1 − 2 G h`** — twice the reach
-— **(proposed in step 8b**, until step 8a's leakage margin exists to
+— **(proposed**, until step 8a's leakage margin exists to
 replace the factor 2**)**; on the suite's fixture that is `0.8375` at
 `h = 5/64`, with `8.4 %` of the owned points inside it. The outer part of
 the layer, `r_gate ≤ r < r_1`, is unguarded by construction.
 
 **The proposed ranges** (`default_bounds`; a `StateBounds` has no default
 for any of them and `hole_case` has none beyond `bounds = nothing`)
-**(proposed in step 8b)**: `α ∈ [1/50, 50]`, `λ(γ) ∈ [1/100, 1000]`,
+**(proposed)**: `α ∈ [1/50, 50]`, `λ(γ) ∈ [1/100, 1000]`,
 `|β| ≤ 10`, `K_max = 100/M`, against the step-5 fixture's deepest data —
 Kerr-Schild at `r_0 = 2/5 M`, where `α = 0.41`, `λ = (1, 1, 6)`, `|β| = 2.04`
 and `max |(α/√γ)Π| = 10.4/M` — so that a healthy interior never fires.
@@ -2100,7 +2092,7 @@ Flat space must be inside every range, and the constructor refuses one
 that excludes it: the non-finite repair writes Minkowski's components,
 and a repair the next check moves again is not idempotent.
 
-**Idempotent on the state and on the flag (measured in step 8b).** Every
+**Idempotent on the state and on the flag.** Every
 test carries a slack of `8 eps` of the scale of the terms it is made of —
 `‖γ‖` for the spectrum, `1 + |h_tt| + β_iβ^i` for `α²`, of which it is a
 difference — and every clamp moves to its bound exactly. TreeHydro found
@@ -2126,7 +2118,7 @@ not roundoff.
 **What it does on the two runs that end** is measured under [Measured
 results](SINGULARITY_HANDLING.md#the-range-projection-step-8b): step 5's
 `N = 6` `:damped` and
-`N = 8` `:pasted`. **It never fires on either (measured in step 8b)**: both
+`N = 8` `:pasted`. **It never fires on either**: both
 degenerate in the evolved shell just outside `r_1`, where no projection
 gated below `r_1` reaches and none should, and the runs with it end bit for
 bit where the runs without it do. The prediction that hits would start
@@ -2134,11 +2126,21 @@ bit where the runs without it do. The prediction that hits would start
 failures at `r_1`, which is step 8c's hypothesis about the layer's
 transition, measured from the other side.
 
+**Written back only where it fired, bit for bit.** The range projection keeps a
+  healthy quantity's bits — it reassembles `h_tt`, `h_ti` or the spatial
+  block only when that block's range was violated, because `(−1 + h_tt) +
+  1` is not `h_tt` — and the kernel writes a point only where `hit` came
+  back true.
+
+**The unguarded outer layer.** The outer part of the layer, `r_gate ≤ r < r_1`, is unguarded by design, and
+  a degenerate metric there still ends a run through the `DomainError` of
+  `metric_quantities`' `sqrt`.
+
 #### The tracked geometry
 
-**The tracked geometry (added in step 8d**, `src/tracking.jl` and the
-second half of `src/interior.jl`**).** Everything above is keyed on
-`r = |x − c(t)|` about the *analytic* center. From step 8d a case may
+**The tracked geometry** (`src/tracking.jl` and the
+second half of `src/interior.jl`). Everything above is keyed on
+`r = |x − c(t)|` about the *analytic* center. A case may
 instead key its layer on the **found** horizon, `PLAN.md`'s finding 3: with
 `r_h(n̂)` the tracked apparent horizon's coordinate radius along the unit
 vector `n̂` from the *tracked* center `c(t)`, the layer is a function of the
@@ -2149,7 +2151,7 @@ vector `n̂` from the *tracked* center `c(t)`, the layer is a function of the
 below the offset surface — `d ≤ 0` evolved, `0 < d ≤ n_L h` the layer
 (core surface `r_0(n̂) = r_1(n̂) − n_L h`), and beyond it the frozen core.
 The sphere is the `l = 0` case, and **a tracked geometry holding step 5's
-sphere is step 5's layer bit for bit (measured in step 8d)**: one
+sphere is step 5's layer bit for bit**: one
 right-hand side on the fixture is `isequal` for `:damped`, `:frozen` and
 `:pasted`, and so is the paste, because the profiles are one function
 (`_layer_profiles`) handed the two surfaces' radii along the ray, and the
@@ -2163,12 +2165,12 @@ Six pieces, in the order a run meets them:
    the ramp `n_L` (`0` meaning step 8c's rule `max(4G, ⌈G (10 ρ_max M)^{1/3}⌉)`,
    resolved by `evolve!` at the scheme's `G` and the run's rate — `8` at
    `q = 2`, `12` at `q = 4` — and at the default `4/M` when the rate is the
-   grid's, whose value changes per chunk **(proposed in step 8d)**),
+   grid's, whose value changes per chunk **(proposed)**),
    `core_min = 2`, `lmax_shape = 4`, `ρ_max` (`0` = the driver's default),
    `max_misses = 3`, `α_trigger = 1/10` and a `target`. **Its ramps are
    step 8c's rule, `ρ_ramp = 1`, `w_ramp = 1/2`**, since `n_L` was
    calibrated as the width over which `ρ` rises; step 5's `1/2, 1/2` is the
-   fixture's **(proposed in step 8d**; the brief said `1/2` for both**)**. A
+   fixture's **(proposed)**. A
    `FittedSpec` case needs a `Horizon` with `every ≥ 1`, and `evolve!`
    refuses one without, saying why: a track that is never updated is the
    analytic seed carried along forever.
@@ -2186,8 +2188,7 @@ Six pieces, in the order a run meets them:
    geometry is. **A find that moves `r_min` by more than half a stencil
    reach `G h/2` is refused** (an `ArgumentError` naming both radii and
    `G h`): the layer is an offset of that surface, and a jump exposes, on
-   the side it moves away from, points no layer ever treated **(proposed in
-   step 8d)**. `track_center(tr) = HoleCenter(c_find − v_est t_find, v_est)`
+   the side it moves away from, points no layer ever treated **(proposed)**. `track_center(tr) = HoleCenter(c_find − v_est t_find, v_est)`
    is all a kernel sees of it — so the masks, `interior_radius`, the range
    projection's gate and the core rule work on the tracked trajectory
    unchanged, and the center is still a function of `t` and never a mutated
@@ -2206,7 +2207,7 @@ Six pieces, in the order a run meets them:
    as its layer's, where a spacing read there asks for a layer that does not
    fit (`18 h = 2.8 M`); so `h` is measured where step 5's `layer_spacing`
    measures the sphere, and what the margin buys along its real path is
-   reported in e-folds, below **(proposed in step 8d)**. `fitted_interior`
+   reported in e-folds, below **(proposed)**. `fitted_interior`
    refuses `r_in − (m + n_L + core_min) h ≤ 0` by name, and
    `check_interior_radii` asserts the result — `offset ≥ m h` and
    `thickness ≥ 2(G+1) h` at the layer blocks' spacing, which is step 5's
@@ -2233,7 +2234,7 @@ Six pieces, in the order a run meets them:
    of `|m|`, and a real function's complex coefficients convert as
    `a_l0 = Re c_l0`, `a^c = √2 Re c_lm`, `a^s = √2 Im c_lm`
    (`real_from_complex`, `complex_from_real`, `real_harmonic_index`)
-   **(proposed in step 8d; step 8e's fit shares the ordering and the
+   **(proposed; the fitted target shares the ordering and the
    conversion)**. The finder's `hlm` is truncated to `lmax_shape` by
    `ash_resample` first. The kernel evaluates the series
    (`shape_series`) with **no angle**: `Y_lm = q_lm(cos θ) sin^m θ e^{imφ}`
@@ -2242,14 +2243,14 @@ Six pieces, in the order a run meets them:
    recurrence for `cos mφ, sin mφ` multiplied through by `sin^m θ`, which
    removes both the `atan` and the division by `sin θ` that would need a
    guard on the axis. Runtime loop bound `lmax`, no allocation, generic in
-   `T`. **The conversion is `sYlm`'s to roundoff (measured in step 8d)**:
+   `T`. **The conversion is `sYlm`'s to roundoff**:
    at 200 random directions the largest error is `3.7` and `6.4` eps of the
    function at `lmax = 4, 8` at `Float64`, `1.6` and `5.3` eps at `Float32`;
    on `EquiangularGrid(6)` it is `ash_evaluate`'s to the same.
    **The surface is the series clamped into `[r_in, r_out]`** — the extremes
    over both poles and a `(4 lmax + 3) × (8 lmax + 6)` grid of directions —
    which makes the two fast paths **exact shortcuts rather than
-   approximations** (proposed in step 8d): outside `r_out − offset` a point
+   approximations** (proposed): outside `r_out − offset` a point
    is evolved and inside `r_in − offset − thickness` it is frozen in every
    direction, and neither evaluates the series.
 5. **The seed is the analytic horizon**, `r_h(θ) = R √((R² + a²)/(R² +
@@ -2260,8 +2261,7 @@ Six pieces, in the order a run meets them:
    `√(1 − v²)` for `boost` (`analytic_horizon_radius`), and **sampled at
    `L = max(4 lmax + 4, 32)` and truncated**, the spectral projection,
    rather than interpolated at `lmax`'s own points, which would alias the
-   spheroid's higher multipoles into the kept ones **(proposed in step
-   8d)**. **What the truncation costs (measured in step 8d)**, the largest
+   spheroid's higher multipoles into the kept ones **(proposed)**. **What the truncation costs**, the largest
    radius error over directions: **Kerr-Schild `a = 9/10`: `1.2e−3` at
    `lmax = 4`, `8.1e−6` at `8`** (`5.5e−8`, `3.8e−10` at `12`, `16`) — the
    axis and equator and `r_in`, `r_out` against `horizon_min_radius`,
@@ -2271,14 +2271,14 @@ Six pieces, in the order a run meets them:
    oblate in the ratio that sets the multipoles' decay (`a²/R² = 4.3` against
    `0.39`). The default `lmax_shape = 4` is Kerr-Schild's (`0.06` cells at
    `h = 5/256`); harmonic Kerr at `a = 9/10` needs `lmax = 12` for a tenth of
-   a cell, which step 8f's rows should carry. **(Amended in step 8:)** the
+   a cell, which step 8f's rows should carry. The
    seed's `r_min` of a **moving** hole is the least of the analytic surface
    over `shape_sample_directions` (both poles included), not
    `horizon_min_radius`'s `√(1 − v²)` bound, which is exact only when the
    smallest radius lies along the boost: G5's hole has it on the spin axis,
    `0.714`, which a boost along `x̂` does not contract, where the bound says
    `0.681`, and the first find (`0.716`) was refused as a jump of `0.034`,
-   over `G h/2` at `h = 5/256` (measured in step 8). A hole at rest keeps
+   over `G h/2` at `h = 5/256`. A hole at rest keeps
    the bound, which is then exact, bit for bit.
 6. **The masks and the guard.** `ShapeMask` (`d ≤ 0` evolved, the same fast
    paths) is what `interior_mask` returns, so every masked norm, the speed
@@ -2290,13 +2290,13 @@ Six pieces, in the order a run meets them:
    can matter: a footprint whose nearest lattice point is outside
    `r_out − offset` passes, one inside `r_in − offset` is refused, and in
    between each of the `(q+2)³` points is classified by the mask itself
-   **(proposed in step 8d**, over the brief's "use the bounding sphere
+   **(proposed**, over "use the bounding sphere
    `r_in − offset`", which would let a footprint read the layer's outer part
    wherever the horizon is farther than its smallest radius — on harmonic
    Kerr's equator by more than the whole margin**)**; 2000 random
    footprints about an `a = 9/10` shape agree with the definition.
 
-**The protocol both geometries speak (amended in step 8d).** `in_layer(int,
+**The protocol both geometries speak.** `in_layer(int,
 t, x)` takes a position and a time and not a radius, `interior_point(int, t,
 x)` is what the kernel's three predicates (`is_frozen`, `is_outside`,
 `interior_profiles`) are evaluated on — the radius for the sphere, the
@@ -2315,7 +2315,7 @@ measures its radii from there, so the row's `center_offset` is **the
 track's prediction error**; `update_track`; the next chunk's geometry from
 the updated track on this mesh, asserted like the sphere; after a regrid,
 the same track on the new mesh. Four decisions the loop needed, each
-**(proposed in step 8d)**:
+**(proposed)**:
 
 - **The lapse-collapse trigger** (the design review's idea 10): the
   validity monitor now also reduces over the whole evolved region
@@ -2339,13 +2339,10 @@ the same track on the new mesh. Four decisions the loop needed, each
   vanishes to second order there. On the static hole the surface moves by
   `10⁻⁴` a chunk and nothing is re-sampled.
 
-**A boost moves the hole the other way (found in step 8d, fixed in step
-8e).** `SpacetimeMetrics.boost(m, v)` evaluates `m` at `Λᵀx` with `Λ`'s
+**A boost moves the hole the other way.** `SpacetimeMetrics.boost(m, v)` evaluates `m` at `Λᵀx` with `Λ`'s
 `+γv` entries, so the rest frame's origin is at `x = −v t` in the lab: the
 metric of `boost(KerrSchild(1, 0), (0.3, 0, 0))` at `t = 1` is singular at
-`x = −0.3`, not `+0.3` (measured). `HoleCenter`'s docstring called `v` "the
-coordinate velocity of `boost(background, v)`", which is the wrong sign, and
-a case built without a `velocity` keyword carried zero. **Fixed in step 8e**
+`x = −0.3`, not `+0.3` (measured). It is handled
 by one dispatch beside `hole_mass`: `hole_velocity(background)` is zero for
 `KerrSchild` and `Harmonic`, passed through `translate`, turned by `rotate`
 (`R u`, since the rotated metric at `x` is the original at `Rᵀx`), `−v` for
@@ -2359,33 +2356,27 @@ the convention; `HoleCenter`'s docstring says `−u`. `test/interior_tests.jl`
 asserts that the seed track of a `boost(Harmonic(1, 0), (0.3, 0, 0))` case is
 at `(−0.3, 0, 0)` at `t = 1`, where the boosted Kerr-Schild metric is
 singular (`|g_tt| = 1.0e17` there, `4.9` at `+0.3`), and that the former sign
-is refused. No existing test, fixture or `hole_runs.jl` section passes a
-`velocity`, and the one boosted case the suite builds (`gauge_tests.jl`'s
-harmonic neighbour of the refused Kerr-Schild) asserts only that it is
-accepted; nothing in G4 moves, so nothing measured changes. The analytic
+is refused. The analytic
 shape's contraction does not depend on the sign.
 
 `evolve!` also takes `find`, the function the horizon rows call —
 `find_gh_horizon`, or a test's wrapper that disables it — because the
-observer is called after the find and cannot reach it **(proposed in step
-8d)**. The damping profile `γ0` and a `HorizonDissipation` stay on the
+observer is called after the find and cannot reach it **(proposed)**. The damping profile `γ0` and a `HorizonDissipation` stay on the
 case's analytic trajectory: both are smooth on the scale of `M`, not of a
-cell **(proposed in step 8d)**.
+cell **(proposed)**.
 
-**What the margin buys, per row** (`margin_efolds`, moved into `src/` from
-`test/dispersion.jl` as `PLAN.md`'s hand-over from step 8c asks): step 8a's
+**What the margin buys, per row** (`margin_efolds`): step 8a's
 path integral `n_e = ∫_{r_1(n̂)}^{r_h(n̂)} ε dr/(h ℓ_max,1)`, along the six
 grid axes from the tracked center — where the one-dimensional symbol is
 exact — with the background's coefficients, `ε_KO` at each point and the
 spacing of the block each point is in; the row carries the least of the
 six. It reproduces the script's `1.81` and `2.07` e-folds for `m = 8` at
-`h = 5/64` (`q = 2`, `4`) to the digits `CODE.md` records **(measured in
-step 8d)**. On the suite's tracked fixture — `m = 10` cells of `5/64` from
+`h = 5/64` (`q = 2`, `4`) to the digits `CODE.md` records. On the suite's tracked fixture — `m = 10` cells of `5/64` from
 `r_1 = 1.22`, of which the outer `0.75 M` lie in blocks of `5/32` — it is
 **`1.45`**, where a uniform `5/64` would give `2.68`.
 
-**What it costs (measured in step 8d**, Apple silicon, Julia 1.13, one
-thread**).** The series is **`21 ns` per point at `lmax = 4` and `79 ns`
+**What it costs** (Apple silicon, Julia 1.13, one
+thread). The series is **`21 ns` per point at `lmax = 4` and `79 ns`
 at `lmax = 8`**, against **`96 ns`** for one analytic `u_exact` of
 Kerr-Schild `a = 9/10` (`background_state`, the dual pass the layer already
 pays), and it is evaluated only between the bounding spheres. A
@@ -2394,7 +2385,7 @@ right-hand side on the fixture with the tracked geometry at `lmax = 4` is
 threads: `3.16 s` against `3.00 s`), of which the host side per chunk is
 `fitted_interior` at `0.04 ms` and `margin_efolds` at `0.6 ms`.
 
-**What it measures on the static hole (measured in step 8d).** One find of
+**What it measures on the static hole.** One find of
 the fixture's initial data (`N_ah = 12`) puts the origin `1.4e−5 M` from
 the analytic center — **`track_offset = 1.8e−4` cells** — with the found
 surface's `r_min = 2.00043`, `r_max = 2.00068` about it against `r₊ = 2`.
@@ -2407,20 +2398,47 @@ projection hit on either, the track at most **`3.3e−4` cells** from the
 analytic center and its prediction error `1.2–1.8e−4` cells per find —
 the tracked hole is the analytic one to six digits.
 
+**Which center.** A
+  `FittedInterior`'s center is `track_center(track)`, `c_find + v_est (t −
+  t_find)`, so its masks, its `interior_radius`, the range projection's gate
+  and the core rule are about the track, while `case.center` — the damping
+  profile, the refinement centroid's offset, `track_offset` — stays the
+  analytic one.
+
+**The fixture's tracked margin.** On the step-5 fixture the finest level is the cube `|x|_∞ ≤ 5/4`,
+  so `m = 8` puts the offset surface outside it and the geometry is refused
+  (`18 h = 2.8 M` needed of a horizon of `2 M`) — the suite's tracked runs
+  use `m = 10`.
+
+**Never test a metric *on* its singular point**: whether rounding leaves `r` at `2e−17` or at zero —
+  a huge `g_tt` on Apple silicon, `NaN` on the x86 CI runners — is the
+  platform's, not the physics'. `interior_tests.jl` asks for
+  `g_tt = −1 + 2γ²M/δ` at a transverse offset `δ` instead.
+
+**Inconsistent:** the paragraph "A boost moves the hole the other way"
+above says that `test/interior_tests.jl` asserts the seed track of a
+boosted case at `(−0.3, 0, 0)` at `t = 1`, "where the boosted Kerr-Schild
+metric is singular (`|g_tt| = 1.0e17` there, `4.9` at `+0.3`)"; the
+paragraph just above (moved from `CLAUDE.md`, "Things that will bite")
+says the test asks for `g_tt` at a transverse offset `δ` instead of on
+the singular point.
+
 #### The fitted target
 
-**The fitted target (added in step 8e**, `src/fit.jl`, with its kernel half
-in `src/evolution.jl`, `src/constraints.jl` and `src/driver.jl`**).** The
+**The fitted target** (`src/fit.jl`, with its kernel half
+in `src/evolution.jl`, `src/constraints.jl` and `src/driver.jl`). The
 tracked geometry still relaxes toward the
 analytic solution, so its core surface must still contain the chart's
 singular set, and harmonic Kerr at `a = 9/10` refuses that at every `h`.
 The fitted target needs no interior at all: a **polynomial in `x`** —
 regular everywhere, the center included — fitted by least squares to the
-state (for 8e-ii's layer) or to the analytic solution (for its initial data)
+state (for the layer) or to the analytic solution (for its initial data)
 on the offset surface `r_1(n̂) = r_h(n̂) − m h`, where the state is still the
 solution, and continued inward. Twelve pieces: seven in the order
-`build_fit` meets them (step 8e-i), and five for the variant that relaxes
-toward it (step 8e-ii):
+`build_fit` meets them, and five for the variant that relaxes
+toward it:
+
+**Inconsistent:** this paragraph counts twelve pieces (seven and five), but the numbered list below has thirteen.
 
 1. **The variables are ADM variables, never `g_ab`** (`PLAN.md`'s finding
    2): `(log α, β^i, γ_ij, Π_ab)`, 1 + 3 + 6 + 10 = 20 (`fit_variables`).
@@ -2430,18 +2448,21 @@ toward it (step 8e-ii):
    has `g_tt = +0.739` and the eigenvalues `(0.739, 1.580, 1.580, 1.580)`,
    Euclidean signature, a signed lapse of `−0.86`, while the same mean of
    the fit's variables reassembles into a metric with `α = 0.60`,
-   `det γ = 3.94` (measured in step 8e**, the control the suite asserts).
-   **The shift is the contravariant `β^i` (proposed in step 8e)**: either is
+   `det γ = 3.94`** (the control the suite asserts).
+   **The shift is the contravariant `β^i` (proposed)**: either is
    valid, but `β^i` is the split's own shift and reassembles without an
    inverse — `β_i = γ_ij β^j`, `h_tt = (1 − α²) + β^iβ_i` (`state_from_fit`)
    — where `β_i` would need `γ^{ij}` at every layer point. `γ_ij` is held as
    its offset `γ_ij − δ_ij` (the same fit, with near-flat digits kept) and
    `Π_ab` as it is. **The samples' radial derivatives go through the chain
    rule** (`β′ = γ⁻¹(b′ − γ′β)`, `(log α)′ = (α²)′/2α²` and their second
-   derivatives, `b_i = h_ti`) **for both samplers (proposed in step 8e)**,
+   derivatives, `b_i = h_ti`) **for both samplers (proposed)**,
    checked against differencing the converted samples along the same rays:
    they agree to `5.7e−10` in the slopes and `7.3e−11` in the curvatures on
-   the fixture's surface (measured in step 8e).
+   the fixture's surface.
+
+   **Inconsistent:** this item says the fit holds `Π_ab` as it is, in `(log α, β^i, γ_ij, Π_ab)`; [The design](#the-design) (item 2) and the `fit_tilde` paragraph at the end of this section say the fit holds `Π̃ = (α/√γ)Π` (by default, `fit_tilde = true`), and item 13 below blends in `(log α, β^i, γ_ij, Π̃_ab)`.
+
 2. **The ansatz** is `f_v(x) = Σ_{lm} S_lm(ξ) Σ_{k=0}^{cont} C_{lm,k,v}
    ρ^{2k}`, `ξ = (x − c(t))/r̄`, `ρ = |ξ|`, `r̄` the mean of `r_1(n̂)` over the
    collocation points, `S_lm = ρ^l ỹ_lm` the real **solid** harmonics in
@@ -2452,11 +2473,11 @@ toward it (step 8e-ii):
    for the unit vector and `ρ²` multiplying the Legendre step's `q_{l−2}`
    (`_solid_harmonic_fold`): no angle, no division, and at the center only
    `S_00` survives; at unit vectors they are `shape_series`'s harmonics to
-   `16 eps`. **The shift has no `ρ⁰ ỹ_00` term by default**, so `β(0) = 0`,
+   `16 eps`. **With `shift_constant = false` the shift has no `ρ⁰ ỹ_00` term**, so `β(0) = 0`,
    as `PLAN.md` asks; its `ρ² ỹ_00` and `ρ⁴ ỹ_00` terms, which also vanish at
    the center, stay, since `l ≥ 1` alone cannot hold a shift's `l = 0` part
-   on the surface at all **(proposed in step 8e)**. **That default is wrong
-   for a moving hole (measured in step 8e):** a boosted hole's shift has an
+   on the surface at all **(proposed)**. **That is wrong
+   for a moving hole:** a boosted hole's shift has an
    `l = 0` part on its offset surface — the angular mean of `β^x` is `0.17`
    against a mean `|β|` of `0.63` for `boost(KerrSchild(1, 0), 0.3 x̂)` on
    `r = 1.22`, `0.28` against `0.36` for the harmonic chart on `0.69` — which
@@ -2467,28 +2488,26 @@ toward it (step 8e-ii):
    and `1.7e−5`, `|β(0)| = 0.19`, `0.29`, where the boost puts it — and on
    the static hole the same fit to roundoff. Validity never needed
    `β(0) = 0` (any shift with `α > 0`, `γ ≻ 0` is Lorentzian), so
-   **`shift_constant = true` is the default (decided in review, step 8e)**:
+   **`shift_constant = true` is the default**:
    the shift keeps its `l = 0` constant, and `false` is the brief's ansatz,
    kept as a switch; on the static hole the constant comes out `6.2e−14` of
-   `|β|` (measured in step 8e).
+   `|β|`.
 3. **The samplers** are called as `sampler(xs, ns)` — the points *and* the
    unit rays, since the radial derivative is along the ray from the tracked
-   center, which a sampler does not know **(proposed in step 8e**, over the
-   brief's `sampler(xs)`**)** — and return `(u, ∂_r u[, ∂_r² u])` as vectors
+   center, which a sampler does not know **(proposed**, over
+   `sampler(xs)`**)** — and return `(u, ∂_r u[, ∂_r² u])` as vectors
    of packed `(h, Π)`. `state_sampler(fs, q; t)` interpolates through
    `interpolate_grad` with **the footprint guard off, `mask = AllPoints()`
    at the call**: the collocation points are on the evolved region's
    boundary, so their windows read `G h` into the layer, where step 8c's
    `n_L ≥ 4G` holds the relaxation to `ρ_max · smoothstep(1/4) = 0.10
    ρ_max`, `0.41/M` at the default — the layer's outer quarter is the
-   equations plus a weak pull toward a fit of this same state **(proposed in
-   step 8e)**. It gives no second derivative, so it serves `cont = 1`, and
+   equations plus a weak pull toward a fit of this same state **(proposed)**. It gives no second derivative, so it serves `cont = 1`, and
    `cont = 2` with it is refused. `analytic_sampler(bg, t; δ)` evaluates
    `state_tuple` at five points along the ray and differences them at
-   **fourth order, `δ = h/8` (proposed in step 8e**, the brief's central
+   **fourth order, `δ = h/8` (proposed**, central
    differences at the order that puts the truncation at `δ⁴`**)**: its `∂_r
-   h` is the analytic gradient's to `1.6e−8` on the fixture (measured in
-   step 8e); the second difference's roundoff `5 eps |u|/δ²` is `10⁻¹¹` at
+   h` is the analytic gradient's to `1.6e−8` on the fixture; the second difference's roundoff `5 eps |u|/δ²` is `10⁻¹¹` at
    `Float64` and `1.7e−2` at `Float32`, so a `Float32` run's initial-data
    fit wants its samples in `Float64`. Every sample is checked finite and a
    metric: a singular point on the offset surface is a configuration error
@@ -2500,12 +2519,11 @@ toward it (step 8e-ii):
    for all twenty right-hand sides**: the constant column is ordered last,
    so the shift's design — the others' without it — is the leading block of
    the same factorization, and its solution is the least-squares one.
-   **Each block of rows is weighted `P^{−b}`, `P = L + 2 cont` (proposed in
-   step 8e)**, the growth of a degree-`P` polynomial under `∂_ρ`: it cuts the
+   **Each block of rows is weighted `P^{−b}`, `P = L + 2 cont` (proposed)**, the growth of a degree-`P` polynomial under `∂_ρ`: it cuts the
    condition number 4–20× (`85.6` and `1.4e3` at `L = 8`, `cont = 1, 2` on
    the fixture, against `377` and `2.9e4` unweighted) and the value residual
    2.5–8× on the spinning holes, and changes no consistent system's solution.
-   **The residual is block by block (proposed in step 8e)** — each block's
+   **The residual is block by block (proposed)** — each block's
    worst over the largest datum of *that block* in the variable's group
    (`log α`, the shift, `γ`, `Π`), so a steep curvature cannot hide a poor
    value; `fit_residual(fit).overall` is the worst. BLAS's threads are not
@@ -2514,11 +2532,11 @@ toward it (step 8e-ii):
 5. **The validity sweep** (`fit_sweep`) evaluates the fit **raw** —
    reassembled, not projected — along every collocation ray at `s r_1(n̂)`,
    `s ∈ {1/8, …, 1}`, and at the center, `8N + 1` points (`1225` at
-   `L = 8`): **fractions of each ray's own `r_1` (proposed in step 8e)**, so
+   `L = 8`): **fractions of each ray's own `r_1` (proposed)**, so
    `s = 1` is the collocation surface and the sweep covers exactly the
    region the fit is used in, oblate or not. A point is valid when finite,
    `γ` positive definite (`sym_eigen3`) and the signed lapse positive —
-   **Lorentzian-ness and not a range (decided in review, step 8e)**; the
+   **Lorentzian-ness and not a range**; the
    sweep records `fit_valid`, the worst `det γ`, `α` and `λ(γ)`, `|β(0)|`,
    and how many points `bounds_project` would move into the target's
    ranges (a count, not a verdict), and `build_fit`
@@ -2537,19 +2555,19 @@ toward it (step 8e-ii):
    the collocation points they are the least-squares model to `28 eps`
    (`Float64`) and `25 eps` (`Float32`) of the largest variable, the
    projection is the identity on them bit for bit, and at the center `β = 0`
-   and the metric is valid (measured in step 8e). **The ranges it projects
-   into are the target's own (decided in review, step 8e)**: `FittedSpec`'s
+   and the metric is valid. **The ranges it projects
+   into are the target's own**: `FittedSpec`'s
    `target_bounds`, or — `nothing`, the default — `derive_target_bounds` of
    the analytic data on the seed's offset surface at `t = 0`: each upper
    range four times the largest value found there (`α`, `λ(γ)`, `|β|`,
    `|(α/√γ)Π|`), each lower one a quarter of the smallest, widened to keep
-   flat space inside **(the factors proposed in step 8e)** — because step
+   flat space inside **(the factors proposed)** — because step
    8b's `default_bounds` are Kerr-Schild's, and harmonic Kerr at `a = 9/10`
    has `|(α/√γ)Π| = 366/M` on its offset surface against their `100/M`. On
    the fixture that is `α ∈ [0.154, 2.46]`, `λ ∈ [1/4, 10.6]`, `|β| ≤ 4.04`,
    `K ≤ 3.35`; on harmonic `a = 9/10`, `α ≥ 0.066`, `λ ≤ 774`, `K ≤ 1464`.
-7. **What it measures (measured in step 8e**, on analytic data unless
-   said**).**
+7. **What it measures** (on analytic data unless
+   said).
    - **Kerr-Schild `a = 0`** on the fixture's tracked geometry (`m = 10`,
      `n_L = 8`, `h = 5/64`, the offset surface at `1.22`): the fit's
      variables have `l ≤ 2` structure on a sphere, so **`L = 2` is what it
@@ -2583,9 +2601,7 @@ toward it (step 8e-ii):
      `0.96`) `cont = 1` is valid from `L = 4` and `cont = 2` first at
      `L = 16`. **The data itself is outside `default_bounds`**: the samples'
      `max |(α/√γ)Π| = 366/M` against step 8b's `K_max = 100/M` at 17 of 153
-     points, so `fit_state`'s projection would clamp the target's `Π` there
-     — the proposed bounds are Kerr-Schild's, and harmonic `a = 9/10` needs
-     its own before 8e-ii projects into them.
+     points, so `fit_state`'s projection would clamp the target's `Π` there.
    - **The evolved state's fit**, at the end of the suite's tracked `:damped`
      run to `0.15 M`, against the analytic solution's fit on the same
      geometry: **`0.031` apart on the surface, falling to `0.016` at the
@@ -2606,12 +2622,12 @@ toward it (step 8e-ii):
      cost; at `2.2 µs` on the fixture's layer (21 % of its points) it would
      have been `+40–75 %`, which is why the kernel reads a cache instead
      (piece 8).
-8. **The target is cached on the grid (decided in review, step 8e)**, not
+8. **The target is cached on the grid**, not
    evaluated in the right-hand side: a field set of `Hsrc`'s shape (`G = 0`,
    read at the owned point, never differenced) holding **40 variables — the
    target `A` (the packed `(h, Π)`) at the fill time `t_f` and its slope in
    time `S`** — so that the kernel's target at `t` is `A + (t − t_f) S`, two
-   loads a variable **(proposed in step 8e**: one field set, and the slope
+   loads a variable **(proposed**: one field set, and the slope
    rather than the previous fit's values, since the slope is what the time
    interpolation multiplies**)**. From the latest fit `F_a` (built at `t_a`)
    and the one before it `F_b` (at `t_b`), both evaluated at `t_f` about
@@ -2622,9 +2638,8 @@ toward it (step 8e-ii):
    `fit_state` with the coefficient arrays as device arguments, at every
    owned point inside the offset surface's bounding sphere **plus one cell**
    — so that a center moving by the refill rule's `h/4` never exposes an
-   unfilled layer point **(proposed in step 8e)** — and zeros elsewhere; the
-   cache is the host evaluator bit for bit. **What it costs (measured in step
-   8e**, one thread, on the fixture's 120 blocks**)**: a fill is `43–44 ms`
+   unfilled layer point **(proposed)** — and zeros elsewhere; the
+   cache is the host evaluator bit for bit. **What it costs** (one thread, on the fixture's 120 blocks): a fill is `43–44 ms`
    from one fit and `75 ms` from two, `0.4` and `0.7` of a right-hand side,
    once a chunk of about forty evaluations; a right-hand side with the
    fitted layer is within `±4 %` of the `:damped` layer's either way — `111`
@@ -2632,17 +2647,15 @@ toward it (step 8e-ii):
    against `118` — the cache's two loads a variable where `:damped` takes the
    analytic solution's dual pass, which the prediction ("a few percent")
    had as a cost and is at worst a wash.
-9. **The refill rule (decided in review, step 8e).** The cache is refilled
+9. **The refill rule.** The cache is refilled
    from the current fits at every chunk's start — after every fit — and,
    for a geometry that moves, whenever the tracked center would move by
    more than `h/4` since the last fill: the chunk's steps are split into
-   `⌈|v_est| · chunk / (h/4)⌉` solves with a refill between **(proposed in
-   step 8e**, over lowering the chunk, which would change the record's
+   `⌈|v_est| · chunk / (h/4)⌉` solves with a refill between **(proposed**, over lowering the chunk, which would change the record's
    cadence**)**. On the static fixture `v_est` is the finder's noise and a
    chunk is one piece; on the boosted seed below (`|v| = 0.3`, `h = 5/128`,
    chunks of `M/20`) it is `1.54` → two pieces and one mid-chunk refill a
-   chunk (measured in step 8e). **The moving seed (measured in step 8e,
-   `hole_runs.jl fitted=boosted`)**: `boost(Harmonic(1, 0), 0.3 x̂)` on 848
+   chunk. **The moving seed** (`hole_runs.jl fitted=boosted`): `boost(Harmonic(1, 0), 0.3 x̂)` on 848
    blocks at `h = 5/128`, `m = 8`, to `0.1 M` — the finder succeeds on every
    row from the boosted hole's initial data, the track is at `x = −0.01492`
    and `−0.02985` at `0.05` and `0.1 M` against the analytic `−0.015` and
@@ -2650,7 +2663,7 @@ toward it (step 8e-ii):
    `3.9e−3` cells, every fit valid; the masked error is `3.26e−2` against
    `:damped`'s `2.03e−2` on the same mesh and track (`1.6×`, the initial
    data's kink again), in 14 steps and `39 s` at four threads.
-10. **The variant (decided in review, step 8e).** `INTERIOR_VARIANTS` has
+10. **The variant.** `INTERIOR_VARIANTS` has
    `:fitted`, a `FittedInterior`'s only (`Interior` refuses it, a sphere
    about the analytic center having no offset surface to fit on), and the
    right-hand-side kernel's branch for it reads the cache: **the core
@@ -2663,7 +2676,7 @@ toward it (step 8e-ii):
    layer is `:damped`'s bit for bit at every point outside the offset
    surface** (45 545 of the fixture's 61 440), its core is `−ρ_max (u −
    u_fit)` exactly, and its layer differs from `:damped`'s by `ρ (u_fit −
-   u_exact)` to `1.4e−14` of the right-hand side (measured in step 8e). The
+   u_exact)` to `1.4e−14` of the right-hand side. The
    driver, per chunk: the geometry and the rate (`with_interior`) → the
    refill → the solve (in pieces, piece 9) → the record (constraints, error,
    monitor, find, indicator) → `update_track` and the next chunk's geometry
@@ -2672,20 +2685,20 @@ toward it (step 8e-ii):
    right-hand side) → a `cont = 1` fit into the target's ranges → the regrid
    branch, whose new mesh gets a new cache filled at the next chunk's start
    from the same fits (a fit is a polynomial in `x` and does not know the
-   mesh; **proposed in step 8e**). **A fit whose sweep is not a metric does
+   mesh; **proposed**). **A fit whose sweep is not a metric does
    not become the target**: the previous fits are kept, the row says
    `fit_valid = false`, and the run goes on — the find's coasting applied to
-   the fit **(proposed in step 8e)**. The record's `residual` is, for
+   the fit **(proposed)**. The record's `residual` is, for
    `:fitted`, the layer's distance from its *target*, and the error kernel
    evaluates the analytic solution only at the points its error and drift
-   rows read **(both proposed in step 8e)**: the fitted interior has no
+   rows read **(both proposed)**: the fitted interior has no
    analytic one, and harmonic Kerr's is singular inside the offset surface.
    `check_interior_radii` skips its singular-set check for `:fitted`. **A
    tracked run's first find starts from the seed's shape** on the finder's
-   grid, not a sphere of the mean radius **(proposed in step 8e)**: on
+   grid, not a sphere of the mean radius **(proposed)**: on
    harmonic `a = 9/10` that sphere, `0.72`, lies inside the offset surface's
    equator at `0.92`, and the footprint guard refuses its first iterates.
-11. **The initial data (decided in review, step 8e)**: the analytic solution
+11. **The initial data**: the analytic solution
    outside the offset surface and **the `cont = 1` fit of the analytic
    solution inside it, for every chart**, from **`Float64` samples whatever
    `T` is** — the cache filled from the analytic fit first, then the state
@@ -2693,20 +2706,20 @@ toward it (step 8e-ii):
    chart whose interior is singular gets regular data, and `state_callback`
    refuses a `:fitted` geometry. The reason for `cont = 1` is harmonic `a =
    9/10`, whose curvature-matched fit is not a metric at any `L` to 16
-   (piece 7). **Its price on the fixture (measured in step 8e)**: the data
+   (piece 7). **Its price on the fixture**: the data
    are `C¹` at `r_1`, value and slope right and the curvature off by
    `O(1/M²)`, which the compact second difference turns into an `O(1)`
    right-hand-side error at the innermost evolved points — finding 1's kink,
    in the *data* where step 8c's E3 had it in the *target* only. The masked
    error at `0.15 M` is **`1.33e−2` against `:damped`'s `3.11e−3`** (`4.3×`;
    L∞ `0.177` against `0.035`) and decays to `1.24×` by `1 M`; at `Float32`
-   the same run agrees with `Float64` to `7e−6` (measured in step 8e,
-   `hole_runs.jl fitted=fixture` for the table):
+   the same run agrees with `Float64` to `7e−6`
+   (`hole_runs.jl fitted=fixture` for the table):
 
    | initial data | masked L2 at `0.1 M` | `0.5 M` | `1 M` | shell `C_a` L2 at `1 M` |
    |---|---|---|---|---|
    | `:damped` (the analytic solution everywhere, the core rule) | `2.09e−3` | `9.81e−3` | `1.40e−2` | `1.24e−2` |
-   | `:fitted`, the fit below `r_1` (decided) | `9.77e−3` | `1.90e−2` | `1.74e−2` | `4.02e−2` |
+   | `:fitted`, the fit below `r_1` (the default) | `9.77e−3` | `1.90e−2` | `1.74e−2` | `4.02e−2` |
    | `:fitted`, the `cont = 2` fit below `r_1` | `3.05e−3` | `1.01e−2` | `1.66e−2` | `3.22e−2` |
    | `:fitted`, the fit below the core surface (`fit_initial_depth = n_L h`) | `2.05e−3` | `9.72e−3` | `1.56e−2` | `2.57e−2` |
    | `:fitted`, the fit below `3h` | `4.18e−3` | `3.30e−2` | `3.92e−2` | `7.98e−2` |
@@ -2720,13 +2733,11 @@ toward it (step 8e-ii):
    `a = 7/10` have and harmonic `a = 9/10` does not (its disk cuts the
    equatorial layer); `evolve!(…; fit_initial_depth, fit_initial_cont)` are
    the study knobs, defaults the decision.
-12. **The proof-of-concept chart: harmonic Kerr `a = 9/10`, `m = 4`
-   (decided in review, step 8e)**, the case's own `FittedSpec(margin = 4,
+12. **Harmonic Kerr `a = 9/10`, `m = 4`**, the case's own `FittedSpec(margin = 4,
    lmax_shape = 12)` and not a change of the default `8`, at `h = 5/256` on
    2472 blocks (2240 of them at `5/256`) in a box of half-width `5/4 M`
    (`hole_runs.jl fitted=harmonic`, three minutes at four threads). **The
-   first `:fitted` initial data of this chart exists (measured in step
-   8e)**: `r_1` from `0.359` (axis) to `0.921` (equator), the core from
+   first `:fitted` initial data of this chart exists**: `r_1` from `0.359` (axis) to `0.921` (equator), the core from
    `0.203`; the analytic fit valid (value residual `1.9e−3`, sweep `min λ(γ)
    = 2.27`, `min α = 0.208`); the target's ranges `α ≥ 0.066`, `λ ≤ 774`,
    `K ≤ 1464`; **every one of the 1 265 664 points finite and a metric**
@@ -2751,21 +2762,19 @@ toward it (step 8e-ii):
    points); halving `h` (the equator's `r_1` at `0.96`) changes the ratios
    little. For comparison, Kerr-Schild `a = 9/10`'s equator is `46` against
    `61` and harmonic `a = 7/10`'s 45° `6000` against `334` (`1720` with `Π̃`
-   at `L = 12`). **So the proof-of-concept chart does not run on this target
-   at `h = 5/256`**; step 8f's row for it needs `Π̃` and `L ≥ 12` at the
-   least, and the design's own fallbacks are `a = 7/10` and 8g's excision.
-   **And the evolved region on the equator is itself under-resolved there
-   (measured in step 8e)**: the analytic solution's own length scale at the
+   at `L = 12`). **So the chart does not run on this target
+   at `h = 5/256`**.
+   **And the evolved region on the equator is itself under-resolved there**: the analytic solution's own length scale at the
    first evolved point on the equator, `√(|u|/|Δ²u|)`, is `0.008 M` at
    `h = 5/256` — under half a cell — `0.019 M` (two cells) at `5/512` and
    `0.024 M` (five cells) at `5/1024`, with `m = 4`: the ring sits `m h +
    0.02 M` inside it, and the solution varies on the scale of that distance.
    Whatever the interior does, the chart at `a = 9/10` wants `h ≲ 5/1024` on
    its equator, or a margin that depends on the direction.
-13. **A moving target (added in step 8).** Two things change when the
-   geometry moves through the grid, and step 8 built one switch for each:
+13. **A moving target.** Two things change when the
+   geometry moves through the grid, and there is one switch for each:
    - **The target's rate is fed forward** (`evolve!(…; target_rate = true)`,
-     the default, **proposed in step 8**). A point relaxing toward a target
+     the default, **proposed**). A point relaxing toward a target
      that moves lags it by `|∂_t u_fit|/ρ`, and where `w < 1` the layer also
      advects the hole's structure at `w v` instead of `v`; so the cache's
      slope now includes the latest fit's translation with the track — a
@@ -2776,7 +2785,7 @@ toward it (step 8e-ii):
      equation. The slope agrees with the cache's own difference to
      `1.2e−4` relative, and a problem whose slope is zero is the problem
      without it, `==` (`test/moving_tests.jl`). **It changes almost nothing
-     measurable (measured in step 8)**: `4.56e−2` against `4.67e−2` masked
+     measurable**: `4.56e−2` against `4.67e−2` masked
      at `0.5 M` on the boosted `a = 0` hole, `0.132` against `0.172` at
      `M/4` on G5's chart with `w_ramp = 1` and `0.492` against `0.494` on the
      default ramp —
@@ -2784,8 +2793,7 @@ toward it (step 8e-ii):
      since it is the consistent form and costs two evaluations of the fit
      per filled point per refill.
    - **The initial data are blended into the fit across the layer**
-     (`evolve!(…; fit_initial_blend = true)`, G5's rows, **proposed in step
-     8**). With `fit_initial_depth = n_L h` the data step from the analytic
+     (`evolve!(…; fit_initial_blend = true)`, G5's rows, **proposed**). With `fit_initial_depth = n_L h` the data step from the analytic
      solution to the fit at the core surface, and on G5's chart that step is
      twenty-five times the solution (`Π_xx` from `1.5e4` to `600` on the
      trailing equator). A static hole relaxes it away where `w = 0`; a moving
@@ -2806,6 +2814,35 @@ toward it (step 8e-ii):
      choice and not the default.
    The table of the screens is in [The moving hole (step
    8)](SINGULARITY_HANDLING.md#the-moving-hole-step-8).
+
+The fit holds **`Π̃ = (α/√γ)Π`** by default
+(`fit_variables(…; tilde)`, `state_from_fit(v, tilde)`, `FitParams.tilde`,
+`FittedSpec`'s `fit_tilde = true`); `interior.jl` has `with_variant` for a
+spec and a geometry; `evolve!` has `handover` (a `:fitted` case on the
+analytic `:damped` layer of the same geometry until then) and `target_source
+= :snapshot` (the cache filled with the state, `fill_snapshot!`), and
+`adapt = true` works for a `:fitted` case — the mesh chosen on the analytic
+data of the same geometry, refused by name where the analytic core meets the
+chart's singular set; the record has a `variant` row; the drift reads the
+evolved points of its band only.
+
+`evolve!` has `target_rate` (default on: the cache's slope carries the fit's
+translation with the track and the kernel adds `(1 − w) ∂_t u_fit` in the
+layer and the core; `GHProblem.target_rate`, `fill_target!(…; rate)`).
+
+**`FittedSpec(; fit_cont = 2)`** fits curvatures too (the state sampler's
+`order = 2` differences the interpolated gradient).
+
+**Inconsistent:** item 3 above says the state sampler "gives no second
+derivative, so it serves `cont = 1`, and `cont = 2` with it is refused";
+the paragraph above says
+`FittedSpec(; fit_cont = 2)` fits curvatures through the state sampler's
+`order = 2`, and the table under "Single black holes: recommended
+settings" uses `fit_cont = 2` for `:fitted` holes.
+
+**Behind a moving layer, narrow the ramp**: `trail_ramp = 9/10` makes `ρ` rise where points leave the layer and is
+  what removed the trailing side's excess; refilling the target more often
+  and evaluating the fit exactly in the kernel changed the fourth digit. It is off by default (a static run is unchanged bit for bit); [The trailing side (step 8′)](SINGULARITY_HANDLING.md#the-trailing-side-step-8) has the numbers.
 
 #### What the layer costs
 
@@ -2829,7 +2866,7 @@ damped harmonic gauge driver is the extension that would remove it.
 
 ## Initial data and backgrounds
 
-**Analytic, from `SpacetimeMetrics`** (decided): `Minkowski`,
+**Analytic, from `SpacetimeMetrics`**: `Minkowski`,
 `GaugeWave(A, d)`, `ShiftedMinkowski(A, w)`, `KerrSchild(M, a)`,
 `Harmonic(M, a)` (Kerr in fully harmonic coordinates, horizon
 penetrating), and `translate`, `rotate`, `boost` of any of them. Every
@@ -2850,11 +2887,9 @@ trajectory.
 Each case is also its box and its periodicity, and the parameters that are
 properties of the physics rather than of the mesh (`ε_KO`, `γ0`, `γ2`);
 that is `GHCase`, which lives here with the backgrounds it is made of
-rather than in `driver.jl` **(amended in step 3**: the right-hand side
-needs a case two steps before there is a driver, and a struct cannot be
-defined twice**)**. Its constructor is where a moving non-harmonic
+rather than in `driver.jl`. Its constructor is where a moving non-harmonic
 background with a sampled source is refused; with the algebraic Kerr-Schild
-source the boosted Kerr-Schild hole is a case (amended 2026-10-20).
+source the boosted Kerr-Schild hole is a case.
 
 A background gives the initial state through one callback,
 `x ↦ (h_ab, Π_ab)` at time `t`, with `Π` from `∂_t g` (the `dmetric`
@@ -2867,9 +2902,9 @@ data on every mesh it produces, as TreeAMR prescribes. GHSO2 instead
 builds `Π` from the *discrete* gradients so that a static solution has
 `∂_t g = 0` to roundoff; that is kept as a **post-pass option** after the
 cycle converges, and G4 measures whether it changes the stationarity
-error of a hole visibly **(predicted: not beyond the first chunk)**.
+error of a hole visibly; the prediction was "not beyond the first chunk".
 
-**(Measured in step 5**, `discrete_gradient_momentum!`.**)** The
+The post-pass is `discrete_gradient_momentum!`, and the
 prediction is right, and the reason is worth stating because it is not
 that the post-pass fails. Inverting `∂_t g = β^i ∂_i g + (α/√γ)Π` for
 `Π` with the *scheme's own* `D_i` makes the **first** evolution
@@ -2886,7 +2921,7 @@ Kreiss–Oliger term is `O(h^{q+1})` and is not part of the inversion:
 constraint's own equation exactly and the run nothing measurable, which
 is what "not beyond the first chunk" meant.
 
-**The hole cases** (added in step 5) are `kerr_schild_case` and
+**The hole cases** are `kerr_schild_case` and
 `harmonic_kerr_case` over a shared `hole_case`: a Dirichlet box, the
 layer's two radii and the variant, GHSO2's recipe (`ε_KO = 1/2`,
 `γ0 ≈ 1/M`) as **their** defaults and nobody else's, and the chunk. The
@@ -2905,27 +2940,31 @@ all the way in to `0.05 M`, the chart being singular on the ring and not
 at the origin. The spinning hole is the gentle one in amplitude and the
 expensive one in resolution.
 
-**The background is evaluated inside kernels** (decided, and a
+**The background is evaluated inside kernels** (a
 dependency risk). The interior's `u_exact` is needed at every RHS
 evaluation and the Dirichlet hook at every ghost fill; both must be
 kernel arguments, so `SpacetimeMetrics` — StaticArrays plus ForwardDiff
 duals, both `isbits` — has to compile as one. On the CPU backend that is
 certain; on CUDA it is expected and untested, and G0 tests it on the CPU
-while G6 tests it on the H200. **(Measured in step 0** on the CPU
+while G6 tests it on the H200. Measured on the CPU
 backend: `KerrSchild(1, 0)` and `boost(Harmonic(1, 9/10), 0.3 x̂)` both
 compile into `fill_by_coordinates!`'s `AllVariables` kernel and fill a
 20-variable, `G = 3`, vertex-centered field set over a two-level forest
 with **bit-for-bit** the values of a host loop through `coordinates`, at
 `Float64` and at `Float32`; both backgrounds, and `boost`'s wrapper
-around one, are `isbits`.**)** If the device refuses, the fix is a
+around one, are `isbits`. If the device refuses, the fix is a
 kernel-safe evaluation path *in `SpacetimeMetrics`*, not a redesign
 here: nothing in this package's structure depends on where the metric
 is evaluated, only its cost does.
 
+**Inconsistent:** this paragraph says that on CUDA a background in a kernel is "expected and untested" and that G6 tests it on the H200; "Time integration" ("On a device") records `evolve!` on a hole running end to end on one H200 at `Float64` and `Float32`, the record equal to the CPU run's.
+
+**Run tools**: `add_noise!` (with `exclude` for a frozen core) and
+`evolve!(; perturb)`.
+
 ## Refinement and regridding
 
-**An error indicator drives the refinement** (decided in review,
-replacing prescribed spheres). It is TreeWave's machinery ported: a
+**An error indicator drives the refinement**. It is TreeWave's machinery ported: a
 per-cell **Löhner indicator** on the state, reduced to a per-block
 verdict through TreeAMR's `firing_boxes`, with two thresholds and a
 travelling margin. Whether that is straightforward was the question
@@ -2943,12 +2982,11 @@ with the classic *local* floor `ε(|u₊| + 2|u₀| + |u₋|)` replaced by a
 amplitude — TreeWave's lesson, recorded in its `CODE.md`: fields that
 cross zero or decay to `1e−16` tails score `τ ≈ 1` against a floor that
 shrinks with them, and the whole domain refines. Here the fields are the
-10 components of `h` (**proposed**; `Π` is a switch), which fall off as
+10 components of `h` (`Π` is a switch), which fall off as
 `M/r` around a hole, and `U_ref` is the largest `|h|` in the *evolved*
 region at `t = 0`.
 
-**`U_ref` is one amplitude for all ten components, not one per component
-(proposed in step 6)**, and `Π` is left off. Per-component is the trap in
+**`U_ref` is one amplitude for all ten components, not one per component**, and `Π` is left off. Per-component is the trap in
 this package's own charts rather than a refinement of the rule: in the
 gauge wave's chart six of the ten components are **identically zero**, so a
 per-component reference is exactly zero, the floor with it, and that
@@ -3000,15 +3038,15 @@ functions of position, all cheap, all block-level:
    requirements hold by construction; the mark is
    `max(indicator's request, floor)`. The assertions stay, and with the
    floor in place they are a check on the arithmetic, not on the
-   indicator's mood. **(predicted)** the indicator asks for the floor
+   indicator's mood. The indicator asks for the floor
    level or more everywhere the floor applies, so the floor never binds
    on a calibrated run; the test that it *can* bind uses a deliberately
-   loose `refine_tol`. **(Confirmed in step 6**, on the reference
-   configuration below: the marks with the floor and the marks without it
+   loose `refine_tol`. On the reference
+   configuration below, the marks with the floor and the marks without it
    are identical at the calibrated thresholds, and with `refine_tol` raised
    to `99/100` — above anything the data reaches — the floor is the only
-   thing that refines, on exactly the blocks whose extent meets the shell.**)**
-   **`L_h` is derived rather than stated (proposed in step 6)**: it is the
+   thing that refines, on exactly the blocks whose extent meets the shell.
+   **`L_h` is derived rather than stated**: it is the
    coarsest level whose spacing satisfies *both* requirements,
    `h ≤ min((r_h,min − r_1)/m, (r_1 − r_0)/2(G+1))`, so a floor a caller
    had to compute by hand cannot go stale when the box, the margin or the
@@ -3025,7 +3063,7 @@ functions of position, all cheap, all block-level:
    coarse-fine faces off the outer boundary, which is a legal but
    pointless configuration to exercise.
 
-   **Two things the ceiling turned out to need (step 6).** First, the
+   **Two things the ceiling turned out to need.** First, the
    **travelling margin has to be dilated before the bounds are applied, not
    after**: TreeAMR's `buffered_flags` promotes every leaf a dilated box
    reaches, whatever this package said about it, so on any root brick small
@@ -3033,7 +3071,7 @@ functions of position, all cheap, all block-level:
    margin refines them anyway — measured, 12 of 64 boundary root blocks.
    So `refine_flags` calls `buffered_flags` itself, applies the floor and
    the ceiling to its result, and the driver passes `buffer = 0` to
-   `regrid!` **(proposed in step 6)**. Second, **the ceiling and the floor
+   `regrid!`. Second, **the ceiling and the floor
    together are a statement about the box**: a block that is both in the
    horizon shell and within the boundary margin is refused by name, because
    the region that must be resolved and the region that must stay coarse
@@ -3055,9 +3093,7 @@ then compared against the uniform-fine reference in TreeWave's manner
 (the tracked pulse against `uniform_pulse`). Both are needed: the frozen
 hierarchy measures the scheme, the adaptive run measures the indicator.
 
-**(Implemented in step 5**, as `hole_forest` in `initialdata.jl`.**)**
-Before the indicator exists there is nothing for it to have chosen, so
-the frozen hierarchy is built by hand: one shell radius per refinement
+`hole_forest` in `initialdata.jl` builds the frozen hierarchy by hand: one shell radius per refinement
 level, each level refining the blocks of the level below whose extent
 reaches within that radius of the hole's center. Which blocks are
 refined therefore depends on the radii, the root brick and the number of
@@ -3070,7 +3106,7 @@ balance would answer by refining everything between them, which the
 constructor refuses); the innermost shell must contain the sphere `r_1`
 whole, or the coarsest blocks touching it are a level up and it is
 *their* spacing the two radius requirements are stated at; and it is not
-the refinement mechanism, which is step 6's.
+the refinement mechanism, which is the indicator's.
 
 **What follows for the hole.** The indicator follows the moving hole on
 its own, and its center of refinement is a measurement to be compared
@@ -3082,7 +3118,9 @@ time-independent up to truncation noise), so regrids during a static run
 should change nothing **(predicted)**; on the moving hole they move the
 shells with it, one block ring per chunk at the finest level.
 
-**The driver** is TreeHydro's one loop with cases as data (decided):
+**Inconsistent:** "The interior layer still uses the analytic center, because it must" contradicts this section's "The floor reads the horizon the layer actually follows" and "The mesh follows the hole" below, and "The interior" → "The tracked geometry", where a case whose interior is a `FittedSpec` has its layer follow the found horizon (the horizon-finder paragraph under "Analysis quantities" says so too).
+
+**The driver** is TreeHydro's one loop with cases as data:
 
     adapt_to_initial_data!(U, ops; initial = state(case, t0), flags = indicator_flags,
                            buffer, boundary = dirichlet(case, t0))
@@ -3108,27 +3146,21 @@ vector changes length and meaning). What the loop returns is what the
 tests assert: the analysis record per chunk, and through `observer`
 whatever the viewer wants.
 
-**(Implemented in step 5**, `src/driver.jl`, without the regrid.**)** The
-loop exists and runs the static hole; `evolve!` takes `regrid = false`
-and **refuses `true` by name** until step 6 supplies the indicator, for
-the reason the refusal says: this section's loop flags with the masked
-Löhner verdict and with nothing else, and a driver that regridded on some
-other criterion now would be a second refinement mechanism to delete
-later. For the same reason `evolve!` takes the **forest** as a keyword
-rather than building one: step 5's mesh is the frozen hierarchy of
-`hole_forest`, and step 6's is what `adapt_to_initial_data!` produces
+The loop is `src/driver.jl`. `evolve!` takes the **forest** as a keyword
+rather than building one: a frozen hierarchy is `hole_forest`'s, and an
+adaptive mesh is what `adapt_to_initial_data!` produces
 from the indicator. Three things the writing settled:
 
-- **`ρ_max` is what makes a chunk a restart even without a regrid.** It
-  was `1/dt` and `dt` is measured per chunk, so the interior the kernel
+- **`ρ_max` is what makes a chunk a restart even without a regrid.** Under the grid-rate option
+  it is `1/dt` and `dt` is measured per chunk, so the interior the kernel
   closes over is rebuilt at the top of every chunk (`with_interior`),
   which shares the field sets, the schedule and the **sampled gauge
   source** rather than rebuilding the problem — re-sampling `H_a` is the
   most expensive setup phase there is and nothing about a new `ρ_max`
-  invalidates it. **(Amended in step 8c′:** the default is now `4/M`, the
+  invalidates it. The default is `4/M`, the
   same in every chunk, and the rebuild stays — it is what the grid-rate
   option `ρ_max_factor` needs, it is where the default is checked against
-  that chunk's `1/dt`, and it costs nothing.**)**
+  that chunk's `1/dt`, and it costs nothing.
 - **The record's first row is `t = 0`**, before anything has been
   integrated, so that "the error grew from zero" is a statement a test
   can check rather than assume; `nchunks` is the number of rows after it.
@@ -3139,8 +3171,8 @@ from the indicator. Three things the writing settled:
   Kerr-Schild `a = 0` and does not move between chunks, so the recheck
   has never fired; it exists for G5, where the hole crosses the mesh.
 
-**(Implemented in step 6**, `src/refinement.jl` and the loop's two
-branches.**)** `evolve!` now takes `adapt` and `regrid`, both of which
+`src/refinement.jl` and the loop's two
+branches implement this. `evolve!` takes `adapt` and `regrid`, both of which
 refuse a case with no `Refinement` by name; the parameters are one
 `isbits` struct on the case (`refine_tol`, `coarsen_tol`, `maxlevel_cap`,
 the floor's margin beyond `r_h,max`, the ceiling's margin in coarse cells
@@ -3149,7 +3181,7 @@ on somebody else's mesh carries one `nothing`. Five things the writing
 settled, each stated where it happens:
 
 - **`τ` is materialised into `diag`, and the marks are taken from that
-  field (amended in step 6).** TreeWave and TreeHydro evaluate their
+  field.** TreeWave and TreeHydro evaluate their
   per-cell indicator inside `firing_boxes`' predicate and keep nothing;
   this package's analysis record asks for `τ_max` among the mesh
   statistics, and a firing *count* cannot give it. So one kernel writes `τ`
@@ -3161,13 +3193,13 @@ settled, each stated where it happens:
   `gh_indicator!` scatters and fills with *this* `t`'s Dirichlet hook, as
   the constraint monitors do, because `regrid!` fills ghosts only after the
   flags exist and a stale ghost corrupts the verdict silently.
-- **`regrid!` is handed the state field set alone (amended in step 6).**
+- **`regrid!` is handed the state field set alone.**
   The loop above lists `Hsrc => nothing, diag => nothing`; both are rebuilt
   by the fresh `GHProblem` — which is also where the gauge source is
   re-sampled and where `check_interior_radii` re-asserts the interior's two
   radius requirements on the new mesh — so resizing them through the
   transfer would be work thrown away.
-- **The regrid is skipped after the last chunk (amended in step 6)**, so
+- **The regrid is skipped after the last chunk**, so
   that the forest that comes back and the state that comes back describe
   the same mesh. TreeHydro's rule, for TreeHydro's reason.
 - **The record gains `τ_max`, the refinement centroid and its distance from
@@ -3175,8 +3207,8 @@ settled, each stated where it happens:
   table, and the run's `passes`, `converged`, `nregrids` and the buffer
   width it used.
 
-**(Amended in step 8d:** the floor reads the horizon the layer actually
-follows.**)** `horizon_floor_level` and `level_bounds` take the layer's
+**The floor reads the horizon the layer actually
+follows.** `horizon_floor_level` and `level_bounds` take the layer's
 radii through two accessors, `geometry_radii(int, background)` — the
 horizon's smallest and largest radius, the analytic ones for step 5's
 sphere and the tracked shape's `r_in`, `r_out` for a tracked geometry — and
@@ -3188,7 +3220,7 @@ in spacings, `offset = m h`, so `offset/m` *is* the `h` the sphere's formula
 derives, and the floor keeps the layer's blocks from coarsening past it —
 which is what would make `check_interior_radii` fire at the next chunk —
 without asking for a finer one; the next geometry is rebuilt on whatever the
-indicator chose **(proposed in step 8d)**. The indicator takes the
+indicator chose. The indicator takes the
 geometry the run holds (`indicator_flags(…; interior)`), and the
 initial-data cycle rebuilds a tracked geometry on every pass's mesh and
 re-evaluates the data with the final one's core rule. The suite exercises
@@ -3196,8 +3228,7 @@ none of this on a mesh that moves — its tracked runs are on the step-5
 fixture's frozen hierarchy — and step 8f's matrix is where a tracked
 geometry is first regridded.
 
-**(Amended in step 8:** the mesh follows the hole.**)** Four pieces, each
-**(proposed in step 8)**:
+**The mesh follows the hole.** Four pieces:
 
 - **A `:fitted` case's initial-data cycle flags on its own data**
   (`adapt_fitted_initial_data!`): on every pass the geometry is rebuilt on
@@ -3207,9 +3238,8 @@ geometry is first regridded.
   the masked indicator flags with the geometry's mask and floor, and
   `regrid!` rebuilds without transferring — TreeAMR's
   `adapt_to_initial_data!` written out, because a `:fitted` case's data live
-  partly in a cache a coordinate callback cannot read. Step 8f's cycle
-  flagged on the analytic `:damped` layer and refused G5's chart, where the
-  analytic core cuts the disk; this one converges there (2 passes to 456
+  partly in a cache a coordinate callback cannot read. This cycle converges on G5's chart, where the
+  analytic core cuts the disk (2 passes to 456
   blocks at `5/128` in the suite, 2 passes to 3536–4040 blocks at `5/256`
   in the `moving` rows), and on a chart with analytic data it chooses the
   analytic cycle's mesh exactly (the adaptive fixture: 288 blocks, one pass
@@ -3228,18 +3258,16 @@ geometry is first regridded.
 - **The floor is widened by the travel `|v| · chunk`**, inward and outward
   (`level_bounds(…; travel)`): it is evaluated at the regrid's `t` and must
   hold the blocks the layer reaches before the next one. The travelling
-  margin `buffer` was already `|v| · chunk` in cells (step 6): 5 cells at
+  margin `buffer` is `|v| · chunk` in cells: 5 cells at
   `5/256` and 3 at `5/128` for `v = 0.3`, chunk `M/4`. Both are zero-width
   for a static hole, whose bounds are unchanged.
 - **The regrid flags the evolved state** at every chunk boundary with the
   geometry the next chunk runs on — nothing new: `gh_indicator!` already
-  read the state and the layer's mask. The first regrids of a tracked
-  geometry along a trajectory are step 8's `moving` rows.
+  read the state and the layer's mask.
 
-**What it measures on the boosted `a = 0` hole (measured in step 8**,
-`hole_runs.jl moving=ctl`, harmonic `a = 0` boosted at `0.3` from `x = 2`
+**What it measures on the boosted `a = 0` hole** (`hole_runs.jl moving=ctl`, harmonic `a = 0` boosted at `0.3` from `x = 2`
 to `x = −1.9` in `13 M`, box `5 M` on a `4³` root brick, finest `5/128`,
-`chunk = M/4`**)**: the mesh regrids at 40 of the 52 chunk boundaries,
+`chunk = M/4`): the mesh regrids at 40 of the 52 chunk boundaries,
 between 1128 and 1912 blocks, every radius assertion holding at every one;
 the refinement centroid stays within **`1.4` finest spacings** of the
 analytic center over the crossing on the analytic `:damped` layer (`20/M`)
@@ -3248,12 +3276,16 @@ edge leaves more grid-scale content on the trailing side for the indicator
 to score; the static configuration's centroid is `0.29` spacings off at
 `t = 0`. The travelling hole is tracked within `0.028` cells.
 
+The level floor of a tracked
+geometry starts at its **core** surface and is widened by the travel
+`|v| · chunk` (`level_bounds`, `indicator_flags`, `gh_indicator!` take
+`travel`).
+
 ## Time integration
 
-**IMEXRungeKutta's classical RK4, its stage arithmetic by block owner**
-(amended 2026-09-26, at Erik's direction, as TreeAMR's own examples now
-use it; OrdinaryDiffEq until then, whose decision and measurements follow
-as history). `src/stepping.jl` is the whole coupling: `state_partition`
+**IMEXRungeKutta's classical RK4, its stage arithmetic by block owner**,
+as TreeAMR's own examples use it (OrdinaryDiffEq before it: see
+[history](HISTORY.md#from-ordinarydiffeq-to-imexrungekutta-2026-09-26)). `src/stepping.jl` is the whole coupling: `state_partition`
 turns TreeAMR's `threadchunks(nblocks)` into IMEXRungeKutta's `partition`,
 so that each block's entries are combined on the thread `map_blocks!` runs
 the block on (`nothing` on a device: the fused broadcast); `gh_integrator`
@@ -3263,116 +3295,72 @@ integrator per chunk**, stepping the run's own state vector in place
 (`alias_u0 = true`); a moving hole's refilled target is swapped into it
 between pieces through a `ProblemRef` (`swappable = true`) instead of a new
 `init`, and each chunk's integrator takes over the previous chunk's scratch
-while the mesh is unchanged (`reuse`, IMEXRungeKutta 1.2, from 2026-09-26),
+while the mesh is unchanged (`reuse`, IMEXRungeKutta 1.2),
 so the scratch is allocated once per mesh and not once per chunk. What
-changed with it:
+follows from it:
 
-- **The limiters: one, on every state vector** (decided 2026-09-26 by
-  Erik). IMEXRungeKutta calls its stage limiter only on the three stage
+- **The limiters: one, on every state vector.** IMEXRungeKutta calls its stage limiter only on the three stage
   values of a step that `f_exp!` reads and its step limiter once on the
   result, so `gh_limiter!` — the projection, then the paste — is passed as
   both, IMEXRungeKutta's own rule for a correction that must reach every
-  right-hand-side input. Under OrdinaryDiffEq only the projection reached
-  the stage values, the paste was a step limiter alone, and the FSAL
-  tendency was evaluated on the result before the paste. On a static hole
+  right-hand-side input. On a static hole
   pasting a stage value changes no bit (inside `r_1` the `:pasted`
   right-hand side is zero and the analytic solution does not depend on the
   stage's time); on a moving one the ball is the analytic solution at every
   stage's time.
-- **The result agrees to roundoff, not bitwise.** The stages are summed in
-  a different order: the gauge wave's `L2` error at `q = 4`, `N = 16` is
-  `2.2860177409713e−5` against OrdinaryDiffEq's `…409697e−5`, and the
-  suite's hole fixture agrees to twelve digits at `t = 1/5`; a moving
-  `:fitted` hole (`hole_runs.jl moving=l0-base t_end=1/4`, seven refills
-  swapped into its chunks' integrators) prints the same row as `main` to
-  every digit. By owner it is
-  bitwise its own broadcast and bitwise across thread counts, which
-  `test/thread_workload.jl` now digests (its hand-written RK4 is gone).
+- **By owner the result is bitwise its own broadcast and bitwise across
+  thread counts**, which `test/thread_workload.jl` digests.
 - **One right-hand side fewer per `solve`** (no FSAL start) and no copy of
-  the state: OrdinaryDiffEq allocated about fifteen state-sized vectors per
-  `solve`, serially; IMEXRungeKutta allocates four scratch vectors per
+  the state: IMEXRungeKutta allocates four scratch vectors per
   `init`, first-touched through the partition — still 0.13–0.36 s at 64
   threads on 320 MB (first touch dearer than interleaved pages), which is
-  why a chunk has one integrator and not one per piece. **(Amended
-  2026-09-26.)** With IMEXRungeKutta 1.2's `reuse` the next chunk's `init`
+  why a chunk has one integrator and not one per piece. With IMEXRungeKutta 1.2's `reuse` the next chunk's `init`
   takes those four arrays over and allocates nothing: 0.05 ms against 13–35
   ms at four threads on the development machine (40–75 MB states), so the
   cost is paid once after the initial data and once after every regrid that
   moves the mesh.
 
-**(Measured 2026-09-26 on Symmetry** with `bench/stepping.jl`, one exclusive
+**Measured on Symmetry** with `bench/stepping.jl`, one exclusive
 64-core EPYC 7543 node, cn096, jobs 563975 and 563982; 512 blocks of `16³` at `q = 4`, a 320 MB
 state; the gauge wave and the suite's Kerr-Schild fixture at `halfwidth =
 5` with `hole_forest(…; roots = 2, radii = (6, 3, 3/2))`, whose finest
 spacing is the fixture's; minimum ms per call, each configuration twice, in
-agreement to a few percent**)**:
+agreement to a few percent:
 
 | per call, pinned, first touch | gauge wave | hole |
 |---|---|---|
-| RHS, `main` (the boxed kernel, below) | 482–530 | 755–786 |
-| RHS, from 2026-09-26 | 120–136 | 252–266 |
-| OrdinaryDiffEq RK4 step, `main` | 3146–3180 | 4354–4504 |
-| OrdinaryDiffEq RK4 step, fixed kernel | 920–947 | 1605–1665 |
+| RHS | 120–136 | 252–266 |
 | IMEXRungeKutta RK4 step, broadcast | 770–793 | 1304–1330 |
 | IMEXRungeKutta RK4 step, by owner | 553–603 | 1077–1106 |
-| `solve` per 4 steps, per step: OrdinaryDiffEq on `main` (the old driver) | 3825–3924 | 5118–5160 |
 | `gh_solve` per 4 steps, per step (`init` included) | 643–706 | 1157–1200 |
 
-So at 64 threads a step of the old driver was **5.6×** (wave) and **4.3×**
-(hole) today's. About 3–4× of that was the right-hand-side kernel itself
-(the `Core.Box` of "Precision, threads, devices": ~570 bytes allocated per
-point, 1.2 GB per evaluation, which 64 threads turn into garbage-collector
-contention — the same bug cost 7–15 % at four threads on the development
-machine), and 1.5–1.6× the integrator (its serial stage arithmetic and its
-per-`solve` buffers). A step by owner is now `4.2–4.9` right-hand sides.
+A step by owner is `4.2–4.9` right-hand sides.
 **Placement** (the four configurations on cn096): pinned (`JULIA_EXCLUSIVE =
 1`, `srun --cpu-bind = none`) with first touch is the fastest for the
 right-hand side (133 ms against 151 unpinned on the wave, 257 against 318 on
 the hole) and for the step; interleaving (`numactl --interleave = all`)
-helps only `init`'s allocation. Job 563749's anomaly — the owner-mapped
-update 3–5× slower under first touch, suspected NUMA balancing — did not
-reproduce: after a process's OrdinaryDiffEq rows (every one a serial pass)
-the owner-mapped step was no slower than before them. **The driver end to
+helps only `init`'s allocation. **The driver end to
 end** (`evolve!`, three chunks, the record included; jobs 563976 on cn112 —
 an 8×8-core AVX-512 node with one NUMA domain, pinned — and 563977 on
-cn079, an EPYC 7543, unpinned): per step, `main` against today, **4111 →
-544 ms** and **5297 → 1140 ms** pinned, **3460 → 843** and **4547 → 1516**
-unpinned, with the records equal to every printed digit.
+cn079, an EPYC 7543, unpinned): per step, **544 ms** and **1140 ms** pinned, **843** and **1516**
+unpinned.
 
-**On a device (measured 2026-09-26**, the first device runs of this
-package**)**. With the box gone the right-hand-side kernel compiles for a
+**On a device.** The right-hand-side kernel compiles for a
 GPU: on the development machine's Metal at `Float32`, and on one H200 (job
 563978, cn113) at `Float64` and `Float32`, with `evolve!` end to end — the
 record's monitors on the device, the broadcast stage arithmetic, `hostcopy`
 only for a horizon find (none here). The `Float64` hole's record equals the
 CPU run's to every printed digit (`err_l2 = 1.690514e−6`).
 
-| H200, ms | wave `16³` | hole `16³` | wave `32³` | hole `32³` |
-|---|---|---|---|---|
-| RHS, `Float64` | 20.7 | 28.8 | 151.2 | 170.5 |
-| RK4 step, `Float64` | 84.3 | 116.2 | 613.8 | 691.7 |
-| `evolve!` per step, `Float64` | 85.2 | 120.2 | | |
-| RHS, `Float32` | 13.0 | 20.6 | | |
-| `evolve!` per step, `Float32` | 53.3 | 86.9 | | |
+The first device timings, before the kernel was tuned, are in
+[history](HISTORY.md#the-first-device-runs-2026-09-26); the tuned kernel is under [The right-hand side on an
+H200](#the-right-hand-side-on-an-h200).
 
-At the same 2.1 M points one H200 runs the right-hand side **6.4×** (wave)
-and **8.9×** (hole) as fast as a pinned 64-core node, and the hole's
-`evolve!` step **9.5×** as fast as the 1140 ms it takes on cn112; `32³`
-blocks, 16.8 M points, cost about 10 ns a point. `Float32` is 1.4–1.6×
-faster than `Float64` (not investigated), and its error is
-roundoff-dominated (`1.9e−5` against
-`1.7e−6` on the hole). None of this is tuned: G6's kernel efficiency is
-still a research project, and these are the numbers it starts from.
-**(Taken up 2026-10-05**, in [The right-hand side on an
-H200](#the-right-hand-side-on-an-h200-measured-2026-10-05): on the device the
-kernel is not inlined and spills 8 KB a thread; inlined, with a register-lean
-source, it is 7× faster.**)**
-
-**Block size and block count (measured 2026-09-26**, `bench/stepping.jl`'s
+**Block size and block count** (`bench/stepping.jl`'s
 `scan` mode, `q = 4` throughout — fourth-order centred differences, sixth-order
 prolongation, `G = 3`; H200 jobs 564111 and 564114, the CPU on cn079, an EPYC
 7543, pinned at 64 threads, job 564112; the hole's rows need two roots or more,
-since one root at `N ≤ 12` fails the interior's radius checks**)**. The
+since one root at `N ≤ 12` fails the interior's radius checks). The
 right-hand side in nanoseconds per point:
 
 | wave, `N` \ blocks | 8 | 64 | 512 | 1728 |
@@ -3406,21 +3394,10 @@ arithmetic's per-call overhead shows). For G5-sized meshes this says `N ≥ 16`
 on either machine, and `N = 24`–`32` where the refinement's granularity
 allows it.
 
-**Fixed-step RK4 from `OrdinaryDiffEqLowOrderRK`** (decided), as
-TreeWave uses it: four stages for a fourth-order spatial scheme, the
-RHS in the SciML signature `f!(du, u, p, t)`, `adaptive = false`, `dt`
-from the CFL bound above. TreeWave measured what this costs on many
-cores — the integrator's serial stage broadcasts cap a threaded step at
-about 3.6× however well the mesh scales, and `thread = True()`
-oversubscribes the cores KernelAbstractions already uses — and this
-package accepts the same cap for the same reason: correctness and a
-shared pattern first. GHSO2's native tableau-generic stepper with fused
-stage updates is the extension that lifts it, listed below with what it
-needs.
+**Inconsistent:** the H200 rows above put the right-hand side at 9–10 ns a point from `N = 16` up, while [The right-hand side on an
+H200](#the-right-hand-side-on-an-h200) measures the tuned kernel at 1.1 ns a point; the block-size table was taken before that tuning.
 
-**(Measured in step 3.)** The integrator is `RK4()` with
-`adaptive = false`, `save_everystep = false` and `dt` from `gh_dt`, and it
-is what every convergence rate above was measured through. At `cfl = 1/4`
+At `cfl = 1/4`
 the time error does not contaminate the spatial one even at `q = 6`,
 because `dt ∝ h` makes it `O(h⁴)` with a factor `cfl⁴ ≈ 0.004` in front
 and the runs are short: the measured rate is 5.92, not 4. That headroom is
@@ -3431,16 +3408,21 @@ tableau to keep it, which is worth knowing before G3 lengthens anything.
 The relaxation rate of the interior layer is bounded by RK4's stability
 on the negative real axis, and both rates the driver runs keep it well
 inside — the default `4/M` is `0.04/dt` to `0.09/dt` on the suite's holes,
-and the grid-rate option `ρ_max · dt = 1` is a factor `2.8` inside (amended
-in step 8c′);
-the `:pasted` variant uses RK4's `step_limiter!(u, integrator, p, t)`
-hook, and step 8b's range projection its `stage_limiter!` — the two places
-the state may be written outside the RHS, both passed as `solve` keywords
-**(amended in step 8b**; see [The
-interior](#the-interior-a-pointwise-damping-layer)**)**. Adaptive
+and the grid-rate option `ρ_max · dt = 1` is a factor `2.8` inside; the
+limiters are the one `gh_limiter!` above. Adaptive
 stepping is not used: the step is set by the CFL bound and
 `volume_weighted_norm` is not wired in as an `internalnorm` (TreeAMR's
 open question, not this package's).
+
+**One integrator per chunk.** The
+  integrator's `p` and `dt` are constants and each `init` allocates and
+  first-touches four state-sized scratch vectors — 0.13–0.36 s at 64
+  threads on 320 MB — so `evolve!` builds **one per
+  chunk** and swaps a moving hole's refilled problem in between pieces
+  (`swappable = true`: the integrator's `p` is a `ProblemRef`, `integ.p.p =
+  p′`), rather than one per piece — and **each chunk's integrator takes
+  over the previous chunk's scratch** (`reuse = integ_prev`, IMEXRungeKutta
+  1.2), so the allocation is once per mesh.
 
 ## Analysis quantities
 
@@ -3461,56 +3443,34 @@ the tests assert on them.
 | spin `J` and its axis | `KorzynskiSpin.horizon_spin` on the finder's collocation grid, from the interpolated `γ_ij` and `K_ij` | with the area |
 | Christodoulou mass | `M_ch = √(M_irr² + J²/(4 M_irr²))` | with the spin |
 | error against the analytic solution | `|u − u_exact|` per component into `diag`; masked volume-weighted L2 and L∞ | every chunk |
-| interior residual | `|u − u_exact|` inside the layer, L∞, the layer's own health — for `:fitted`, `|u − u_fit|`, the distance from its target (amended in step 8e) | every chunk |
+| interior residual | `|u − u_exact|` inside the layer, L∞, the layer's own health — for `:fitted`, `|u − u_fit|`, the distance from its target | every chunk |
 | mesh statistics | leaf count per level, finest spacing, the indicator's `τ_max`, the refinement centroid against the analytic center | every chunk |
-| range projection | `bounds_hits` (points moved, summed over every stage-limiter call of the chunk), `bounds_nonfinite` (of those, points with a non-finite component), `bounds_r_max` (the outermost radius it fired at, `−1` where it did not); `nothing` for a case without bounds (added in step 8b) | every chunk |
-| validity monitor | over the layer `r_0 ≤ r < r_1` and over the `G` points outside it: `min_detγ`, `min_α` (the *signed* lapse, negative where `g^{tt} > 0`), `max_h`, `max_Π` (the largest component magnitudes) — `min_detγ_layer` … `max_Π_shell` (added in step 8b); and over the whole evolved region, `min_detγ_evolved`, `min_α_evolved` — the lapse-collapse trigger's input (added in step 8d). On the tracked geometry the two bands are its own (`layer_mask`, `shell_mask`) | every chunk |
-| horizon track | for a case whose interior is a `FittedSpec` (added in step 8d; `nothing` otherwise): `track_source` (`:found`, `:coasting`), `track_center` and `track_velocity` (the tracked trajectory after this row's find), `track_r_min`, `track_r_max` (the found surface's radii about its own origin), **`track_offset`** (the tracked center's distance from the analytic one, in cells of the finest spacing — the number "good to about a cell" is read from), `track_misses`, `track_prediction` (the found origin's distance from where the track predicted it, in cells; `nothing` without a find), `track_trigger` (this row's find was forced by the lapse trigger) | every chunk, the find every `k`-th or when triggered |
-| tracked layer | the geometry the next chunk runs on: `layer_h` (the spacing its offset and ramp are stated in), `layer_offset = m h`, `layer_thickness = n_L h`, `layer_r_in`, `layer_r_out` (the shape's bounding radii), and `margin_efolds` — step 8a's leakage e-folds across the margin, the least of the six grid axes (added in step 8d) | every chunk |
-| fitted target | for a `:fitted` case (added in step 8e; `nothing` otherwise), of the fit built from this row's state: **`fit_valid`** (every point of the fit's validity sweep a Lorentzian metric — `fit_valid(fit)`; a fit that is not does not become the target), **`fit_residual`** (`fit_residual(fit).overall`, the fit's worst relative residual block by block against the data it was fitted to), and beside them the sweep's worst **`fit_min_detγ`**, `fit_min_α`, `fit_min_λ`, `fit_hits` (swept points the target's ranges would move) and `fit_refills` (the cache's mid-chunk refills in the chunk this row ends) **(proposed in step 8e)**; for `:fitted` the row `residual` is the layer's distance from its target (the cache), not from the analytic solution | every chunk |
+| range projection | `bounds_hits` (points moved, summed over every stage-limiter call of the chunk), `bounds_nonfinite` (of those, points with a non-finite component), `bounds_r_max` (the outermost radius it fired at, `−1` where it did not); `nothing` for a case without bounds | every chunk |
+| validity monitor | over the layer `r_0 ≤ r < r_1` and over the `G` points outside it: `min_detγ`, `min_α` (the *signed* lapse, negative where `g^{tt} > 0`), `max_h`, `max_Π` (the largest component magnitudes) — `min_detγ_layer` … `max_Π_shell`; and over the whole evolved region, `min_detγ_evolved`, `min_α_evolved` — the lapse-collapse trigger's input. On the tracked geometry the two bands are its own (`layer_mask`, `shell_mask`) | every chunk |
+| horizon track | for a case whose interior is a `FittedSpec` (`nothing` otherwise): `track_source` (`:found`, `:coasting`), `track_center` and `track_velocity` (the tracked trajectory after this row's find), `track_r_min`, `track_r_max` (the found surface's radii about its own origin), **`track_offset`** (the tracked center's distance from the analytic one, in cells of the finest spacing — the number "good to about a cell" is read from), `track_misses`, `track_prediction` (the found origin's distance from where the track predicted it, in cells; `nothing` without a find), `track_trigger` (this row's find was forced by the lapse trigger) | every chunk, the find every `k`-th or when triggered |
+| tracked layer | the geometry the next chunk runs on: `layer_h` (the spacing its offset and ramp are stated in), `layer_offset = m h`, `layer_thickness = n_L h`, `layer_r_in`, `layer_r_out` (the shape's bounding radii), and `margin_efolds` — step 8a's leakage e-folds across the margin, the least of the six grid axes | every chunk |
+| fitted target | for a `:fitted` case (`nothing` otherwise), of the fit built from this row's state: **`fit_valid`** (every point of the fit's validity sweep a Lorentzian metric — `fit_valid(fit)`; a fit that is not does not become the target), **`fit_residual`** (`fit_residual(fit).overall`, the fit's worst relative residual block by block against the data it was fitted to), and beside them the sweep's worst **`fit_min_detγ`**, `fit_min_α`, `fit_min_λ`, `fit_hits` (swept points the target's ranges would move) and `fit_refills` (the cache's mid-chunk refills in the chunk this row ends); for `:fitted` the row `residual` is the layer's distance from its target (the cache), not from the analytic solution | every chunk |
 
 **Constraints.** Both kernels mask the interior `r < r_1` and write zero
-inside it; the modified region is not a numerical solution. Norms are
-`block_mapreduce` partials weighted by each block's `h³`, combined in
-block order, so they are bit-identical across thread counts. **(Amended
-2026-10-01:** they are TreeAMR's `mesh_mapreduce` — the same partials, the
-weight `h³` applied by TreeAMR, the combination on the host, which is the
-one place TreeAMR's M7 combines the ranks' partials, by an `allgather`
-folded in rank order — and so is every other
-reduction that crosses blocks: the speed, the indicator's scales and
-`τ_max`, the projection's counts and the validity monitor's extremes. They
-are still bit-identical across thread counts. `mesh_mapreduce` combines
-pairwise where this package's loop summed left to right, so the L2 norms
-moved in the last place and nothing printed to the digits this document
-records did; `max`, `min` and the counts are unchanged bit for bit. The
-denominator is `evolved_volume`, one weighted reduction of the mask.**)**
-**(Amended 2026-10-23:** the norms are TreeAMR 0.2.6's **folds over
+inside it; the modified region is not a numerical solution. The norms are TreeAMR 0.2.6's **folds over
 points**, `mesh_fold` (M15, which this package asked for): the callback sees
 a whole owned point — several `diag` slots at once, its position bit for bit
 `point_position`'s, its spacing, level and a per-block tag — and folds it
 into an `isbits` accumulator of `Sum`, `Max` and `Min` fields, so one sweep
 and one collective give every norm of every region. `diag_norms` is the one
 fold behind `masked_norms`, `evolved_volume`, `constraint_norms`,
-`error_norms` and the new `record_norms` (the last two together, which is
+`error_norms` and `record_norms` (the last two together, which is
 what the driver's row reads after its three monitors: they write disjoint
 slots); `level_constraint_norms` bins every level in one fold; the validity
 monitor and the evolved region's finiteness count are one fold over the
-state vector, with the regions' masks asked at the point (the kernel that
-wrote them into four `diag` slots, and the non-finite kernel's slot, are
-gone: `diag` has 17 slots); the projection's three counts are one fold, and
+state vector, with the regions' masks asked at the point (`diag` has 17 slots); the projection's three counts are one fold, and
 the indicator's ten reference amplitudes another, without the scratch field
-set. A record row made 37 reductions (54 on an ADM chunk, 65 with the
-indicator) and makes 2 (4 with the indicator); `test/octant_runs.jl`'s row,
-which re-ran the ADM monitor and the error kernel once per shell and
-half-shell only to select their points, runs each monitor once and folds
-three times. The weight is now per point, `p.h³`, where `mesh_mapreduce`
-scaled a block's sum: a sum may move in the last place (`threading_tests.jl`'s
-exact claim held unchanged, its spacings being powers of two), maxima, minima and counts
-are unchanged bit for bit, and each block is still one sequential fold on
+set. A record row makes 2 reductions (4 with the indicator);
+`test/octant_runs.jl`'s row runs each monitor once and folds three times. The weight is per point, `p.h³`, and each block is one sequential fold on
 its owner's thread, so the norms are bit-identical across thread counts.
-The speed and `τ_max`, one number each, stay `mesh_mapreduce`s.**)**
+The speed and `τ_max`, one number each, are `mesh_mapreduce`s.
 
-**(Implemented and measured in step 4**, `src/constraints.jl`.**)** Five
+`src/constraints.jl` implements both monitors. Five
 things the writing settled, each stated where it is made in that file:
 
 - **Which `∂_t g`.** The gauge constraint takes it from the first
@@ -3519,13 +3479,12 @@ things the writing settled, each stated where it is made in that file:
   differentiating it along `t`, with `∂_tΠ` from
   `gh_node_rhs_expanded` — the reduced equation with its source and its
   constraint damping, which is what "consistent with the discrete
-  dynamics" means. **The Kreiss–Oliger term is left out of both**
-  **(proposed in step 4)**: it is `O(h^{q+1})`, one order below what these
+  dynamics" means. **The Kreiss–Oliger term is left out of both**: it is `O(h^{q+1})`, one order below what these
   monitors converge at, and carrying it would mean differencing the
   dissipation operator as well. This is the one place this package's
   `∂_t g` and the right-hand side's differ, and the difference is below
   the truncation error either of them measures.
-- **The Ricci tensor is assembled, not reduced (proposed in step 4).**
+- **The Ricci tensor is assembled, not reduced.**
   `R_ab = ∂_cΓ^c_ab −
   ∂_bΓ^c_ca + Γ^c_cd Γ^d_ab − Γ^c_bd Γ^d_ca`, written out, rather than
   through the generalized-harmonic identity `R_ab = −½g^{cd}∂_c∂_d g_ab +
@@ -3539,32 +3498,30 @@ things the writing settled, each stated where it is made in that file:
   and `∂_t√γ` are not among what `metric_derivatives` returns (three
   spatial directions, with `√γ` folded into `A^{jk}`), so `pointwise.jl`
   gained `metric_derivatives_along`, the same five closed forms for one
-  direction **(proposed in step 4)**. The three-direction function is
+  direction. The three-direction function is
   untouched, and `test/constraints_tests.jl` asserts the two agree on
   every spatial direction — to roundoff, for the reason under
   [Measured results](#measured-results).
 - **The masked norm divides by the evolved volume.** Each kernel writes a
   `1`/`0` indicator into a `diag` slot beside its values, and the L2 norm
   is `√(Σ_b h_b³ Σ|c|² / Σ_b h_b³ Σ 1)` — so masking a region out does not
-  make the number smaller merely by diluting it with zeros
-  **(proposed in step 4)**. Where nothing is masked that is TreeAMR's
+  make the number smaller merely by diluting it with zeros. Where nothing is masked that is TreeAMR's
   `volume_weighted_norm` exactly, which the tests assert rather than
   assume.
-- **`diag` now has ten slots**: the speed, `C_a` (four), `ℋ`, `ℳ_i`
+- **`diag` starts with ten slots**: the speed, `C_a` (four), `ℋ`, `ℳ_i`
   (three) and the mask indicator, with `C_a` and `ℳ_i` contiguous because
   `block_mapreduce` reduces a contiguous range of variables and nothing
-  else. **(Thirteen from step 5**: the masked error, the interior
-  residual and the gauge drift, appended rather than inserted, because
-  the two contiguous runs above must not move. **Fourteen from step 6**:
-  the refinement indicator `τ`, appended for the same reason.**)**
+  else. The masked error, the interior
+  residual and the gauge drift follow, appended rather than inserted, because
+  the two contiguous runs above must not move, and then
+  the refinement indicator `τ`, appended for the same reason.
 
-**(Implemented and measured in step 5.)** The error rows are one more
+The error rows are one more
 kernel — the state, the analytic solution, no stencil and no ghosts, so
 it costs what the speed kernel costs plus one forward-mode dual pass per
 point — and three decisions:
 
-- **The error slots hold a magnitude, not twenty components
-  (proposed in step 5).** The table above says "`|u − u_exact|` per
+- **The error slots hold a magnitude, not twenty components.** The table above says "`|u − u_exact|` per
   component into `diag`", which would be twenty more slots, more than
   tripling a field set that is `nvars × (N+1)³ × nblocks`, for a number
   the record reads as one norm. What is stored is the pointwise Euclidean
@@ -3579,8 +3536,7 @@ point — and three decisions:
   excludes would have to be divided by that region's volume, which the
   mask's count does not hold; the number those rows are read for is the
   worst point.
-- **The gauge drift's shell is `[r_h,min, r_h,max + (r_1 − r_0)]`
-  (proposed in step 5).** `CODE.md` asked for "the drift of `h_tt` at the
+- **The gauge drift's shell is `[r_h,min, r_h,max + (r_1 − r_0)]`.** `CODE.md` asked for "the drift of `h_tt` at the
   horizon" and did not say over what set. The outer margin is the layer's
   own width rather than a number chosen for the occasion: it is the only
   length in the case that is set by the hole and known to be resolved.
@@ -3588,12 +3544,11 @@ point — and three decisions:
   the three interior variants are compared over "the `G` points outside
   `r_1`".
 
-**(Implemented in step 8b**, `src/bounds.jl`**.)** The range projection's
+In `src/bounds.jl`, the range projection's
 rows and the validity monitor's are written at every chunk, and three
 things the writing settled:
 
-- **The hit count is per call, summed over the chunk (proposed in step
-  8b).** A stage's flags are overwritten by the next stage's, so a count
+- **The hit count is per call, summed over the chunk.** A stage's flags are overwritten by the next stage's, so a count
   read off the `DIAG_BOUNDS` slot once per chunk would say how many points
   fired in the chunk's last stage, not in the chunk. `BoundsAccounting` —
   host-side, mutable, one per run, shared by every problem the run
@@ -3609,7 +3564,7 @@ things the writing settled:
   on the record. The lapse is the signed `sign(α²)√|α²|` from the ADM split
   rather than `metric_quantities`' `1/√(−g^{tt})`, which has no value for
   the states the row exists to report.
-- **`finite` is the evolved region's (amended in step 8b).** It was
+- **`finite` is the evolved region's.** It was
   `all(isfinite, u)` over the whole state, which with `max_speed_of`'s
   identical check ended a run at the first `NaN` in the frozen core; both
   now count non-finite values at `r ≥ r_1` (`evolved_nonfinite`). A `NaN`
@@ -3618,23 +3573,22 @@ things the writing settled:
   non-finite value there is a case whose analytic solution is singular
   somewhere the mesh reaches, which is the configuration error step 5's
   check was written for, and not something to repair.
-  `diag` has **22** slots from step 8b: the projection's three, the
-  monitor's four and the non-finite count, appended. **(Amended
-  2026-10-23:** 17 — the monitor and the count are folds over the state
+  `diag` has **17** slots, the projection's three appended; the monitor and
+  the count are folds over the state
   vector, see [Analysis quantities](#analysis-quantities)'s constraints
-  paragraph.**)**
+  paragraph.
 
-**(Implemented and measured in step 6.)** The mesh-statistics row gains
+The mesh-statistics row holds
 `τ_max` and the refinement centroid, and both come out of the flagging pass
 the regrid needs anyway:
 
 - **The centroid is the volume-weighted centroid of the cells above
-  `coarsen_tol` (proposed in step 6)**, taken over the bounding boxes the
+  `coarsen_tol`**, taken over the bounding boxes the
   `coarsen_tol` sweep already reports — each block's box center weighted by
   its firing count and its cell volume. A centroid over cells rather than
   boxes would be a third sweep of the mesh for a diagnostic.
 - **It has a bias of order the coarsest *firing* spacing, and the reason is
-  the mesh's indexing (measured in step 6).** On the static hole, where the
+  the mesh's indexing.** On the static hole, where the
   mesh and the solution are symmetric about the center, the centroid comes
   out `1.7`–`2.4` finest spacings from it. TreeAMR's blocks own their lower
   plane and not their upper one, so at a coarse-fine interface the coarse
@@ -3666,19 +3620,12 @@ this package implements so that the interpolation runs threaded — and
 a seed sphere `(origin, r0)` at resolution `N_ah`; it returns
 `(; success, origin, hlm, area, grid, …)`. `K_ij` comes from `Π`
 through the evolution relation, GHSO2's `adm_vars_from_state`. The
-provider is the one place this package interpolates: point location by
-`find_leaf`, then Lagrange interpolation of order `q + 2` over the
-containing block's stored points (which reach `G` into the neighbors,
-so a point near a block face is interpolated without crossing it), on
-the host at analysis cadence — a stopgap for TreeAMR's "generic
-interpolation" to-do, and the first item under
-[Upstream prerequisites](#upstream-prerequisites). **(Amended
-2026-09-26:** it is TreeAMR's `interpolate` (M11) now, with the basis
-`Lagrange(q + 2)` — the same stencil, located by one binary search rather
+provider interpolates with TreeAMR's `interpolate` (M11), the basis
+`Lagrange(q + 2)`, located by one binary search rather
 than an ancestor walk, one launch on the field set's backend rather than a
 host loop, so a device-resident state is no longer copied to the host per
 find (`hostcopy`); `gh_interpolate`/`gh_interpolate_grad` are the thin
-wrapper, and the provider and the fit's `state_sampler` call it.**)** The
+wrapper, and the provider and the fit's `state_sampler` call it. The
 horizon lies outside the layer by the margin `m`, and the provider throws
 if a query point's interpolation footprint reaches `r_1`. Each find is seeded with
 the previous result, recentred on `c(t)`. **Spin and mass** follow
@@ -3693,18 +3640,17 @@ sharp test rather than a picture.
 The horizon finder is a *diagnostic*, not a tracker: the layer follows
 the analytic center, and the refinement follows the indicator. A run in
 which the found horizon and the analytic center disagree by more than a
-few finest spacings has found a bug, not a feature to track. **(Amended
-in step 8d:** a case whose interior is a `FittedSpec` asks for its layer to
+few finest spacings has found a bug, not a feature to track. A case whose interior is a `FittedSpec` asks for its layer to
 follow the found horizon, and then the finder's answer is an input —
 through `src/tracking.jl`'s track, from the row the driver records, under
 [The interior](#the-interior-a-pointwise-damping-layer), "The tracked
 geometry". Every other case is as this paragraph says, and `track_offset`
-is the row that says whether a tracked one has found a bug.**)**
+is the row that says whether a tracked one has found a bug.
 
-**(Implemented and measured in step 7**, `src/horizon.jl`.**)** Five
+`src/horizon.jl` implements the finder's side. Five
 things the writing settled, each stated where it is made in that file:
 
-- **The guard is on the footprint and it is exact (proposed in step 7).**
+- **The guard is on the footprint and it is exact.**
   `CODE.md` asks the provider to throw "if a query point's interpolation
   footprint reaches `r_1`", which is a statement about `(q+2)³` points and
   not about the query. The footprint is a tensor-product lattice, so the
@@ -3713,7 +3659,7 @@ things the writing settled, each stated where it is made in that file:
   squares — exact, rather than the bounding box's conservative
   `√3·(q+2)h/2`. It fires on a query that is *outside* `r_1` and reads
   inside it, which is the whole point of putting it on the footprint.
-  **(Amended 2026-09-26**, with the port to TreeAMR's M11:**)** TreeAMR's
+  TreeAMR's
   `interpolate` takes an `exclude::Region` and *flags* a query whose
   stencil has a point inside it; the guard is the region
   `UnevolvedRegion(mask)` — inside where `is_evolved(mask, x)` is false —
@@ -3740,8 +3686,7 @@ things the writing settled, each stated where it is made in that file:
   offset surface the footprints straddle, the override and plain
   enumeration are `0.160` and `0.162 ms` (the band is enumerated either
   way); outside the band `0.108` against `0.120`.
-- **The radii are measured from the analytic center (proposed in step
-  7).** `CODE.md` says "the coordinate radii of the surface points" and
+- **The radii are measured from the analytic center.** `CODE.md` says "the coordinate radii of the surface points" and
   not from where. The two claims made on them — that the horizon encloses
   the layer by the margin `m`, and that `r_min` and `r_max` are
   [`horizon_min_radius`](#the-interior-a-pointwise-damping-layer) and
@@ -3750,15 +3695,15 @@ things the writing settled, each stated where it is made in that file:
   centers is a row of its own, `center_offset`, and it is the number the
   paragraph above turns into a bug report. `r_mean` is the `sin θ`-weighted
   mean over the collocation points, which is `∮ r dΩ/4π` to the accuracy
-  of the grid's own quadrature. **(Amended in step 8d:** `find_gh_horizon`
+  of the grid's own quadrature. `find_gh_horizon`
   takes `center =`, the point the radii and `center_offset` are measured
   from, defaulting to the analytic center, and also returns the radii about
   the surface's own recentred origin, `origin_r_min`, `origin_r_mean`,
   `origin_r_max` — what the shape `hlm` describes, and what a tracked
   geometry is built from. A tracked run passes its predicted center, so its
   rows' `r_min` … `r_max` are about the track and its `center_offset` is the
-  track's prediction error.**)**
-- **A failed find is recorded, not thrown (proposed in step 7).** The
+  track's prediction error.
+- **A failed find is recorded, not thrown.** The
   horizon is a diagnostic and nothing in the evolution reads it, so a
   find that throws — the guard refusing a flow that wandered inward, a
   seed sphere outside the box — leaves `horizon_success = false` and the
@@ -3766,7 +3711,7 @@ things the writing settled, each stated where it is made in that file:
   goes on. A diagnostic that ends a run loses the record that would have
   said why.
 - **The spin's uniformization tolerance is `1e-8` and not the library's
-  `1e-13` (proposed in step 7).** `1e-13` is the round-off floor of
+  `1e-13`.** `1e-13` is the round-off floor of
   *analytic* Cauchy data; data interpolated off a finite-difference mesh
   has a floor set by its own error — `2.2e−5` on the suite's hole at
   `h = 5/64` — so the library's default stalls there and reports
@@ -3783,31 +3728,60 @@ things the writing settled, each stated where it is made in that file:
 The numbers are under [Measured results](#measured-results): Kerr's
 `A`, `M_irr`, `J` and `M_ch` recovered from sampled data in both charts
 and at `a = 9/10`, the interpolation's order, and what a find costs.
-**(Amended 2026-10-22:** the table's "about one RHS" for the ADM monitor is
+The table's "about one RHS" for the ADM monitor is
 not what an H200 measures. There a pair of the ADM monitor and the error
 kernel costs about `30` right-hand sides, inferred from whole runs, and a
 find under a second: [The analysis cadence on an
-H200](#the-analysis-cadence-on-an-h200-measured-2026-10-22). A production run
-takes its analysis row every `M`.**)**
+H200](#the-analysis-cadence-on-an-h200). A production run
+takes its analysis row every `M`.
 
-## The coupling contract with TreeGRRMHD (redesigned 2026-11-08)
+`initialdata.jl`'s `GHCase` has a sixth type parameter for the `Horizon`, and
+`with_horizon`; `driver.jl`'s record has the horizon rows, seeded from
+the previous find.
+
+Point-weighted and per-level norms: `weighting = :points`, `at_level`,
+`level_constraint_norms`. Beside `diag_norms` and `record_norms`,
+`constraints.jl` has `slot_norms`; `bounds.jl`'s `validity_and_nonfinite`
+is the validity monitor and `evolved_nonfinite` at once (`NDIAG = 17`).
+
+**Reductions across blocks are TreeAMR's.** TreeAMR combines the per-block partials on the host,
+  and over MPI (its M7) gathers one partial per rank; a `sum`, `maximum` or
+  weighted loop over `block_mapreduce`'s vector here would be a per-rank
+  answer under MPI. Several numbers are one fold because a point's
+  values do not depend on the mask, and each reduction is a sweep and a
+  collective. The fold's `rf` must return `init`'s exact type (a `Sum(1)`
+  beside a `Sum(0.0)` is refused), everything it closes over must be
+  `isbits`, and a region is asked of the point as `is_evolved(mask, p.x)`
+  with the masks the kernels take. The blocks combine pairwise, so an L2
+  compared with a stored number is compared to roundoff;
+  `threading_tests.jl`'s exact claim names the combination.
+
+**The ADM monitor's shape.** It is a
+  four-dimensional Ricci tensor out of a hundred second derivatives, which
+  is the opposite of the right-hand side's streaming order and
+  deliberately so: it runs once per chunk, not once per stage.
+
+**Ghosts must be filled before anything is interpolated**, with that
+call's hook. `find_gh_horizon` scatters and fills; `gh_adm_provider` and
+`gh_interpolate` do not, and an unfilled halo makes the metric garbage
+  exactly at the block faces — which the fast flow then walks into the
+  layer to escape.
+
+## The coupling contract with TreeGRRMHD
 
 TreeGRRMHD evolves general-relativistic MHD on this package's spacetime.
 Neither package depends on the other. A short script owns the loop and
 calls each package's verbs (`prepare!`, `rhs!`, the limiters) in the order
-the data flows (TreeGRRMHD's `CODE.md`, "The coupling contract", decided by
-Erik 2026-11-05). On 2026-11-08 Erik redesigned what crosses between the two
-packages, and where:
+the data flows (TreeGRRMHD's `CODE.md`, "The coupling contract"). What crosses
+between the two packages, and where ([history](HISTORY.md#the-coupling-contract-with-treegrrmhd)):
 
-- **Both directions cross at this package's vertices, in 3+1 variables**
-  (decided by Erik 2026-11-08).
+- **Both directions cross at this package's vertices, in 3+1 variables.**
   - The metric crosses as `(α, β^i, γ_ij, K_ij)`, 16 values a vertex.
   - The matter crosses as `(ρ, S_i, S_ij)`, 10 values a vertex:
     `ρ = n^a n^b T_ab`, `S_i = −γ_i^a n^b T_ab` and
     `S_ij = γ_i^a γ_j^b T_ab`. They are covariant, not densitized, in
     `G = c = 1` and the metric's length unit.
-- **Every conversion between centerings is TreeGRRMHD's** (Erik,
-  2026-11-08, from TreeGRRMHD's proposal). TreeGRRMHD is the only package
+- **Every conversion between centerings is TreeGRRMHD's.** TreeGRRMHD is the only package
   with mixed centerings, so it owns these conversions:
   - it interpolates the vertex metric to its cells, faces and edges;
   - it differentiates its own interpolant for `∂α`, `∂β` and `∂γ`;
@@ -3816,19 +3790,14 @@ packages, and where:
   This package interpolates nothing and fills none of TreeGRRMHD's sets. It
   knows neither TreeGRRMHD's centerings nor its ghost widths.
 
-This reverses TreeGRRMHD's amendment of 2026-11-06. That amendment made
-GH-1 a `FourMetric` adapter here, answering `g_ab` and `∂_c g_ab` at every
-point of every consumer centering, 4th order in the outermost ghost layer of
-a `G = 3` cell set, and it made GH-3 a covariant `T_ab`. The redesign also
-reverses the metric half of 2026-11-05's "each interpolating its own data".
 GH-5 stays withdrawn: nothing is asked of this package's ghost width.
 
 ### What this package provides (GH-1)
 
 `adm_vars(work, I, b, inv_h, Val(q))` already returns those 16 values at a
-stored vertex ([below](#public-access-to-the-vertex-metric-added-2026-11-05)),
-so GH-1 needed no new algebra, only its form in the contract. *(Built
-2026-11-08, `src/admvars.jl`:)*
+stored vertex ([below](#public-access-to-the-vertex-metric)),
+so GH-1 needed no new algebra, only its form in the contract. It is in
+`src/admvars.jl`:
 
 ```julia
 adm = ADMMetric(p, u, t)        # scatter and ghost fill, as gh_rhs! does
@@ -3871,10 +3840,10 @@ at  = adm(M)                    # bound to the consumer's vertex set M
 - **The consumer's set needs `N ≥ 10` at `G = 4`.** TreeAMR's vertex
   invariant is `N ≥ 2G + 2`, so a 16-variable set wide enough for a
   4th-order interpolation to the outermost ghost cell of a `G = 3` cell set
-  refuses `N = 8` (found 2026-11-08, building the test). TreeGRRMHD's TOV
+  refuses `N = 8`. TreeGRRMHD's TOV
   runs use `N = 16`.
 
-**Measured (2026-11-08).**
+**Measured.**
 
 - **On the CPU** (`test/admvars_tests.jl`, two testsets, 17 claims, about
   10 s inside the file). On a Kerr-Schild hole at `a = 1/2` on a two-level
@@ -3920,7 +3889,7 @@ at = matter(U)                            # bound to this package's vertex set
   kernel calls it at its owned vertices with the owned index, and never
   stores the result. `S` is an `SVector{3,T}`, `Sij` a symmetric
   `SMatrix{3,3,T}`. It adds a seventh kernel `Val`, `HASMATTER`
-  (`W` became the sixth on 2026-10-05). With `false` the kernel is bit for bit
+  (`W` is the sixth). With `false` the kernel is bit for bit
   today's.
 - **The term.** The head's `metric_quantities` give this point's `α`, `β^i`
   and `γ^ij`. With them the covariant `T_ab` is
@@ -3994,7 +3963,7 @@ at = matter(U)                            # bound to this package's vertex set
 - the implementation of GH-3 and GH-4, which is not started;
 - an H200 run of the adapter (Metal only so far).
 
-## Public access to the vertex metric (added 2026-11-05)
+## Public access to the vertex metric
 
 A code that couples to this package's metric — TreeGRRMHD, whose GH-1 asks
 for it — reads `α`, `β^i`, `γ_ij` and `K_ij` at the vertices of the GH field
@@ -4011,8 +3980,8 @@ adm_vars(work, I, b, inv_h, Val(q)) -> (; α, β, γ, sqrtγ, γu, K)
   `(n, n, n, nvars, nblocks)`. `I` is the **stored** index, ghosts included,
   the index `coordinates` takes. `b` is the block, `inv_h` is the block's
   `1/h`, and `q` is the right-hand side's order. `inv_h` must have the
-  array's element type `T`. A spacing of another precision is refused
-  (amended in review, 2026-11-05), because it would promote `∂h` and make `K`
+  array's element type `T`. A spacing of another precision is refused,
+  because it would promote `∂h` and make `K`
   mixed-precision.
 - **Where each method is valid.** The first reads one point and is valid at
   every stored vertex. The second reads the right-hand side's own
@@ -4041,7 +4010,7 @@ A downstream code decodes once per vertex and interpolates the ADM variables
 filler here, it writes its own `map_blocks!` into an ADM field set of its
 own, which it can ghost-fill at any `G` it needs.
 
-**Measured (2026-11-05).**
+**Measured.**
 
 - **On the CPU.** On a boosted spinning Kerr-Schild hole (`a = 1/2`,
   `v = (1/5, −1/10, 0)`), the metric agrees with `adm_decompose` to under
@@ -4078,23 +4047,22 @@ break it:
   function of `t`, never a mutated field.
 - **Bit-identical across thread counts.** Every reduction goes through
   `block_mapreduce` or `firing_boxes`; `test/thread_workload.jl` runs a
-  gauge wave with a regrid and a chunk of a hole with its layer and
-  compares digests. **(Measured in step 4.)** It holds. The workload is
+  gauge wave with a regrid and
+  compares digests. It holds. The workload is
   the gauge wave on a `2³` root grid: the initial-data cycle with its
   flagging pass, two chunks of fixed-step RK4 on a two-level mesh, the
   gauge-constraint monitor and its masked norms, `max_speed`, and a regrid
   that moves data between levels — six printed lines of digests, norms and
   mesh statistics, **character for character identical** at one and at
   four threads. The workload carries the *gauge* monitor and not the ADM
-  one **(proposed in step 4)**: the ADM kernel is the same `map_blocks!`
+  one: the ADM kernel is the same `map_blocks!`
   launch reduced by the same fold, so it adds no parallel structure, and
   compiling it costs 18 s in each of the two processes the test runs.
   What this bit-identity does *not* mean is under
   [Measured results](#measured-results): the same compiled code, at the
   same call site, at a different thread count, and nothing more.
-  **(Amended in step 5:** the workload stays the gauge wave and does
-  *not* grow a chunk of a hole with its layer. The sentence above was
-  written before the interior existed and promised one; what the interior
+  The workload stays the gauge wave and does
+  *not* grow a chunk of a hole with its layer. What the interior
   adds is a per-point branch inside one `map_blocks!` kernel, two more
   `map_blocks!` launches (the error kernel and the `:pasted` limiter) and
   three more `masked_norms` folds — no new parallel *structure*, and the
@@ -4103,10 +4071,15 @@ break it:
   two more kernel specialisations, in each of the two subprocesses the
   test runs, for a claim the existing lines already make. The right time
   to reconsider is G5, where the hole *moves* and the refinement follows
-  it — that is a new flagging pass, which is new parallel structure.**)**
+  it — that is a new flagging pass, which is new parallel structure.
+
+  **Inconsistent:** this bullet says every reduction goes through
+  `block_mapreduce` or `firing_boxes`; "Upstream prerequisites", item 3,
+  and `CLAUDE.md`, "Things that will bite", say every reduction that
+  crosses blocks is TreeAMR's `mesh_mapreduce` or `mesh_fold`, never a host
+  fold over `block_mapreduce`'s per-block vector.
 - **Every per-block pass runs on the block's owner thread, and this
-  package adds none of its own** (added 2026-09-25, with TreeAMR's
-  owner-based threading of 2026-09-23, `4be726e`). TreeAMR now gives
+  package adds none of its own.** TreeAMR gives
   block `b` to the thread whose chunk of `threadchunks(nblocks)` holds it,
   in every `map_blocks!`, `scatter!`/`gather!`, `fill_by_coordinates!`,
   ghost fill, interface fixup, regrid transfer and host loop over blocks,
@@ -4115,48 +4088,14 @@ break it:
   process loses"). Every kernel here — the right-hand side, the limiters,
   the monitors, the indicator, the target cache — already goes through
   `map_blocks!`, and every state vector and field set is allocated by
-  TreeAMR, so all of that is inherited with no change to `src/`; `[compat]`
-  asks for TreeAMR `0.1.2`. The one parallel loop this package wrote
-  itself, the horizon interpolator's batch over query points, was
-  `Threads.@threads` and is TreeAMR's `threaded_foreach` now: the same
-  chunk on the same thread every call, nestable, and it rethrows the
-  body's own exception, so the footprint guard's refusal still reaches
-  the record readable. **(Amended 2026-09-26:** that loop is gone with the
-  stopgap. The batch is TreeAMR's `interpolate`, one KernelAbstractions
+  TreeAMR, so all of that is inherited with no change to `src/`. The horizon interpolator's batch is TreeAMR's `interpolate`, one KernelAbstractions
   launch over the points — not a by-owner launch, since points are not
   blocks — which flags rather than throws, so the guard's refusal is raised
-  on the host after it; this package has no parallel loop of its own
-  now.**)** **What is not owner-based is RK4's stage
-  arithmetic.** OrdinaryDiffEq's `RK4()` forms `uprev + (dt/2) k` and the
-  final combination with a serial broadcast (`thread = Serial()`), on the
-  calling thread, over the whole state. **(Measured 2026-09-25** on the
-  development machine, the gauge wave at `q = 4`, 64 blocks of `16³`:**)**
-  the four broadcasts of a step are `5.7 ms` against `4 × 519 ms` of
-  right-hand side at one thread (0.3 %) and `4 × 143 ms` at four (1.0 %).
-  On a 64-core Symmetry node it is not measured, and is expected to
-  matter more for two reasons: a single core's bandwidth is a small share
-  of the node's, and the broadcast reads every block from one core
-  between launches, which is exactly the migration TreeAMR removed. It
-  also first-touches the vectors the integrator allocates (its copy of
-  `u`, the stage vector `tmp`, the saved end state) from that one core, so
-  TreeAMR's advice — pin the threads, then let first touch place the
-  pages — makes the field sets domain-local and leaves the state vectors
-  on one domain. Today's Symmetry jobs neither pin nor interleave; pinned,
-  with and without `numactl --interleave=all`, is the comparison to make
-  before choosing. The
-  ways out are `RK4(; thread = True())` (Polyester, whose chunk-to-thread
-  map is its own) or an integrator whose stage update is a `map_blocks!`
-  — a change to "RK4 from OrdinaryDiffEq", and G6's to measure.
-  **(Resolved 2026-09-26.)** Measured on Symmetry (job 563749), the serial
-  updates were 12–14 % of a step at 64 threads, and every `solve` added
-  the serial allocation of about fifteen state-sized vectors; the
-  integrator is IMEXRungeKutta's RK4 by block owner since, which removes
-  both — [Time integration](#time-integration) has the numbers. The
-  placement question is answered there too: pinned with first touch is
-  the fastest configuration, and the 3–5× first-touch anomaly of job
-  563749 did not reproduce once nothing serial touched the state.
-- **`Float64` on Symmetry's H200 is the requirement** (decided in
-  review). It is the machine the proof of concept runs on, and the
+  on the host after it; this package has no parallel loop of its own. RK4's stage arithmetic is owner-based too: the integrator is
+  IMEXRungeKutta's RK4 by block owner, and pinned with first touch is the
+  fastest configuration — [Time integration](#time-integration) has the
+  numbers ([history](HISTORY.md#precision-threads-devices)).
+- **`Float64` on Symmetry's H200 is the requirement.** It is the machine the proof of concept runs on, and the
   precision it runs in; every device claim below is made there first.
   `Float32` on a device — Metal on the development machine, or `Float32`
   on the H200 for the register-footprint experiment — is *desirable*:
@@ -4167,18 +4106,18 @@ break it:
   a `Float32` failure would be recorded, not fixed at the expense of
   `Float64`. The RHS kernel's register pressure and the in-kernel metric
   evaluation are the two device unknowns, and G6 measures both on the
-  H200. **(Measured in step 4** on `CPU()`, which is what a host test can
-  settle.**)** There is no failure to record. Everything steps 3 and 4
-  built runs at `Float32` and returns `Float32`: the fused kernel, the
+  H200. On `CPU()`, which is what a host test can
+  settle, there is no failure to record. These
+  run at `Float32` and return `Float32`: the fused kernel, the
   time step, RK4, both constraint monitors, the two-level mesh with its
   prolongated ghosts. The gauge wave converges at **3.93** at `Float32`
   against `Float64`'s **3.94** over the two coarsest resolutions, with
   errors `2.00e−4, 1.31e−5` against `2.00e−4, 1.30e−5` — the *same* error,
-  not merely the same rate. Two resolutions and no more, for step 2's
+  not merely the same rate. Two resolutions and no more, for this
   reason: the roundoff floor of a second derivative is `eps/h²`, which at
   `Float32` and `h = 1/24` is already the size of the `Float64` truncation
   error there, so a third point would measure the arithmetic. The
-  pointwise algebra — including step 4's `metric_derivatives_along` and
+  pointwise algebra — including `metric_derivatives_along` and
   the four-dimensional curvature assembly — also runs at `Float32x2`, the
   software float that has no hardware path underneath it, and agrees with
   the `Float64` answer on the same rational data to each type's own
@@ -4208,8 +4147,8 @@ break it:
   picoseconds per point against the roofline in the format of
   `notes/ghaccel-bench.jl`, whose numbers (25.8 % of the H200 roofline,
   49.6 % on an A40, for 10 fields) are the reference this kernel is
-  compared to. **(Measured 2026-10-05**, in [The right-hand side on an
-  H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).**)**
+  compared to. The measurements are in [The right-hand side on an
+  H200](#the-right-hand-side-on-an-h200):
   - **The arithmetic:** 3867 FP64 instructions a point, about 6.5 kflop, inside the
     prediction.
   - **The cost was neither the arithmetic nor the traffic:** the kernel held 255
@@ -4217,10 +4156,22 @@ break it:
   - **The lean source alone:** 52 % of FP64 peak.
   - **Around the kernel,** TreeAMR's scatter and ghost fill run at 0.65–1 TB/s.
 
+**A closure in a kernel must not capture a name assigned twice in that body.** Lowering boxes such a variable — even when the
+  two assignments are in branches a `Val` compiles away — and a `Core.Box`
+  is untyped: `gh_rhs_kernel!`'s `:none` branch and its layer branch both
+  assigned `∂ₜh, ∂ₜΠ`, which the `ntuple(Val(NC)) do v … end` store
+  captured, so every right-hand side on the CPU allocated ~570 bytes a
+  point (7–15 % of its time at four threads, and 3–4× at 64, where the
+  threads contend for the garbage collector) and no device would compile
+  the kernel at all ("unsupported dynamic function invocation (call to
+  getindex)"). The symptom on the CPU is
+  `@allocated gh_rhs!(…)` growing with the block count; the ghost fill's
+  13 kB is fixed. `Profile.Allocs` names the line.
+
 ## Running distributed
 
-*(Added 2026-10-19, on TreeAMR's M7, released since TreeAMR 0.1.5.)* A run
-is distributed over MPI by building its forest over a communicator —
+A run
+is distributed over MPI, through TreeAMR's M7, by building its forest over a communicator —
 `gh_forest(…; comm)`, `hole_forest(…; comm)`, an `MPI.Comm` with `using MPI`
 and `MPI.Init()` done — and calling `evolve!` on every rank with the same
 arguments; a restart takes `evolve!(…; comm)` and distributes the
@@ -4257,8 +4208,8 @@ What was left for this package, `src/distributed.jl` and the paths it fixed:
   the whole vector alike on every rank, and hands `regrid!` this rank's slice.
 - **`add_noise!` draws per block**: a `Xoshiro` seeded from one draw of the
   caller's generator and the block's Morton key, so the noise is a function
-  of the seed and the mesh alone (the values changed with the scheme).
-- **The host analysis runs on rank 0 alone (decided 2026-10-19).** The
+  of the seed and the mesh alone.
+- **The host analysis runs on rank 0 alone.** The
   horizon find, the track's update and the fitted target's fits are host
   computations whose iteration counts nobody knows in advance and which read
   the state through the collective `interpolate`. Rank 0 runs them
@@ -4285,28 +4236,21 @@ blocks, the adaptive hole through the initial-data cycle, the tracked
 `:fitted` hole that regrids, the static hole checkpointed and
 restarted at another rank count from the three-rank checkpoint, a wall-clock
 stop, rotation with part files, and a restart file that exists on one rank
-only. `test/mpi_tests.jl` compares the lines. **(Measured 2026-10-19** on
+only. `test/mpi_tests.jl` compares the lines. Measured on
 the development machine, MPICH from `MPI.jl`: every line agrees — 81 a group,
 12 of them sums that differ in the last bits at three ranks and agree to
 roundoff — in 4m37 for the launch, most of it three ranks compiling; and
 `test/octant_runs.jl mpi=true` at two ranks writes the serial run's CSV
-character for character on the tracked `:fitted` octant hole. The suite with
-the test is 5364 assertions in 16m35 at four threads.**)** **(Amended
-2026-10-30.)** Where the machine has no room for the three ranks beside the
+character for character on the tracked `:fitted` octant hole. Where the machine has no room for the three ranks beside the
 suite — CI's threaded Linux cell, four cores and 16 GB — they run to their end
 *before* the suite (`test/mpi_jobs.jl`), and `mpi_tests.jl` compares what they
-wrote. Until then they ran after it, beside a test process that had compiled
-everything, and that cell's runner went down in five of its thirteen attempts
-from 2026-10-23 to 2026-10-30 ("lost communication", "received a shutdown
-signal"), each time while the ranks ran. Measured on the development machine
-(`/usr/bin/time -l`, macOS, 2026-11-06): the suite's process peaks at 5.0 GB,
+wrote ([history](HISTORY.md#running-distributed)). Measured on the development machine
+(`/usr/bin/time -l`, macOS): the suite's process peaks at 5.0 GB,
 and each rank, the workload running alone for 240 s, at 3.4–3.8 GB resident and
 5.2–5.4 GB of footprint — the ranks together about 11 GB resident and 16 GB of
-footprint, close to what that runner holds on their own. With the job first, as
-that cell runs it, the suite is 5664 assertions in 15m09 after the job's 230 s,
-the MPI comparison's 263 among them (load 9–11).
+footprint, close to what that runner holds on their own.
 
-**On Symmetry's H200s (measured 2026-10-19, job 578514, cn113, four of its
+**On Symmetry's H200s (job 578514, cn113, four of its
 eight H200s; `bench/symmetry_mpi_gpu.sh`, environments by
 `bench/symmetry_mpi_gpu_env.sh`).** `test/octant_runs.jl`'s tracked `:fitted`
 Kerr-Schild hole on the reflecting octant — `L = 32`, `N = 32`, `4³` roots,
@@ -4335,17 +4279,14 @@ on one GPU with no MPI and then one rank a GPU:
   shortens. `bench/mpi_steps.jl` times a step alone, which is what the GPUs
   divide.
 - **HPC-X is 2.5–3× slower than MPICH_jll here, staged and direct alike**, so
-  the messages are not where (the direct path changes nothing): the module
-  also puts nvhpc's CUDA libraries on the library path, which CUDA.jl warns
-  of, and its UCX progress may compete with the ranks' threads. Not traced;
-  MPICH_jll is the one to use until it is.
+  the messages are not where (the direct path changes nothing).
 - **The HPC-X environment needs `OpenMPI_jll` pointed at HPC-X's libraries**:
   HDF5_jll follows MPIPreferences' ABI to the Open MPI build and loads
   `OpenMPI_jll`, whose own `libopen-pal` does not load beside the module's
   (`undefined symbol: pmix_framework_names`). `bench/symmetry_mpi_gpu_env.sh`
   sets the JLL's library paths to the module's.
 
-**The step alone (measured 2026-10-19, job 578572, cn113;
+**The step alone (job 578572, cn113;
 `bench/symmetry_mpi_steps.sh`).** `bench/mpi_steps.jl` on the same octant mesh
 with the analytic `:damped` layer and the algebraic source — no finder, no
 fit, no observer — the wall clock of a step from two single-chunk runs of 7
@@ -4361,9 +4302,8 @@ and 56 steps, in ms (and points a nanosecond):
 
 - **The step does not strong-scale yet: 1.33× and 1.43× on 2 and 4 GPUs at
   25.7 M points, and none at 7.6 M.** One GPU is throughput-bound — 3.4× the
-  points cost 3.0× the time, about 19 ns a point a step. **(Corrected
-  2026-10-19:** this said the ghost fill and prolongation were most of a
-  step, as on the CPU; on a GPU the kernel is — the breakdown below.**)**
+  points cost 3.0× the time, about 19 ns a point a step. On a GPU the kernel is most of a step, not the ghost fill and
+  prolongation as on the CPU — the breakdown below.
 - **The messages are a large part of what is left.** HPC-X's UCX moves the
   same staged messages in a step 26 % shorter than MPICH_jll's at 2 ranks
   (111 against 150 ms) — so MPICH_jll's shared-memory path is slow for these
@@ -4372,10 +4312,10 @@ and 56 steps, in ms (and points a nanosecond):
   one has three nested coarse-fine shells, and a split by equal block counts
   may leave the prolongation-heavy blocks on few ranks (a guess, not traced).
 - **And HPC-X's 2.5–3× in job 578514 is in the analysis, not the step**:
-  rank 0's host work — the find, the spin, the fit. **(Found 2026-10-19: it
-  is Open MPI's core binding, below.)**
+  rank 0's host work — the find, the spin, the fit. It
+  is Open MPI's core binding, below.
 
-**Where a step goes, rank by rank (measured 2026-10-19; job 578648 on cn113's
+**Where a step goes, rank by rank (job 578648 on cn113's
 H200s, and the same mesh at `N = 16` on the development machine's CPU, one
 thread a rank).** `bench/mpi_breakdown.jl` times, on every rank by itself,
 the scatter, a whole ghost fill, each fill stage's local groups, packs and
@@ -4435,7 +4375,7 @@ coarsest first, run in sequence**, each with its own messages. On the GPU,
   `:fitted` run on 2 GPUs that took 48.8 s bound and 16.0 s under MPICH takes
   **12.8 s**. That was the 2.5–3×.
 
-**What to run with, then (decided by the measurement, 2026-10-19):**
+**What to run with, then:**
 HPC-X's Open MPI, through `bench/symmetry_mpi_gpu_env.sh`'s environment
 (`OpenMPI_jll` pointed at its libraries), launched with **`--bind-to none`**
 — 1.89× on 4 GPUs against MPICH_jll's 0.86×, and the analysis 3.8× faster
@@ -4474,6 +4414,11 @@ integrator (a step is four right-hand sides plus 2–3 %) divide by the ranks.
 Not yet measured: `test/hole_runs.jl`, whose workers have no `mpi` option,
 and GPUs across nodes.
 
+`evolve!` refuses a forest over another communicator than its `comm`, and
+`load_run` passes `comm` on. `src/distributed.jl` has `rank_bcast` beside
+`on_root`, `SimWatchWriter(; comm)` is collective, and `evolve!` has
+`checkpoint_io`.
+
 ## I/O and viewers
 
 - **The analysis time series**: one HDF5 file per run, one dataset per
@@ -4489,13 +4434,9 @@ and GPUs across nodes.
   drawn, the horizon's cross-section when found, the indicator `τ`,
   constraint norms and the error against time. Volume output in a
   VTK-readable form is an extension.
-- **No checkpoint and restart** (decided in review): a proof of concept
-  runs to completion. When it is needed it is a few dozen lines over
-  TreeAMR's leaf keys and the state vector, or TreeAMR's M9; it is under
-  [Possible extensions](#possible-extensions). **(Amended 2026-10-01:** it
-  is TreeAMR's M9a, and [Checkpoint and restart](#checkpoint-and-restart)
-  is its section.**)**
-- **A live status file for SimWatch (added 2026-10-02)**: `src/simwatch.jl`
+- **Checkpoint and restart** is TreeAMR's M9a, and
+  [Checkpoint and restart](#checkpoint-and-restart) is its section.
+- **A live status file for SimWatch**: `src/simwatch.jl`
   writes `simwatch.toml` into a run directory for SimWatch
   (`https://github.com/eschnett/simwatch`, whose `FORMAT.md` is the
   reference), a terminal viewer that shows every run below a directory with
@@ -4506,31 +4447,35 @@ and GPUs across nodes.
   `update_interval` from the observed spacing of its calls so that a run
   whose chunks take minutes is not shown as stale between them. Its data
   come from `evolve!`'s observer, which is handed the chunk's record row when
-  it takes a fourth argument (`observer(p, t, u, row)`, added the same day),
+  it takes a fourth argument (`observer(p, t, u, row)`),
   so the horizon's numbers are not recomputed; `test/octant_runs.jl` writes
   everything its CSV carries — constraints overall, by level, in shells and
   at the boundary, the error, the horizon, the track, the fit and the step —
-  and `finished`, `stopped` or `failed` at the end. **(Amended 2026-10-21,
-  for SimWatch 1.3.0:** the writer has the reference writer's `group`,
+  and `finished`, `stopped` or `failed` at the end. For SimWatch 1.3.0, the writer has the reference writer's `group`,
   `progress.fraction`, `slurm` keys and the chain's `previous_job_ids`, read
   from the status file an earlier job left; the thumbnails
   (`test/simwatch_plots.jl`) are SVG written by hand on a transparent
   background with `currentColor` axes, which SimWatch draws with its own font
-  and adapts to a light or dark terminal as its user configures, instead of
-  dark-on-light PNGs; and `bench/simwatch.sh` is the batch jobs' copy of its
-  shell helper.**)**
+  and adapts to a light or dark terminal as its user configures; and `bench/simwatch.sh` is the batch jobs' copy of its
+  shell helper.
+
+There is no I/O and no CLI: those are step 9.
+
+**Inconsistent:** "There is no I/O" (from `CLAUDE.md`'s former "Current
+state", written at step 7) against this section's SimWatch status file,
+`src/simwatch.jl`, and [Checkpoint and restart](#checkpoint-and-restart).
+
+`SimWatchWriter` also writes a `summary` and the `[history]` window
+SimWatch draws as sparklines, and `simwatch_history!` refills it after a
+restart.
 
 ## Checkpoint and restart
 
-*(Added 2026-10-01, on TreeAMR 0.1.4, whose M9a adds `save_checkpoint` and
-`load_checkpoint` through a package extension on HDF5. Erik's decision of
-that day reversed "No checkpoint and restart" above; the mechanism is
-TreeHydro's — its `CODE.md`, "Checkpoint and restart", 2026-09-29 — on
+The mechanism is
+TreeHydro's — its `CODE.md`, "Checkpoint and restart" — on
 purpose, so that the applications of TreeAMR checkpoint alike, with the
-two differences marked. **Amended 2026-10-09:** TreeAMR 0.2.0 moved the
-checkpoint functions, with their names, signatures and file format, out of
-its HDF5 extension into the companion package TreeIOHDF5, which this package
-now calls.)* G5's crossing is eleven hours on a node, the
+two differences marked; `save_checkpoint` and `load_checkpoint` are
+TreeIOHDF5's. G5's crossing is eleven hours on a node, the
 `a = 9/10` run `38`–`149 h`, and a queue's day is the limit. **Everything
 about the file is upstream**: the forest, the field-set layout, the atomic
 and durable write, element types as limbs, the provenance and the refusal
@@ -4538,18 +4483,16 @@ of a file a version cannot read — "no mesh machinery" applied to I/O. What
 `src/checkpoint.jl` holds is when to write, the run state, the refusal of a
 restart with other parameters, and the files' names and rotation.
 
-**The checkpoint code is a hard dependency** (decided 2026-10-01; *TreeHydro
+**The checkpoint code is a hard dependency** (*TreeHydro
 leaves it to the caller*). `TreeGeneralizedHarmonic.jl` has `using
 TreeIOHDF5`, TreeAMR's companion package for checkpoints, so a run can always
 be checkpointed and no job script has to load anything; `src/` uses HDF5 for
-nothing else, so HDF5 itself is TreeIOHDF5's dependency, not this package's
-(until 2026-10-09 it was HDF5 that was the dependency here, loading TreeAMR's
-`TreeAMRHDF5Ext`). `prerequisite_tests.jl` asserts that `save_checkpoint` and
+nothing else, so HDF5 itself is TreeIOHDF5's dependency, not this package's. `prerequisite_tests.jl` asserts that `save_checkpoint` and
 `load_checkpoint` are TreeIOHDF5's and that TreeAMR defines neither, which
 would make them ambiguous inside the package.
 
 **Where: at a chunk boundary, after the analysis row and before the regrid**
-(decided 2026-10-01; *TreeHydro writes after the regrid*). At a chunk
+(*TreeHydro writes after the regrid*). At a chunk
 boundary the fixed-step integrator holds nothing but `(t, u)` —
 IMEXRungeKutta's scratch carries no value from one step to the next — so a
 restart that restores the state and the run state begins where the
@@ -4580,10 +4523,7 @@ criterion, run)` in its group `TreeGeneralizedHarmonic.jl`, format version
 1. `u` and not `U.work`: the row's find, fit and indicator have scattered
 into the working array, and without a regrid it holds the integrator's last
 stage. The **run state** is what the uninterrupted run would carry into the
-next chunk and cannot be recomputed from `(forest, u, t)`; since step 8d
-that is a good deal more than TreeHydro's accumulators, and the old note
-under [Possible extensions](#possible-extensions) — "bit-identical, since
-the layer and the hook depend on `(x, t)` only" — was no longer true:
+next chunk and cannot be recomputed from `(forest, u, t)`; that is a good deal more than TreeHydro's accumulators:
 
 - the **horizon track**, after the row's update (the next chunk's geometry
   and the next find's jump test), and the track the chunk was built from
@@ -4597,9 +4537,8 @@ the layer and the hook depend on `(x, t)` only" — was no longer true:
 - the **gauge source's sample**: the time and the track of the geometry it
   was sampled with, so that the restart samples it with the same core rule
   (a non-harmonic background's tracked core is re-sampled only when it has
-  moved half a cell, step 8d);
-- the **speed growth** `λ_end/λ` that sizes a moving hole's next step (step
-  8f), in `T`, and the chunk's relaxation rate;
+  moved half a cell);
+- the **speed growth** `λ_end/λ` that sizes a moving hole's next step, in `T`, and the chunk's relaxation rate;
 - the **range projection's accounting**, the counters, the fits' costs and
   **the record** so far, so that a restarted run's *answer* is the
   uninterrupted one's and not only its state.
@@ -4615,7 +4554,7 @@ are taken apart, and anything else is refused with its field's path. The
 fits' diagnostics come back as plain `Float64` tuples, which nothing the run
 computes reads. The record is already plain data (its vectors are tuples).
 
-**The recipe and the criterion** (decided 2026-10-01; *TreeHydro's recipe
+**The recipe and the criterion** (*TreeHydro's recipe
 holds its criterion*). A restart is called with the same case and keywords
 as the run it continues, and **only `t_end` and the regridding criterion may
 change**. The recipe is every parameter that decides a number: the working
@@ -4652,20 +4591,20 @@ called for the rows a restart brings back; it sees the chunks it runs.
 `test/hole_runs.jl`'s `generic` and `moving` workers take `checkpoint=<dir>`
 and `walltime=<s>`, so the same command resubmitted is a job chain.
 
-**What it amounts to** (measured 2026-10-01, `test/checkpoint_tests.jl`): a
+**What it amounts to** (`test/checkpoint_tests.jl`): a
 chain of restarts, one chunk per job, is the uninterrupted run **bit for
 bit** — state, mesh, record, counters, track, accounting and the fits'
 coefficients — on the step-5 fixture with the range projection on, on the
 adaptive fixture through the regrid that moves its mesh, on a tracked
 `:fitted` Kerr-Schild hole through a regrid (its gauge source re-sampled),
-and on a moving `:fitted` harmonic hole with step 8′'s trailing ramp; a
+and on a moving `:fitted` harmonic hole with the trailing ramp; a
 finished run continued from its last chunk is the longer run; a restart that
 no longer coarsens keeps the corner the uninterrupted run removes. On a real
 row — `hole_runs.jl moving=l0-trail-9 t_end=1/2`, the boosted `a = 0` hole
 on 820 blocks — the two-job chain's last row is the uninterrupted run's in
 every printed digit, at the same 84 steps, from a `68 MB` file.
 
-**What it costs** (measured 2026-10-01 on the development machine, four
+**What it costs** (measured on the development machine, four
 threads, its SSD; `save_run`/`load_run` of a 20-variable vertex-centered set
 at `N = 8`): on 3536 blocks — G5's mesh at rest is 3900–5600 — the file is
 `290 MB`, a save `0.09 s` (`3 GB/s`), `0.11 s` with the flush to stable
@@ -4675,64 +4614,57 @@ load of a session compile for `3 s` and `5.5 s`. A G5 chunk is about
 percent. The record of 53 rows is noise beside the state. Symmetry's BeeGFS
 is not measured.
 
+`evolve!`'s checkpoint keywords are TreeHydro's names:
+`checkpoint_path_prefix`, `checkpoint_every_chunks`,
+`checkpoint_interval_seconds`, `max_walltime_seconds`,
+`num_checkpoints_keep`, `checkpoint_hdf5_filters`,
+`checkpoint_sync_to_disk` and `restart_file`.
+
+**TreeIOHDF5 `main` can be ahead of the TreeAMR it admits.** TreeIOHDF5 0.1.4 reads TreeAMR 0.2.5's `FieldSet.halfturn`,
+  but its `[compat]` lists TreeAMR `=0.2.2, …, =0.2.5`. So the `[sources]`
+  pin to `main` resolves it beside TreeAMR 0.2.4, and the first checkpoint
+  throws in `set_layout` ("type FieldSet has no field `halfturn`"). That is
+  an upstream compat bug: TreeIOHDF5 0.1.4 should require `=0.2.5`. A run without `checkpoint=` does not notice. This package requires TreeAMR 0.2.6, which TreeIOHDF5 `main` (0.1.5) admits.
+
 ## Upstream prerequisites
 
 What this package needs from TreeAMR. None blocks G0–G3.
 
 1. **Point interpolation from a field set** (G4, for the horizon
    finder). `find_leaf` plus block-local Lagrange interpolation, batched
-   over a host array of points. Written here first as a stopgap;
-   TreeAMR's `TODO.md` lists "generic interpolation". **(Written in step
-   7**, `src/horizon.jl`: `locate_block` — the descent TreeAMR does not
-   export, root brick to finest cell to the first ancestor that is a leaf
-   — and `interpolate`/`interpolate_grad`, the tensor-product Lagrange
-   window of `q + 2` points with its value and its gradient formed in one
-   pass. Two things the port upstream will have to keep: the window is
+   over a host array of points. Two properties matter: the window is
    *half* the ghost width on each side, which is what makes a query
    anywhere in a block readable without crossing into another block's
    array at `G = q/2 + 1`; and the batch is what makes it threaded, with
    one output slot per input point and no accumulation, so the answer does
-   not depend on the thread count.**)**
-   **(Done upstream, 2026-09-26:** TreeAMR 0.1.3's M11 — `locate_point`,
+   not depend on the thread count.
+   **Done upstream:** TreeAMR's M11 — `locate_point`,
    `interpolate`/`interpolate!` with a `Lagrange(n)` basis, `derivs` as
    multi-indices, an `exclude::Region` that flags, one launch on the field
-   set's backend — kept both properties above and adds the ones the stopgap
-   lacked: one binary search per point instead of `maxlevel` `find_leaf`s,
-   device execution, periodic and reflecting faces. TreeAMR 0.1.3 is
-   registered, and `Project.toml` takes it from General (`[compat]`
-   `0.1.3`, no `[sources]` entry). The port removed `locate_block` and the
-   exported `interpolate`/`interpolate_grad`, whose name collided with
-   TreeAMR's; what stays in `src/horizon.jl` is the wrapper
+   set's backend — keeps both properties, with one binary search per point,
+   device execution, periodic and reflecting faces; what stays in `src/horizon.jl` is the wrapper
    `gh_interpolate`/`gh_interpolate_grad` (the order `q + 2`, the unpacking
    into `SVector`s, the refusal) and the guard as a `Region` — see
    [Analysis quantities](#analysis-quantities), where the guard's exactness
-   and the measured costs are.**)**
-2. **A device reduce-to-scalar** (TreeAMR `TODO.md`) would let the
-   per-chunk norms stay on the device; today `block_mapreduce` copies
-   one value per block back, which is fine at chunk frequency.
-   **(Done upstream:** TreeAMR 0.1.2 reduces on a device in two launches,
-   and `mesh_mapreduce` is the one-number form; this package reduces
-   through it from 2026-10-01.**)**
-3. **MPI (M7) and I/O (M9)** are on TreeAMR's roadmap and this package
-   is written so they arrive transparently: no host loop over blocks
-   assumes all blocks are local, and every reduction is a
-   `block_mapreduce` or a `firing_boxes`. **(Amended 2026-10-01:** every
-   reduction that crosses blocks is a `mesh_mapreduce` — the host folds
-   over `block_mapreduce`'s per-block vector, which would have been
-   per-rank answers under M7, are gone — and M9's checkpoint half, M9a,
-   is in use: [Checkpoint and restart](#checkpoint-and-restart).**)**
-   **(Amended 2026-10-23:** or a `mesh_fold`, TreeAMR 0.2.6's fold over
-   points, which carries many results through one collective.**)**
-   **(Done upstream and in use, 2026-10-19:** M7 has been released since
-   TreeAMR 0.1.5, and [Running distributed](#running-distributed) is what
-   this package had left to do — four host paths that were not, after all,
-   free of the assumption.**)**
+   and the measured costs are.
+2. **A device reduce-to-scalar**, which lets the per-chunk norms stay on
+   the device. **Done upstream:** TreeAMR reduces on a device in two
+   launches, and `mesh_mapreduce` is the one-number form; this package
+   reduces through it.
+3. **MPI (M7) and I/O (M9)**, which this package is written to take
+   transparently: no host loop over blocks assumes all blocks are local,
+   and every reduction that crosses blocks is a `mesh_mapreduce` or a
+   `mesh_fold`, TreeAMR's fold over points, which carries many results
+   through one collective. **Done upstream and in use:** M9's checkpoint
+   half, M9a, is [Checkpoint and restart](#checkpoint-and-restart), and
+   [Running distributed](#running-distributed) is what this package had
+   left to do for M7.
 4. **A launch-configuration knob on `map_blocks!`** (G6): today it
    launches with KernelAbstractions' default workgroup, and GHAccel
    measured the workgroup shape of a 3D stencil kernel as worth about
    10 % of peak. A `workgroupsize` keyword passed through to the launch
-   is the whole request. **(Measured 2026-10-05**, [The right-hand side on an
-   H200](#the-right-hand-side-on-an-h200-measured-2026-10-05)**.)**
+   is the whole request. Measured in [The right-hand side on an
+   H200](#the-right-hand-side-on-an-h200):
    - **The right-hand side no longer needs the knob.** Now that its kernel forms
      no closure, KA's default workgroup is within 1 % of the best shape at
      `N = 32` and `128`, and 2.7 % at `16`. Forcing inlining changes nothing
@@ -4746,7 +4678,7 @@ What this package needs from TreeAMR. None blocks G0–G3.
      rewritten, forcing inlining was worth 1.6×, and a static workgroup 20 %
      to the prototypes.
 5. **TreeAMR's copy kernels at bandwidth: the first thing TreeAMR should change
-   for a device** (added 2026-10-05).
+   for a device.**
    - **What is left of an evaluation is TreeAMR's.** After this package's kernel
      went from 8.5 to 1.1 ns a point, `scatter!` and `fill_ghosts!` are 0.73 of
      `gh_rhs!`'s 1.81 ns at `N = 32`, 1.39 of 2.61 at `N = 16`, and 0.41 of 1.70
@@ -4760,8 +4692,8 @@ What this package needs from TreeAMR. None blocks G0–G3.
      (0.14 ns a point, measured in `bench/rhs_lab.jl`'s `round5`). A fill at
      copy bandwidth would be about 4× faster, which at `N = 16` saves more than
      the whole kernel costs.
-   - **The CPU has the same problem** (measured 2026-10-05, [The right-hand side
-     on a CPU](#the-right-hand-side-on-a-cpu-measured-2026-10-05)). On Symmetry's
+   - **The CPU has the same problem** ([The right-hand side
+     on a CPU](#the-right-hand-side-on-a-cpu)). On Symmetry's
      EPYC nodes the fill costs about 10 ns a ghost value on one core — a seventh
      to a twentieth of copy speed — and a quarter of memory bandwidth at 64
      threads, where it is a third of `gh_rhs!` at `16³` and, once the kernel is
@@ -4769,7 +4701,7 @@ What this package needs from TreeAMR. None blocks G0–G3.
      the copy as a weighted tensor-product stencil, KernelAbstractions' 5-D
      iteration, integer index arithmetic, and at 64 threads a fifth of the time
      waiting between phases.
-   - **On a refined mesh the prolongation is the cost** (measured 2026-10-05 on the
+   - **On a refined mesh the prolongation is the cost** (measured on the
      hole fixture's mesh, 64 threads): the fill is 145 ms of a 200 ms `gh_rhs!`
      against a 7.8 ms copy floor, a third of its samples threads waiting, so the
      prolongation groups want balancing across threads as well as fewer operations
@@ -4785,17 +4717,15 @@ What this package needs from TreeAMR. None blocks G0–G3.
    3. **Then a state that lives in the working array**, for a native stepper
       that writes the next stage's input straight into it (the stage vectors
       as field sets). That removes the scatter altogether.
-6. **Checkpoint rotation, possibly in TreeIOHDF5** (noted 2026-10-19, Erik's
-   suggestion; **(open)**, nothing to do now). `rotate_checkpoints!`, with
+6. **Checkpoint rotation, possibly in TreeIOHDF5** **(open)**; nothing to do now. `rotate_checkpoints!`, with
    `checkpoint_files` and `latest_checkpoint` beside it (`src/checkpoint.jl`),
    is TreeHydro's code restated: the file names, the newest-by-iteration rule,
-   keeping the file just written, and from the MPI port the removal of an
+   keeping the file just written, and the removal of an
    index's part files, which knows TreeIOHDF5's part-file names. Every
    application of TreeAMR that checkpoints needs the same, and TreeIOHDF5
    writes the files and the parts, so it may belong there rather than in each
    application.
-7. **The MPI launchers, consolidated in TreeAMR** (noted 2026-10-19, Erik's
-   suggestion; **(open)**, nothing to do now). Three packages now carry the
+7. **The MPI launchers, consolidated in TreeAMR** **(open)**; nothing to do now. Three packages now carry the
    same launching code, copied from one another: the `mpiexec` job of a test
    suite (`test/mpi_jobs.jl` here, in TreeHydro and in TreeAMR — `MPI.mpiexec()`
    with its environment, started beside the suite and collected with a
@@ -4813,436 +4743,141 @@ recorded with the extensions that would need them: an interior-reading
 device boundary hook (radiative boundaries, excision) and excised leaves
 (excision).
 
+The package requires **TreeAMR 0.2.6**: every norm is a fold over points,
+its M15 `mesh_fold`, which this package asked for.
+
+**Inconsistent:** "File layout", in its paragraph on the dependencies,
+says that TreeAMR's `[compat]` selects **0.1.1**.
+
 ## File layout
 
 | file | contents |
 |---|---|
 | `notes/` | verbatim copies of the inherited documents, with provenance; see `notes/README.md` |
 | `src/TreeGeneralizedHarmonic.jl` | module shell: `using`s, exports, includes |
-| `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host (amended in step 0) |
-| `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source` (all added in step 1), and `metric_derivatives_along` — the same chain rule along **one** direction, returning `∂√γ` and `∂γ^{jk}` rather than the assembled `∂(α√γγ^{jk})`, which is what the constraint monitors need along *time* (added in step 4) — and `_pairindex`, the packed slot of a symmetric index pair, so that the file has one packing convention used on two index pairs; `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
-| `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q` (added in step 2): `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2` **(proposed in step 2)**; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions step 3's streaming kernel has to agree with |
-| `src/evolution.jl` | the fused RHS kernel in streaming order (added in step 3), the linear-index stencil contractions it evaluates, `GHProblem` with the **six** `Val`s (the SIMD width the sixth, from 2026-10-05) and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. Step 5 split the streaming body out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and added `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
-| `src/lanes.jl` | the right-hand-side kernel's SIMD lanes on the CPU (added 2026-10-05): `default_simd_width` and `check_simd_width`, `Lanes` (an array read and written `W` consecutive elements at a time, with the `Const` wrapper unwrapped), `is_lane_leader` (every `W`-th item, and the overlapping last group of a row), and the `Vec` methods of `pointwise.jl`'s `_anynonzero` and `_select`; the kernel's group is `evolution.jl`'s `gh_rhs_lanes!` |
-| `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is (added in step 3); the two `γ0` profiles (step 5) and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number (step 8c) |
-| `src/boundaries.jl` | the time-dependent Dirichlet hook, and the declarations TreeAMR's symmetries ask of every field set: the parities of the reflecting faces (`state_parity`, `even_parity`, added 2026-10-02) and the signed maps of the rotating seam (`state_rotation`, `identity_rotation`, added 2026-10-04) |
-| `src/bounds.jl` | the range projection (added in step 8b): `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
-| `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks; added in step 5. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii and the hole's mass (`hole_mass`, added in step 8c′), and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead **(amended in step 5)**, beside the kernel it launches and the state layout it writes. **Step 8d adds the tracked geometry's kernel side**: the real harmonics (`real_harmonic_index`, `real_from_complex`/`complex_from_real`, the recurrence `shape_series`, `shape_bounds`), the analytic horizon of the seed (`analytic_horizon_radius`), `FittedSpec` — what a case holds — and `FittedInterior` — the kernel argument — with `interior_point`, `fitted_geometry`, `core_position`, `ShapeMask`, `ShapeBand`, `geometry_spacing` and its `check_interior_radii`; and the protocol both geometries speak (`in_layer(int, t, x)`, `interior_point`, `is_outside`, `geometry_radii`, `layer_radii`, `layer_mask`, `shell_mask`) |
-| `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`, amended in step 3), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`, added in step 4), or `hole_forest`'s nested shells around a hole (added in step 5, **here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
+| `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host |
+| `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source`, and `metric_derivatives_along` — the same chain rule along **one** direction, returning `∂√γ` and `∂γ^{jk}` rather than the assembled `∂(α√γγ^{jk})`, which is what the constraint monitors need along *time* — and `_pairindex`, the packed slot of a symmetric index pair, so that the file has one packing convention used on two index pairs; `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
+| `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q`: `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2`; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions the streaming kernel has to agree with |
+| `src/evolution.jl` | the fused RHS kernel in streaming order, the linear-index stencil contractions it evaluates, `GHProblem` with the **six** `Val`s (the SIMD width the sixth) and the per-chunk geometry, `gh_rhs!`, the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. The streaming body is split out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and the file has `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
+| `src/lanes.jl` | the right-hand-side kernel's SIMD lanes on the CPU: `default_simd_width` and `check_simd_width`, `Lanes` (an array read and written `W` consecutive elements at a time, with the `Const` wrapper unwrapped), `is_lane_leader` (every `W`-th item, and the overlapping last group of a row), and the `Vec` methods of `pointwise.jl`'s `_anynonzero` and `_select`; the kernel's group is `evolution.jl`'s `gh_rhs_lanes!` |
+| `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is; the two `γ0` profiles and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number |
+| `src/boundaries.jl` | the time-dependent Dirichlet hook, and the declarations TreeAMR's symmetries ask of every field set: the parities of the reflecting faces (`state_parity`, `even_parity`) and the signed maps of the rotating seam (`state_rotation`, `identity_rotation`) |
+| `src/bounds.jl` | the range projection: `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
+| `src/interior.jl` | the profiles `w(r)`, `ρ(r)`, the core rule, the radius checks, the masks. Also `HoleCenter` — `c(t) = c₀ + v t` as two vectors and a line, which is what "the center is a function of `t`, never a mutated field" means as code — the horizon's analytic coordinate radii and the hole's mass (`hole_mass`), and `layer_spacing`, the coarsest spacing among the blocks the sphere `r_1` passes through, which is the one number in the file that looks at a mesh (and looks at it only to *assert*). The `:pasted` limiter is in `evolution.jl` instead, beside the kernel it launches and the state layout it writes. **The tracked geometry's kernel side**: the real harmonics (`real_harmonic_index`, `real_from_complex`/`complex_from_real`, the recurrence `shape_series`, `shape_bounds`), the analytic horizon of the seed (`analytic_horizon_radius`), `FittedSpec` — what a case holds — and `FittedInterior` — the kernel argument — with `interior_point`, `fitted_geometry`, `core_position`, `ShapeMask`, `ShapeBand`, `geometry_spacing` and its `check_interior_radii`; and the protocol both geometries speak (`in_layer(int, t, x)`, `interior_point`, `is_outside`, `geometry_radii`, `layer_radii`, `layer_mask`, `shell_mask`) |
+| `src/initialdata.jl` | backgrounds, `GHCase` and the case constructors (here rather than in `driver.jl`), the forest builders — uniform, with one root block refined for the frozen two-level hierarchy the interface study needs (`refined = true`), or `hole_forest`'s nested shells around a hole (**here rather than in `interior.jl`**, since a forest builder belongs with the other forest builder) — the `(h, Π)` callback with the core rule, the `SpacetimeMetrics` index conversion and nowhere else |
 | `src/refinement.jl` | the Löhner indicator with its global floor, the mask, the level floor and ceiling, the four marks, the buffer; TreeWave's `refinement.jl` ported |
-| `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate step 5's interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` (added in step 4) |
-| `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. Added in step 7, in the order the numbers are produced: `locate_block` and `interpolate`/`interpolate_grad` (the stopgap of [Upstream prerequisites](#upstream-prerequisites), item 1, with the footprint guard that refuses a query reaching inside `r_1`; **amended 2026-09-26**: `gh_interpolate`/`gh_interpolate_grad` over TreeAMR's `interpolate`, and the guard as the `Region` `UnevolvedRegion`), `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
-| `src/tracking.jl` | the tracked horizon, host-side (added in step 8d, after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, step 8a's leakage e-folds moved in from `test/dispersion.jl` |
-| `src/fit.jl` | the fitted target (added in step 8e, after `tracking.jl` and before `driver.jl`): the fit's variables (`fit_variables`, `state_from_fit`), the real solid harmonics (`_solid_harmonic_fold`, `real_solid_harmonics`, `fit_directions`), the two samplers (`state_sampler`, `analytic_sampler`), the least squares (`solve_fit`, `fit_row_weights`), the validity sweep (`fit_sweep`), `FitParams` and `InteriorFit` with `build_fit`, `fit_residual` and `fit_valid`, the kernel-callable evaluator `fit_variables_at`/`fit_state`, and the kernel half (8e-ii): `derive_target_bounds`, the 40-variable cache (`target_cache`, `fit_target_kernel!`, `fill_target!`) and the initial data's `fitted_state_kernel!`. The variant's branch is in `evolution.jl` (`GHProblem`'s `target`/`fits`/`t_target`, `refill_target`), its residual in `constraints.jl`'s error kernel, its flow in `driver.jl` (`refit!`, the refill and the pieces of a moving chunk) |
-| `src/checkpoint.jl` | checkpoint and restart (added 2026-10-01, after `fit.jl` and before `driver.jl`): the file names and their rotation and `latest_checkpoint` (TreeHydro's), `plain_reals` for exact reals, `to_plain`/`from_plain` for the run state's own structs and `fit_from_plain` for an `InteriorFit`, `run_recipe` and `run_criterion`, `check_recipe`, `save_run`/`load_run` over TreeIOHDF5's `save_checkpoint`/`load_checkpoint`, and `check_checkpoint_keywords`. `evolve!` writes and reads through it; `test/checkpoint_tests.jl` is its file |
-| `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written (added in step 8c′) — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's (added in step 5). `GHCase` is in `initialdata.jl`, amended in step 3 |
+| `src/constraints.jl` | the gauge-constraint kernel (state and first derivatives) and the ADM one (every second derivative of `g_ab`, the `∂_t` blocks from the evolution equations, the four-dimensional Ricci tensor assembled rather than reduced), the masks they take — `AllPoints` and the `is_evolved` predicate the interior adds a method to — `masked_norms` and `constraint_norms`, and `adm_constraints_at_node`, the pointwise curvature assembly the tests check against `ddmetric` |
+| `src/horizon.jl` | the interpolating ADM provider for `ApparentHorizonFinder`; location, shape, area, `M_irr`, `J`, `M_ch`. In the order the numbers are produced: `gh_interpolate`/`gh_interpolate_grad` over TreeAMR's `interpolate` ([Upstream prerequisites](#upstream-prerequisites), item 1), with the footprint guard that refuses a query reaching inside `r_1` as the `Region` `UnevolvedRegion`, `GHADMProvider` (batched, `Float64` out whatever the run computes in, with a one-entry cache keyed on the identity of the query array because `KorzynskiSpin.surface_geometry` asks for `γ` and `K` in two calls with the same points), `find_gh_horizon`, and `Horizon` — the cadence and resolution the case carries |
+| `src/tracking.jl` | the tracked horizon, host-side (after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, the leakage e-folds, moved in from `test/dispersion.jl` |
+| `src/fit.jl` | the fitted target (after `tracking.jl` and before `driver.jl`): the fit's variables (`fit_variables`, `state_from_fit`), the real solid harmonics (`_solid_harmonic_fold`, `real_solid_harmonics`, `fit_directions`), the two samplers (`state_sampler`, `analytic_sampler`), the least squares (`solve_fit`, `fit_row_weights`), the validity sweep (`fit_sweep`), `FitParams` and `InteriorFit` with `build_fit`, `fit_residual` and `fit_valid`, the kernel-callable evaluator `fit_variables_at`/`fit_state`, and the kernel half: `derive_target_bounds`, the 40-variable cache (`target_cache`, `fit_target_kernel!`, `fill_target!`) and the initial data's `fitted_state_kernel!`. The variant's branch is in `evolution.jl` (`GHProblem`'s `target`/`fits`/`t_target`, `refill_target`), its residual in `constraints.jl`'s error kernel, its flow in `driver.jl` (`refit!`, the refill and the pieces of a moving chunk) |
+| `src/checkpoint.jl` | checkpoint and restart (after `fit.jl` and before `driver.jl`): the file names and their rotation and `latest_checkpoint` (TreeHydro's), `plain_reals` for exact reals, `to_plain`/`from_plain` for the run state's own structs and `fit_from_plain` for an `InteriorFit`, `run_recipe` and `run_criterion`, `check_recipe`, `save_run`/`load_run` over TreeIOHDF5's `save_checkpoint`/`load_checkpoint`, and `check_checkpoint_keywords`. `evolve!` writes and reads through it; `test/checkpoint_tests.jl` is its file |
+| `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's. `GHCase` is in `initialdata.jl` |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide; added in step 0), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop and `driver.jl` is step 5's (added in step 3, after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions (amended in step 1). The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl` **(proposed in step 4)**: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. Step 5 adds `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here **(proposed in step 5**, following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`**)**. Step 8b adds `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. Step 8c adds the E3 target `CurvatureTarget` to `evolution_cases.jl`, its claims to `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. Step 8d adds `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and makes `evolution_cases.jl`'s shell norms the interior's own `shell_mask`. Step 8e adds `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and, for 8e-ii, the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and moves `fitted_fixture` into `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` gains a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`) |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop (after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions. The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl`: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. The hole has `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here (following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`). The range projection has `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. The layer's calibration has the E3 target `CurvatureTarget` in `evolution_cases.jl`, its claims in `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. The tracked geometry has `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and `evolution_cases.jl`'s shell norms are the interior's own `shell_mask`. The fitted target has `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and `fitted_fixture` is in `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` has a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`) |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
+
+**Inconsistent:** the `test/` row says `prerequisite_tests.jl` checks what
+"the two pinned dependencies" must still provide; the dependencies
+paragraph below, and `CLAUDE.md`'s "Things that will bite", name more
+`[sources]` pins than two.
 
 Dependencies: `TreeAMR` (registered) and `SpacetimeMetrics` (pinned to
 GitHub `main` by `[sources]`),
 `KernelAbstractions`, `StaticArrays`
 (kernel-safe, and what `SpacetimeMetrics` speaks),
-`IMEXRungeKutta` (unregistered, pinned to GitHub `main` by `[sources]`; it
-replaced `OrdinaryDiffEqLowOrderRK` and `SciMLBase` on 2026-09-26, and
-neither is a dependency of the package or of its tests since), `LinearAlgebra` (`det`, `dot`
+`IMEXRungeKutta` (unregistered, pinned to GitHub `main` by `[sources]`; neither
+`OrdinaryDiffEqLowOrderRK` nor `SciMLBase` is a dependency of the package or
+of its tests), `LinearAlgebra` (`det`, `dot`
 and `tr` on `StaticArrays`, which the pointwise algebra uses; a standard
-library, added in step 1 and not listed when `PLAN.md` enumerated step 0's
-`Project.toml` **(proposed in step 1)**), `TreeIOHDF5` (**from
-2026-10-09**, TreeAMR's companion package for checkpoints, registered,
-`[compat]` `0.1.0`; it replaced `HDF5`,
-a hard dependency from 2026-10-01 to load TreeAMR's HDF5 extension, when
-TreeAMR 0.2.0 moved the checkpoint functions there),
-`ApparentHorizonFinder` and `KorzynskiSpin` (from G4, added in step 7,
+library), `TreeIOHDF5` (TreeAMR's companion package for checkpoints, registered,
+`[compat]` `0.1.0`),
+`ApparentHorizonFinder` and `KorzynskiSpin` (from G4,
 both pinned to GitHub `main` by `[sources]` like `SpacetimeMetrics` and both
 listed in `test/Project.toml` as well, because `prerequisite_tests.jl`
 holds them to the same standard: a moving `main` that dropped a name must
-fail at the top of the suite). **`KorzynskiSpin` is pinned over `ssh`,
-because its GitHub repository is private** — an anonymous `https` clone
-gets a 404, so `git@github.com:eschnett/KorzynskiSpin.jl.git` is the only
-URL that resolves it: **(resolved 2026-09-21 — the repository is public.
-The pin is the plain `https` URL of the others, the deploy key, the
-`ssh-agent` step and `JULIA_PKG_USE_CLI_GIT` are gone from `CI.yml`, and
-an anonymous clean checkout and a fork's pull request both resolve it, so
-the clean-checkout check proves what it claims for the first time.)**
-`TreeAMR` left `[sources]` the same day: it is registered, and `[compat]`
-selects **0.1.1**. The remaining entries (three until TreeIOHDF5 joined
-them on 2026-10-09) would by themselves put the Julia floor at 1.11, and
+fail at the top of the suite). The `[sources]` entries would by themselves put the Julia floor at 1.11, and
 three of them are necessary rather than chosen — `KorzynskiSpin` and `TreeIOHDF5` are not in
 General at all, and `ApparentHorizonFinder` `2.1` is not released there
 (General has `2.0.0`). Vendoring a package or
 adding a local-path source would hide that instead of stating it.
-**The Julia floor is 1.13** (`julia = "1.13"`), and CI runs 1.13 only:
-decided by Erik on 2026-10-16, because supporting earlier versions slows
-development and is not useful at the moment. Until then the floor was
-1.11, set by `[sources]`, and CI had run 1.11 beside the release until
-2026-09-19 (the failure that ended it is under
-[Measured results](#measured-results)).
-**`AbstractSphericalHarmonics` is a direct dependency from step 8d** (`1.2`,
-registered; it was already in the manifest through `ApparentHorizonFinder`):
+
+**Inconsistent:** the paragraph above lists `TreeIOHDF5` as registered
+(`[compat]` `0.1.0`, as `HISTORY.md`'s [Releases and dependencies](HISTORY.md#releases-and-dependencies) does) and then as one
+of the `[sources]` entries that are necessary because it is "not in General
+at all".
+
+**The Julia floor is 1.13** (`julia = "1.13"`), and CI runs 1.13 only,
+because supporting earlier versions slows
+development and is not useful at the moment.
+**`AbstractSphericalHarmonics` is a direct dependency** (`1.2`,
+registered):
 the tracked geometry converts the finder's coefficients with its
 `ash_resample` and samples the seed on its `EquiangularGrid`, and a package
 this one calls is one it names, not one it reaches through another's
 namespace. The tests list it too, for `sYlm` and `ash_evaluate`. Tests add
 `MultiFloats` and `ForwardDiff` — the latter because the checks on the
 expanded form differentiate the analytic solution one layer above the one
-`SpacetimeMetrics` takes internally (added in step 1). `bin/` adds
+`SpacetimeMetrics` takes internally. `bin/` adds
 `CairoMakie` and `SixelTerm` in its own environment. The compat bounds
-follow TreeWave's, including
-`OrdinaryDiffEqLowOrderRK = "2.2.5"` **(proposed in step 0**, which is
-the one bound `PLAN.md` left unstated**)**. The two pins resolved in step 0
-to TreeAMR v0.1.0 and SpacetimeMetrics v1.6.0; a `[compat]` entry on a
+follow TreeWave's. A `[compat]` entry on a
 `[sources]` dependency is a floor on what `main` may become, not a
-selection, which is what `prerequisite_tests.jl` exists to notice. The
-two added in step 7 resolved to `ApparentHorizonFinder` v2.1.0 and
-`KorzynskiSpin` v1.1.0.
+selection, which is what `prerequisite_tests.jl` exists to notice.
+
+More of what the files hold:
+
+- `precision.jl` holds the `Base`
+  bridges for software floating-point types, and `device.jl`
+  `to_backend`, `hostcopy` and `hostcopy!`.
+- `interior.jl` has the `InteriorMask` and `ShellMask` every norm takes,
+  and `evolution.jl`'s fifth `Val` carries the interior *variant*.
+- `refinement.jl` has the
+`Refinement` parameters a case carries, `lohner` with the global
+amplitude, the masked `field_scales`, the `τ` kernel into `diag`'s
+fourteenth slot, `tau_max`, the four marks with the box keyed on
+`coarsen_tol`, the derived `horizon_floor_level`, the `LevelBounds` the
+floor and the ceiling are applied through, the travelling margin,
+`refinement_centroid`, and `indicator_flags`/`gh_indicator!`, the two
+entry points the cycle and the driver call.
+- `bounds.jl` has `StateBounds` (the
+ranges of `α`, `γ`'s spectrum, `|β|` and `Π`'s scale, and the gate radius;
+`default_bounds` and `default_gate` are the named proposals, and a
+`GHCase` carries one as `bounds`, default `nothing`), the pointwise
+`bounds_project` in ADM variables, `gh_bounds_kernel!` behind
+`gh_stage_limiter!` — the state's third writer, the integrator's stage
+limiter beside the paste — `BoundsAccounting`, the validity monitor
+(`validity_rows`) and `evolved_nonfinite`, which is what `max_speed_of`
+and the record's `finite` read.
+- `test/evolution_cases.jl` has the E3 target
+  (`CurvatureTarget`) and a `gh_outside_shell_norms(p, u, t)` method, and
+  `hole_runs.jl` a `calibration` section; `hole_runs.jl` has the `generic` section,
+  the matrix.
+
+**TreeAMR is General's release under `[compat]` `0.2.6`**; the other pinned packages are what `Project.toml`'s `[sources]` entries resolve. `SpacetimeMetrics` is
+  registered at the bound this package asks for, so its pin is a choice
+  rather than a necessity.
+
+**The fixtures**: `hole_fixture` in `test/evolution_cases.jl` (Kerr-Schild
+  `a = 0`, `q = 2`, `N = 8`, `h = 5/64`, `r_0 = 2/5`, `r_1 = 23/20`,
+  `m = 8`, box `5/2`, 120 leaves); `adaptive_hole_fixture` (box `5`,
+  `m = 4`); `gh_outside_shell_norms` reads the `G` points outside `r_1`
+  through a `ShellMask`. `hole_runs.jl` takes section names as arguments;
+  add a section, do not lengthen an existing one.
 
 ## Milestones
 
-Each has an acceptance test; serial `Float64` correctness first. Every
-test is three-dimensional and therefore small: `N = 8`, a few roots, one
-refinement level, short times.
-
-- **G0 — Scaffolding.** *(Done.)* `Project.toml` with the pins, CI on
-  1.11 and release at one and four threads (1.13 only from 2026-10-16),
-  `CLAUDE.md`, this document, `notes/`; `precision.jl`, `device.jl`; a prerequisite test that the
-  pinned TreeAMR exports what this package calls, and that a
-  `SpacetimeMetrics` metric with its `dmetric` pass runs as a kernel
-  argument on `CPU()`. *Accept:* a clean archive instantiates and passes.
-  The prerequisite test runs **two** backgrounds rather than the one
-  named above **(proposed in step 0)**: `KerrSchild(1, 0)` and
-  `boost(Harmonic(1, 9/10), 0.3 x̂)`, the proof-of-concept case itself.
-  `KerrSchild` is static, so the `∂_t g` its `dmetric` pass returns
-  vanishes identically and a callback that filled the momentum half from
-  the wrong slice of `dg` — the two derivative index conventions above
-  are exactly that mistake — would pass. (That test fills those ten slots
-  with `∂_t g` as a *stand-in*: the evolved `Π` above is densitised and
-  Lie-advected, and equals `∂_t g` only where the shift vanishes and
-  `α = √γ`. Nothing in step 0 evolves anything, and the claim under test
-  is about the kernel argument; the real `Π` arrives with
-  `initialdata.jl`.) The boosted case is also the expensive one to
-  compile, nested duals through a coordinate pullback, and it compiling
-  is what the
-  dependency risk under [Initial data and
-  backgrounds](#initial-data-and-backgrounds) is about.
-- **G1 — Pointwise algebra and stencils.** *(Done.)* `pointwise.jl`,
-  `stencils.jl`. *Accept:* against `SpacetimeMetrics` automatic
-  differentiation on every background — ADM extraction, the offset
-  identities at `‖h‖ ~ 1e−13`, GHSO2's identity `∂_tΠ − ∂_iF^i = msrc`
-  by finite differences of the analytic solution, the expanded form's
-  coefficient derivatives against a dual pass, the vanishing of `C_a`
-  and `Z_ab` on exact data; rational stencil weights reproducing the
-  textbook tables and exact to degree `q`; every function callable from
-  a trivial kernel on `CPU()`. `pointwise.jl` and its half of the
-  acceptance are done (step 1); `stencils.jl` and the weights are step 2,
-  which marks the milestone. The numbers are under [Measured
-  results](#measured-results). Step 2 found that the acceptance was one
-  claim short of the design: "exact to degree `q`" is the *first*
-  derivative's statement, and the compact second derivative is exact to
-  degree `q + 1` by the symmetry of an even `q`; both are asserted, with
-  their "and not one degree higher" halves, in `Rational` (amended in step
-  2). And the one thing the step found that the design did not say:
-  `‖h‖ ~ 1e−13` is a claim about the *offsets*
-  `g^{ab} − η^{ab}`, `det g + 1`, `det γ − 1` — `α`, `β^i` and `√γ` are
-  built from them and are accurate to a relative `eps` **as values**,
-  which is not the same statement and is the one a test can make about
-  what `metric_quantities` returns.
-- **G2 — The RHS on a uniform periodic mesh.** *(Done.)* `evolution.jl`,
-  `initialdata.jl`, `gauge.jl`, `boundaries.jl`; the gauge wave and
-  shifted Minkowski cases; RK4. *Accept:* Minkowski and shifted Minkowski
-  are stationary to roundoff (the RHS is exactly zero on data the stencils
-  reproduce); the gauge wave converges at order `q` for `q = 2, 4, 6` on
-  `N = 8`, roots `2 … 8`; white noise on flat space stays bounded for
-  a thousand steps with `ε_KO > 0` and its growth without is recorded;
-  the RHS is pure and never mutates `u`; the fused kernel's throughput
-  per point recorded. Three of those sentences needed amending, and step 3
-  amended them where they are stated rather than only here:
-  **Minkowski is exactly stationary and shifted Minkowski is not** — its
-  `Π` is built from the *analytic* spatial gradients, which the stencils
-  reproduce only to truncation order, so it is stationary to `O(h^q)` and
-  what converges at order `q` is its error (GHSO2 built `Π` from the
-  discrete gradients to make the stronger statement true, and `CODE.md`
-  keeps that as a G4 post-pass; `PLAN.md`'s step 3 had it right where this
-  line did not). **`N = 8` does not exist at `q = 6`**, where TreeAMR's
-  vertex invariant forces `N ≥ 10`. And **roots `2 … 8` over one crossing**
-  is minutes per order in three dimensions: what is run is roots `1, 2, 3`
-  over an eighth of a crossing, which measures the same rate — the
-  numbers are under [Measured results](#measured-results).
-- **G3 — Coarse-fine faces, static mesh.** *(Done.)* TreeAMR's two-level
-  mesh; `constraints.jl`. *Accept:* the interface-order table (predicted
-  rates 3 and 4 at `p = 4, 6` for `q = 4`, control at 4), independent of
-  the restriction order and of `ε_KO`; both constraint monitors converge on
-  the gauge wave across the interface; the thread-workload digests
-  identical at one and four threads; G2 and G3 on `CPU()` in `Float32`.
-  All four hold; the numbers are under [The interface-order
-  rule](#the-interface-order-rule-and-what-it-costs-a-second-order-system),
-  [Analysis quantities](#analysis-quantities) and [Precision, threads,
-  devices](#precision-threads-devices), and the suite's cost is under
-  [Measured results](#measured-results). Two sentences of the acceptance
-  needed amending where they are stated rather than only here.
-  **"Both constraint monitors converge on the gauge wave across the
-  interface" is a claim about the interface and nothing else**: the same
-  case on a *uniform* mesh has no constraint violation above roundoff, so
-  the refined rows measure the interpolated ghosts alone, and they
-  converge at `q + 1/2` rather than at `q` because that error lives on a
-  set of measure `~h`. The statement that the monitors converge at `q` is
-  made on harmonic Kerr, where the violation is the bulk truncation error
-  — and both rows are in the suite, because between them they say the
-  monitors see both. And **the restriction order is not a row of the
-  table**: on a vertex-centered mesh restriction is injection, so the two
-  orders are the same computation and the test asserts bit-identity rather
-  than two equal rates.
-- **G4 — A black hole.** *(Done.)* Kerr-Schild (`a = 0`, sampled `H`) and harmonic
-  Kerr (`a = 0` and `a = 0.9`, `H = 0`) in a Dirichlet box of half-width
-  `≥ 20 M`, the indicator with its mask, floor and ceiling, the interior
-  layer, the recipe (`ε_KO = 0.5`, `γ0 = 1/M`), `driver.jl`,
-  `interior.jl`, `refinement.jl`, `horizon.jl`. *Accept:* the
-  calibration table of `τ_max` against `h` and the thresholds chosen
-  from it; the initial-data cycle converges to a hierarchy of nested
-  shells around the hole, coarse at the boundary, with the floor not
-  binding at calibrated thresholds and binding when they are loosened;
-  the radius assertions asserted and tested to fire; the masked error
-  against the exact solution converging at order `q` on the frozen
-  hierarchy as `N` doubles, to `t = 50 M`; constraints flat at
-  truncation and *masked*; the interior residual at truncation; the
-  horizon found, enclosing the layer by the margin, with its area,
-  `M_irr`, `J` and `M_ch` at the Kerr values to interpolation accuracy;
-  the analysis record complete at every chunk; the three interior
-  variants measured and the default confirmed or changed; the gauge
-  drift rate recorded beside GHSO2's `≈ 0.14/M`; the discrete-gradient
-  `Π` post-pass measured; regrids on the static hole changing nothing
-  after the cycle; the same run in `Float32` on `CPU()` reaching the
-  same mesh.
-  **G4a (step 5) is done**: `interior.jl`, `driver.jl`, the layer with
-  its three variants, the radius assertions, the per-chunk analysis
-  record, the masked error at order `q` on a frozen hierarchy, the
-  `Float32` row, the drift and the `Π` post-pass — the numbers are under
-  [step
-  5](SINGULARITY_HANDLING.md#step-5-the-static-holes-interior-and-the-driver-g4a).
-  **G4b (step 6) is done with it**:
-  `refinement.jl`, the masked Löhner indicator with its global amplitude,
-  the four marks, the derived level floor and the boundary ceiling, the
-  travelling margin, the initial-data cycle and the regrid branch of the
-  driver, the calibration table and the thresholds chosen from it, and the
-  refinement centroid in the record. **G4c (step 7) closes it**:
-  `horizon.jl`, the stopgap interpolator with its footprint guard, the
-  batched interpolating `ADMVars` provider, `find_gh_horizon` over
-  `ApparentHorizonFinder` and `KorzynskiSpin`, and the horizon rows of the
-  analysis record at the case's own cadence — with Kerr's `A`, `M_irr`,
-  `J` and `M_ch` recovered from sampled data in both charts and at
-  `a = 9/10`, from a displaced guess, enclosing the layer by the margin.
-  Two sentences of the acceptance needed amending where *they* are stated.
-  **"harmonic Kerr at `a = 0.9`" is not among the rows**, for step 5's
-  reason: the chart is refused by `check_interior_radii`, so the spinning
-  hole's horizon is measured in Kerr-Schild, where `r₊ = 1.436 > |a|`, and
-  the second chart is harmonic Kerr at `a = 0`. And **the horizon rows are
-  not measured in the suite at `a = 9/10`**: the layer of a spinning hole
-  needs `h ≈ 0.04 M` and that is a thousand blocks, so the suite runs
-  `a = 0` and `test/hole_runs.jl` runs the rest. Two further sentences needed
-  amending where they are stated rather than only here. **The calibration
-  is not portable between boxes the way the thresholds are**: the
-  thresholds are a property of the solution and the spacing, but *which*
-  hierarchy they produce is a property of the box and the root brick as
-  well, so the reference configuration is recorded with them. And **the
-  indicator's mesh and the hand-built hierarchy of step 5 are not the same
-  mesh at the same cost**: see the comparison under [Measured
-  results](#measured-results). Two sentences of the acceptance needed amending where they are
-  stated rather than only here. **"In a Dirichlet box of half-width
-  `≥ 20 M`" is a statement about a production run and not about a test**:
-  the two radius requirements need `r_h,min ≥ (m + 2G + 2)·h`, so a hole
-  costs about `(m + 2G + 2)³` finest-level points *per `r_h,min` cubed*
-  whatever the box is, and a box of `20 M` with a uniform mesh at that
-  spacing is `10⁸` points. The boundary is exact, so a small box costs
-  accuracy and not validity; the suite runs `5/2 M` and records it.
-  And **the three variants are separated by the interior residual and by
-  what survives to `t = 50 M`, not by the constraints outside `r_1`** —
-  see the numbers; the prediction that `:damped` is the smaller of the two
-  violations holds against `:pasted` and is a 3 % effect, while the
-  residual separates `:frozen` from the other two by more than an order of
-  magnitude and the long run separates all three: only `:damped` reaches
-  `50 M`. A third sentence needed amending, in
-  [the interior](#the-interior-a-pointwise-damping-layer) where it is
-  stated: **`a = 9/10` in the harmonic chart is refused**, because the
-  chart's singular disk has coordinate radius `a` and the horizon's
-  smallest coordinate radius is `√(M² − a²)`, so no ball contains the one
-  and fits inside the other. That is G5's case, and it is the open
-  question step 5 leaves.
-- **G5 — A hole that moves.** Boosted (`|v| ≈ 0.3`), spinning
-  Kerr in harmonic coordinates crossing the box — **at `a = 7/10`
-  (decided 2026-09-23**; `a = 9/10` waits with its price written down,
-  [the interior's
-  questions](SINGULARITY_HANDLING.md#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)**)**,
-  on **the tracked geometry with
-  the `:fitted` target** (amended in step 8f: the analytic core cuts
-  harmonic Kerr's disk at `a = 7/10`, so the analytic layer is not
-  available on G5's own chart, and runs as the control on the boosted
-  `a = 0` hole).
-  *Accept:* the indicator's refinement follows the hole, its centroid
-  within a few finest spacings of the analytic center at every chunk;
-  the layer follows the **tracked** center and shape — the found
-  horizon's offset surface, rebuilt every chunk from the track and
-  within a cell of the analytic center — with the radius assertions
-  holding at every regrid, the fit valid at every row, and the
-  initial-data cycle choosing the mesh on the analytic data of the same
-  geometry where the chart allows it; the time-dependent Dirichlet data exact at
-  the boundary; the masked error stays at the static run's level over
-  the crossing and converges at order `q` on the frozen hierarchy; the
-  adaptive run matches the uniform-fine reference at fewer points; the
-  interior residual at truncation, points released by the core relaxed
-  within `1/ρ_max`; `:frozen` measured to fail as predicted; the
-  horizon found along the trajectory with its area, mass, spin and the
-  boost's contraction recovered.
-  **The generic interior (steps 8a–8f) is *(Done.)*** — the leakage
-  margin (8a), the range projection and validity monitor (8b), the layer
-  rule for an inexact target and `ρ_max = 4/M` (8c, 8c′), the tracked
-  geometry (8d), the fitted target and the `:fitted` variant (8e), and the
-  measurement matrix (8f) under [steps 8a–8f](SINGULARITY_HANDLING.md);
-  excision (8g) is not needed, since `:fitted` reaches `50 M` on the
-  matrix's first row. What G5 inherits from 8f: G5's chart at `h = 5/256`
-  is 2472 blocks and `630 s` of a node per `M` when the hole sits still; at
-  `5/128` it does not survive; `:fitted` holds a boosted hole at `4/M`
-  across `1.5 M` of the box, while the analytic `:damped` control on the
-  boosted `a = 0` hole needs `ρ_max ≳ 20/M`, its frozen core released on the
-  trailing side after about `M` at `v = 0.3`; and a moving hole's step is
-  sized for the speed it will have, since the fastest speed grows by
-  0.1–0.3 % a chunk and the CFL recheck otherwise stops the run.
-  **Step 8 (2026-09-24): G5 is not done; seven of its ten items hold.**
-  Item by item (the numbers under [The moving hole (step
-  8)](SINGULARITY_HANDLING.md#the-moving-hole-step-8)): *the refinement follows
-  the hole* — yes, the
-  mesh is re-chosen at every chunk boundary around the tracked layer (the
-  `:fitted` cycle on the case's own data, the floor from the core surface
-  widened by the travel), with the centroid within `1.4` finest spacings of
-  the analytic center over the boosted `a = 0` hole's crossing on the
-  analytic layer and within `7.3` on the fitted one; on G5's chart the
-  centroid is `6.7` finest spacings off *before anything moves*, the
-  boosted spinning chart's own asymmetry, and its per-chunk record is on
-  Symmetry, unread (**partly measured**); *the layer follows the tracked
-  center and shape, the radius assertions at every regrid, the fit valid at
-  every row* — the runs regridded tens of times without an assertion firing
-  and without a failed find; the fit's per-row validity on G5's chart is in
-  the unread record (**measured on `a = 0`: every fit valid, the track
-  within `0.022` cells**); *the initial-data cycle* — done, on the fitted
-  data where the chart has no analytic interior (amended in step 8: "on the
-  analytic data of the same geometry where the chart allows it" became the
-  cycle on the case's own data, which agrees with it where it allows it);
-  *the Dirichlet data exact* — done, bit for bit at `t = 7/10`; *the masked
-  error at the static run's level over the crossing* — **not met**: `3.3×`
-  in L2 at `7 M` and growing four times as fast; *order `q` on the frozen
-  hierarchy* — **measured, `2.3`** in the masked norm over the first
-  `0.15 M` of travel; *the adaptive run matching the uniform one at fewer
-  points* — **measured to `1 M`**: to three digits at the hole with
-  6.5–9.3× fewer points, 2–4× the far-field error, the uniform run lost to a
-  `SIGBUS` twice after `1 M`; *the interior residual at truncation, released
-  points relaxed within `1/ρ_max`* — **not met**: the trailing side's outer
-  layer carries twice the leading side's error; *`:frozen` measured to fail*
-  — done, `1.0 M` on the boosted `a = 0` hole (on G5's chart it cannot be
-  built: the analytic core cuts the disk); *the horizon along the
-  trajectory* — done, `M_irr` `0.04 %`, `J` `0.3 %`, `M_ch` `7e−4` from
-  Kerr's and the contraction `0.9534` against `0.95394`. What remains is
-  the moving layer's trailing side on G5's chart.
-  **Step 8′ (2026-09-25): G5 is still not done.** The side-dependent ramp
-  (`trail_ramp = 9/10`) removes the trailing side's excess — the layer's
-  outer quarter off the truth `268` behind the hole against `277` ahead at
-  `13 M` — so *points released by the core relaxed* holds in the sense of
-  "as well behind the hole as ahead of it", though the layer's residual is
-  `1.7×` the resting hole's (**item 8 partly met**); *the masked error at
-  the static run's level* is **still not met**: `2.05×` at `13 M` (without
-  the ramp `5.0×`), growing on both sides; the centroid, with the ramp,
-  `5.3`–`14.5` finest spacings off (without it `27`–`32`; **item 1 not
-  met** on G5's chart); the track, the fits and the finds hold at every one
-  of 53 rows (**item 2 met**); and **item 10 degrades over the crossing**:
-  `J` drifts to `0.846` and `M_ch` to `1.030` by `13 M` with and without the
-  ramp, the extent ratio to `0.948`, where the resting hole keeps `0.710`,
-  `0.9985`, `1.000`. The adaptive run matches the uniform one to `2 M`
-  (**item 7 met**); the frozen hierarchy converges at order 2 to `M/4` and
-  not at `M/2` in the masked norm (**item 6 partly met**). The open question
-  records what is left and the recommendation (more interior work — the
-  spin drift first — before excision's price).
-  **2026-10-20, outside G5's chart:** a boosted *Kerr-Schild* hole at
-  `a = 0`, `v = 1/5`, crosses `8 M` of a frozen capsule mesh on the quadrant
-  at the resting hole's level on the analytic layer at `8/M` — the error just
-  outside the horizon `1.1–1.3×` the resting hole's to `16 M` at `1/32`,
-  `ℋ` `0.8–1.2×` to `40 M`, order four from `r = 3` out, every find with
-  Schwarzschild's `M_irr`, `J` and contraction ([the boosted Kerr-Schild hole
-  at binary
-  speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)).
-  It says the analytic layer can follow a moving hole; it says nothing about
-  G5's chart, spin or `:fitted` layer, and G5 is not done. **2026-10-21:**
-  with the target's rate in the moving layer and core the same holds at the
-  default `4/M` — `ℋ` just outside the horizon the resting hole's to `3 %`
-  from `1/24` on, order four in every shell ([the moving `:damped` layer's
-  target
-  rate](SINGULARITY_HANDLING.md#the-moving-damped-layers-target-rate-2026-10-21)).
-  **2026-10-21, a spinning hole along its axis:** Kerr-Schild at `a = 1/2`
-  moving along its spin at `v = 1/5` on the rotating quadrant, `:damped` at
-  `4/M`, is at the resting hole's level in `ℋ` (`0.81–1.08×`) to `40 M` at
-  `1/24`, `1/32` and `1/40`, and its `J − a` drifts linearly at the resting hole's rate to `0.4–3 %`
-  (`4.0·10⁻⁸/M` at `1/32`), converging at order four; `:fitted` keeps `J`
-  within `4·10⁻⁶` too ([a spinning hole along its
-  axis](SINGULARITY_HANDLING.md#a-spinning-hole-along-its-axis-2026-10-21)).
-  So a moving spinning hole as such does not drift, and G5's `0.013` a `M`
-  belongs to something this run does not have — the boost across the spin,
-  the harmonic chart, or G5's `q = 2`, `v = 0.3`, `a = 7/10` and `m = 4`.
-  That is an elimination from one run that differs from G5 in all of these at
-  once, not a measurement of any of them: no run has yet moved a spinning hole
-  across its spin in Kerr-Schild, or along it in the harmonic chart.
-- **G6 — Infrastructure and the H200.** `io.jl`, slice output and
-  viewers, `bin/gh.jl`, the per-phase benchmark on threads (TreeWave's
-  table, on Symmetry) and **on the H200 in `Float64`**, in-kernel metric
-  evaluation on the device, `q = 4, 6, 8` cost, `N = 16` against `32`;
-  the three black-box attempts at the RHS kernel — the stencil/algebra
-  split, `Float32`, the workgroup shape — each with the kernel's
-  registers per thread, spill bytes, achieved occupancy and picoseconds
-  per point against the roofline. *Accept:* the G5 run on the H200 in
-  `Float64` reaching the same mesh, horizon and analysis record as the
-  host; the tables recorded here, the kernel numbers beside GHAccel's,
-  and the defaults chosen from them; the same in `Float32` on the H200
-  or on Metal *if it runs*, recorded either way. What G6 does *not*
-  promise is a fast GPU kernel: it measures, and hands the measurement
-  to the research project under
-  [Possible extensions](#possible-extensions).
-- **G7 — Two holes; G8 — An inspiral** (proposed 2026-10-25). Beyond the
-  proof of concept: a head-on collision through merger and ringdown, then
-  an equal-mass binary from XCTS data, each with its waveform. The design
-  and the acceptance are under [Binary black
-  holes](#binary-black-holes-proposed-2026-10-25), and the steps are
-  `PLAN.md`'s B1–B9.
+The milestones G0–G8 and their acceptance tests are in [`PLAN.md`](PLAN.md#milestones); what the finished ones found is in [`HISTORY.md`](HISTORY.md#the-implementation-plan) and below.
 
 ## Measured results
 
 This section takes the numbers as the milestones produce them; each also
 sits beside the prediction it confirms or corrects, in the section it
-belongs to. **The black hole's interior is the exception (moved
-2026-10-08)**: step 5's layer, steps 8a–8′ and the single holes on the
+belongs to. **The black hole's interior is the exception**: step 5's layer, steps 8a–8′ and the single holes on the
 octant are in [`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md), and what
 they recommend for a single hole is [the table
-below](#single-black-holes-recommended-settings-added-2026-10-08).
+below](#single-black-holes-recommended-settings).
 
-**G0 (step 0).** The suite is 82 assertions in 7.7 s at one thread and
-7.6 s at four, on the development machine (Apple silicon, 12 CPU threads,
-Julia 1.13.0): 0.7 s of it `precision_tests.jl` and 7.4 s
-`prerequisite_tests.jl`, which is the compilation and evaluation of the
-two `dmetric` passes and nothing else. Both are inside GHSO2's rule of
-thumb of 30 s per test file, and the evaluated metric is the cost to
-watch as the suite grows. A clean archive of the tree, with no
-`Manifest.toml`,
-resolves TreeAMR v0.1.0 and SpacetimeMetrics v1.6.0 from GitHub `main`
-through the `[sources]` pins, instantiates and passes with the same 82.
-The two backgrounds of `prerequisite_tests.jl` compile into a
-KernelAbstractions kernel on `CPU()` and fill a 20-variable, `G = 3`,
-vertex-centered field set over a two-level forest with **bit-for-bit**
-the values of a host loop through `coordinates`, at `Float64` and at
-`Float32` — see [Initial data and
-backgrounds](#initial-data-and-backgrounds). No physics is measured yet:
-`src/` holds the module shell, `precision.jl` and `device.jl`.
-
-**G1a (step 1), the pointwise algebra.** The suite is 1007 assertions in
-124 s at one thread and 116 s at four, on the development machine
-(Apple silicon, 12 CPU threads, Julia 1.13.0), up from step 0's 82 in
-7.7 s. Essentially all of the growth is **compilation**: the six
+**G1a, the pointwise algebra.** Essentially all of the pointwise tests' cost is **compilation**: the six
 backgrounds of the table, at `Float64` and `Float32`, under
 `SpacetimeMetrics`' nested forward-mode passes — `dmetric` once,
 `gauge_source_grad` twice, and once more for the pass the tests take on
@@ -5269,6 +4904,11 @@ statements they confirm. Two further results:
   **2.4e−16**, one `eps`; computed as `inv(g) − η` it is **1.1e−3**. At
   `Float32` and `‖h‖ = 1e−5`, **1.4e−7** against **4.2e−3**. The identity
   buys about `eps/‖h‖`, which is the whole accuracy of the wave zone.
+- **What `‖h‖ ~ 1e−13` claims.** `‖h‖ ~ 1e−13` is a claim about the *offsets*
+  `g^{ab} − η^{ab}`, `det g + 1`, `det γ − 1` — `α`, `β^i` and `√γ` are
+  built from them and are accurate to a relative `eps` **as values**,
+  which is not the same statement and is the one a test can make about
+  what `metric_quantities` returns.
 - **Bit-identity is not a property of an expression, nor even of a
   function.** Two textually identical copies of the source term, one
   inlined inside `gh_node_rhs` and one in `gh_node_source`, differ on two
@@ -5281,22 +4921,11 @@ statements they confirm. Two further results:
   `0.19 eps` of `max_i ‖∂_i h‖`. Two call sites are enough; the code need
   not even be written twice. This costs nothing here, because the tests
   compare to roundoff against the scale that produced the number, but it
-  says what the bit-identity the threading test of step 4 asserts does and
+  says what the bit-identity the threading test asserts does and
   does not mean: the *same* compiled code, at the same call site, on a
   different thread count — and nothing more.
 
-**G1b (step 2), the stencils.** The suite is 1682 assertions in 128 s at
-one thread and 122 s at four, on the development machine (Apple silicon,
-12 CPU threads, Julia 1.13.0), up from step 1's 1079 in 124 s. Of that,
-`stencils_tests.jl` is **603** assertions in **5 s** of testset time — 7 s
-standalone, including its own compilation: the step's tests evaluate no
-background at all, weights and polynomials only, so the suite's cost is
-still step 1's compilation of `SpacetimeMetrics`' nested dual passes and
-the stencils did not move it. Three of those five seconds are the two
-KernelAbstractions launches, at `Float64` and `Float32`. This is the file
-to copy when a later step needs a cheap test.
-
-The weights reproduce the textbook central-difference tables entry for
+**G1b, the stencils.** The weights reproduce the textbook central-difference tables entry for
 entry at `q = 2, 4, 6, 8`, for `∂` and for the compact `∂∂`, and the
 Kreiss–Oliger binomial rows at `r = 2, 3, 4, 5`, **as exact rationals**.
 Rounded into `Float64` and into `Float32` every entry is **bit-identical**
@@ -5356,7 +4985,7 @@ and one ulp away on 3 of 11 sampled ratios at `Float64x2`, whose division is
 not correctly rounded. This is the trap the type-genericity rule exists to
 catch, and it is why `Float32x2` is in the suite.
 
-One thing the step found that is not about the stencils: the *tests* need
+One thing that is not about the stencils: the *tests* need
 `Rational{BigInt}` and not `Rational{Int}`. A monomial of degree `q + 2` at
 an off-grid rational point overflows a 64-bit denominator at `q = 6`
 already. `Rational` arithmetic is checked, so this arrived as an
@@ -5364,15 +4993,7 @@ already. `Rational` arithmetic is checked, so this arrived as an
 reason for `BigInt` in its own weight construction, seen from the other
 side.
 
-**G2 (step 3), the right-hand side on a uniform mesh.** The suite is 1877
-assertions in **3m48** at one thread and **3m21** at four, on the
-development machine (Apple silicon, 12 CPU threads, Julia 1.13.0), up from
-step 2's 1682 in 128 s. A clean archive with no `Manifest.toml` resolves
-the two pins from GitHub `main`, instantiates and passes with the same
-1877. The growth is the physics: `evolution_tests.jl` is **56 s** and
-`convergence_tests.jl` **40 s** of it, both over `PLAN.md`'s 30 s rule of
-thumb and recorded as such — a row of either costs a kernel specialisation
-to compile, and the evolutions themselves are seconds.
+**G2, the right-hand side on a uniform mesh.**
 
 **The order of the scheme.** The gauge wave (`A = 1/20`, one wavelength
 cubed, periodic, `ε_KO = 0`, `γ0 = 1`), evolved an eighth of a crossing at
@@ -5390,7 +5011,7 @@ a quarter of a crossing on roots `2, 3, 4` through a Dirichlet face:
 The errors at `q = 4` are `2.0e−4, 1.3e−5, 2.6e−6` in L2, and at `q = 6`
 `5.3e−6, 8.8e−8, 7.9e−9` — four orders above the roundoff floor at the
 finest, which is what makes the rate a measurement of truncation error and
-not of `eps/h²` (step 2's warning about the window). Shifted Minkowski's
+not of `eps/h²` (G1b's warning about the window). Shifted Minkowski's
 rate is **3.6** at the profile width `w = 1` and **3.93** at `w = 2`: at
 `h = L/16` the sech² profile is not resolved, and the shortfall is the
 case's parameters and not the scheme — which is worth knowing before a
@@ -5399,8 +5020,9 @@ hole, whose features are sharper still, is put on a mesh this coarse.
 **Stationarity.** Minkowski's `du` is **exactly** zero — every component,
 at `q = 2, 4, 6`, with and without dissipation, at any `t` — and a run of
 it through RK4 returns the initial state with an error of exactly zero.
-Shifted Minkowski is stationary only to truncation, for the reason under
-G2 above.
+Shifted Minkowski is stationary only to truncation: its `Π` is built
+from the *analytic* spatial gradients ([Initial data and
+backgrounds](#initial-data-and-backgrounds)).
 
 **Robust stability** (`N = 8`, one root block, `q = 4`, `γ0 = 1`,
 `γ2 = 0`, white noise of amplitude `1e−8` on all 20 variables): over a
@@ -5418,9 +5040,25 @@ points of every block, agree to **under 1e−12** of the size of the terms
 that build `∂ₜΠ` — on the gauge wave, on shifted Minkowski (with its
 sampled gauge source) and on harmonic Kerr in a box off centre, at
 `q = 2, 4, 6`, with `ε_KO = 0` and `0.5`. Not bit for bit, and not asked
-to be: two call sites of one body are contracted differently (step 1's
+to be: two call sites of one body are contracted differently (G1a's
 finding, now seen from the mesh). Two evaluations at the same `(u, t)`
 *are* bit-identical, and `u` is untouched by either.
+
+**`out_identical` is a roundoff bound, not bit-identity** ([history](HISTORY.md#what-the-suite-costs-and-where-measured-2026-09-19-on-symmetry)):
+the `:damped` kernel outside `r_1` and `:none` are separate `Val`-specialised
+kernels, each fusing its multiply-adds in its own inlining context — on x86-64 only: Apple
+silicon still fuses the two kernels alike, while on an EPYC 7543
+(`znver3`, Symmetry and GitHub's Linux runners) 241 914 of 962 780 values
+outside `r_1` differ, by at most **120 eps** of the variable's largest
+`|du|`. `interior_tests.jl` now bounds that at 512 eps and reports the
+ratio; an interior term leaking outside `r_1` would be of order `ρ_max`
+times the test's `10⁻³` perturbation. The same judgement relaxed
+`moving_tests.jl`'s "the analytic solution outside the offset surface bit
+for bit", a kernel's fill against a host `state_tuple`, which differed
+only under coverage on Linux: bounded at 64 eps of each variable's largest
+value, measured `0` plain and `1.4` eps under `--code-coverage
+--check-bounds=yes` on an EPYC 7532, where the interior's ratio is `120`
+and `96` eps.
 
 **What an evaluation costs** is the table under [One right-hand-side
 evaluation](#one-right-hand-side-evaluation), together with the linear
@@ -5431,34 +5069,7 @@ measurement: the pointwise algebra — `metric_quantities`,
 this package uses, and the split into a stencil kernel and an algebra
 kernel that G6 will try is a split of roughly 3:1 rather than 1:1.
 
-**G3 (step 4), coarse-fine faces, the constraints and the threads.** The
-suite is **2144 assertions in 8m40** at one thread and **6m55** at
-four, on the development machine (Apple silicon, 12 CPU threads, Julia
-1.13.0), up from step 3's 1877 in 3m48. A clean archive with no
-`Manifest.toml` resolves the two pins from GitHub `main`, instantiates and
-passes with the same count. Where the growth went, and why each piece is
-what it is:
-
-| file | 1 thread | what it pays for |
-|---|---|---|
-| `type_tests.jl` | 99 s | the fused kernel, both monitors and the pointwise algebra compiled again at `Float32` (45 s) and `Float32x2` (33 s) |
-| `interface_tests.jl` | 93 s | fifteen evolutions on the two-level mesh, where the ghost fill is 79 % of an evaluation |
-| `constraints_tests.jl` | 74 s | the ADM kernel's first specialisation (18 s) and its second (4 s), and `ddmetric` on a second background (40 s) |
-| `threading_tests.jl` | 25 s | the workload twice — once in process, once in a subprocess at the other thread count |
-
-Three of the four are over `PLAN.md`'s 30 s rule of thumb, as
-`pointwise_tests.jl`, `evolution_tests.jl` and `convergence_tests.jl`
-already were, which makes six files in the suite over it; each is recorded
-here with what it buys. Three of step 4's four are **compilation**, and
-the fourth — the interface table — is the only file in the suite whose
-cost is arithmetic. Before adding to any of them, price it: a new `q` or a
-new element type is a new kernel; a new background is a new dual pass; and
-a resolution added to an interface sweep is `N⁴` of ghost filling at 216
-coarse points per fine ghost point.
-
-The cheapest thing step 4 could have done and did not is worth recording
-too: the thread workload carries the gauge monitor and not the ADM one,
-which keeps `threading_tests.jl` at 25 s instead of about 60.
+**G3, coarse-fine faces, the constraints and the threads.**
 
 **The interface-order rule**, the table's own numbers and what a
 coarse-fine face costs in time, are under [The interface-order
@@ -5494,33 +5105,27 @@ devices](#precision-threads-devices): six digest lines identical character
 for character at one and four threads, and `Float32` reproducing the gauge
 wave's rate and its error at the two coarsest resolutions.
 
-**G4a (step 5), the interior and the driver** — the suite, the layer's order,
+**G4a, the interior and the driver** — the suite, the layer's order,
 the three variants to `50 M`, the other charts, the gauge drift, `Float32` and
-the record — moved to
-[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#step-5-the-static-holes-interior-and-the-driver-g4a)
-(2026-10-08).
+the record — are in
+[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#step-5-the-static-holes-interior-and-the-driver-g4a).
 
-**G4b (step 6), the refinement indicator.** The suite is **2968 assertions
-in 13m35 at one thread and 10m45 at four** on the development machine
-(Apple silicon, 12 CPU threads, Julia 1.13.0), up from step 5's 2486 in
-11m51 and 8m33. Step 6 also ran it on **Symmetry**, one node of the
-64-core AMD EPYC `amddebugq` partition at the same Julia, where the same
-2968 take **29m32** and **20m29**: a cluster core is about **twice** as
-slow as this laptop's, so the cluster buys studies in parallel rather than
-wall clock, and the laptop column stays the one comparable with steps 0–5.
-That run is also the clean-checkout check by construction — the tree is
-copied there without any `Manifest.toml` and the `[sources]` pins resolve
-from GitHub before the job starts.
-
-| file | 1 thread | 4 threads | what it pays for |
-|---|---|---|---|
-| `driver_tests.jl` | 2m19 | 56 s | step 5's five static-hole runs, unchanged |
-| `refinement_tests.jl` | **26 s** | **16 s** | the algebra and the marks (about 1 s), the initial-data cycle (1.2 s), and the two adaptive runs (10.3 s and 8.4 s) |
-
-`refinement_tests.jl` stays inside `PLAN.md`'s 30 s rule of thumb, and what
+**G4b, the refinement indicator.** `refinement_tests.jl` stays inside `PLAN.md`'s 30 s rule of thumb, and what
 buys that is the fixture's `maxlevel_cap = 1`: at the calibrated cap the
 same case is 848 blocks and belongs to `test/hole_runs.jl`, which is where
 it is.
+
+**The calibration
+is not portable between boxes the way the thresholds are**: the
+thresholds are a property of the solution and the spacing, but *which*
+hierarchy they produce is a property of the box and the root brick as
+well, so the reference configuration is recorded with them. G4's **"In a Dirichlet box of half-width
+`≥ 20 M`" is a statement about a production run and not about a test**:
+the two radius requirements need `r_h,min ≥ (m + 2G + 2)·h`, so a hole
+costs about `(m + 2G + 2)³` finest-level points *per `r_h,min` cubed*
+whatever the box is, and a box of `20 M` with a uniform mesh at that
+spacing is `10⁸` points. The boundary is exact, so a small box costs
+accuracy and not validity; the suite runs `5/2 M` and records it.
 
 **The reference configuration.** Everything below is Kerr-Schild `a = 0`,
 `q = 2`, `N = 8`, in a Dirichlet box of half-width **`5 M`** on a `4³` root
@@ -5593,7 +5198,7 @@ boundary blocks *are* the refined region's neighbours.
 
 **The adaptive run against a frozen hierarchy**, both at `refine_tol = 0.4`
 to `t = 1/2 M` with `chunk = 1/20`, the same case, the same finest spacing
-`5/64`, at the grid rate `1/dt`, the default until 2026-09-23:
+`5/64`, at the grid rate `1/dt`:
 
 | mesh | leaves | points | `err_l2` | `err_linf` | `gauge_l2` |
 |---|---|---|---|---|---|
@@ -5625,8 +5230,7 @@ problem (re-sampling the gauge source and re-asserting the interior's two
 radius requirements on the new mesh) and the state vector; the transferred
 state is still a metric and its masked error after two chunks is
 `1.36e−3`, against `1.93e−3` after three chunks on the mesh that did not
-move — at the grid rate; `1.34e−3` and `1.88e−3` at the default `4/M`
-**(measured in step 8c′)**, where the interior residual of the run that did
+move — at the grid rate; `1.34e−3` and `1.88e−3` at the default `4/M`, where the interior residual of the run that did
 not move is `6.0` against `0.80` at `t = 3/20 M`: this fixture's layer is
 six cells of `h = 5/32` down to `r_0 = 3/10`, where `|Π|` is `131`, and it
 saturates at `14.7` by `1 M` while the masked error stays below the grid
@@ -5640,118 +5244,11 @@ symmetric about the hole. See [Analysis
 quantities](#analysis-quantities) for why, and read G5's "within a few
 finest spacings" against it.
 
-**G4c (step 7), the horizon.** The suite is **3444 assertions in 12m31**
-at one thread and **8m38** at four on the development
-machine (Apple silicon, 12 CPU threads, Julia 1.13.0), up from step 6's
-2968. `test/horizon_tests.jl` is **28.7 s / 12.8 s** of that (one thread /
-four) and 51 s run on its own — the difference is the right-hand-side
-kernel and the hole fixture, which `driver_tests.jl` has already compiled
-by the time it runs. Its two evolutions are most of it; the interpolator's
-own claims, which evaluate no background at all, are under two seconds.
-(The same runs put `driver_tests.jl` at `1m59 / 44.8 s` and
-`refinement_tests.jl` at `22.1 / 12.8 s`; step 6 recorded `2m19` and `26 s`
-for those at four threads, so the machine or the depot is faster than it
-was, and the step-6 numbers should be read as that step's and not as a
-regression here.)
-Two further pins are resolved, `ApparentHorizonFinder` v2.1.0 and
-`KorzynskiSpin` v1.1.0, and `prerequisite_tests.jl` holds both to the same
-standard as the first two — including a find of Kerr's horizon on
+**G4c, the horizon.** `prerequisite_tests.jl` holds `ApparentHorizonFinder` and
+`KorzynskiSpin` to the same standard as the first two pinned dependencies — including a find of Kerr's horizon on
 *analytic* Cauchy data at `a = 9/10`, which recovers the area to `1e−8`
 and `J = M a` to `1e−6` with the axis along `ẑ`, and is the baseline
 everything below is measured against.
-
-**That acceptance item is no longer blocked** (2026-09-21), and is
-recorded under [File layout](#file-layout): `KorzynskiSpin`'s repository
-is public, so every dependency resolves anonymously. The clean-checkout
-check — a `git archive` of the tree with no `Manifest.toml`, instantiated
-and tested — resolves `TreeAMR` from the registry at `0.1.1` and the other
-three from GitHub, and passes here, **3444 assertions in 12m26**. It now
-means what it says in an anonymous clone and in a fork's pull request as
-well.
-
-That first green build also measured the suite in CI for the first time —
-no job had reached `julia-runtest` before, every run having died in
-`julia-buildpkg` at the clone — and it found **four pre-existing failures
-that the clone failure had been masking**. They are not regressions and
-are unfixed as of this writing:
-
-- On the **floor version, 1.11**, on both operating systems, the
-  zero-allocation claims fail: `@allocated` is **176** bytes for all four
-  of `gh_node_rhs_expanded`, `gh_node_rhs`, `metric_derivatives` and
-  `adm_vars_from_state` at both `Float64` and `Float32`
-  (`pointwise_tests.jl:480`), and **48** bytes for the weights
-  (`stencils_tests.jl:347`). Both are zero on 1.13. So the claim holds on
-  the version the suite usually runs and not on the version `[sources]`
-  makes the floor; one of the two is wrong. **(Moot from 2026-10-16:
-  the floor is 1.13 and nothing runs 1.11 any more; see
-  [File layout](#file-layout).)**
-
-  **It does not reproduce in isolation.** On 1.11.9 here, `@allocated` of
-  `derivative_weights` and `dissipation_weights` is **0** — measured
-  through the tests' own loop-over-closures spelling *and* through a named
-  function taking the arguments, at `--check-bounds=yes` as
-  `julia-actions/julia-runtest` runs it as well as at `auto`, and under
-  `--code-coverage=user`, which every cell was getting by default and
-  which was the most promising guess of the three — coverage instrumentation is a standard way to break an `@allocated`
-  claim. It is not this
-  one: the measurement is 0 with instrumentation demonstrably active,
-  `.cov` files being written for `stencils.jl` and for 47 of StaticArrays'
-  files and 22 of TreeAMR's in the same process. So neither the spelling,
-  the bounds-checking flag nor coverage is the mechanism, and whatever
-  is left needs the full suite's context — `runtests.jl` loads this
-  package before `MultiFloats`, and `derivative_weights` is `@generated`,
-  which is the one interaction this package already knows is order-
-  dependent. TreeHydro is the closest comparison and is **green**: its
-  `riemann_tests.jl` asserts the same `@allocated(…) == 0` of
-  `face_states` and `riemann_flux`, its matrix pins `1.11` explicitly, and
-  it differs in two ways worth trying here — the measurement goes through
-  a top-level named function that takes the arguments, and the functions
-  return plain `NTuple{M,T}` rather than `SVector`/`SMatrix`.
-- On **Linux at 1.13 under code coverage**, four exact-equality
-  assertions fail: `first_r.err_l2 == 0`, `err_linf == 0` and
-  `residual == 0` evaluate to `3.2e−17`, `1.4e−15` and `1.2e−13`
-  (`driver_tests.jl:93`–`95`), and `inside_exact` — a `===` comparison of
-  the `:pasted` state against the exact reference — fails
-  (`interior_tests.jl:552`). These are this document's own rule about
-  bit-identity across call sites, met in the tests rather than in the
-  code: the initial data and the error reference both reach the analytic
-  solution through `case_state_tuple`, by different call sites, so exact
-  equality was never an invariant. **Fixed** by comparing to roundoff —
-  `100 eps(T)`, and `10⁴ eps(T)` for the residual, which is the only one of
-  the three read inside `r_1` where the solution is steepest.
-
-  **It is the machine, not the flags** (measured 2026-09-18 on three).
-  The first reading — that code coverage flips it — was wrong, and is
-  recorded here because the CI evidence for it looked clean: the same
-  Linux cell failed instrumented and passed uninstrumented. Symmetry
-  settles it. On an EPYC 7543 the three values are
-
-      err_l2 = 3.241779465395761e-17, err_linf = 1.3653937842860002e-15,
-      residual = 1.2253080414080616e-13
-
-  **with coverage and without it alike, and bit-identical to what CI
-  reports**. So three machines give three behaviours: aarch64 returns an
-  exact `0.0` however it is compiled (no combination of `--code-coverage`
-  scope and `--check-bounds=yes` perturbs it there), GitHub's Linux runner
-  returns `0.0` uninstrumented and these values instrumented, and EPYC
-  returns these values always. The quantity is not reproducible across
-  microarchitectures, which is the same lesson TreeHydro records for
-  Base's `@simd` reductions: bit-identity across *thread counts* is an
-  invariant and is asserted; bit-identity across *microarchitectures* was
-  never on offer. That the instrumented Intel runner and the EPYC agree to
-  the last bit says the alternative is a *determinate* second value — one
-  fused multiply-add taken or not — and not noise.
-
-  The fix is verified where the failure lives: on Symmetry at 1.13 the
-  patched `driver_tests.jl` passes 243 of 243 and `interior_tests.jl` with
-  it, against values 2 to 4 orders of magnitude inside the new bounds.
-
-  *Note for `Pkg.test`*: its coverage scope is `@<pkgdir>`, not the `user`
-  one might assume. It also passes `--check-bounds=yes` — **but only up to
-  Julia 1.12**; 1.13's `Pkg` dropped it from `gen_subprocess_flags`
-  (checked in all three). So the 1.11 cells test with bounds checking
-  forced on and the 1.13 cells do not, which is part of why 1.11 is slower
-  and is a difference in the harness rather than in the compiler.
 
 **`Float32`.** The same find on a `Float32` field set gives the `Float64`
 answer to **seven digits** — `r_mean` `2.0005742` against `2.0005741`, area
@@ -5796,7 +5293,7 @@ returns whichever the flow's orientation gives — the two `a = 0` rows,
 whose `J` is `2e−6`, point along `−ẑ` for no reason at all.
 
 **The harmonic chart needed a finer mesh than the "other charts" table
-uses, and it is the mesh `CODE.md` predicted (measured in step 7).** At
+uses, and it is the mesh `CODE.md` predicted.** At
 `h = 5/64` — step 5's harmonic row — `r_0` has to sit at `0.2 M` and
 therefore `r_1` at `0.67 M` against a horizon at `1.0 M`, and the fast
 flow's *transient* dips into the layer: the guard refuses the query and
@@ -5809,8 +5306,8 @@ direction.
 
 **The horizon of a run, and what it says about the solution.** Kerr-Schild
 `a = 0` on the step-5 fixture (`q = 2`, `N = 8`, `h = 5/64`, `cfl = 1/5`,
-the `:damped` layer at the grid rate `1/dt`, the default until 2026-09-23;
-step 8c's `4/M` runs end at `M_irr = 0.9972` at `50 M`) to `t = 10 M`, the
+the `:damped` layer at the grid rate `1/dt`; the
+`4/M` runs end at `M_irr = 0.9972` at `50 M`) to `t = 10 M`, the
 horizon found at every chunk:
 
 | `t/M` | 0 | 2 | 4 | 6 | 8 | 10 |
@@ -5850,7 +5347,7 @@ interpolated data is **`2.2e−5`** at `h = 5/64`, which is what the
 `unif_tol` decision under [Analysis quantities](#analysis-quantities) is
 about.
 
-**The port to TreeAMR's interpolation (measured 2026-09-26).** The same
+**The port to TreeAMR's interpolation.** The same
 fixture, `q = 2`, 120 leaves at `h = 5/64`, 496 points of
 `EquiangularGrid(15)` at `r = 2 M`, value and gradient of all twenty
 variables with the guard on, the best of 200 calls, on the development
@@ -5879,8 +5376,7 @@ same area `50.26326183407128` and `M_irr` to every digit, `r_min` and
 `r_mean` differing in the sixteenth, and converges in 48 iterations
 against 49 — the fast flow's stall detector, not the surface. The
 interpolation's rates are unchanged, `4.19` and `2.81` (`horizon_tests.jl`).
-**The provider interpolates 16 variables, not 20 (added 2026-09-26, in
-review).** `adm_vars_from_state` reads all of `h`, the gradients of `h_ti`
+**The provider interpolates 16 variables, not 20.** `adm_vars_from_state` reads all of `h`, the gradients of `h_ti`
 and `h_ij`, and `Π_ij`: `Π_tt` and `Π_ti` enter only the `tt` and `ti`
 components of `∂_t g`, which `K_ij` never uses, and no gradient of `Π` is
 read at all — 43 of the 80 numbers per point a 20-variable value-and-gradient
@@ -5905,38 +5401,18 @@ differently.
 no longer `hostcopy` the state, and TreeAMR's `interpolate` runs on the
 field set's backend, but this package has no device test until step 9.
 
-**Step 8a, what crosses the horizon from inside it** — moved to
-[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#step-8a-what-crosses-the-horizon-from-inside-it)
-(2026-10-08).
+**Step 8a, what crosses the horizon from inside it** — in
+[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#step-8a-what-crosses-the-horizon-from-inside-it).
 
-### What the suite costs, and where (measured 2026-09-19 on Symmetry)
+**Steps 8b–8′, the generic interior and the moving hole** — in
+[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#steps-8b8-the-generic-interior-and-the-moving-hole): the range projection (8b), the layer against an inexact target
+(8c), the default rate (8c′), the tracked geometry (8d), the fitted target
+(8e-i, 8e-ii), the measurement matrix (8f), the moving hole (8) and its
+trailing side (8′).
 
-Measured on one `amddebugq` node, Julia 1.13.0, `Float64`, no coverage —
-the configuration the suite is normally run in. **3444 assertions pass in
-`31m12` at one thread and `16m41` at four**, a speed-up of **1.87×**. Read
-these against the development machine's `12m31 / 8m38`: a Symmetry core is
-about 2.5× slower, so the cluster buys throughput and not wall clock, as
-step 6 found.
+### What the suite costs, and where
 
-**97 % of the wall clock is inside testsets** — 0.8 min of 31.2 sits
-outside them, so there is nothing to win in loading or in the harness. The
-distribution is a long tail with one fat head: the top 5 testsets are
-35 % of the run, the top 10 are 52 %, the top 20 are 74 %, over 124
-top-level testsets.
-
-| testset | 1 thread | 4 threads | speed-up |
-|---|---|---|---|
-| The driver and the static hole | 5.50 | 1.68 | 3.28× |
-| The dissipation does not change what the interface costs | 1.41 | 0.33 | 4.22× |
-| A ghost filled at order `p` … an order | 1.40 | 0.34 | 4.18× |
-| The horizon | 1.30 | 0.45 | 2.90× |
-| The pointwise algebra … `T=Float32x2` | 1.28 | 0.88 | 1.46× |
-| A run computes in the type it is given: `T=Float32` | 1.13 | 0.77 | 1.46× |
-| The ADM constraints vanish on an exact vacuum solution | 1.08 | 0.77 | 1.40× |
-
-(minutes). `driver_tests.jl` alone is **17.6 %** of the serial run, and
-inside it the convergence sweep *the masked error converges at order `q` on
-the frozen hierarchy* is **2.22 min — 7 % of the whole suite**.
+Measured on the suite of 3444 assertions; the rest of that profile is in [`HISTORY.md`](HISTORY.md#what-the-suite-costs-and-where-measured-2026-09-19-on-symmetry).
 
 **The speed-up separates the two kinds of cost, and so does code
 coverage.** Testsets that evolve something parallelise at 2.9–4.2× and cost
@@ -5949,174 +5425,8 @@ So the arithmetic half shrinks by doing less work and the compilation half
 only by *specialising less*; a new `q`, a new element type or a new
 interior variant is priced in the second column and nowhere else.
 
-**The physics tests are per-step bound, not overhead bound** — which was
-worth measuring, because the opposite was the plausible guess: the ADM
-monitor is a hundred second derivatives and runs once per chunk, and a
-short run has few steps per chunk. It is not what they cost. Running each
-resolution of the sweep to `t_end` and to `2 t_end` and taking the slope
-and the intercept:
-
-| `N` | points | per step | fixed per run | fixed share |
-|---|---|---|---|---|
-| 6 | 25 920 | 1.06 s | 1.43 s | 10.9 % |
-| 8 | 61 440 | 2.01 s | 1.32 s | 4.5 % |
-| 10 | 120 000 | 3.40 s | 1.41 s | 2.4 % |
-
-Setup, the per-chunk analysis and the horizon find together are **1.3–1.4 s
-per run whatever the resolution**, and the rest is the integrator. Per
-point per RK4 stage that is **11.5, 8.6 and 7.2 µs** at `N = 6, 8, 10` —
-falling with `N` because the per-block costs amortise — and the sweep's
-total cost grows as `N^2.95`, not `N⁴`, for the same reason. The constant
-is the right-hand side's own, and [Possible
-extensions](#possible-extensions) already books kernel efficiency as a
-research project rather than a milestone; until that is taken up, a
-physics test costs what its points and its steps cost.
-
-So the levers, in order of what they return and with what they cost:
-
-1. **Four threads.** Already 1.87× on the whole suite and 3.28× on
-   `driver_tests.jl`, for nothing. CI runs one of its two pull-request
-   cells serial, and two of its three cells on `main`.
-2. **The sweep's resolutions.** `Ns = (6, 8, 10)` costs `13.1 + 29.5 +
-   59.3 s`, and `N = 10` alone is 58 % of it. At `N^2.95`, `(6, 7, 8)`
-   costs 62 % of `(6, 8, 10)` and saves about **38 s**; `N ≥ 2G + 2 = 6` is
-   TreeAMR's vertex invariant, so 6 is the floor and there is nothing
-   below it. The price is lever arm: `h` spans 1.33× instead of 1.67×, so
-   the fitted rate is noisier and the slack in `rate_l2 > q − 1/4` has to
-   absorb it.
-3. **`t_end`.** 97 % of a run is per-step, so halving `t_end = 3/20`
-   nearly halves the sweep — but at 11–17 steps it is already short, and
-   the error has to stay clear of roundoff for a rate to mean anything.
-4. **Fewer specialisations**, for the 13 % that threads do not touch.
-   `T=Float32x2` in the `pointwise` rows is the single largest at 0.88 min
-   even at four threads.
-
-None of 2–4 drops a physics claim; they change how finely it is measured.
-
-**Where the time actually goes** (profiled 2026-09-19, one thread on
-Symmetry: the whole suite under `@time`, and one `N = 8`, `q = 2` hole run
-sampled at 1 ms and by allocation). Three findings, and none of them is
-the physics.
-
-**Compilation is 52.4 % of the suite**: `1877 s, 7.04 G allocations:
-242.670 GiB, 6.00 % gc time, 52.43 % compilation time`. That bounds every
-other optimisation — making the numerics twice as fast buys 24 % of the
-suite, not 50 % — and it is the same statement as the threading and
-coverage split above, arrived at independently.
-
-**About a fifth of the run is ghost-exchange bookkeeping, and it is
-upstream.** Of 28 889 samples, the hottest leaves are `rem` (11.5 %), `==`
-(9.6 %) and `div` (1.3 %), and resolving their callers puts almost all of
-them in one place: **3263 of 3310 `rem` samples and 358 of 365 `div`
-samples are `TreeAMR/src/ghosts.jl:27`**,
-
-    off = ntuple(d -> (r ÷ boxstride[d]) % boxlen[d], Val(D))
-
-— an integer division and a remainder per dimension, per ghost point, per
-variable, in `cpu_transfer_kernel!`. A further 1930 `==` samples are
-`CartesianIndices` iteration in the same kernel's tensor-product stencil
-loop. Actual floating-point work — `+`, `*`, `muladd`, `-` — is about
-22 %. So the transfer kernel's *addressing* costs nearly as much as the
-arithmetic of the whole run, and by this package's rules that is TreeAMR's
-to fix, not ours.
-
-**One hole run allocates 3.66 GiB**, which it should not:
-
-| est. per run | what | where |
-|---|---|---|
-| 2390 MiB | boxed `Float64` | `ntuple.jl:68` (caller not resolved) |
-| 779 MiB | `SVector{10,Float64}` | **`evolution.jl:378`** |
-| 132 MiB | `Core.Box` | a closure capturing a mutated local |
-| 25 MiB | `BigInt` / `MPQ._MPQ` | `Rational` arithmetic at run time |
-
-`evolution.jl:378` is `∂ₜh, ∂ₜΠ = gh_rhs_at_point(…)`, whose two
-`SVector{10}` returns are supposed to stay in registers — "Never build an
-`SVector` of all derivatives" under [Precision, threads,
-devices](#precision-threads-devices) is about exactly this, and
-`pointwise_tests.jl` asserts the node-local algebra allocates nothing. The
-algebra keeps that promise; the *kernel around it* does not, so the return
-is escaping rather than being inlined away. `Core.Box` is the classic
-closure-capture instability, and `BigInt` at run time should not exist at
-all — the stencil weights are built in `Rational` and rounded once into `T`
-at compile time by design.
-
-None of this is measured on a device, and none of it is the deferred GPU
-question: these are host costs, in host code, at `q = 2`.
-
-**The right-hand-side kernel boxes its own results, and unboxing them
-collides with an invariant.** `∂ₜh, ∂ₜΠ = gh_rhs_at_point(…)` is assigned
-*inside a conditional branch* and then captured by the
-`ntuple(Val(NC)) do v … end` write-back closures — the idiom
-KernelAbstractions forces, since it refuses a `return` in a kernel body.
-Julia lowers a branch-assigned captured variable into a `Core.Box`, after
-which `∂ₜh[v]` infers as `Any`, and every component write becomes a
-dynamic dispatch allocating a boxed `Float64`. One cause, all three of the
-allocation rows above. Wrapping each closure in `let ∂ₜh = ∂ₜh, … end`
-(and the layer branch's `w`, `ρ`, `he`, `Πe` with it) measures, on the
-same node:
-
-| | allocations | time |
-|---|---|---|
-| as written | 3662.8 MiB | 29.54 s |
-| with `let` | **365.2 MiB** | **25.51 s** |
-
-Ten times fewer allocations and 14 % faster — and it is not only a speed
-question: `pointwise_tests.jl` proves the *node-local algebra* allocates
-nothing, which is true and stayed true, while the *kernel around it*
-allocated ~65 MiB per evaluation. Nothing asserts that, and on a device it
-is not expressible at all, so this blocks G6 rather than merely slowing
-G0–G5.
-
-**The fix is not applied**, because it fails one assertion:
-`interior_tests.jl`'s `out_identical`, which requires the `:damped`
-kernel outside `r_1` to be **bit-identical** to `:none` — "the same
-numbers … not merely close ones", as [The interior: a pointwise damping
-layer](#the-interior-a-pointwise-damping-layer) puts it. Its two siblings
-(`core_zero`, `worst ≤ 1e-12·scale`) still pass, so the disagreement is in
-the last bits, and the mechanism is this document's own: the two are
-separate `Val`-specialised kernels, and once the write-back is statically
-typed each fuses its multiply-adds in its own inlining context. **The
-invariant was being met by the bug** — both paths were equally dynamic
-before. Three ways out, and the choice is a design decision: keep the
-identity and the allocations; keep the fix and weaken `out_identical` to
-roundoff (amending the claim here); or find a spelling that gives both.
-**(Decided 2026-09-27: the fix, and roundoff.** IMEXRungeKutta's
-integration of 2026-09-26 removed the box by giving each branch its own
-names, and the collision arrived as predicted — on x86-64 only: Apple
-silicon still fuses the two kernels alike, while on an EPYC 7543
-(`znver3`, Symmetry and GitHub's Linux runners) 241 914 of 962 780 values
-outside `r_1` differ, by at most **120 eps** of the variable's largest
-`|du|`. `interior_tests.jl` now bounds that at 512 eps and reports the
-ratio; an interior term leaking outside `r_1` would be of order `ρ_max`
-times the test's `10⁻³` perturbation. The same judgement relaxed
-`moving_tests.jl`'s "the analytic solution outside the offset surface bit
-for bit", a kernel's fill against a host `state_tuple`, which differed
-only under coverage on Linux: bounded at 64 eps of each variable's largest
-value, measured `0` plain and `1.4` eps under `--code-coverage
---check-bounds=yes` on an EPYC 7532, where the interior's ratio is `120`
-and `96` eps.**)**
-
-**What allocation remains is TreeAMR's, and so is the `BigInt`.** With the
-`let` patch in place `evolution.jl` leaves the allocation profile
-entirely, and the named sites are all upstream:
-
-| est. | site |
-|---|---|
-| ~22 MiB | `lagrange_weights@TreeAMR/src/operators.jl:377`–`380` — `BigInt`/`MPQ` rationals, thousands of allocations, **at run time** |
-| ~10 MiB | `run_group!@TreeAMR/src/ghosts.jl:70` — KernelAbstractions launch-argument tuples, per launch |
-| 1.5 MiB | `prolong_stencil@schedule.jl:480` — `BigFloat` |
-
-So the run-time `BigInt` is not this package's stencil weights, which are
-rounded into `T` once at compile time as designed: it is TreeAMR
-recomputing exact-rational Lagrange interpolation weights per ghost fill.
-That is the same file region as the `rem`/`div` hot spot, so TreeAMR's
-ghost machinery now owns both the time and the allocations. (Two caveats
-on those estimates: the profiler's own buffer appears as a single sample
-scaled to 468 MiB and is discarded, and the attributed rows sum to about
-30 MiB of the 365, so a fragmented tail is unaccounted for.)
-
 **Four threads on four cores is not oversubscribed in any way that costs**
-(measured 2026-09-19, and the obvious hypothesis was wrong). Julia 1.13
+(the obvious hypothesis was wrong). Julia 1.13
 gives `-t4` **four** GC threads, so a four-thread suite has eight runnable
 threads, and a GitHub Linux runner for a public repository has four vCPUs
 — which looks like 2× oversubscription and is not. Under a four-CPU
@@ -6133,19 +5443,86 @@ explains it is `user/real = 1.80`: with four cores available the suite
 keeps **1.8 of them busy**, because so much of it is single-threaded
 compilation. There is no contention to relieve — the cores are idle.
 
-The same table calibrates GitHub. Symmetry at eight CPUs and four threads
-is `16m41`, at four CPUs `21m30`, so the narrow allocation costs 29 %; and
-GitHub's four-thread cell measures `22.7` and `23.2` min, which is the
-four-CPU figure. Its runners behave exactly as four-core machines should.
-One run of three took `61.6` min against a `43.6` min serial sibling —
-that is a bad runner, not a property of the matrix, and three samples with
-a 2.7× spread are not enough to act on.
+#### The test files
 
+The suite's files include `precision_tests.jl`, `prerequisite_tests.jl`
+(the pinned TreeAMR still exports the names the design calls, a
+`SpacetimeMetrics` background compiles and runs as a kernel argument on
+`CPU()` filling a field set bit-for-bit as a host loop does, and the
+*unexported* metric wrappers `gauge.jl` dispatches on still exist), the
+pointwise pair — `pointwise_tests.jl` and `pointwise_identity_tests.jl`
+over a shared `pointwise_backgrounds.jl`, which is where the six
+backgrounds of this document's table and the analytic data are built —
+`stencils_tests.jl`, which evaluates no background at all and costs
+seconds, and `gauge_tests.jl`, `initialdata_tests.jl`,
+`evolution_tests.jl` (the kernel against `gh_node_rhs_expanded`, and the
+properties nothing else can state), `convergence_tests.jl` and
+`noise_tests.jl`, over the helper `evolution_cases.jl`; and
+`constraints_tests.jl` (both monitors, against `ddmetric` on analytic
+data and against the mesh), `interface_tests.jl` (the interface-order
+table on the two-level mesh), `type_tests.jl` (`Float32` end to end,
+`Float32x2` for the algebra) and `threading_tests.jl` over the standalone
+`thread_workload.jl`; and `interior_tests.jl` (the
+profiles, the core rule, the masks, the radius assertions firing, and one
+right-hand-side evaluation with the layer on a mesh) and
+`driver_tests.jl` (the runs: the record, the order on the frozen
+hierarchy, the three variants, the drift, the `Π` post-pass), over the
+hole fixture in `evolution_cases.jl`; and `refinement_tests.jl`
+(the Löhner algebra and its global floor, the four marks on a `τ` field
+written by hand, the mask, the level floor and the ceiling, the
+initial-data cycle, and two short adaptive runs — one whose mesh does not
+move and one whose does), over that file's second hole fixture and the
+three new helpers in `evolution_cases.jl`; and
+`horizon_tests.jl` (the interpolator's exactness and its rate, the
+footprint guard, Kerr's horizon from a displaced guess on both the step-5
+fixture and the mesh the indicator chose, and the record's horizon rows at
+the case's cadence); and `fit_tests.jl` (the fit's harmonics, its
+least squares, the static and spinning holes' fits and their validity, the
+`g_ab` control, the evaluator at two precisions, and the fit of the one
+tracked run's state, which `evolution_cases.jl`'s `tracked_fixture_run`
+shares with `tracking_tests.jl`). **`test/hole_runs.jl` is a standalone script, not
+part of the suite**: the `t = 50 M` runs, `q = 4`, the two harmonic
+charts, the indicator's calibration and the horizon
+section (Kerr's numbers at `a = 9/10` and in the harmonic chart, on meshes
+of a thousand blocks) are minutes rather than seconds, and its numbers are
+recorded here with the command that produced them. There is a second
+script, **`test/dispersion.jl`** — the frozen-coefficient dispersion
+analysis of the package's own weights inside a horizon, the penetration
+length `ℓ` of grid-scale content, and a one-dimensional model run that
+predicts what the 3D runs measure — and `hole_runs.jl` has a `leakage`
+section, which is *not* in its default list (it is a batch job).
+The `calibration` section is not in it either: about 150 runs of
+`5 M` and `50 M`, a dozen node-hours on Symmetry.
+`simwatch_tests.jl` is the SimWatch writer's file (with its SVG
+thumbnails). `test/octant_runs.jl`'s output is analysed by
+`octant_rates.jl`, `octant_study.jl` and `octant_diff.jl`, and
+`test/aligned_study.jl campaign=transverse` reads the transverse
+campaign's data and sets each row against the aligned row of the same
+`a`, `v` and `h`.
 
-### The suite's tiers, and where each runs (2026-11-06)
+#### What pays for the suite's time
+
+Most of the suite's time is **compilation**, and the things that pay for
+it are, in order: `SpacetimeMetrics`' nested forward-mode passes for six
+backgrounds at two precisions; a
+right-hand-side kernel per `(q, has gauge source, has dissipation,
+interior variant, T)`; the ADM constraint kernel, whose first
+specialisation is **18 s** and each further one about 4 s; and the four
+files whose cost is *arithmetic* rather than compilation —
+`driver_tests.jl` (the suite's black hole, 1m59 / 44.8 s),
+`interface_tests.jl`, where the ghost fill at `p = 6` is 79 % of every
+evaluation, `refinement_tests.jl` (22.1 / 12.8 s) and `horizon_tests.jl`
+(28.7 / 12.8 s, of which the two evolutions are most: the interpolator's
+own claims are under two seconds and a *find* is a tenth of one).
+
+`checkpoint_tests.jl` is over `PLAN.md`'s 30 s rule because a chain is
+the claim; the cheapest chains that still reach each carried piece of
+state are the ones there.
+
+### The suite's tiers, and where each runs
 
 Evolving a black hole is what this package is for, and it is work for a
-workstation or Symmetry, not for a free GitHub runner (Erik, 2026-11-06).
+workstation or Symmetry, not for a free GitHub runner.
 On GitHub's four-core Linux runners, with `julia-runtest`'s
 `--check-bounds=yes`, the suite had grown to **72 minutes serial** and
 **51 at four threads**, the threaded cell another 17.5 in front of that for
@@ -6175,7 +5552,7 @@ invariance, and one short hole run through `evolve!` (the record's). A
 left-out testset is a testset there holding one skipped test, so the summary
 counts it as "Broken" and `runtests.jl` lists the names. Measured on the
 development machine at four threads: **5035 assertions in 10–11 minutes**,
-against the full suite's 16–24. On GitHub (PR #23, 2026-11-07) the serial
+against the full suite's 16–24. On GitHub the serial
 cell's suite went from **72 to 32 minutes** and the threaded cell's from 51
 to 24, and the MPI job took 16 on its own runner, so a pull request waits
 **34 minutes instead of 75**. What the quick tier still pays most for is
@@ -6193,16 +5570,35 @@ unasked, but on a public repository it runs any fork's pull request on the
 machine, and a runner daemon on Symmetry's login node is the
 administrators' to allow.
 
-### Steps 8b–8′: the generic interior and the moving hole
+#### CI's cells and coverage
 
-Moved to
-[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#steps-8b8-the-generic-interior-and-the-moving-hole)
-(2026-10-08): the range projection (8b), the layer against an inexact target
-(8c), the default rate (8c′), the tracked geometry (8d), the fitted target
-(8e-i, 8e-ii), the measurement matrix (8f), the moving hole (8) and its
-trailing side (8′).
+Code coverage
+runs on **the macOS cell only**: instrumented runs compute
+*wrong numbers* on GitHub's Linux runners (207 failures on the threaded
+Linux cell at Julia 1.13.1, which a removed gate had left instrumented),
+while the instrumented macOS cell and the instrumented suite on Symmetry
+pass. Probes of 146 GitHub runners found the trigger: `--code-coverage`
+together with `--check-bounds=yes` (what `julia-runtest` passes; either
+alone is fine) on AMD Zen 4/Zen 5 **with AVX-512 exposed** (EPYC 9V45
+always, EPYC 9V74 only on the VMs that expose it), on Julia **1.13.0 and
+1.13.1**, deterministically — a miscompilation, not a bad machine. Zen 3,
+Intel with AVX-512 and nightly (1.14.0-DEV.3386) pass. **CI runs
+in two tiers**, the same in every Tree* repository: a
+pull request runs the two Linux cells only, uninstrumented; a push to
+`main`, a weekly schedule and a manual dispatch add the macOS cell and
+its coverage; Markdown-only changes and tags run nothing. The pull-request
+cells had taken 65–90 min each, against 17–21 min for the suite on the
+laptop, and 61 of the last 80 commits on `main` touched only Markdown.
+**GitHub runs the quick tier**; `full` is the default, so `Pkg.test()` is
+unchanged, and the weekly schedule and a dispatch with `tier = full` run it
+on GitHub too. 
 
-### Robust stability on the octant (measured 2026-10-02)
+On Symmetry's nodes the full suite no longer fits `amddebugq`'s or
+`h200debugq`'s hour — three jobs stopped at `type_tests.jl` at 60 min, with two
+compiling against each other's pidfiles — so it is submitted to `amdq` or
+`h200q` (`CLAUDE.md`, "Commands"; [history](HISTORY.md#the-test-suite)).
+
+### Robust stability on the octant
 
 `test/octant_runs.jl` on Symmetry's H200 (`octant-run`, jobs 567966 and
 567984): flat space on `[0, 128]³`, reflecting at the three faces through the
@@ -6238,21 +5634,21 @@ against `2.83` for the wave part at the finest level, `0.43` against `2.78`
 for the dissipation). A 64-core EPYC node is `12.6×` slower than one H200 here
 (`1351 s` per unit of `t`).
 
-### Single black holes: recommended settings (added 2026-10-08)
+### Single black holes: recommended settings
 
 Rules of thumb for a single Kerr-Schild hole, `M = 1`, spin `a ≤ 9/10` along
 `z`, at rest on the octant, drawn from the runs in
 [`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#single-holes-on-the-octant-a--0-to-910-2026-10-02-to-2026-10-07)
-— and, from 2026-10-20, the `a = 0` hole moving at `v = 1/5` on the quadrant
+— and the `a = 0` hole moving at `v = 1/5` on the quadrant
 (the rows marked *moving*, from [the boosted Kerr-Schild hole at binary
 speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)),
-and from 2026-10-21 the `a = 1/2` hole moving along its spin at `v = 1/5` on
+and the `a = 1/2` hole moving along its spin at `v = 1/5` on
 the rotating quadrant ([a spinning hole along its
 axis](SINGULARITY_HANDLING.md#a-spinning-hole-along-its-axis-2026-10-21)),
-and from 2026-10-22 `a = 0`, `1/2` and `9/10` moving along their spin at
+and `a = 0`, `1/2` and `9/10` moving along their spin at
 `v = 1/5` and `1/2` ([aligned spin and
 velocity](SINGULARITY_HANDLING.md#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22),
-the rows marked *along `z`*, `20 M` each, `chunk = M`), and from 2026-10-25
+the rows marked *along `z`*, `20 M` each, `chunk = M`), and
 `a = 1/2` and `9/10` moving along `x` across their spin at `v = 1/5` and
 `1/2` on the bitant ([spin across the
 motion](SINGULARITY_HANDLING.md#spin-across-the-motion-the-bitant-2026-10-24),
@@ -6272,13 +5668,15 @@ spacing at the hole; a convergence pair keeps the layer's radii fixed in `M`,
 not in cells. The horizon's coordinate radius is `r₊ = 1 + √(1 − a²)` at the
 poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
 
+Earlier versions of this table and its rules: [history](HISTORY.md#single-black-holes-recommended-settings).
+
 | `a` | variant | coarsest `h` (convergence pair) | singularity settings | basis |
 |---|---|---|---|---|
 | 0 | `:damped` | `1/16` (`1/16`, `1/24`) | `r_0 = 3/4`, `r_1 = 3/2` | measured: order 4 from `1/16` |
 | 0 | `:fitted` | `1/24` (`1/24`, `1/32`) | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured: `ℋ` outside `1.6×` `:damped`'s, the error `1.1×` |
-| 0, *moving* (`v = 1/5` along `x`) | `:damped` (with the target's rate, 2026-10-21) | `1/16` (`1/24`, `1/32`) | `r_0 = 5/8`, `r_1 = 23/16` (`8.4` cells inside the contracted horizon at `1/16`) | measured to `40 M` at `4/M`: from `1/24` on `ℋ` just outside the horizon `1.00–1.03×` the resting hole's and the error there `1.26–1.36×` to `16 M`; order 4 in every shell from `1/24` to `1/32`; at `1/16` `ℋ` there `1.4–1.6×` (`8/M`: `1.03–1.09×` its own resting hole, which `8/M` lowers too) |
+| 0, *moving* (`v = 1/5` along `x`) | `:damped` (with the target's rate) | `1/16` (`1/24`, `1/32`) | `r_0 = 5/8`, `r_1 = 23/16` (`8.4` cells inside the contracted horizon at `1/16`) | measured to `40 M` at `4/M`: from `1/24` on `ℋ` just outside the horizon `1.00–1.03×` the resting hole's and the error there `1.26–1.36×` to `16 M`; order 4 in every shell from `1/24` to `1/32`; at `1/16` `ℋ` there `1.4–1.6×` (`8/M`: `1.03–1.09×` its own resting hole, which `8/M` lowers too) |
 | 0, *moving* (`v = 1/5` along `x`) | `:fitted` | `1/24` | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` | measured to `40 M`: stable, the error just outside the horizon `:damped`'s at `4/M`, `ℋ` there `13–15×` `:damped`'s at `8/M`; `ℋ` there does not converge to `1/32` at `m = 16`, even at rest; `trail_ramp = 9/10` raised the error there `1.5–2.4×` and lowered it over the evolved region to `0.72–0.91×` |
-| 0, *along `z`* (`v = 1/5`, `1/2`) | `:damped` (the core at `max(ρ_max, 12 |v|/r_0)`, 2026-10-22) | `1/16`; `1/24` at `v = 1/2` (`1/16`, `1/24`, `1/32`) | `r_0 = 1/2`, `r_1 = 19/16` (`8.7` cells inside the contracted pole `1.732` at `v = 1/2` and `1/16`; the ramp `11` cells) | measured to `20 M`: order 4 in the error outside the horizon; moving over resting in `[3, 5)` `1.38×` at `1/5` and `4.9×` at `1/2`, the same at every `h` (the moving solution and its position); `ℋ` `0.8–2.0×` at `1/2`, `0.65–1.01×` at `1/5` |
+| 0, *along `z`* (`v = 1/5`, `1/2`) | `:damped` (the core at `max(ρ_max, 12 |v|/r_0)`) | `1/16`; `1/24` at `v = 1/2` (`1/16`, `1/24`, `1/32`) | `r_0 = 1/2`, `r_1 = 19/16` (`8.7` cells inside the contracted pole `1.732` at `v = 1/2` and `1/16`; the ramp `11` cells) | measured to `20 M`: order 4 in the error outside the horizon; moving over resting in `[3, 5)` `1.38×` at `1/5` and `4.9×` at `1/2`, the same at every `h` (the moving solution and its position); `ℋ` `0.8–2.0×` at `1/2`, `0.65–1.01×` at `1/5` |
 | 0.3 | `:damped` | `1/16` (`1/16`, `1/24`) | `r_0 = 3/4`, `r_1 = 3/2` | the rules |
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:damped` (with the target's rate) | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 23/16` (`9.4` cells inside the contracted pole `r₊ √(1 − v²) = 1.828` at `1/24`) | measured to `40 M` at `4/M`, with `1/40`: `ℋ` `0.81–1.08×` the resting hole's in every shell at every `h` and time, the error `1.1–1.6×` (the hole's position, late); order 4 outside the horizon in both pairs; `J − a` drifts at the resting hole's rate, order 4 |
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:fitted` | `1/32` (the ring: at `1/24` the core surface is at `0.35 < a` on the equator) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured to `40 M`: stable, but `ℋ` just outside the horizon `43×` `:damped`'s at `1/32` and `176×` at `1/40`, `10–15×` its own resting hole; it does not converge from `1/32` to `1/40` at `m` fixed in cells, even at rest |
@@ -6306,10 +5704,10 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   margin's 4.8 cells; at `a = 0` a margin of 4 cost only `2×`, which favours
   the ring.) For `:damped` the rule sets `r_0` and the coarsest `h`; for
   `:fitted`, whose initial data are analytic down to the core surface, it
-  bounds `m + n_L` on the equator. **(Amended 2026-10-16: necessary, not
-  sufficient.** At `a = 9/10` and `1/48`, `r_0 = 1` gives the ring 9.1 cells
+  bounds `m + n_L` on the equator. **Necessary, not
+  sufficient:** at `a = 9/10` and `1/48`, `r_0 = 1` gives the ring 9.1 cells
   and is `3.7×` *worse* than `19/20`'s 4.7, with a ramp of 12 cells against
-  14.4. `1/96` is needed whichever `r_0` is used.)
+  14.4. `1/96` is needed whichever `r_0` is used.
 - **`:damped`**: a ramp `r_1 − r_0` of at least 12 cells (18 lowers `ℋ`
   outside about `3×` at `a = 0`), and `r_1` at least 8 cells inside the
   horizon at the poles, `r₊`; more depth than 8–12 cells did not help.
@@ -6320,14 +5718,12 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   a bounded ring at the pole, `0.25 M` grows on the axis), while `0.625 M` is
   fine at `3/5`; between the two it is unknown. `fit_cont = 2` won every pair
   at `a = 0`; the spinning runs have used `fit_cont = 1` only.
-- **A moving hole** (added 2026-10-20, measured at `a = 0`, `v = 1/5`):
-  - **`:damped` at the default `4/M`, with the target's rate** (amended
-    2026-10-21). Without `(1 − w) ∂_t u_exact` in the layer and the core's
+- **A moving hole** (measured at `a = 0`, `v = 1/5`):
+  - **`:damped` at the default `4/M`, with the target's rate.** Without `(1 − w) ∂_t u_exact` in the layer and the core's
     own rate the layer lagged a moving target by `|∂_t u|/ρ_max` — a
     residual of `6.5` at `4/M` and `3.9` at `8/M` at every `h`, the error
     just outside the horizon `28–44×` the resting hole's at `4/M` and `1/16`
-    — and `8/M` was the remedy. With the rates (`core_follows`, built
-    2026-10-20) the residual is `0.09–0.21`, `ℋ` just outside the horizon is
+    — and `8/M` was the remedy. With the rates (`core_follows`) the residual is `0.09–0.21`, `ℋ` just outside the horizon is
     the resting hole's from `1/24` on, and `4/M` beats the old `8/M`
     everywhere (`ℋ` over the evolved region `0.08–0.36×`). `8/M` now helps a
     moving hole only as much as a resting one: at `1/16`, where it lowers
@@ -6343,17 +5739,16 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
     not**: the found center runs ahead of the analytic one by truncation
     error (`1.6·10⁻⁶` at `40 M` at `1/32`, order four), and by `40 M` the
     error is `2.6–3.4×` the resting hole's in every shell at every `h`.
-  - The core must follow its target (`core_follows`, built 2026-10-20): with
+  - The core must follow its target (`core_follows`): with
     `du = 0` the run died at `r_0/v = 3.1 M`.
-  - **Along its spin** (added 2026-10-21, measured at `a = 1/2`): the rotating
+  - **Along its spin** (measured at `a = 1/2`): the rotating
     quadrant, and everything above holds unchanged — `ℋ` the resting hole's,
     order four, the late error the position (`z − c_z = 1.2·10⁻⁶` at `40 M` at
     `1/32`). Take `r_0` outside the ring and `r_1` against the contracted
     *pole*, `r₊ √(1 − v²)`. A `:fitted` core surface must clear the ring on the
     equator, `m + n_L` cells below `√(r₊² + a²)`: at `m = 20`, `n_L = 18` and
     `a = 1/2` that rules out `1/24`. The spin's drift is the resting hole's.
-  - **Choose `r_1` for the fastest speed the run will reach** (added
-    2026-10-22, from the aligned campaign). Put it at least 8 cells, at the
+  - **Choose `r_1` for the fastest speed the run will reach** (from the aligned campaign). Put it at least 8 cells, at the
     coarsest `h` of the family, below the contracted pole `r₊ √(1 − v²)` at
     that speed, and keep the radii fixed in `M` across `v` and `h`. At
     `a ≤ 1/2` one layer then serves every speed to `1/2`: `r_0 = 1/2`,
@@ -6363,10 +5758,10 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
     and that layer, `22` cells below the resting pole, grows at rest; the
     resting `r_1 = 5/4` holds `v ≤ 1/5` only. Until a layer holds both, pick
     the `a = 9/10` layer by the speed, and do not run `9/8` at rest.
-    **Across the spin** (amended 2026-10-25) the motion contracts the equator
+    **Across the spin** the motion contracts the equator
     and not the pole, and `r_1 = 5/4` serves `a = 9/10` at every speed to
     `1/2`; read the margin from `horizon_min_radius`, which is exact there.
-  - **Across its spin** (added 2026-10-25, the bitant): the same layers, at
+  - **Across its spin** (the bitant): the same layers, at
     twice the points of the quadrants. Expect an excess near the horizon at
     the coarser spacings that the aligned hole does not have: at `a = 1/2` it
     is `4–8×` the aligned hole's error at `1/24` and `1.6–2.5×` at `1/32`.
@@ -6379,8 +5774,8 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
     `chunk_interior` refuses one above `1/dt`. What is left at `v = 1/2` is a
     first-order residual at the point the core has just released; at
     `a = 1/2` it rises again at `1/40`.
-  - **Production cadence: `chunk = M`, no split** (2026-10-22, [The analysis
-    cadence on an H200](#the-analysis-cadence-on-an-h200-measured-2026-10-22)):
+  - **Production cadence: `chunk = M`, no split** ([The analysis
+    cadence on an H200](#the-analysis-cadence-on-an-h200)):
     `2.5×` cheaper than `M/2` with the trailing/leading split. Turn the split
     on to diagnose a moving layer's two sides.
 - **Screen a new `:fitted` depth** before a long run: the same tracked
@@ -6390,31 +5785,15 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   `test/octant_runs.jl` needs its `variant=` option, and the singular-set
   check, which tests the core's least radius against `a` and so refuses a
   polar radius below the equatorial ring, needs to know the ring's plane.
+
+  **Inconsistent:** `CLAUDE.md`'s "Commands" says that `test/octant_runs.jl` takes `variant=` and `trail_ramp=` for a tracked layer, while this item says only the scratch copy `spin-sync/` can run the screen because the script needs its `variant=` option.
+
 - **What would firm this up**, in order:
   - depth screens at `a = 0.7` and `0.8`;
   - `fit_cont = 2` with spin, at `3/5`.
-- **What it costs** on one H200 with the pre-rewrite kernel: `26 s/M` at
-  `a = 0`, `1/16` (9.4 M points); `6.5 min/M` at `3/5`, `1/32` (60.8 M);
-  `5 min/M` at `9/10`, `1/48` (31.9 M); `15 min/M` at `9/10`, `1/96`
-  (52.8 M). On a hole, `main`'s rewritten kernel is `1.6–2.2×` faster per
-  point, not the gauge wave's `8×` (measured 2026-10-14): `220 s/M` at `1/48`
-  (38.0 M points on `L = 128`) and `460 s/M` at `1/96` (58.9 M). The layer's
-  kernel and the refined mesh's prolongation are what is left. The moving
-  `a = 0` hole on the quadrant's capsule (measured 2026-10-20, `56–112` steps
-  per `M`): `34 s/M` at `1/16` (`3.51 M` points, `21 GB`), `125 s/M` at `1/24`
-  (`11.8 M`, `33 GB`), `234–250 s/M` at `1/32` (`28.0 M`, `54 GB`; `:fitted`
-  `64 GB`) — `40 M` in `0.4`, `1.4` and `2.6–2.8 h`, and `75–175 ns` per point
-  and step, `2–4×` the `a = 9/10` family's. The moving `a = 1/2` hole on the
-  rotating quadrant's capsule (measured 2026-10-21, `84–140` steps per `M`):
-  `130 s/M` at `1/24` (`11.8 M` points, `33 GB`), `254 s/M` at `1/32`
-  (`28.0 M`, `54 GB`; `:fitted` `243 s/M`, `64 GB`), `543 s/M` at `1/40`
-  (`54.8 M`, `89 GB`; `:fitted` `525 s/M`, `107 GB`) — `40 M` in `1.45`,
-  `2.7–2.8` and `5.8–6.0 h`, `71–131 ns` per point and step. `1/48` on that
-  capsule is `94.7 M` points, about `141 GB` for `:damped` and `171 GB` for
-  `:fitted` extrapolated linearly: not one H200. Every number so far in this
-  item ran the analysis every `M/2`, the moving ones with the
-  trailing/leading split, and most of the moving runs' `71–175 ns` was that
-  analysis. The aligned campaign (measured 2026-10-22, `chunk = M`, no split,
+- **What it costs** on one H200 ([earlier runs](HISTORY.md#single-black-holes-recommended-settings)). On the capsule of the moving `a = 1/2`
+  hole on the rotating quadrant, `1/48` is `94.7 M` points, about `141 GB` for `:damped` and `171 GB` for
+  `:fitted` extrapolated linearly: not one H200. The aligned campaign (`chunk = M`, no split,
   TreeAMR 0.2.4) cost `21–34 ns` per point and step at its finest spacings:
   `75 s/M` at `a = 0`, `1/32` (`21.6 M` points, `44 GiB`), `252 s/M` at
   `a = 1/2`, `v = 1/2`, `1/40` (`58.4 M`, `92 GiB`), `587–605 s/M` at
@@ -6423,7 +5802,7 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   `0.45`, `1.44`, `3.4–3.9` and `3.5 h`. A moving `a = 9/10` capsule at
   `1/128` is `106–166 M` points, about `170–260 GiB`: several GPUs.
 - **A convergence family fits one H200 only with thin outer levels**
-  (measured 2026-10-19, `SINGULARITY_HANDLING.md`, "`a = 9/10` `:damped`
+  (`SINGULARITY_HANDLING.md`, "`a = 9/10` `:damped`
   converges at `1/96`"). Each coarse level of a nested-cube mesh is at least
   the 56-block band 2:1 balance allows, `6.2 M` points at `N = 48`; with
   `N = 24` and `radii = 32,16,8,4,4,3` on `L = 64` it is `0.77 M`, and the
@@ -6431,18 +5810,25 @@ poles and `√(2 r₊)` on the equator, and the ring has radius `a`.
   `1/128` (`803 s/M`, `123 GB`). The finest cube `[0, 3]³` is what is left,
   and `1/192` would not fit. The thin levels cost the exterior's error
   (`2–17×` B's outside the horizon at `1/96`), not the interior's.
-- **The finest cube must be a whole number of its parent level's blocks**
-  (found 2026-10-14). With `N = 96` the `1/48` level's blocks are two units
+- **The finest cube must be a whole number of its parent level's blocks**.
+  With `N = 96` the `1/48` level's blocks are two units
   wide, so a `1/96` cube of radius `3` refined all of `[0, 4]³`, and 2:1
   balance cascaded a level out to the root: 304 M points, out of an H200's
   memory. `roots = 4`, `N = 48` gives the same spacings with half-unit blocks
   at `1/96`.
 
-### The analysis cadence on an H200 (measured 2026-10-22)
+**The ring rule limits `:fitted` to `h ≤ 1/32` at `a = 1/2`**.
+  The `:fitted` core surface is `m + n_L` cells below the horizon, and on the
+  equator (`√(r₊² + a²) = 1.932`) it must clear the ring `r = a`: at `m = 20`,
+  `n_L = 18` it is at `0.74` at `1/32` and `0.35 < a` at `1/24`; the rules'
+  least `16 + 18` cells would put it at `0.52`, on the ring. Spin raises the
+  coarsest spacing `:fitted` can run before it raises `:damped`'s, whose `r_0`
+  is in `M`.
 
-A moving-hole run on one H200 cost `71–175 ns` per point and step on
-2026-10-20 and 2026-10-21, against the right-hand-side kernel's `1.1 ns` a
-point ([below](#the-right-hand-side-on-an-h200-measured-2026-10-05)). This
+### The analysis cadence on an H200
+
+A moving-hole run on one H200 cost `71–175 ns` per point and step, against the right-hand-side kernel's `1.1 ns` a
+point ([below](#the-right-hand-side-on-an-h200)). This
 benchmark asked where that goes. The setup is the spinning
 hole's `1/32` row of `SINGULARITY_HANDLING.md`'s "A spinning hole along its
 axis": `a = 1/2`, `v = 1/5` along `z` on the rotating quadrant's capsule,
@@ -6461,8 +5847,6 @@ from `4 M` to `6 M` over two:
 | `b4` | `2M` | off | on | `80.5` |
 | `b5` | `2M` | off | off | `80.1` |
 
-- **TreeAMR 0.2.4's nested-mesh ghost fill** is `b1` against the same row on
-  0.2.3 (`254 s/M`, 2026-10-21): about `6 %`.
 - **The split costs `109 s/M`** at `chunk = M/2`, `55 s` a chunk (`b1 − b2`).
   It runs the ADM monitor and the error kernel over the whole mesh once per
   half of each of the six shells, twelve times a chunk, so about `4.5 s` per
@@ -6486,7 +5870,7 @@ By the inference above, a pair of the ADM monitor and the error kernel is
 about `30` right-hand sides here (`4.5` against `0.14 s`); the kernels were
 not timed one by one.
 
-**The rule for a production run** (from 2026-10-22): `chunk = M` and
+**The rule for a production run**: `chunk = M` and
 `split=0`, `97 s/M` here, two and a half times cheaper than `b1`. The
 analysis is then a third of the run. Turn the split on only to diagnose a
 moving layer's two sides, for a run that needs them. `chunk = 2M` saves
@@ -6497,7 +5881,7 @@ ran at `chunk = M` without the split, at `21–34 ns` per point and step at
 its finest spacings and `72–78 ns` on its smallest meshes (`2.7–3.7 M`
 points), where the analysis weighs most.
 
-**(Amended 2026-10-23:** the row no longer re-runs a monitor per shell or
+**The measurements above predate the folds:** the row no longer re-runs a monitor per shell or
 half-shell. `test/octant_runs.jl`'s `observe` runs the GH monitor, the ADM
 monitor and the error kernel once each and folds three times (`mesh_fold`,
 [Analysis quantities](#analysis-quantities)), so the split costs one larger
@@ -6507,12 +5891,12 @@ this mesh in place of `33 s`, and `55 s` of the split's gone. That is a
 prediction from the table, not a measurement; the H200 timing is still to
 be made. On the development machine (four threads, the quadrant smoke run
 of `CLAUDE.md`, 0.24 M points) the second chunk's wall time went from `22.1`
-to `19.9 s` with the split, and the CSV is the old one to its ten digits.**)**
+to `19.9 s` with the split, and the CSV is the old one to its ten digits.
 
-### The right-hand side on an H200 (measured 2026-10-05)
+### The right-hand side on an H200
 
-An investigation of how the right-hand side can be evaluated faster on a GPU, made
-as an analysis and changing nothing in `src/`. Scope (Erik's):
+An investigation of how the right-hand side can be evaluated faster on a GPU.
+Scope:
 
 - `q = 4`, no interior (`INT = :none`), one H200, `Float64`;
 - the state's storage, the ghosts and the time integration are open to change.
@@ -6529,76 +5913,21 @@ It takes up [Possible extensions](#possible-extensions)' research item and answe
   uniform periodic mesh. The main mesh is 512 blocks of `32³` (16.8 M points); also
   8 × `128³` (the octant runs' `N`) and 512 × `16³`.
 - **Timing:** the minimum of eight calls, in nanoseconds per owned point.
-- **Correctness:** every prototype was compared with `gh_rhs!` on the same filled
-  working array. `h` agrees bit for bit without inlining and to `2·10⁻³²` relative
-  with it. `Π` agrees to `7.1·10⁻¹³` of `max |∂ₜΠ|`. That is also what the
-  package's *own* kernel shows when it is merely compiled with inlining forced:
-  contraction differences of one body at two call sites ("Two spellings of one
-  expression are not bit-identical"), not a different scheme.
 - **Where the code is:** the prototypes are raw CUDA.jl kernels and KA kernels in
   `bench/rhs_lab.jl`, whose modes `baseline`, `variants` and `round3` … `round9` are
-  the rounds below. It runs from a copy of the package with CUDA added to its
+  the rounds in [`HISTORY.md`](HISTORY.md#the-right-hand-side-on-an-h200). It runs from a copy of the package with CUDA added to its
   `Project.toml` (on Symmetry `rhs-gpu-lab`, jobs 570186–570203). Its companions:
   - `bench/rhs_lab_source.jl`, the lean source, shared by the GPU and CPU scripts;
   - `bench/rhs_lab_cpu.jl`, the source's CPU check and timing, in the package's own
     environment;
   - `bench/sass_stats.jl`, which counts a SASS dump's instructions.
 
-**Where the time goes.** The kernel is nine tenths of an evaluation, and the mesh
-pattern around it is small today:
-
-| per owned point, ns | 512 × `16³` | 512 × `32³` | 8 × `128³` |
-|---|---|---|---|
-| `gh_rhs!` | 9.94 | 9.21 | 9.31 |
-| — the kernel (`map_blocks!`) | 8.55 | 8.48 | 8.90 |
-| — `scatter!` | 0.36 | 0.34 | 0.33 |
-| — `fill_ghosts!` | **1.03** | 0.40 | 0.08 |
-| RK4 step (IMEXRungeKutta, broadcast) | 40.4 | 37.4 | 37.8 |
-
-A step is 4.06 right-hand sides, and the stage arithmetic is 0.54 ns a point a step.
-An evaluation launches 28 kernels (26 transfer groups, the scatter, the kernel), each
-4 µs of host time, and the GPU is busy 97 % of it: launch overhead is not a cost here.
-The workgroup shape moves the kernel by less than 10 % (`(32, 8, 1)` and `(32, 4, 1)`
-best, `(8, 8, 2)` worst).
-
-**Why the kernel is slow: on a device it is not inlined.** KA launches it with a
+**On a device the kernel is not inlined.** KA launches it with a
 default `CUDABackend()`, whose `always_inline = false` leaves GPUCompiler to Julia's
-inlining heuristics. These keep as real functions:
-
-- the `ntuple(Val(n)) do … end` blocks of `gh_rhs_at_point`;
-- `mixed_stencil`'s closures;
-- the StaticArrays generator closures of `gh_node_source` and `metric_derivatives`.
-
+inlining heuristics. These keep closures as real functions ([the ones the kernel
+had](HISTORY.md#the-right-hand-side-on-an-h200)).
 A device call passes its `SVector` and `SArray` arguments through the stack, and a
-closure that indexes an `SVector` with its argument indexes memory. The SASS:
-
-| `gpu_gh_rhs_kernel_` | as compiled | with `always_inline = true` |
-|---|---|---|
-| instructions (callees included) | 11 224 | 10 992, straight line |
-| call sites | 162, about 140 into Julia closures | 0 to Julia code |
-| registers, local memory per thread | 255, 8.1 KB | 255, 3.8 KB |
-| spill stores / loads (`STL` / `LDL`) | 2417 / 2020 | 914 / 990 |
-| FP64 instructions (`DFMA` + `DMUL` + `DADD`) | — | 3867 (2656 + 930 + 281) |
-| global loads (`LDG`) | — | 871 |
-| kernel | 8.48 ns/pt | 5.0–5.4 ns/pt |
-
-At 255 registers a 256-thread block fills an SM, so there are eight warps. The local
-memory per SM is 1–2 MB, beyond L1 (256 KB) and beyond an SM's share of L2 (50 MB
-for 132). So the spills go to HBM — inferred, not counted: no `ncu`.
-
-In the inlined build the ~1900 spill instructions move about 15 KB a point. At HBM
-bandwidth that alone is 70 ms of the kernel's 72. The FP64 pipes are about 5 %
-busy. So neither the arithmetic nor the traffic of [Precision, threads,
-devices](#precision-threads-devices)' budget is what the kernel costs, and **the
-stencils are not the problem.** Ablations of the inlined kernel (raw CUDA, static
-strides):
-
-| | ns/pt |
-|---|---|
-| state, `∂_i h`, the dissipation of `h`, the coefficients and `∂ₜh` only | 0.32 |
-| everything but the source | 1.20 |
-| everything but the Π stencils | 2.54 |
-| everything | 4.30 |
+closure that indexes an `SVector` with its argument indexes memory.
 
 The source alone in a kernel of its own, with nothing else live, still holds 255
 registers and 1.8 KB of local memory and costs 2.02 ns/pt. `gh_node_source` builds
@@ -6654,9 +5983,7 @@ So the closure-free spelling is 4.3× faster than `gh_node_source` on the CPU. T
 do-block version was also 46 ns/pt on the device without forced inlining: its
 closures were calls on both backends.
 
-**The fused kernel's order matters once the source is lean.** The package's kernel
-with only `gh_node_source` replaced runs at 7.56 ns/pt inlined and 49 ns/pt without.
-`CODE.md`'s streaming order puts the source last, as step 3. The fast kernel keeps
+**The fused kernel's order matters once the source is lean.** The fast kernel keeps
 the per-component stencil streaming but moves the source before the Π components:
 
 1. load the state and form `∂_i h` and the coefficient set;
@@ -6696,28 +6023,6 @@ always returns the dynamic `CPU()`). There are two ways out:
 - **every helper the kernel reaches is written without closures**, as the lean
   source is. Measured for the source alone: 0.22 ns/pt without the flag, 0.18 with
   it.
-
-**The design's other ideas, measured.**
-
-| idea (where it was proposed) | measured | verdict |
-|---|---|---|
-| Stencil/algebra split ("One right-hand-side evaluation", black-box attempt) | package source: 3.2 + 0.29 against 4.3 fused (inlined); lean source: 1.14 against 1.21 | 6 % once the source fits; the Π principal part alone is a spill-free 0.29 ns/pt kernel at ~80 % of L1 load bandwidth |
-| Workgroup shape (black-box attempt; GHAccel's 10 %) | within 10 % for a spilling kernel; static against dynamic is ~20 % for the split | set a static `(32, 4, 1)`; no further tuning |
-| `Float32` (black-box attempt) | not measured: `Float64` is the requirement (1.4–1.6× in September) | — |
-| Shared-memory staging of one variable's ghosted block ([Possible extensions](#possible-extensions)) | Π principal part, one component's `h` and `Π` tiles at a time: 0.95–1.59 ns/pt against 0.28 through L1 | **no**: L1 already holds the reuse |
-| Fusing the scatter and the stage update into the kernel (GHSO2's "Tier 5") | scatter plus stage arithmetic ≈ 0.48 ns/pt per right-hand side | second order now; ~10–15 % of a step after the kernel (below) |
-| Generated code for the source's register schedule | the hand-written lean source, 11× the source and 7× the kernel | **yes**, and no generator is needed |
-| Kernel or scatter-and-ghost pattern first ([Possible extensions](#possible-extensions)) | the kernel is 92 % of an evaluation | the kernel, then the pattern |
-| `Int32`, arrays, `div` (GHAccel) | static against dynamic strides: no difference while spilling, 4 % in the lean kernel | minor |
-| Skipping the stencils' zero weights (new; IEEE forbids dropping `0·x`, so a fifth of the first derivative's loads and over a third of the mixed derivative's are zeros) | Π principal part 0.283 against 0.309 ns/pt; nothing elsewhere | minor |
-| `maxregs` (new) | always slower: the fused kernel 5.95 at 128 and 5.72 at 168 against 4.30 | no |
-| One Π component per thread (new) | 0.31–0.43 against 0.28–0.31 ns/pt | no |
-
-The algebraic Kerr-Schild source has `gh_node_source`'s structure — an `SMatrix`
-generator over closures. It adds 0.47 ns/pt to the fused lean kernel and costs 0.54
-ns/pt in the source's own kernel against 0.18 without it, so it wants the same
-treatment. So does `metric_derivatives`: the stencils-and-coefficients kernel still
-spills 1.26 KB.
 
 **Around the kernel: storage, ghosts and time integration.** Once the kernel is
 1.2 ns/pt, the pattern around it is 40 % of an evaluation at `N = 32` and two thirds
@@ -6771,53 +6076,25 @@ since neighbours still read the current one.
   writers](#the-range-projection) into one kernel, which is a
   decision for review.
 
-**The projection (predicted)**, per owned point at `N = 32`, from the measured
-pieces:
+**The order of the work.** Items 1–3 are done ([history](HISTORY.md#the-right-hand-side-on-an-h200)), the
+kernel without `Val(N)`: static strides are worth 4 %, and a kernel
+specialised on the block size would be compiled again at every `N` the suite
+runs. Half of item 5 is done. What
+remains is **(proposed)**:
 
-| ns/pt | today | kernel fixed | and TreeAMR's copies at bandwidth | and a ghosted state with a fused stepper |
-|---|---|---|---|---|
-| kernel | 8.48 | 1.21 | 1.21 | ~1.3 with the epilogue |
-| scatter | 0.34 | 0.34 | 0.14 | 0 |
-| ghost fill | 0.40 | 0.40 | ~0.1 | ~0.1 |
-| right-hand side | 9.21 | 1.95 | 1.45 | ~1.4 |
-| RK4 step | 37.4 | ~8.3 | ~6.3 | ~5.6 |
-
-That is 4.5× to 7× per step. At `128³` the first column's change alone gives about
-8 ns/pt.
-
-**The order of the work (proposed).**
-
-1. **The lean, closure-free source in `pointwise.jl`.** It is a third spelling,
-   tested to roundoff against `gh_node_source` on every background of
-   `pointwise_backgrounds.jl` and against the forward-mode pass. It helps the CPU
-   too. **(Done 2026-10-05:** `gh_node_source_lean`.**)**
-2. **The kernel in the order above**, with `Val(N)` for static strides and linear
-   `@inbounds` stores. This amends "One right-hand-side evaluation": the source
-   moves from step 3 to step 2, and the per-component streaming stays. **(Done
-   2026-10-05, without `Val(N)`:** static strides are worth 4 %, and a kernel
-   specialised on the block size would be compiled again at every `N` the suite
-   runs.**)**
-3. **Forced inlining and a static workgroup** on the device, through TreeAMR keeping
-   the backend a field set was built with, or the kernel's remaining closures
-   rewritten.
-   - Steps 1–3 together are measured: **8.5 → 1.2 ns/pt**.
-   - Steps 1–2 alone are 3.1 ns/pt.
-
-   **(Done 2026-10-05 by the second route:** nothing in the kernel is a closure
-   any more, and forcing inlining changes nothing — below.**)**
 4. **TreeAMR's scatter and transfer kernels at bandwidth:** 0.74 → ~0.25 ns/pt at
    `N = 32`, and more at `N = 16`. Upstream. **(The first change TreeAMR should
    make:** [Upstream prerequisites](#upstream-prerequisites), item 5.**)**
 5. **`metric_derivatives` and the algebraic gauge source made lean** like the
-   source. **(Half done 2026-10-05:** `metric_divergences` forms the contraction
+   source. **(Half done:** `metric_divergences` forms the contraction
    alone; the algebraic source has lost its closures but not its spills.**)**
 6. **Then, if its 10–15 % is wanted, a native stepper** with a ghosted state and the
    stage update fused into the right-hand side.
 
-Not worth doing, measured: shared-memory staging of the principal part, `maxregs`,
+Not worth doing, measured ([history](HISTORY.md#the-right-hand-side-on-an-h200)): shared-memory staging of the principal part, `maxregs`,
 one component per thread, further workgroup tuning.
 
-**Implemented (2026-10-05).** Items 1–3, and half of 5, are in `src/`.
+**Implemented.** Items 1–3, and half of 5, are in `src/`.
 
 The package's own `gh_rhs!`, through `map_blocks!` and KernelAbstractions'
 default backend (H200 job 570217, cn111):
@@ -6857,11 +6134,14 @@ of `gh_rhs!` at `32³` and 53 % at `16³`.
   local memory and SASS counts.
 - `Float32`, more than one GPU, and the monitor kernels.
 
-### The right-hand side on a CPU (measured 2026-10-05)
+**The symptom of a closure that a device left as a call** is a `CALL` to `julia_…` in the SASS
+(`bench/rhs_lab.jl mode=baseline` writes it, `bench/sass_stats.jl` counts it).
+On the CPU the same closures cost 7× (`bench/rhs_lab_cpu.jl`).
+
+### The right-hand side on a CPU
 
 The H200 study's question, asked of Symmetry's AMD nodes: where does an evaluation go
-on a CPU, and what would SIMD **across grid points** buy? Made as an analysis,
-changing nothing in `src/`. Scope (Erik's): the H200 study's — `q = 4`, no interior,
+on a CPU, and what would SIMD **across grid points** buy? Scope: the H200 study's — `q = 4`, no interior,
 `Float64`, the gauge wave with `ε_KO = 1/2`, `γ0 = 1`, no gauge source, on a uniform
 periodic mesh — starting from that study's kernel (`c80e52d`).
 
@@ -6974,14 +6254,13 @@ launch is over `(N/W, N, N, nblocks)`.
   loads, statically).
 - **The result is bit for bit the scalar kernel's** on the gauge wave, at every
   width, on Zen 2, Zen 3 and the development machine's aarch64. Every lane does the
-  scalar code's operations in its order. **(Amended in the implementation,
-  2026-10-05:** that is the gauge wave's, not the kernel's. On a hole the lanes
+  scalar code's operations in its order. That is the gauge wave's, not the kernel's. On a hole the lanes
   differ from the scalar kernel in the last bits — up to `1.2e−14` on the step-5
   fixture, 1.0–2.0 eps of the size of the terms at evolved points (`rhs_scale`) —
   because StaticArrays forms `inv(g4) * h` with
   `muladd`, and LLVM fuses each into an FMA or not by the code around it, which the
   lanes change; the gauge wave's zero shift hides it. So the claim is roundoff, as for
-  every two call sites of one body; bit-identity across thread counts is unaffected.**)**
+  every two call sites of one body; bit-identity across thread counts is unaffected.
 - **Why not 4×.** SIMD removes 3.2× of the instructions and gains 2.3–2.5× on one
   core. The vector kernel's instructions are still two fifths stack traffic (its live
   set is four times wider in the same sixteen registers), and the scalar kernel was
@@ -7030,42 +6309,34 @@ not move. With the fill at copy speed the two together are 2.4× an evaluation a
 1.8× a step, and the stage arithmetic is then 41 % of what is left — the H200 study's
 fused stepper, which on the CPU would also remove the scatter.
 
-**What SIMD in `src/` would take (proposed; done 2026-10-05 as below, with an
-overlapping last group instead of a scalar tail, and on every branch).**
+**What SIMD in `src/` takes** ([the plan](HISTORY.md#the-right-hand-side-on-a-cpu)).
 
 1. **A lane type.** SIMD.jl's `Vec{W,Float64}` works through the package's algebra
-   unchanged but for the three methods above; SIMD.jl has no dependencies of its own.
-   The `γ0 != 0` branch would be spelled through a helper that a `Vec` answers with
-   `any`. **(Done:** SIMD.jl is a dependency; `pointwise.jl` has `_scale`,
+   unchanged but for the three methods above; SIMD.jl has no dependencies of its own. SIMD.jl is a dependency; `pointwise.jl` has `_scale`,
    `_anynonzero` and `_select`, and `_η4` is spelled with `one(T)` and `zero(T)`; no
-   method is added to a type the package does not own.**)**
-2. **The launch**, over `(N/W, N, N, nblocks)` on the CPU and unchanged on a device
-   (`W = 1`), chosen where `GHProblem` builds its `Val`s. `N` must be a multiple of
-   `W`, or the row needs a scalar tail: the suite's `N = 10` at `q = 6` is not a
-   multiple of four. **(Done otherwise:** the launch stays `map_blocks!`'s, and the
+   method is added to a type the package does not own.
+2. **The launch**, unchanged on a device
+   (`W = 1`), with `W` chosen where `GHProblem` builds its `Val`s. The suite's `N = 10` at `q = 6` is not a
+   multiple of four. The launch stays `map_blocks!`'s, and the
    item at the start of each group of `W` does the group — `is_lane_leader`, the other
    items do nothing. A row that `W` does not divide ends in a group that **overlaps**
-   the one before it, Erik's proposal in place of a scalar tail or masks: no lane is
+   the one before it, in place of a scalar tail or masks: no lane is
    ever outside the row, and the shared points are stored twice by the same thread.
-   `W` is `default_simd_width`'s: 32 bytes of lanes, 64 with AVX-512, at most `N`.**)**
+   `W` is `default_simd_width`'s: 32 bytes of lanes, 64 with AVX-512, at most `N`.
 3. **No `DomainError` from a lane.** SIMD.jl's `sqrt` is the instruction: a degenerate
    metric gives a `NaN`, which the record's `finite` reads, where the scalar kernel
-   throws (`CLAUDE.md`, the outer part of the layer). **(As predicted; the layer
+   throws (`CLAUDE.md`, the outer part of the layer). The layer
    and the core keep the scalar code and its `DomainError`, and `simd_width = 1`
-   restores it everywhere.)**
-4. **The interior and the gauge sources are not measured.** A layer branches per
-   point; the natural split is the vector path where all `W` lanes are outside the
-   layer, which is most of the mesh, and the scalar one elsewhere. The sampled gauge
-   source reads `Hsrc` along the first axis as the state is read; the algebraic
-   Kerr-Schild source would have to accept a `Vec`. **(Done, all three:** a group
+   restores it everywhere.
+4. **The interior and the gauge sources.** A group
    takes the lanes when all its points are outside the layer and the scalar code point
    by point otherwise; `Lanes` reads `Hsrc` by its cartesian index; the algebraic
-   source's two clamps are `_select`s.**)**
+   source's two clamps are `_select`s.
 5. **The zero weights** need the weights in the type: `derivative_weights` returning a
    type whose `axis_stencil` and `mixed_stencil` are generated without the zero terms.
    **(Not done:** independent of the lanes, and left for a decision.**)**
 
-**Implemented (2026-10-05).** The kernel above is the package's (`src/lanes.jl`,
+**Implemented.** The kernel above is the package's (`src/lanes.jl`,
 `gh_rhs_lanes!`), on by default on the CPU. Measured with `bench/rhs_cpu_lab.jl` and
 `bench/stepping.jl`, `simd_width = 1` (the scalar kernel) against the default, on the
 same filled state; Symmetry jobs 570353–570361 and 570370, directories
@@ -7089,8 +6360,7 @@ code.)
   default width is the best one on both instruction sets — four on AVX2, eight on
   AVX-512, where the 32 registers hold an eight-wide head without the extra spills
   that cost eight lanes on AVX2 (the native code has the same instruction and spill
-  counts at eight lanes as at four). That settles `default_simd_width`'s 64 bytes,
-  which was a prediction until this row.
+  counts at eight lanes as at four). That settles `default_simd_width`'s 64 bytes.
 - **The overlapping group costs what it computes twice:** at `N = 10` three groups of
   four cover ten points, 20 % redundant, and the kernel is 469 ns a point where 409 ×
   1.2 = 491 was predicted; eight lanes are a poor fit there (two groups for ten
@@ -7124,29 +6394,27 @@ code.)
 - **Devices are unchanged:** the H200 runs the `W = 1` kernel at PR #4's speed — the
   gauge wave's right-hand side 5.45 ms and step 22.7 ms (5.47 and 22.7 before), the
   hole's 17.84 and 72.4 (17.8 and 72) — and Metal compiles and runs it at `Float32`.
-- **The suite** is 5037 assertions, green on the development machine (12m20 at four
-  threads), on an EPYC 8534P (Zen 4c, AVX-512, so eight lanes; 23m59 at four threads)
-  and on an EPYC 7543 (27m14 at one thread, 5029). `test/simd_tests.jl` is about 20 s
-  of it, most of it the kernels at `W = 1` it compiles to compare against.
 
 **Not measured.** The monitor kernels, which stay scalar, and hardware counters: `perf` is not open to users on Symmetry
 (`perf_event_paranoid = 4`), so instructions a cycle and pipe occupancy above are
 inferred from the native code and the clock.
 
-## Binary black holes (proposed 2026-10-25)
+**On the CPU the kernel's algebra runs on SIMD lanes.** Bit-identity across thread counts is unaffected — a block is one thread's.
+
+## Binary black holes (proposed)
 
 *Status: a design for review. Nothing in this section is built or
 measured.* It extends the proof of concept to two black holes that orbit,
 merge and ring down, with the gravitational waves they emit as the result.
 `PLAN.md`'s steps B1–B9 are the work breakdown, and the two milestones are
-under [Milestones G7 and G8](#milestones-g7-and-g8): two holes colliding
+under [Milestones G7 and G8](PLAN.md#milestones-g7-and-g8): two holes colliding
 head-on (G7), and an equal-mass binary through inspiral, merger and ringdown
 (G8). What it needs Erik to decide is under [What this asks Erik to
 decide](#what-this-asks-erik-to-decide).
 
 **Units.** The total mass is `M = 1`, so each hole of an equal-mass pair has
 `M_A = 1/2`. Every single-hole setting in [Single black holes: recommended
-settings](#single-black-holes-recommended-settings-added-2026-10-08) is in
+settings](#single-black-holes-recommended-settings) is in
 units of the hole's own mass and scales by `M_A`: the spacing at the hole,
 the layer's radii, `ρ_max = 4/M_A = 8/M`, `γ0`'s `1/M_A`. The
 convergence pair `1/24`, `1/32` of the moving `:damped` hole is `1/48`,
@@ -7159,11 +6427,10 @@ That is inside what the single moving holes measured.
 Everything a binary needs *per hole* has been run on one hole that moves:
 
 - **The moving `:damped` layer.** With its target's rate and a core that
-  follows (2026-10-20/21) it holds a boosted Kerr-Schild hole at the
+  follows it holds a boosted Kerr-Schild hole at the
   resting hole's level and converges at order four outside the horizon.
   The aligned campaign extends this to `v = 1/2` and `a ≤ 9/10` along the
-  spin (2026-10-22). The bitant campaign moved holes across their spin
-  (2026-10-24/25, `5f391ee` and `6558e06`, not yet on `main`), which is a
+  spin. The bitant campaign moved holes across their spin, which is a
   binary's own configuration: spins along `z`, motion in the plane `z = 0`.
   Every row there was stable and converged at order four outside the
   horizon, except at `v = 1/2`, which is faster than a binary's holes move
@@ -7172,7 +6439,7 @@ Everything a binary needs *per hole* has been run on one hole that moves:
   just outside the horizon is `13–15×` `:damped`'s at `a = 0` and `43–176×`
   at `a = 1/2`, and it does not converge at a margin fixed in cells.
 - **The tracked geometry**, the finder along a trajectory, coasting and the
-  jump refusal (steps 8d and 8).
+  jump refusal.
 - **The algebraic Kerr-Schild source**, which moves with its hole.
 - **Checkpoints and job chains**, MPI with the analysis on rank 0, and
   SimWatch.
@@ -7316,8 +6583,7 @@ norm, the indicator, the projection's gate, and the finder's footprint guard.
 
 **The radius checks** apply per hole. Each is checked against its hole's
 contracted horizon at its current speed, from its boosted Kerr-Schild
-parameters, and then from the finds. (The bitant campaign's branch makes
-`horizon_min_radius` exact across the spin, which a binary's spinning
+parameters, and then from the finds. (`horizon_min_radius` is exact across the spin, which a binary's spinning
 holes need.)
 
 **The target, two ways:**
@@ -7331,7 +6597,7 @@ holes need.)
   This target is not the solution near a hole of a binary. It misses the
   companion's tidal field over the layer, `M_B r²/d³`: `5·10⁻⁴` at
   `d = 10` and `0.02` at `d = 3`. It also misses the orbit's acceleration
-  across the layer: `0.005` and `0.06`. Step 8c's rule may make that
+  across the layer: `0.005` and `0.06`. The interior's calibration rule may make that
   enough: a smooth layer at `4/M` with a ramp of at least `4G` cells holds
   an inexact target and leaves the exterior what the exact one leaves.
   Step B2 measures it.
@@ -7686,39 +6952,9 @@ hours on one H200.
 - **TreeBSSN on the same physical configuration**, which is what TreeBSSN
   was built for.
 
-### Milestones G7 and G8
-
-- **G7 — Two holes.** Equal-mass, non-spinning holes from rest at
-  `d = 10 M` on the reflecting octant, from superposed Kerr-Schild data,
-  through merger and ringdown to the wave's passage of `R_ext`, at three
-  resolutions. *Accept:*
-  - the run stable, with the constraints at truncation level under the
-    composite mask and converging;
-  - each individual horizon found at every find until the handover, and
-    the common horizon found with a nondecreasing area, `J` at zero to
-    truncation;
-  - the handover completed with no projection hit outside the common core;
-  - `Ψ₄`'s `(2, 0)` mode converging, and its ringdown frequency within
-    `1 %` of the Schwarzschild mode for the measured `M_f`;
-  - `M_ADM − E_rad − M_f` recorded;
-  - the extraction validated on the Teukolsky wave and the boundary's
-    reflection measured first (steps B5 and B6).
-- **G8 — An inspiral.** An equal-mass, non-spinning, quasi-circular binary
-  from XCTS data at `d ≈ 10 M`, on the half-turn quarter domain, through
-  merger and ringdown, at three resolutions. *Accept:*
-  - `Ψ₄`'s `(2, 2)` phase and amplitude converging, with the measured
-    order and the phase difference between the two finest at merger
-    recorded;
-  - `M_f` and `χ_f` within their self-convergence error of Scheel et al.'s;
-  - the energy and angular-momentum balances closing to the junk's
-    uncertainty;
-  - the waveform compared with an SXS waveform of the same mass ratio,
-    with the mismatch recorded;
-  - the cost recorded.
-
-  Aligned spins, unequal masses and eccentricity reduction come after G8.
-
 ### What this asks Erik to decide
+
+All six are **(open)**.
 
 1. **The gauge and the interior together**: (α) the tracked Kerr-Schild
    source with `:damped` per hole, built first, or (β) the damped harmonic
@@ -7742,15 +6978,6 @@ hours on one H200.
 What separates the proof of concept from a production code, listed with
 the design note that would start each:
 
-- **Checkpoint and restart**: the forest's leaf keys, the time, the
-  case and the state vector to HDF5, read back into a fresh forest
-  (`Forest`, `refine!` to the keys, `balance!`, `scatter!`); bit-identical
-  to an uninterrupted run, since the layer and the hook depend on
-  `(x, t)` only. A few dozen lines, or TreeAMR's M9. **(Done 2026-10-01**
-  through TreeAMR 0.1.4's M9a, whose load builds the forest from its leaf
-  list directly (`Forest(roots; leaves)`) — see [Checkpoint and
-  restart](#checkpoint-and-restart); and since step 8d the layer depends on
-  the track and the fits as well, which the run state carries.**)**
 - **Excision**, for spacetimes without an analytic interior. Like the
   interior layer it would be a pointwise decision — a mask that marks
   points as not evolved, with one-sided or extrapolated data supplied
@@ -7761,8 +6988,7 @@ the design note that would start each:
   the hook slot between the phases. That wants an interior-reading
   device hook and, cleanly, *excised leaves* in TreeAMR (leaves that
   keep their place in the tree but carry no data). GHSO2's recipe for
-  the sonic surface applies unchanged. **(Priced 2026-09-23, PLAN.md
-  step 8g.)** A fill that keeps the `∂²` stencil's order must reproduce
+  the sonic surface applies unchanged. **Priced:** a fill that keeps the `∂²` stencil's order must reproduce
   the Taylor polynomial to degree `q + 1`, so a block-local fill needs a
   `3G` halo — stored volume ×4–7 at `N = 8`, where the vertex invariant
   `N ≥ 6G + 2` refuses it, ×1.8–2.7 at `N = 32` — or a second ghost
@@ -7773,37 +6999,31 @@ the design note that would start each:
   Szilágyi–Lindblom–Scheel 2009): `H_a` algebraic in `g` and
   `log(√γ/α)`, its gradient by the chain rule through `∂_a g`, no extra
   variables, no extra exchange; the fix for the gauge drift G4 records,
-  and the prerequisite for binaries. **(Designed 2026-10-25** under [The
+  and the prerequisite for binaries. **(Designed, proposed,** under [The
   gauge](#the-gauge), rolled on from a tracked Kerr-Schild source, and
   paired with the interior there.**)**
 - **A radiative outer boundary** for solutions not known at the
   boundary: the standard `1/r` outgoing extrapolation into the ghosts
   along the ray, needing a device-capable hook that reads the block's
-  interior (TreeAMR's `CODE.md` names the gap). **(2026-10-25:** TreeAMR's
+  interior (TreeAMR's `CODE.md` names the gap). (TreeAMR's
   relative hook, `CellBoundary(Relative(f))`, is that hook for a
   zero-gradient deviation from frozen data; [The outer
   boundary](#the-outer-boundary-and-the-wave-zone) proposes measuring it
-  against a far frozen boundary.**)**
+  against a far frozen boundary.)
 - **Time-dependent prescribed gauge sources** evaluated in the kernel,
   which would admit boosted Kerr-Schild; priced at about one RHS per
   evaluation by GHSO2's `gauge_source_grad` timing.
-- **A hole tracker** for the *interior layer* when the center is not
-  known in advance — the volume-weighted centroid of `α < α_thr`
-  through `block_mapreduce`, or the horizon finder itself; the
-  refinement already follows the indicator. **(Built in step 8d** from the
-  finder; a binary's orbit needs a quadratic prediction and a center-jump
-  check, proposed 2026-10-25 under [The tracks](#the-tracks).**)**
 - **Binaries**: superposed Kerr-Schild as the approximate data, then
   constraint-satisfying data from `XCTS` / `SolveConstraints` through
   the same `(h, Π)` callback on the host; needs excision or an interior
   layer per hole, the gauge driver and the radiative boundary.
-  **(Designed 2026-10-25** under [Binary black
-  holes](#binary-black-holes-proposed-2026-10-25): an interior layer per
+  **(Designed, proposed,** under [Binary black
+  holes](#binary-black-holes-proposed): an interior layer per
   hole, a handover to a common one at merger, and XCTS data through a file
   rather than a callback.**)**
 - **Gravitational-wave extraction**: `Ψ_4` on extraction spheres, modes
   through spin-weighted harmonics, needing the interpolation of
-  prerequisite 1. **(Designed 2026-10-25** under [The
+  prerequisite 1. **(Designed, proposed,** under [The
   waveform](#the-waveform): `Ψ_4` at the spheres' points from TreeAMR
   0.2.6's second-derivative interpolation, the modes by
   `AbstractSphericalHarmonics`' spin-weighted transform.**)**
@@ -7818,15 +7038,15 @@ the design note that would start each:
   and a change to TreeAMR's RHS contract); generated code for the
   register schedule of the source algebra; and the question the traffic
   estimate above raises, whether TreeAMR's scatter-and-ghost pattern or
-  the kernel is the first thing to change. **(Investigated 2026-10-05**, in [The
-  right-hand side on an H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).**)**
+  the kernel is the first thing to change. **(Investigated**, in [The
+  right-hand side on an H200](#the-right-hand-side-on-an-h200).**)**
   - Shared-memory staging is slower than L1.
   - The source's register schedule is the lever, and a hand-written spelling
     suffices.
   - The kernel comes first; then TreeAMR's scatter and transfer kernels; the fused
     stage update last, at 10–15 % of a step.
-- **SIMD across grid points on the CPU** (measured and implemented 2026-10-05,
-  [The right-hand side on a CPU](#the-right-hand-side-on-a-cpu-measured-2026-10-05)):
+- **SIMD across grid points on the CPU** (implemented,
+  [The right-hand side on a CPU](#the-right-hand-side-on-a-cpu)):
   the package's own kernel on four SIMD.jl lanes is 2.0–2.4× the scalar one on
   Symmetry's EPYC nodes, the same `du` to roundoff, and the stencils without their
   zero weights a further 4–13 % (not implemented). It is 1.3× a step on its own: the
@@ -7835,11 +7055,6 @@ the design note that would start each:
   between a block and its restriction, which TreeAMR's operators make
   cheap — if the calibration in G4 shows Löhner's thresholds to be
   fragile across resolutions.
-- **Smoothing the interior** for a spacetime without an analytic
-  solution — the interior layer relaxing toward something other than
-  the exact solution. **(Became PLAN.md step 8e on 2026-09-23**: the
-  fitted target; see [the interior's
-  questions](SINGULARITY_HANDLING.md#the-interiors-questions-opened-in-step-5-and-closed-through-step-8).**)**
 - **A hyperboloidal outer layer**, which this author's electrodynamics
   packages rehearse and which would retire the outer boundary question.
 - **Matter**, through the source slot: TreeHydro's scheme on this
@@ -7847,22 +7062,10 @@ the design note that would start each:
 
 ## Open questions
 
-Settled in review on 2026-09-16: the expanded form (the flux form is not
-implemented on the mesh); three dimensions only; no excision, the
-interior treated pointwise by profiles of the distance to the center;
-the proof-of-concept target a single boosted, spinning hole;
-OrdinaryDiffEq's RK4 for time integration (amended 2026-09-26:
-IMEXRungeKutta's RK4, by block owner); the analysis quantities as
-part of the deliverable; an error indicator for refinement; `Float64`
-on the H200 as the device requirement; no checkpointing (reversed
-2026-10-01); the inherited documents copied into `notes/`.
-
 **The interior's questions** — the spherical core against harmonic Kerr at
 `a = 9/10`, the generic interior, the price of that chart, the fitted target and the
-moving layer's trailing side, all opened in step 5 and closed or measured
-through step 8′ — moved to
-[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
-(2026-10-08).
+moving layer's trailing side, all closed or measured — are in
+[`SINGULARITY_HANDLING.md`](SINGULARITY_HANDLING.md#the-interiors-questions-opened-in-step-5-and-closed-through-step-8).
 
 Still proposed, to be confirmed or amended by the milestones that
 first touch them:
@@ -7871,56 +7074,47 @@ first touch them:
    the hard paste and the pure mask (G4, G5). The argument for it is
    under [The interior](#the-interior-a-pointwise-damping-layer); the
    numbers are not yet.
+
+   **Inconsistent:** item 1 says the damping layer's numbers "are not yet";
+   this file's "What the single holes hand over" (under Binary black holes)
+   reports the moving `:damped` layer measured and converging at order four,
+   and `SINGULARITY_HANDLING.md` holds the interior variants' runs.
+
 2. **The Löhner indicator on `h` with a global floor**, with the mask,
    the level floor around the horizon and the ceiling at the boundary
    (G4): whether calibrated thresholds carry from the static to the
    moving hole, and whether the floor ever binds.
 3. **The streaming-order fused kernel** against the stencil/algebra
-   split, decided by measured spills and time (G2 on the CPU, G6 on the
-   H200); anything beyond the black-box attempts is research, not a
-   milestone. *G2's half is in*: the fused kernel runs at 1244 ns per
-   owned point at `q = 4` on one CPU thread, of which the pointwise
-   algebra is 505 ns and the stencils the rest, and the mesh pattern
-   around it adds another 616. A host CPU says nothing about spills, so
-   the question stays open for the H200; what G2 adds to it is that the
-   split it would be measured against is 3:1 and not 1:1. **(Answered on the
-   H200 2026-10-05**, in [The right-hand side on an
-   H200](#the-right-hand-side-on-an-h200-measured-2026-10-05).**)**
-   - The split is worth 1.25× with the package's source and 6 % with a
-     register-lean one, so the fused kernel stays.
-   - The spills come from the source and from closures left uninlined on the
-     device, not from the stencils.
+   split: answered, the fused kernel stays ([The right-hand side on an
+   H200](#the-right-hand-side-on-an-h200); the
+   question's [history](HISTORY.md#open-questions)).
 4. **In-kernel evaluation of `SpacetimeMetrics`** on the H200 (G6); the
    structure does not depend on it, the cost does.
 5. **The defaults** — `q = 4`, `N = 32`, `cfl = 1/4`, `ε_KO = 0.5`,
    `γ0 = 1/M` near the hole, `m = 8`, a layer of `2(G + 1)` spacings,
-   `ρ_max = 4/M` (`ρ_max · dt = 1` until 2026-09-23), the indicator's
+   `ρ_max = 4/M`, the indicator's
    thresholds — are starting values for G4–G6 to confirm or move. Three
    of them survived G2 on flat space and on a gauge wave: `cfl = 1/4` (no
    run needed less), `ε_KO = 0.5` (the noise test, and no order lost) and
    `q = 4` as the development order (`q = 2, 6, 8` all run, at 0.5×, 1.3×
-   and 1.9× the cost of `q = 4`). None of that is yet a statement about a hole. Step 8a split
-   `m` into a stencil margin and a leakage margin, measured that `m = 8`
-   attenuates grid-scale content from `r_1` by `e^{−2.9}` to `e^{−4.6}` on
-   the fixture, and left the default where it is until step 8c says what
-   amplitude it has to hold back **(proposed in step 8a**; see [The
-   interior](#the-interior-a-pointwise-damping-layer)**)**. Step 8c kept
-   `m = 8` — a smooth layer's wrong target leaves the exterior what the exact
-   one leaves — and replaced `ρ_max · dt = 1` by `ρ_max = 4/M` with a ramp of
-   `4G` cells, measured for an inexact target and **(proposed in step 8c)**
-   for the analytic one, where it cuts the `50 M` error sixfold. **Erik took
-   it on 2026-09-23** for every variant, the analytic `:damped` layer
-   included, and step 8c′ made `4/M` the code's default; the grid rate is
-   the option `ρ_max_factor` **(decided 2026-09-23)**. The ramp is not part
-   of that decision: it is the case's `r_0`, `r_1` and `ρ_ramp`, and the
-   suite's fixture keeps step 5's layer, a ramp of `4.8` cells, on which
-   step 8c measured the exact target at `4/M` to `50 M`.
+   and 1.9× the cost of `q = 4`). None of that is yet a statement about a hole. `m` is
+   split into a stencil margin and a leakage margin; `m = 8` attenuates
+   grid-scale content from `r_1` by `e^{−2.9}` to `e^{−4.6}` on the fixture
+   (see [The interior](#the-interior-a-pointwise-damping-layer)), and stays
+   the default: a smooth layer's wrong target leaves the exterior what the
+   exact one leaves. `ρ_max = 4/M` with a ramp of `4G` cells, measured for an
+   inexact target and for the analytic one, where it cuts the `50 M` error
+   sixfold, is the code's default for every variant, the analytic `:damped`
+   layer included; the grid rate `ρ_max · dt = 1` is the option
+   `ρ_max_factor`. The ramp is not part of that decision: it is the case's
+   `r_0`, `r_1` and `ρ_ramp`, and the suite's fixture keeps step 5's layer, a
+   ramp of `4.8` cells, on which the exact target was measured at `4/M` to
+   `50 M` ([history](HISTORY.md#open-questions)).
 
-**Gauge sources that know less about the hole (opened 2026-10-02 in a
-design discussion with Erik; nothing is built).** Today `H_a(x)` is sampled
+**Gauge sources that know less about the hole.** The sampled `H_a(x)` is taken
 from the background ([Gauge and constraint
 damping](#gauge-and-constraint-damping)), so it knows the hole's mass, spin,
-position and velocity, and a moving Kerr-Schild hole is refused because its
+position and velocity, and with it a moving Kerr-Schild hole is refused because its
 `H_a(x − vt)` is not a per-chunk sample. The question is which gauge
 sources need less of that, and which of them still make the initial data an
 exact stationary solution, so that a run starts without a gauge transient.
@@ -8039,29 +7233,19 @@ to 20 digits or better.
   a point outside `r = M/2`. There is no closed form for it here, and
   Kerr's version (Doran's coordinates) is not worked out.
 
-**Built (2026-10-02)**: the source above, `KerrSchildSource` behind
+**Built**: the source above, `KerrSchildSource` behind
 `Val(:algebraic)` — see [Gauge and constraint
 damping](#gauge-and-constraint-damping) — and measured first on the static
 hole on the octant ([single holes on the
 octant](SINGULARITY_HANDLING.md#single-holes-on-the-octant-a--0-to-910-2026-10-02-to-2026-10-07)).
 
-**Proposed (2026-10-02):** build the source above as an alternative to the
-sampled `Hsrc` behind the kernel's existing gauge-source `Val`, measure (1)
-on the static Kerr-Schild hole, and then run a boosted Kerr-Schild hole
-across the mesh with the analytic layer, against G5's harmonic `a = 7/10`
-rows; the damped harmonic gauge stays the extension for binaries, where no
-constants of the run make the data stationary.
-
-**Done (2026-10-20) for `a = 0`**: the boosted Kerr-Schild hole at `v = 1/5`,
-the speed of one member of a binary a few orbits before merger, crossed `8 M`
-of a frozen capsule mesh on [the quadrant](#the-quadrant-a-hole-moving-along-x-added-2026-10-20)
-to `40 M` with the analytic layer, at the resting hole's level once the layer
-relaxes at `8/M` and its core follows the target — under [the boosted
-Kerr-Schild hole at binary
-speed](SINGULARITY_HANDLING.md#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)
-— and, from 2026-10-21, at the default `4/M` once the layer and the core carry
-their target's rate ([the moving `:damped` layer's target
-rate](SINGULARITY_HANDLING.md#the-moving-damped-layers-target-rate-2026-10-21)).
-It was not compared with G5's rows, which differ in chart, speed (`0.3`),
+The boosted Kerr-Schild hole at `a = 0`, `v = 1/5`
+([history](HISTORY.md#open-questions)) was not compared with G5's rows, which differ in chart, speed (`0.3`),
 order (`q = 2`) and spin. A moving spinning Kerr-Schild hole, `a = 9/10`
 above all, is still open.
+
+**Inconsistent:** the sentence above calls a moving spinning Kerr-Schild
+hole, `a = 9/10` above all, still open; "What the single holes hand over"
+(under Binary black holes, this file) reports the aligned campaign at
+`a ≤ 9/10` and `v ≤ 1/2` and the bitant campaign across the spin, stable and
+converging at order four outside the horizon.

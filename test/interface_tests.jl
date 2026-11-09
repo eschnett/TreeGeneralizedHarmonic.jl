@@ -2,7 +2,7 @@
 # that takes second derivatives.
 #
 # `CODE.md`, "The interface-order rule, and what it costs a second-order
-# system", and milestone G3. TreeAMR's measured rule is that a ghost
+# system", and `PLAN.md`'s milestone G3. TreeAMR's measured rule is that a ghost
 # filled by an order-`p` operator carries an `O(h^p)` error, an `m`-th
 # derivative divides it by `h^m`, and the global rate is
 # `min(q, p − m + 1)`. This system takes **second** derivatives, so

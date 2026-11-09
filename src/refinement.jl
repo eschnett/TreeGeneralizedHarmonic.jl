@@ -797,7 +797,7 @@ contributes its bounding box's center, weighted by the number of cells that
 fired in it and by its cell volume.
 
 `CODE.md`'s mesh statistics ask for "the refinement centroid against the
-analytic center", and its G5 acceptance for that centroid to stay "within a
+analytic center", and `PLAN.md`'s G5 acceptance for that centroid to stay "within a
 few finest spacings of the analytic center at every chunk". This is that
 number, and its definition is **(proposed in step 6)** — the box centers
 rather than the cells themselves, because the boxes are what the flagging

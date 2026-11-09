@@ -1,7 +1,7 @@
 # The fitted target: a regular fit of the state on the offset surface, which
 # the layer of step 8e's `:fitted` variant relaxes toward.
 #
-# `CODE.md`, "The interior" — "The fitted target (added in step 8e)" — and
+# `CODE.md`, "The interior" — "The fitted target" — and
 # `PLAN.md`'s step 8e. Step 5's layer relaxes toward the analytic solution,
 # which needs an analytic interior whose singular set a core can contain;
 # harmonic Kerr at `a = 9/10` has none that fits. The fitted target needs no
