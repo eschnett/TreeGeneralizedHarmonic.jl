@@ -2997,7 +2997,7 @@ end
 
 # --- (12) the moving hole: G5 (step 8) --------------------------------------
 #
-# `PLAN.md`'s step 8 and `CODE.md`'s milestone G5: harmonic Kerr at `a = 7/10`
+# `PLAN.md`'s step 8 and milestone G5: harmonic Kerr at `a = 7/10`
 # (decided 2026-09-23), boosted at `v = 0.3 x̂` — which moves it at `−0.3 x̂`,
 # `hole_velocity`'s sign — run as the `:fitted` variant on the tracked
 # geometry, on a mesh the indicator chooses and re-chooses at every chunk
@@ -3327,7 +3327,7 @@ end
 # The layer's residual against the truth, by depth (four bins of the ramp,
 # the offset surface first) and by side — trailing, `(x − c)·v < 0`, where
 # the moving core releases points, or leading — as the largest `|u − u_exact|`
-# over the twenty variables: `CODE.md`'s "points released by the core relaxed
+# over the twenty variables: `PLAN.md`'s G5 "points released by the core relaxed
 # within `1/ρ_max`" as a number per chunk. Host-side, a test script's loop.
 function mv_layer_residual(p, u, t, bg)
     int = p.interior

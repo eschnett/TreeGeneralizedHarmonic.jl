@@ -5,6 +5,7 @@ authors = ["Erik Schnetter <schnetter@gmail.com>"]
 
 [deps]
 AbstractSphericalHarmonics = "ee470b23-2871-4f3a-b920-8523874a9e46"
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 ApparentHorizonFinder = "2326d305-03d0-4260-ba27-fc7d1edfc55d"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 IMEXRungeKutta = "6f46d5f7-e15e-41aa-a098-eed9d1a63ad8"
@@ -28,6 +29,7 @@ SpacetimeMetrics = {rev = "main", url = "https://github.com/eschnett/SpacetimeMe
 
 [compat]
 AbstractSphericalHarmonics = "1.2"
+Adapt = "4"
 ApparentHorizonFinder = "2.1"
 Dates = "1.11"
 IMEXRungeKutta = "1.2"

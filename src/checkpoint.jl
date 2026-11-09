@@ -1,6 +1,6 @@
 # Checkpoint and restart for `evolve!` (added 2026-10-01, on TreeAMR 0.1.4's
 # M9a; Erik's decision of that day reversed `CODE.md`'s "no checkpoint and
-# restart").
+# restart", now in `HISTORY.md`, "I/O and viewers").
 #
 # Everything about the *file* is upstream: TreeIOHDF5's `save_checkpoint` writes
 # the forest, the evolved field set and an application's plain data, and

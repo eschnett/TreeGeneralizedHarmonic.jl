@@ -5,7 +5,7 @@ design of the interior — [The interior: a pointwise damping
 layer](CODE.md#the-interior-a-pointwise-damping-layer), the variants, the
 profiles, the range projection, the tracked geometry and the fitted target —
 and the settings these runs recommend for a single hole, [Single black holes:
-recommended settings](CODE.md#single-black-holes-recommended-settings-added-2026-10-08).
+recommended settings](CODE.md#single-black-holes-recommended-settings).
 This file keeps the runs that made them: what was measured, with which jobs
 and scripts, and what each result decided. Prose that names a section
 ("under …", "above", "below") names one of `CODE.md`'s unless the section is
@@ -328,7 +328,7 @@ against `2.636953e−2`, the layer residual `5.512611e−1` against
 of large terms near a hole, which is where `Float32` has least to give —
 agrees to `3.5e−3` against `3.5e−3`. This is the sharpest `Float32`
 result in the package, and it is the offset identities of
-[G1](CODE.md#milestones) earning their keep: `metric_quantities` takes
+[G1](PLAN.md#milestones) earning their keep: `metric_quantities` takes
 `g^{ab} − η^{ab}` from GHSO2's identity rather than from `inv(g) − η`,
 whose `Float32` error is `4.2e−3` against the identity's `1.4e−7`.
 
@@ -2345,7 +2345,7 @@ analysis row every `M/2` and the trailing/leading split, which together are
 about three quarters of such a run's cost (`175` of `239 s/M` for the
 spinning hole's `1/32` row below, on TreeAMR 0.2.4); the evolution alone is about `20 ns` per
 point and step — `CODE.md`, [The analysis cadence on an
-H200](CODE.md#the-analysis-cadence-on-an-h200-measured-2026-10-22).**)**
+H200](CODE.md#the-analysis-cadence-on-an-h200).**)**
 
 **`:damped` at `8/M` puts the moving hole at the resting hole's level
 (measured 2026-10-20).** Moving over resting, at `ρ_max = 8/M`:
@@ -2678,7 +2678,7 @@ The two sections above move a hole without spin. A Kerr hole spinning about
 the spin `x → −x` and `y → −y` — but it is its own image under a quarter turn
 about `z` at every time, so it runs on the **rotating quadrant**, a quarter
 of the box (commit `8efc5fe`; `CODE.md`, [The rotating quadrant: a hole moving
-along its spin axis](CODE.md#the-rotating-quadrant-a-hole-moving-along-its-spin-axis-added-2026-10-21)).
+along its spin axis](CODE.md#the-rotating-quadrant-a-hole-moving-along-its-spin-axis)).
 It is the first spinning hole this package has moved in Kerr-Schild
 coordinates, and it is not G5's case: G5's hole moves *across* its spin, in
 the harmonic chart.
@@ -2987,7 +2987,7 @@ grows at rest.
   On the previous section's `1/32` row that is `97 s/M` against `239` at
   `chunk = M/2` with the split, at the same step, and the evolution alone is
   `64 s/M`. The benchmark is in `CODE.md`, [The analysis cadence on an
-  H200](CODE.md#the-analysis-cadence-on-an-h200-measured-2026-10-22).
+  H200](CODE.md#the-analysis-cadence-on-an-h200).
   Without the split the CSV has no extents and no `hz_J`. `J` here is
   `records.csv`'s, the Korzyński `J`'s magnitude, so at `a = 0` it is
   `|J| ≥ 0`.
@@ -3293,7 +3293,7 @@ The rows at rest are the same physics on another domain, and they are
 the bitant's check against the rotating quadrant.
 
 **No rotation holds this hole** (`CODE.md`, [The
-bitant](CODE.md#the-bitant-a-hole-moving-across-its-spin-added-2026-10-24)).
+bitant](CODE.md#the-bitant-a-hole-moving-across-its-spin)).
 The request was for TreeAMR 0.2.5's half-turn seam. A half turn keeps only
 vectors along its axis: one about `x` reverses the spin and one about `z`
 reverses the velocity. The hole's one symmetry is the mirror `z → −z`, so its
@@ -3682,7 +3682,7 @@ moving alike, against `10⁻¹¹` under Kerr-Schild's (`ℋ` there `5·10⁻⁵`
 `4·10⁻¹²`), still growing linearly at `40 M`; over the whole evolved region the
 faces are most of the damped harmonic runs' `C_a` (`7.4·10⁻⁵` at rest at `40 M`).
 `2M/r²` is `4.9·10⁻⁴` at `64 M` ([What step B1 built and
-measured](CODE.md#what-step-b1-built-and-measured-2026-10-25)). It does not reach
+measured](CODE.md#what-step-b1-built-and-measured)). It does not reach
 the shells about the hole by `40 M`.
 
 **What this says about the pairings** (`CODE.md`, "The gauge"): the damped harmonic
@@ -3721,7 +3721,7 @@ spacing (`r_0 = 5/8`, `r_1 = 23/16`, `4/M` with the target's rate), a fast roll-
 - **The faces' `C_a` is the gauge's far field**, `10⁵×` the Kerr-Schild run's:
   the harmonic far field against Kerr-Schild Dirichlet data, `2M/r²` at a box of
   `16 M` ([What step B1 built and
-  measured](CODE.md#what-step-b1-built-and-measured-2026-10-25)).
+  measured](CODE.md#what-step-b1-built-and-measured)).
 - A `:fitted` smoke run (`h = 1/24` on a box of `8 M`, `m = 16`, `n_L = 20`,
   `σ_g = 1`, moving) reached `2 M`, the found center `0.074 M` behind the analytic
   one.
@@ -3737,7 +3737,7 @@ the same (`r_0 = 5/8`, `r_1 = 23/16`, `4/M` with the target's rate, its core
 following its target); what changes is that the target is the boosted Kerr-Schild hole
 the track says is there, rebuilt at every piece's midpoint, and the track predicts
 along the quadratic of its last four finds ([What step B2 built and
-measured](CODE.md#what-step-b2-built-and-measured-2026-10-26)). One hole, in its own
+measured](CODE.md#what-step-b2-built-and-measured)). One hole, in its own
 Kerr-Schild gauge, where it moves at exactly `v`: with exact finds the tracked target
 is the analytic one, so what is measured is the price of the finds' noise, and of
 each perturbation of the target's parameters a binary's target will carry —

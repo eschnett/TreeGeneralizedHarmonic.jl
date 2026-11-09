@@ -92,3 +92,109 @@ end
                                   _reach(I[3], r, size(work, 3)), 1, b))
 end
 @inline _reach(i, r, n) = i - r < 1 ? i - r : i + r > n ? i + r : i
+
+# The metric adapter of the coupling contract (added 2026-11-08): `adm_vars`
+# behind an object that holds the working array, the block spacings and `q`, so
+# that the consumer needs none of them (`CODE.md`, "The coupling contract with
+# TreeGRRMHD").
+
+"""
+    ADMMetric(p::GHProblem, u, t)
+    ADMMetric(p::GHProblem)
+
+The metric adapter of the coupling contract with TreeGRRMHD (GH-1): this
+package's metric at its own vertices, as `α`, `β^i`, `γ_ij` and `K_ij`
+(`CODE.md`, "The coupling contract with TreeGRRMHD").
+
+The first method scatters `u` into the problem's field set and fills its ghosts
+at `t`, as [`gh_rhs!`](@ref) does, and then wraps the result. The second wraps
+the field set as it is, for a caller that has just filled it at the time it
+wants. Both are a **snapshot**: the adapter reads the field set's working array
+in place, so it is valid until this package's state changes. Rebuild it after a
+regrid, which replaces the field set.
+
+`ADMMetric` is the host side and is not passed to a kernel. Binding it to a
+field set of the consumer's,
+
+```julia
+at = ADMMetric(p, u, t)(M)
+(; α, β, γ, K) = at(n, b)
+```
+
+checks that `M` is vertex-centered and on this problem's forest (`===`), and
+returns the kernel-side object. That object is `isbits` once adapted to the
+backend (`Adapt.adapt`, which a KernelAbstractions launch applies). `n` is the
+**owned** index, `1 ≤ n[d] ≤ N`, the index `map_blocks!` hands a kernel over
+the default range, and `b` the local block. The call returns
+[`adm_vars`](@ref)'s second method at the stored index `n + G`, with this
+package's `1/h` and `q`. An owned index means the same point in every
+vertex-centered set on the forest, so `M`'s own `G` does not enter.
+
+The contract promises the owned vertices only. `K`'s stencil reaches `q/2`
+points, so with `G = q/2 + 1` it would be defined one ghost layer further, but
+the consumer fills its own ghosts. A `@boundscheck` refuses any other `n` with
+the `BoundsError` of its stored index; `@inbounds` at the call site elides it.
+"""
+struct ADMMetric{F,A,S,q}
+    forest::F
+    work::A
+    spacings::S
+    valq::Val{q}
+end
+
+ADMMetric(p::GHProblem{T,G,q}) where {T,G,q} =
+    ADMMetric(p.U.forest, p.U.work, p.spacings, Val(q))
+
+function ADMMetric(p::GHProblem{T}, u, t) where {T}
+    scatter!(p.U, u)
+    if p.hasdirichlet
+        fill_ghosts!(p.U, p.schedule; boundary=dirichlet(p.case, T(t)))
+    else
+        fill_ghosts!(p.U, p.schedule)
+    end
+    return ADMMetric(p)
+end
+
+# The kernel side: everything a call reads, and nothing that is host-only.
+struct BoundADMMetric{A,S,G,q}
+    work::A
+    spacings::S
+    valG::Val{G}
+    valq::Val{q}
+end
+
+Adapt.@adapt_structure BoundADMMetric
+
+function (adm::ADMMetric{F,A,S,q})(M::FieldSet) where {F,A,S,q}
+    M.forest === adm.forest || throw(ArgumentError(
+        "the metric adapter is bound to a field set on another forest: the " *
+        "owned index it is called with names a point only on this problem's " *
+        "forest, so build the consumer's field set on it (`===`), and rebind " *
+        "after every regrid (CODE.md, \"The coupling contract with " *
+        "TreeGRRMHD\")"))
+    all(c -> c === :vertex, M.centering) || throw(ArgumentError(
+        "the metric adapter answers at this package's vertices, and this " *
+        "field set is $(M.centering): the contract leaves every conversion " *
+        "between centerings to the consumer, which interpolates from a " *
+        "vertex-centered set of its own (CODE.md, \"The coupling contract " *
+        "with TreeGRRMHD\")"))
+    return BoundADMMetric(adm.work, adm.spacings, Val(q ÷ 2 + 1), adm.valq)
+end
+
+@inline function (at::BoundADMMetric{A,S,G,q})(n::NTuple{3,Int},
+                                               b::Int) where {A,S,G,q}
+    I = (n[1] + G, n[2] + G, n[3] + G)
+    @boundscheck begin
+        N = size(at.work, 1) - 2G - 1
+        ok = (1 <= n[1] <= N) & (1 <= n[2] <= N) & (1 <= n[3] <= N)
+        ok || _owned_out_of_range(at.work, I, b)
+        checkbounds(at.spacings, b)
+    end
+    inv_h = inv(@inbounds at.spacings[b])
+    return @inbounds adm_vars(at.work, I, b, inv_h, Val(q))
+end
+
+# An index outside the owned range, reported as the `BoundsError` of its stored
+# index — integers only, so that a device compiles it.
+@noinline _owned_out_of_range(work, I, b) =
+    Base.throw_boundserror(work, (I[1], I[2], I[3], 1, b))

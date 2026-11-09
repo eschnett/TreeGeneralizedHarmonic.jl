@@ -1,7 +1,7 @@
 # The fitted target: the fit's variables and harmonics, the least squares,
 # the validity sweep, the evaluator, and the fit of an evolved state.
 #
-# `CODE.md`, "The interior" — "The fitted target (added in step 8e)" — and
+# `CODE.md`, "The interior" — "The fitted target" — and
 # `PLAN.md`'s step 8e-i. Everything here is host-side and against analytic
 # data, except the last claim, which fits the state the suite's one tracked
 # run ends in (`tracked_fixture_run`, in `evolution_cases.jl`, shared with

@@ -60,6 +60,7 @@ using AbstractSphericalHarmonics: EquiangularGrid, SphereGrid, ash_grid_size,
                                   ash_point_coord, ash_resample, ash_transform
 using ApparentHorizonFinder: ADMVars, find_horizon, horizon_grid,
                              horizon_points
+import Adapt
 using KernelAbstractions: @Const, @index, @kernel
 using KernelAbstractions: Backend, CPU, allocate, get_backend
 using KorzynskiSpin: horizon_spin
@@ -83,6 +84,7 @@ export hostcopy
 export pack_g, pack_sym
 export metric_quantities, metric_derivatives, metric_derivatives_along
 export adm_from_metric, adm_vars_from_state, adm_vars, gauge_constraint_at_node
+export ADMMetric
 export gh_node_rhs, gh_node_source, gh_node_rhs_expanded
 export gh_node_source_lean, metric_divergences
 
