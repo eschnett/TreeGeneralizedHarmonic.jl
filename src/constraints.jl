@@ -382,8 +382,8 @@ singular inside the offset surface **(proposed in step 8e)**.
 end
 
 """
-    adm_constraint_kernel!(diag, work, Hwork, origins, spacings, γ0, γ2, mask,
-                           ::Val{G}, ::Val{q}, ::Val{HASH})
+    adm_constraint_kernel!(diag, work, Hwork, origins, spacings, damping, γ2, mask,
+                           t, ::Val{G}, ::Val{q}, ::Val{HASH}, mat, ::Val{HASMATTER})
 
 The ADM Hamiltonian and momentum constraints at one owned point, written
 into `DIAG_HAM` and the three `DIAG_MOM` slots, with the mask indicator in
@@ -408,11 +408,18 @@ different one. What it leaves out is the Kreiss–Oliger term, in both time
 derivatives (recorded in step 4): it is `O(h^{q+1})`, one order below the
 truncation error these monitors converge at, and carrying it would mean
 differencing the dissipation operator as well.
+
+**With matter** (`HASMATTER`, added 2026-11-09; GH-3, `CODE.md`, "What this
+package takes (GH-3)") the bound adapter `mat` is asked for `(ρ, S_i, S_ij)` at
+the point: `∂_tΠ` gains the right-hand side's own [`matter_source`](@ref), so the
+reconstructed `∂_t∂_t g` is the matter run's, and the two constraints become the
+matter's, `ℋ − 16πρ` and `ℳ_i − 8πS_i`. Without it the kernel is the vacuum one.
 """
 @kernel function adm_constraint_kernel!(diag, @Const(work), Hwork,
                                         @Const(origins), @Const(spacings),
                                         damping, γ2, mask, t, ::Val{G},
-                                        ::Val{q}, ::Val{HASH}) where {G,q,HASH}
+                                        ::Val{q}, ::Val{HASH}, mat,
+                                        ::Val{HASMATTER}) where {G,q,HASH,HASMATTER}
     I = @index(Global, NTuple)
     b = I[4]
     inner = ntuple(d -> I[d], Val(3))
@@ -458,7 +465,11 @@ differencing the dissipation operator as well.
     # evolution equation gives without the source (added 2026-10-02).
     ∂ₜh₀ = β[1]*∂h[1] + β[2]*∂h[2] + β[3]*∂h[3] + (α / sqrtγ) * Πv
     Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), x, t, hv, ∂ₜh₀, ∂h)
-    ∂ₜh, ∂ₜΠ = gh_node_rhs_expanded(hv, Πv, ∂h, ∂Π, ∂∂h, Hl, dHl, γ0, γ2)
+    ∂ₜh, ∂ₜΠ₀ = gh_node_rhs_expanded(hv, Πv, ∂h, ∂Π, ∂∂h, Hl, dHl, γ0, γ2)
+    # The matter at the point, and its term in `∂ₜΠ` (GH-3; each name assigned
+    # once, since the closures below capture some of them).
+    m = _monitor_matter(mat, inner, b, Val(HASMATTER))
+    ∂ₜΠ = _with_matter_source(∂ₜΠ₀, m, g4, α, β, γu, sqrtγ)
 
     φ = α / sqrtγ
     # ∂_i∂_t g: the first evolution equation differentiated along x^i.
@@ -480,7 +491,8 @@ differencing the dissipation operator as well.
 
     dd = (∂ₜ∂ₜh, ∂ᵢ∂ₜh[1], ∂ᵢ∂ₜh[2], ∂ᵢ∂ₜh[3],
           ∂∂h[1], ∂∂h[2], ∂∂h[3], ∂∂h[4], ∂∂h[5], ∂∂h[6])
-    ℋ, ℳ = adm_constraints_at_node(g4, gu4, α, β, _dg4(∂ₜh, ∂h), _ddg4(dd))
+    ℋ₀, ℳ₀ = adm_constraints_at_node(g4, gu4, α, β, _dg4(∂ₜh, ∂h), _ddg4(dd))
+    ℋ, ℳ = _with_matter_constraints(ℋ₀, ℳ₀, m)
 
     keep = is_evolved(mask, x)
     diag[inner..., DIAG_HAM, b] = keep ? ℋ : zero(T)
@@ -529,7 +541,8 @@ function gh_constraint!(p::GHProblem{T}, u, t;
 end
 
 """
-    adm_constraint!(p::GHProblem, u, t; mask = interior_mask(p.interior, t))
+    adm_constraint!(p::GHProblem, u, t; mask = interior_mask(p.interior, t),
+                    matter = nothing)
 
 Evaluate the ADM Hamiltonian and momentum constraints of the state `u` at
 time `t` into `p.diag`, and return `p`.
@@ -537,14 +550,37 @@ time `t` into `p.diag`, and return `p`.
 The expensive monitor — every second derivative of the metric, and the
 four-dimensional Ricci tensor — so `CODE.md` runs it every `k`-th chunk
 where the gauge constraint runs at every one.
+
+`matter` is [`gh_rhs!`](@ref)'s (GH-3, added 2026-11-09): `nothing` for vacuum,
+or a matter adapter, with which the constraints written are `ℋ − 16πρ` and
+`ℳ_i − 8πS_i` and `∂ₜΠ` carries the matter's term. It needs the matter at the
+point only, so the owned vertices the adapter answers for suffice.
 """
 function adm_constraint!(p::GHProblem{T}, u, t;
-                         mask=interior_mask(p.interior, T(t))) where {T}
+                         mask=interior_mask(p.interior, T(t)),
+                         matter=nothing) where {T}
     _prepare_monitor!(p, u, t)
+    at = bind_matter(matter, p.U)
     map_blocks!(adm_constraint_kernel!, p.U, p.diag.work, p.U.work,
                 gauge_work(p.Hsrc, t), p.origins, p.spacings, p.case.γ0,
-                p.case.γ2, mask, eltype(p.U.work)(t), p.valG, p.valq, p.valH)
+                p.case.γ2, mask, eltype(p.U.work)(t), p.valG, p.valq, p.valH,
+                at, has_matter(at))
     return p
+end
+
+# The ADM monitor's matter (GH-3, added 2026-11-09): the adapter's answer at the
+# point, or `nothing`; then its term in `∂ₜΠ` and its subtraction from the two
+# constraints, each the identity for `nothing` — no `+ 0`, which would turn a
+# `−0.0` into `+0.0` and make the vacuum monitor differ from before in a bit.
+@inline _monitor_matter(mat, inner, b, ::Val{true}) = mat(inner, b)
+@inline _monitor_matter(mat, inner, b, ::Val{false}) = nothing
+@inline _with_matter_source(∂ₜΠ, ::Nothing, g4, α, β, γu, sqrtγ) = ∂ₜΠ
+@inline _with_matter_source(∂ₜΠ, m, g4, α, β, γu, sqrtγ) =
+    ∂ₜΠ + matter_source(g4, α, β, γu, sqrtγ, m.ρ, m.S, m.Sij)
+@inline _with_matter_constraints(ℋ, ℳ, ::Nothing) = (ℋ, ℳ)
+@inline function _with_matter_constraints(ℋ::T, ℳ, m) where {T}
+    c = 8 * T(π)
+    return ℋ - 2 * (c * m.ρ), ℳ - SVector{3,T}(c * m.S[1], c * m.S[2], c * m.S[3])
 end
 
 """

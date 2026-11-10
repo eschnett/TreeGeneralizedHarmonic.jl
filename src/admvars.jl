@@ -145,15 +145,7 @@ end
 ADMMetric(p::GHProblem{T,G,q}) where {T,G,q} =
     ADMMetric(p.U.forest, p.U.work, p.spacings, Val(q))
 
-function ADMMetric(p::GHProblem{T}, u, t) where {T}
-    scatter!(p.U, u)
-    if p.hasdirichlet
-        fill_ghosts!(p.U, p.schedule; boundary=dirichlet(p.case, T(t)))
-    else
-        fill_ghosts!(p.U, p.schedule)
-    end
-    return ADMMetric(p)
-end
+ADMMetric(p::GHProblem, u, t) = ADMMetric(prepare!(p, u, t))
 
 # The kernel side: everything a call reads, and nothing that is host-only.
 struct BoundADMMetric{A,S,G,q}

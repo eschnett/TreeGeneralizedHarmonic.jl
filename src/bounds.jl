@@ -947,7 +947,7 @@ points** — `r ≥ r_1` from the hole's center at `t`, or everywhere for a
 case with no hole.
 
 This is what the driver's finiteness checks read (amended in step 8b):
-`max_speed_of`'s refusal and the record's `finite` row used to be
+`max_speed(p, u, t)`'s refusal and the record's `finite` row used to be
 `all(isfinite, u)` over the whole state, which ended a run at the first
 `NaN` in the frozen core — a region nothing evolved reads until the
 layer's stencils do, and the region the range projection exists to repair.

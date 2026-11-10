@@ -53,6 +53,13 @@ else
         # hole fixture it evaluates, and after `evolution_tests.jl`, whose `rhs_scale`
         # it measures against.
         include("simd_tests.jl")
+        # The matter term, GH-3 of the coupling contract with TreeGRRMHD (added
+        # 2026-11-09): after `evolution_cases.jl`, whose runs it builds on, and after
+        # `evolution_tests.jl`, whose `rhs_scale` its lanes test measures against.
+        include("matter_tests.jl")
+        # The verbs a script calls, GH-4 (added 2026-11-09): after `matter_tests.jl`,
+        # whose star and matter adapter it runs a script's integrator on.
+        include("verbs_tests.jl")
         # Step 4's four. They come after `evolution_cases.jl` because all of
         # them are runs; `threading_tests.jl` is last because it starts a
         # subprocess, and a failure anywhere above is cheaper to read than a

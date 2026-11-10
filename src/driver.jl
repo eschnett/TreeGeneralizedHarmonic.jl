@@ -1452,7 +1452,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # `t = 0`, before anything has been integrated: the record's first row
         # is the initial data's own, which is what makes "the error grew from
         # zero" a statement a test can check rather than assume.
-        λ_initial = max_speed_of(p0, u, zero(T))
+        λ_initial = max_speed(p0, u, zero(T))
         dt0 = cfl * minimum_spacing(T, forest) / λ_initial
         p0 = with_interior(p0, chunk_interior(case, dt0, ρ_max_factor,
                                               ρ_max_fixed; default=ρ_max_default,
@@ -1460,9 +1460,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # The initial data has not been through a stage, so neither limiter
         # has seen it: the range projection first, in the order RK4 applies
         # the two (stage, then step), and the paste after it **(proposed in
-        # step 8b** — on analytic data neither fires**)**.
-        apply_bounds!(p0, u, zero(T))
-        paste_interior!(p0, u, zero(T))
+        # step 8b** — on analytic data neither fires**)**: the limiter a script
+        # calls, `stage_limit!` (GH-4).
+        stage_limit!(u, p0, zero(T))
         record!(p0, zero(T), u, zero(T), 0, λ_initial, λ_initial, zero(T))
     end
 
@@ -1539,9 +1539,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # bounds) — the prolongation into a fresh fine block is unlimited and
         # can leave an owned point outside every range, TreeHydro's reason for
         # the same call — and the `:pasted` variant's paste, which every other
-        # variant compiles away.
-        apply_bounds!(p, u, stop)
-        paste_interior!(p, u, stop)
+        # variant compiles away: `stage_limit!` (GH-4).
+        stage_limit!(u, p, stop)
         return (; moved, p, u, schedule, geom=g)
     end
 
@@ -1610,7 +1609,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         end
 
         # (1) the step, and with it this chunk's relaxation rate.
-        λ = max_speed_of(p, u, tstart)
+        λ = max_speed(p, u, tstart)
         h_min = minimum_spacing(T, forest)
         dt = cfl * h_min / (moving ? λ * max(growth * growth, T(101 // 100)) : λ)
         steps = max(1, ceilint((stop - tstart) / dt))
@@ -1780,7 +1779,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         end
 
         # (2) the recheck. It throws, and it is meant to.
-        λ_end = max_speed_of(p, u, stop)
+        λ_end = max_speed(p, u, stop)
         growth = max(one(T), λ_end / λ)
         cflnum = check_cfl(dt_used, h_min, cfl, λ_end; chunk=c, λ=λ)
 
@@ -2060,43 +2059,6 @@ function centroid_offset(case::GHCase{T}, t, centroid) where {T}
     return sqrt(sum(abs2, SVector{3,T}(centroid) - c))
 end
 
-# `max_speed` reads the working array, so the state has to be there first.
-# Named, because the driver does it three times a chunk and forgetting the
-# scatter is a speed measured on the previous chunk — and because the
-# answer has to be **checked** here rather than three lines later: `dt` is
-# `cfl·h/λ`, and a `λ` of `NaN` or zero reaches `ceilint` as an
-# `InexactError: Int64(NaN)`, which says nothing about what went wrong.
-# `gh_dt` makes the same check for the same reason (added in step 5, after
-# a harmonic-Kerr configuration whose initial data was not finite in the
-# evolved region produced exactly that error).
-#
-# **The check is the evolved region's (amended in step 8b).** It was
-# `all(isfinite, u)`, which ended a run at the first `NaN` anywhere — the
-# frozen core included, where nothing evolved reads it until the layer's
-# stencils do, and where the range projection exists to repair it. A `NaN`
-# in the core is a hit; a `NaN` at `r ≥ r_1` is still the end.
-function max_speed_of(p::GHProblem{T}, u, t) where {T}
-    nbad = evolved_nonfinite(p, u, t)
-    nbad == 0 || throw(ArgumentError(
-        "the state at t = $t is not finite where it is evolved, so there is " *
-        "no time step: $nbad values at points outside the interior (r ≥ r_1, " *
-        "or everywhere for a case with no hole) are NaN or Inf. On the " *
-        "initial data this is a case whose analytic solution is singular " *
-        "somewhere the mesh reaches — check r_0 against where |h| is still " *
-        "moderate — and after a chunk it is a run that blew up, whose last " *
-        "analysis record says where."))
-    scatter!(p.U, u)
-    λ = max_speed(p; t=t)
-    isfinite(λ) && λ > 0 || throw(ArgumentError(
-        "the maximum characteristic speed α√(tr γ^{ij}) + |β| over the " *
-        "evolved points came out as $λ at t = $t, so there is no " *
-        "CFL-limited time step. The interior is masked out of this " *
-        "reduction (CODE.md, \"The time step\"), so a non-finite answer is " *
-        "a state outside r_1 that is no longer a metric, and a zero one is " *
-        "a state that is identically zero — which no initial data of this " *
-        "package produces, h = 0 being Minkowski, whose speed is √3."))
-    return λ
-end
 
 # The horizon rows of one record entry: the find at `t` when this is a
 # `k`-th chunk and the case asks for one, and a row of `nothing` otherwise.
