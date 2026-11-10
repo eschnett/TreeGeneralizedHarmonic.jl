@@ -592,6 +592,13 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `RK4` clashes with OrdinaryDiffEq's by name: the package `import`s it
   `as IRK`.
   See `CODE.md`, "Time integration".
+- **A script's verbs are `public`, not exported, and `rhs!` reads what
+  `prepare!` left.** `prepare!`, `rhs!`, `stage_limit!`, `step_limit!`,
+  `initial_state!` and `evolved_sets` share TreeGRRMHD's names: qualify
+  them. Anything that scatters between `prepare!` and `rhs!` (`max_speed`, a
+  monitor, `gh_dt`, `initial_state!`) makes `rhs!` evaluate another state,
+  and nothing checks. A segment must be a contiguous view, since the CPU
+  lanes store through a pointer. See `CODE.md`, "The verbs (GH-4)".
 - **The RHS never mutates `u`, and the state has exactly three writers**. Both limiters
   are **integrator keywords**, passed by `gh_integrator` (`src/stepping.jl`)
   and nowhere else. **Under IMEXRungeKutta the two are

@@ -156,6 +156,12 @@ export gh_step_limiter!, paste_interior!
 # The time integrator (IMEXRungeKutta's RK4 by block owner, 2026-09-26)
 export state_partition, gh_limiter!, gh_integrator, gh_solve, ProblemRef
 
+# The verbs a script that owns the time loop calls (GH-4 of the coupling contract
+# with TreeGRRMHD, 2026-11-09): public, not exported, because TreeGRRMHD's verbs
+# have the same names and a script loads both packages. `max_speed` is exported
+# above; its method `max_speed(p, u, t)` is the speed for `Δt`.
+public prepare!, rhs!, stage_limit!, step_limit!, initial_state!, evolved_sets
+
 # Constraints and the masks their norms take
 export AllPoints, is_evolved, adm_constraints_at_node
 export gh_constraint!, adm_constraint!, gh_error!

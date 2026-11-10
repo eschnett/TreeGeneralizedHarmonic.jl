@@ -1329,7 +1329,7 @@ function bounds_section(rows)
             p = out.problem
             u = copy(out.u)
             tc = T(c_a)
-            λ = TreeGeneralizedHarmonic.max_speed_of(p, u, tc)
+            λ = max_speed(p, u, tc)
             dt = T(1 // 5) * minimum_spacing(T, out.forest) / λ
             steps = max(1, ceil(Int, 1 / dt))
             dt_used = one(T) / steps

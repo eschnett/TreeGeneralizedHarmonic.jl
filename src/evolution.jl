@@ -1247,14 +1247,54 @@ The hook is rebuilt here, at every evaluation, with that evaluation's `t`.
 That is not a cost worth avoiding — it is a closure over two `isbits`
 values — and the alternative is a boundary that lags the solution by up to
 a chunk (`CLAUDE.md`, "Hooks depend on time").
+
+It is [`prepare!`](@ref) and then [`rhs!`](@ref) (GH-4, amended 2026-11-09): a
+script that owns the time loop calls the two in turn, with the other package's
+work between them.
 """
 function gh_rhs!(du, u, p::GHProblem, t; matter=nothing)
+    prepare!(p, u, t)
+    rhs!(du, p, t; matter=matter)
+    return nothing
+end
+
+"""
+    prepare!(p::GHProblem, u, t) -> p
+
+Make the state `u` at time `t` readable: scatter it into the problem's working
+array and fill the ghosts, with the Dirichlet hook of this `t` where the case
+has a physical boundary. The first half of [`gh_rhs!`](@ref), whose second is
+[`rhs!`](@ref) (GH-4 of the coupling contract with TreeGRRMHD, added 2026-11-09;
+`CODE.md`, "The verbs (GH-4)").
+
+Returns `p`, whose working array now holds the state that the metric adapter
+reads, `ADMMetric(prepare!(p, u, t))` ([`ADMMetric`](@ref), GH-1), and that
+`rhs!` evaluates. The working array is scratch: the next `prepare!`, `gh_rhs!`,
+monitor or speed overwrites it. `u` may be a segment of a multi-set state
+vector (TreeAMR's `stateview`), and is never written. Public, not exported:
+TreeGRRMHD's verbs have the same names.
+"""
+function prepare!(p::GHProblem{T}, u, t) where {T}
     scatter!(p.U, u)
     if p.hasdirichlet
-        fill_ghosts!(p.U, p.schedule; boundary=dirichlet(p.case, t))
+        fill_ghosts!(p.U, p.schedule; boundary=dirichlet(p.case, T(t)))
     else
         fill_ghosts!(p.U, p.schedule)
     end
+    return p
+end
+
+"""
+    rhs!(du, p::GHProblem, t; matter = nothing)
+
+The right-hand side of the state that [`prepare!`](@ref) left in `p`, at time
+`t`, into `du`: the kernel half of [`gh_rhs!`](@ref) (GH-4, added 2026-11-09).
+`t` must be the time `prepare!` was given, and nothing may have used `p`'s
+working array in between: `rhs!` reads that array as it finds it. `matter` is
+`gh_rhs!`'s, GH-3's adapter or `nothing`. `du` may be a segment of a multi-set
+state vector. Public, not exported.
+"""
+function rhs!(du, p::GHProblem, t; matter=nothing)
     map_blocks!(gh_rhs_kernel!, p.U,
                 gh_rhs_kernel_args(p, du, t, bind_matter(matter, p.U))...)
     return nothing
@@ -1386,4 +1426,45 @@ function gh_dt(p::GHProblem{T}, u; cfl, t=zero(T)) where {T}
         "initial data of this package produces — h = 0 is Minkowski, whose " *
         "speed is √3."))
     return T(cfl) * minimum_spacing(T, p.U.forest) / λ
+end
+
+"""
+    max_speed(p::GHProblem, u, t) -> T
+
+The largest characteristic speed of the state `u` at time `t` over the evolved
+points, checked: the speed a time step is computed from, `Δt = cfl · h_min / λ`
+(GH-4's speed; until 2026-11-09 the driver's unexported `max_speed_of`).
+It scatters `u` and launches the speed kernel, overwriting the working array
+(`prepare!`'s state is gone afterwards). `u` may be a segment of a multi-set
+state vector.
+
+**Checked, and only where the state is evolved.** A non-finite value outside
+the interior (`r ≥ r_1`, or anywhere for a case with no hole) throws an
+`ArgumentError` before the speed is computed, and so does a speed that is not
+finite and positive: `dt = cfl·h/λ` with a `λ` of `NaN` or zero would
+otherwise reach the step count as an `InexactError` that says nothing about
+what went wrong. A `NaN` in the frozen core is a hit for the range projection,
+not the end (amended in step 8b; it was `all(isfinite, u)`).
+"""
+function max_speed(p::GHProblem{T}, u, t) where {T}
+    nbad = evolved_nonfinite(p, u, t)
+    nbad == 0 || throw(ArgumentError(
+        "the state at t = $t is not finite where it is evolved, so there is " *
+        "no time step: $nbad values at points outside the interior (r ≥ r_1, " *
+        "or everywhere for a case with no hole) are NaN or Inf. On the " *
+        "initial data this is a case whose analytic solution is singular " *
+        "somewhere the mesh reaches — check r_0 against where |h| is still " *
+        "moderate — and after a chunk it is a run that blew up, whose last " *
+        "analysis record says where."))
+    scatter!(p.U, u)
+    λ = max_speed(p; t=t)
+    isfinite(λ) && λ > 0 || throw(ArgumentError(
+        "the maximum characteristic speed α√(tr γ^{ij}) + |β| over the " *
+        "evolved points came out as $λ at t = $t, so there is no " *
+        "CFL-limited time step. The interior is masked out of this " *
+        "reduction (CODE.md, \"The time step\"), so a non-finite answer is " *
+        "a state outside r_1 that is no longer a metric, and a zero one is " *
+        "a state that is identically zero — which no initial data of this " *
+        "package produces, h = 0 being Minkowski, whose speed is √3."))
+    return λ
 end

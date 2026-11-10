@@ -87,6 +87,7 @@ The briefs of the finished steps are under
   - [The redesign of 2026-11-08](#the-redesign-of-2026-11-08)
   - [Building GH-1 (2026-11-08)](#building-gh-1-2026-11-08)
   - [Building GH-3 (2026-11-09)](#building-gh-3-2026-11-09)
+  - [Building GH-4 (2026-11-09)](#building-gh-4-2026-11-09)
 - [Public access to the vertex metric](CODE.md#public-access-to-the-vertex-metric)
 - [Precision, threads, devices](CODE.md#precision-threads-devices)
   - [The thread workload](#the-thread-workload)
@@ -1048,6 +1049,36 @@ this package takes (GH-3)" are of that day.
     `EinsteinTensor` costs 75 s to compile per metric type.
   - The star's first box, `(−4, 4)³`, was too coarse for `N = 8 … 16`: `ℳ_i`
     converged at 3.29 there.
+
+### Building GH-4 (2026-11-09)
+
+GH-4, the verbs a script calls, was built 2026-11-09. The parts are:
+
+- `prepare!` and `rhs!` in `src/evolution.jl`, as `gh_rhs!`'s two halves;
+- `max_speed(p, u, t)` there, which until then was the driver's unexported
+  `max_speed_of`;
+- `stage_limit!`, `step_limit!`, `initial_state!` and `evolved_sets` in
+  `src/stepping.jl`;
+- `LaneArray` in `src/lanes.jl`.
+
+The measurements under "The verbs (GH-4)" are of that day.
+
+- **`prepare!` returns the problem**, decided by Erik 2026-11-09, as
+  TreeGRRMHD's `prepare!` (built in its step 10) returns its own. The
+  alternative was to return GH-1's adapter, which was the open item
+  "whether GH-4's `prepare!` returns the adapter".
+- **`initial_state!` and `evolved_sets` were added** at Erik's choice,
+  2026-11-09. GH-4's request lists only `prepare!`, `rhs!`, the limiters and
+  the speed. TreeGRRMHD's step-11 sketch calls these two as well, and
+  without them a script would reach into `p.U`.
+- **A segment broke the SIMD lanes.** The first run of the script test
+  failed in the kernel's store. `Lanes` admitted only a `DenseArray`, so the
+  reshape of a segment view fell through to the scalar `setindex!` with a
+  `Vec`. It now admits a contiguous view (`LaneArray`).
+- **`prepare!` converts `t` to the problem's type** for the Dirichlet hook,
+  as `ADMMetric(p, u, t)` did. `gh_rhs!` passed it unconverted. The
+  integrator converts its span to `T`, so a run is unchanged, and so are the
+  `du` hashes.
 
 ## Public access to the vertex metric
 

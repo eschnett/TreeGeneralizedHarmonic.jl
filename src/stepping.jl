@@ -66,12 +66,63 @@ no-ops where they do not apply (no bounds; any variant but `:pasted`), and
 on a static hole pasting a stage value changes no bit: inside `r_1` the
 `:pasted` right-hand side is zero, so the stage value there is `uⁿ`'s paste,
 and the analytic solution does not depend on the stage's time.
+
+It is [`stage_limit!`](@ref), the limiter a script calls, under
+IMEXRungeKutta's signature (GH-4, amended 2026-11-09).
 """
-function gh_limiter!(u, integrator, p, t)
-    gh_stage_limiter!(u, integrator, p, t)
-    gh_step_limiter!(u, integrator, p, t)
+gh_limiter!(u, integrator, p, t) = stage_limit!(u, p, t)
+
+"""
+    stage_limit!(u, p::GHProblem, t)
+    step_limit!(u, p::GHProblem, t)
+
+The limiters without an integrator (GH-4 of the coupling contract with
+TreeGRRMHD, added 2026-11-09; `CODE.md`, "The verbs (GH-4)"): the range
+projection ([`apply_bounds!`](@ref)) and then the `:pasted` variant's paste
+([`paste_interior!`](@ref)), on the state `u` at `t`. The two are the same
+function, because this package passes one limiter as both IMEXRungeKutta's stage
+and step limiter ([`gh_limiter!`](@ref), which calls `stage_limit!`); the two
+names are the script's, which calls each package's limiter of each kind. A
+no-op, writing nothing, for a case without bounds and any variant but
+`:pasted`. `u` may be a segment of a multi-set state vector. They do not touch
+the working array, so a `prepare!` before them is stale after them where they
+wrote. Public, not exported.
+"""
+function stage_limit!(u, p::GHProblem, t)
+    gh_stage_limiter!(u, nothing, p, t)
+    gh_step_limiter!(u, nothing, p, t)
     return nothing
 end
+
+step_limit!(u, p::GHProblem, t) = stage_limit!(u, p, t)
+
+"""
+    initial_state!(u, p::GHProblem, t) -> u
+
+The case's exact state at `t` in `u`, limited: [`fill_exact!`](@ref) into the
+problem's field set, through the core rule with the problem's interior, then
+`gather!` into `u` and [`stage_limit!`](@ref), since the data has not been
+through a stage (GH-4, added 2026-11-09). What `evolve!` starts from on an
+analytic case, without its initial-data cycle, its perturbation or a fitted
+target's data. `u` may be a segment of a multi-set state vector. Public, not
+exported.
+"""
+function initial_state!(u, p::GHProblem{T}, t) where {T}
+    fill_exact!(p.U, p.case, T(t); interior=p.interior)
+    gather!(u, p.U)
+    stage_limit!(u, p, T(t))
+    return u
+end
+
+"""
+    evolved_sets(p::GHProblem) -> Tuple
+
+The field sets this package evolves, in the order of its segment of a state
+vector: `(p.U,)`. A script concatenates them with the other package's into one
+state vector (TreeAMR's `statevector(sets)`, AMR-1). GH-4, added 2026-11-09.
+Public, not exported.
+"""
+evolved_sets(p::GHProblem) = (p.U,)
 
 """
     ProblemRef(p)

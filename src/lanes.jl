@@ -66,10 +66,19 @@ neighbouring rows, with the linear indices the scalar kernel forms. The cartesia
 `l[i, j, k, v, b]` is the same for the sampled gauge source, which is read at the
 owned index.
 """
-struct Lanes{W,A<:DenseArray}
+struct Lanes{W,A}
     a::A
 end
-@inline Lanes{W}(a::A) where {W,A<:DenseArray} = Lanes{W,A}(a)
+@inline Lanes{W}(a::A) where {W,A} = Lanes{W,A}(a)
+
+# What the lanes read and write through a pointer: a dense array, or the
+# `(N, N, N, nvars, nblocks)` reshape of one segment of a longer state vector —
+# a view with one unit range, so contiguous — which is what `du` is when a script
+# calls `rhs!` on its segment of a multi-set state vector (GH-4, added 2026-11-09).
+# A view with a step would load the wrong elements, and is not admitted.
+const _ContiguousSegment = SubArray{<:Any,1,<:DenseArray,<:Tuple{AbstractUnitRange{Int}},true}
+const LaneArray = Union{DenseArray,_ContiguousSegment,
+                        Base.ReshapedArray{<:Any,<:Any,<:_ContiguousSegment}}
 
 @inline function Base.getindex(l::Lanes{W}, i::Int) where {W}
     a = l.a
@@ -86,7 +95,7 @@ end
 
 # An array argument of the kernel as the lanes see it; anything else — `nothing`,
 # an algebraic gauge source — as it is.
-@inline lanes(::Val{W}, a::DenseArray) where {W} = Lanes{W}(a)
+@inline lanes(::Val{W}, a::LaneArray) where {W} = Lanes{W}(a)
 @inline lanes(::Val{W}, x) where {W} = x
 # KernelAbstractions passes a `@Const` argument on the CPU as Julia's read-only
 # `Const` wrapper, which has no `pointer`; its array is its one field.

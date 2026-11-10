@@ -73,6 +73,7 @@ research project; the inherited documents live in `notes/`.
 - [The coupling contract with TreeGRRMHD](#the-coupling-contract-with-treegrrmhd)
   - [What this package provides (GH-1)](#what-this-package-provides-gh-1)
   - [What this package takes (GH-3)](#what-this-package-takes-gh-3)
+  - [The verbs (GH-4)](#the-verbs-gh-4)
   - [Why 3+1 variables at the vertices](#why-31-variables-at-the-vertices)
 - [Public access to the vertex metric](#public-access-to-the-vertex-metric)
 - [Precision, threads, devices](#precision-threads-devices)
@@ -3293,7 +3294,7 @@ turns TreeAMR's `threadchunks(nblocks)` into IMEXRungeKutta's `partition`,
 so that each block's entries are combined on the thread `map_blocks!` runs
 the block on (`nothing` on a device: the fused broadcast); `gh_integrator`
 builds `init(IMEXProblem(gh_rhs!, nothing, u, tspan, p), RK4(); dt,
-stage_limiter = gh_limiter!, step_limiter = gh_limiter!, partition)`, and `gh_solve` runs one to its end. The driver builds **one
+stage_limiter = gh_limiter!, step_limiter = gh_limiter!, partition)`, and `gh_solve` runs one to its end. The same pieces are public for a script that owns the loop: `prepare!`, `rhs!`, `stage_limit!`, `step_limit!` and `max_speed(p, u, t)` ([The verbs (GH-4)](#the-verbs-gh-4)). The driver builds **one
 integrator per chunk**, stepping the run's own state vector in place
 (`alias_u0 = true`); a moving hole's refilled target is swapped into it
 between pieces through a `ProblemRef` (`swappable = true`) instead of a new
@@ -3568,7 +3569,7 @@ things the writing settled:
   rather than `metric_quantities`' `1/√(−g^{tt})`, which has no value for
   the states the row exists to report.
 - **`finite` is the evolved region's.** It was
-  `all(isfinite, u)` over the whole state, which with `max_speed_of`'s
+  `all(isfinite, u)` over the whole state, which with `max_speed(p, u, t)`'s
   identical check ended a run at the first `NaN` in the frozen core; both
   now count non-finite values at `r ≥ r_1` (`evolved_nonfinite`). A `NaN`
   in the core is the projection's business, not the end of the run. The
@@ -3883,7 +3884,7 @@ at  = adm(M)                    # bound to the consumer's vertex set M
 ### What this package takes (GH-3)
 
 ```julia
-gh_rhs!(du, u, p, t; matter = nothing)     # GH-4's `rhs!` will forward to it
+gh_rhs!(du, u, p, t; matter = nothing)     # or GH-4's prepare! and rhs!(du, p, t; matter)
 at = matter(p.U)                           # bound to this package's field set, once a call
 (; ρ, S, Sij) = at(n, b)                   # in the kernel, at an owned vertex
 ```
@@ -4011,6 +4012,110 @@ claims, quick tier).
   one metric type serves every testset: a second type would cost another
   75 s.
 
+### The verbs (GH-4)
+
+```julia
+const GH = TreeGeneralizedHarmonic
+sets = (GH.evolved_sets(gh)..., MHD.evolved_sets(mhd)...)  # (gh.U,), then the matter's
+u = statevector(sets); ug = view(u, staterange(sets, 1))   # this package's segment
+GH.initial_state!(ug, gh, t)                 # the exact state, limited
+adm = GH.ADMMetric(GH.prepare!(gh, ug, t))   # scatter and fill; GH-1's adapter of it
+GH.rhs!(view(du, staterange(sets, 1)), gh, t; matter)      # the kernel alone (GH-3)
+GH.stage_limit!(ug, gh, t); GH.step_limit!(ug, gh, t)      # the projection and the paste
+λ = max_speed(gh, ug, t)                     # Δt = cfl · h_min / λ
+```
+
+A script that owns the time loop, TreeGRRMHD's coupled run, calls these on
+this package's segment of one multi-set state vector, between the other
+package's verbs of the same names ([history](HISTORY.md#building-gh-4-2026-11-09)).
+
+- **Public, not exported.** `prepare!`, `rhs!`, `stage_limit!`,
+  `step_limit!`, `initial_state!` and `evolved_sets` are declared `public`,
+  so that loading this package beside TreeGRRMHD, whose verbs have the same
+  names, makes nothing ambiguous; a script qualifies them. `max_speed` was
+  already exported, and the speed is its method `max_speed(p, u, t)`.
+- **`prepare!(p, u, t)` returns `p`**, as TreeGRRMHD's does. It scatters `u`
+  into the working array and fills the ghosts with the Dirichlet hook of `t`.
+  The metric adapter of the prepared state is `ADMMetric(p)`;
+  `ADMMetric(p, u, t)` is `ADMMetric(prepare!(p, u, t))`.
+- **`rhs!(du, p, t; matter)` reads the working array as `prepare!` left it.**
+  It is `gh_rhs!`'s kernel launch, and `gh_rhs!` is `prepare!` and then
+  `rhs!`, bit for bit the function of before. Nothing checks that the
+  prepared state is the one meant: `max_speed`, the monitors, `gh_dt`,
+  `initial_state!` and another `prepare!` all overwrite the working array,
+  and a script calls none of them between the two.
+- **`stage_limit!` and `step_limit!` are one function**: the range
+  projection, then the `:pasted` paste, which this package passes as both
+  IMEXRungeKutta limiters (`gh_limiter!` is `stage_limit!` under
+  IMEXRungeKutta's signature). The script names each kind for each package.
+  They write `u` where they fire and do not touch the working array, so a
+  `prepare!` of the same `u` is stale after one that wrote.
+- **`max_speed(p, u, t)`** is the checked speed the driver steps by: it
+  refuses a non-finite value at an evolved point and a speed that is not
+  finite and positive, each with an `ArgumentError`. It scatters `u`.
+- **`initial_state!(u, p, t)`** is `fill_exact!` through the problem's own
+  interior, `gather!` and `stage_limit!`: an analytic case's exact state,
+  limited. The initial-data cycle, perturbations and a fitted target's data
+  are `evolve!`'s.
+- **Segments.** Every verb takes TreeAMR's segment view `view(u,
+  staterange(sets, i))` in place of a vector of its own. On the CPU the
+  kernel's SIMD lanes store `du` through a pointer into it: `Lanes` admits a
+  dense array and the reshape of a view with one unit range, which is
+  contiguous, and nothing else. On a device a contiguous view of a device
+  array is a device array.
+- **`evolve!` is a composition of them.** Its integrator's right-hand side
+  is `gh_rhs!`, so `prepare!` and `rhs!`. Its limiter is `stage_limit!`, both
+  after the initial data and after a regrid, and its speed is
+  `max_speed(p, u, t)`. Its record, the regrid and the checkpoints stay its
+  own.
+- **What the script does not get here.** TreeGRRMHD's step-11 sketch also
+  names the following, which are not built:
+  - a `GHProblem(forest, case; q)` that builds its own field set and
+    schedule;
+  - a `GHCase` from a bare metric;
+  - `constraint_norms(p, u, t)`;
+  - the regrid branch's `flags`, `regrid_pairs` and `rebuild`.
+
+  These wait for step 11 to need them (**open**).
+
+**Measured** (2026-11-09, `test/verbs_tests.jl`, two testsets and 23
+claims, quick tier):
+
+- **Vacuum is still bit for bit.** `du` hashes are unchanged for all four
+  cases of GH-3's check at both widths.
+- **A script is the run.** On the tilted star with its matter (`q = 4`,
+  `N = 8`, `roots = 2`), a script runs IMEXRungeKutta's RK4 over a state
+  vector of two sets, a three-variable cell-centered set first and this
+  package's segment second, at an offset. It calls `prepare!`, `rhs!` with
+  the matter, `stage_limit!` and `step_limit!` on the segment. The result
+  is `gh_solve`'s run bit for bit at the default SIMD width, and the other
+  segment keeps its bits.
+- **On a segment.** On the hole fixture (`:pasted`, with bounds) the verbs
+  on a segment are those on a vector of its own, bit for bit: the limiters
+  on a planted `γ_xx < 0` inside the gate and a planted value in the ball,
+  the speed, and `initial_state!`. The speed refuses a planted `NaN` at an
+  evolved point.
+- **On an H200** (Symmetry job 594413, `Float64`, the same two cases with
+  every array on the device, 18 claims):
+  - **A script is the run there too.** The script's integrator over a device
+    state vector of two sets is `gh_solve`'s on the device bit for bit, and
+    the other segment keeps its bits. `initial_state!`, `prepare!` with
+    `rhs!`, and the speed on a segment are a vector of its own's. Against
+    the CPU's scalar kernel, `du` agrees to `6.1 × 10⁻¹³` relative and the
+    state at `t = 1/2` to `3 × 10⁻¹⁵`.
+  - **The limiters on a device segment** are those on a vector of its own,
+    bit for bit, on the hole fixture's planted values; they agree with the
+    CPU to `1.3 × 10⁻¹⁴` relative. The speed refuses the planted `NaN`.
+  - **No price for the split.** On 64 blocks of `32³` (2.1 M points),
+    `prepare!` and `rhs!` with matter on a segment take `4.556` ms against
+    `gh_rhs!`'s `4.550` on a vector of its own; `prepare!` alone (the
+    scatter and the ghost fill) is `1.45` ms of it, and `max_speed` `1.31`.
+- **Cost.** About 6 s inside the quick tier at four threads, after
+  `matter_tests.jl` has compiled the star; the tier passes 5379 with its 26
+  hole evolutions skipped, in 12m36.
+- **The full suite on Symmetry** (job 594412, EPYC 7543, four threads)
+  passes 5744 of 5744 in 27m48, with this file in 12 s.
+
 ### Why 3+1 variables at the vertices
 
 - **Positivity survives the averages.** The mean of `ρ` over eight cells
@@ -4043,11 +4148,9 @@ claims, quick tier).
 **Open on this side:**
 
 - the adapter's name (`ADMMetric`; `ADMVars` is ApparentHorizonFinder's);
-- whether GH-4's `prepare!` returns the adapter, or `ADMMetric(p, u, t)` stays
-  the way to fill and wrap at once;
-- the implementation of GH-4, which is not started; GH-3 is done (above);
-- an H200 run of the metric adapter (Metal only so far); the matter term
-  has run there (above).
+- the names TreeGRRMHD's step-11 sketch uses that GH-4 did not build (above);
+- an H200 run of the metric adapter (Metal and the CPU only so far); the
+  matter term and the verbs have run there (above).
 
 ## Public access to the vertex metric
 
@@ -4844,8 +4947,8 @@ says that TreeAMR's `[compat]` selects **0.1.1**.
 | `src/precision.jl`, `src/device.jl` | copied from TreeWave, with TreeHydro's `hostcopy!` split so that the copying half is exercised host to host |
 | `src/pointwise.jl` | GHSO2's pointwise algebra (ported from `notes/pointwise-ghso2.jl`), plus the expanded form's coefficient derivatives `metric_derivatives`, the assembled `gh_node_rhs_expanded`, and `gh_node_source`, and `metric_derivatives_along` — the same chain rule along **one** direction, returning `∂√γ` and `∂γ^{jk}` rather than the assembled `∂(α√γγ^{jk})`, which is what the constraint monitors need along *time* — and `_pairindex`, the packed slot of a symmetric index pair, so that the file has one packing convention used on two index pairs; `SVector{10}` state, `SMatrix{4,4}` tensors. `gh_node_source` is a **second copy** of the reduced source and the damping, written out of `gh_node_rhs` character for character rather than factored out of it: the port stays diffable against `notes/pointwise-ghso2.jl`, which is what makes it the validated reference, and `test/pointwise_identity_tests.jl` asserts the copy still matches it — to roundoff, because two spellings of one expression are not bit-identical (see "Measured results") |
 | `src/stencils.jl` | rational finite-difference and Kreiss–Oliger weights at order `q`: `derivative_weights`, `dissipation_weights`, both `@generated` over `(T, Val(q), Val(m))` and returning `SVector`s of `T` for unit spacing; `lagrange_derivative_weights` and the two `rational_*` constructors behind them, exposed unexported so that the exactness claims can be asserted in `Rational` rather than through a tolerance; `dissipation_rank(Val(q)) = Val(q/2 + 1)`, one spelling of `2r = q + 2`; the host-side `apply_stencil` and `apply_mixed_stencil`, which are the reference contractions the tests measure with and the definitions the streaming kernel has to agree with |
-| `src/evolution.jl` | the fused RHS kernel in streaming order, the linear-index stencil contractions it evaluates, `GHProblem` with the **six** `Val`s (the SIMD width the sixth) and the per-chunk geometry, `gh_rhs!` (whose `matter` adds the kernel's seventh, `HASMATTER`, GH-3), the speed kernel, `max_speed`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. The streaming body is split out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and the file has `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
-| `src/lanes.jl` | the right-hand-side kernel's SIMD lanes on the CPU: `default_simd_width` and `check_simd_width`, `Lanes` (an array read and written `W` consecutive elements at a time, with the `Const` wrapper unwrapped), `is_lane_leader` (every `W`-th item, and the overlapping last group of a row), and the `Vec` methods of `pointwise.jl`'s `_anynonzero` and `_select`; the kernel's group is `evolution.jl`'s `gh_rhs_lanes!` |
+| `src/evolution.jl` | the fused RHS kernel in streaming order, the linear-index stencil contractions it evaluates, `GHProblem` with the **six** `Val`s (the SIMD width the sixth) and the per-chunk geometry, `gh_rhs!` (whose `matter` adds the kernel's seventh, `HASMATTER`, GH-3) and its two halves `prepare!` and `rhs!` (GH-4), the speed kernel, `max_speed` with its checked method `max_speed(p, u, t)`, `gh_dt`, and `convergence_rate` — TreeWave's, in the file TreeWave keeps it in. The streaming body is split out of the kernel into `gh_rhs_at_point`, an `@inline` plain function, because `F` must not be evaluated in the frozen core and **KernelAbstractions refuses a `return` statement anywhere in a kernel body** — so the core branch cannot be an early exit and has to be an `if` around the whole computation; and the file has `gh_paste_kernel!` with `gh_step_limiter!` and `paste_interior!`, the `:pasted` variant's one write to the state |
+| `src/lanes.jl` | the right-hand-side kernel's SIMD lanes on the CPU: `default_simd_width` and `check_simd_width`, `Lanes` (an array read and written `W` consecutive elements at a time, with the `Const` wrapper unwrapped; a dense array or a contiguous segment of a state vector, `LaneArray`, GH-4), `is_lane_leader` (every `W`-th item, and the overlapping last group of a row), and the `Vec` methods of `pointwise.jl`'s `_anynonzero` and `_select`; the kernel's group is `evolution.jl`'s `gh_rhs_lanes!` |
 | `src/gauge.jl` | sampling prescribed sources into `Hsrc` and reading them back at a point (`gauge_at`, the kernel's half of the packing); `isharmonic` as a table over the background types and `isstatic` as an exact measurement, with the reason each is what it is; the two `γ0` profiles and the `ε_KO(r)` profile `HorizonDissipation`, with `dissipation_rate` the identity on a number |
 | `src/boundaries.jl` | the time-dependent Dirichlet hook, and the declarations TreeAMR's symmetries ask of every field set: the parities of the reflecting faces (`state_parity`, `even_parity`) and the signed maps of the rotating seam (`state_rotation`, `identity_rotation`) |
 | `src/bounds.jl` | the range projection: `StateBounds` and the proposed `default_bounds`/`default_gate`, `check_bounds_gate`, the pointwise `bounds_project` over an explicit-scalar ADM split and a Jacobi `sym_eigen3`, `gh_bounds_kernel!`, `BoundsAccounting`, `apply_bounds!` and `gh_stage_limiter!`; the validity monitor (`state_validity`, `validity_rows`); and `evolved_nonfinite`, the masked finiteness check. Included after `interior.jl` and before `initialdata.jl`, whose `GHCase` carries a `StateBounds` |
@@ -4860,7 +4963,7 @@ says that TreeAMR's `[compat]` selects **0.1.1**.
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's. `GHCase` is in `initialdata.jl` |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop (after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions. The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl`: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. The hole has `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here (following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`). The range projection has `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. The layer's calibration has the E3 target `CurvatureTarget` in `evolution_cases.jl`, its claims in `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. The tracked geometry has `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and `evolution_cases.jl`'s shell norms are the interior's own `shell_mask`. The fitted target has `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and `fitted_fixture` is in `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` has a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`); GH-3's matter term has `matter_tests.jl` — the acceptance on a static star with its `EinsteinTensor` matter, the lanes with matter, the anti-Cowling run, and a test adapter (`SampledMatter`) shaped as TreeGRRMHD's will be |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop (after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions. The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl`: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. The hole has `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here (following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`). The range projection has `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. The layer's calibration has the E3 target `CurvatureTarget` in `evolution_cases.jl`, its claims in `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. The tracked geometry has `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and `evolution_cases.jl`'s shell norms are the interior's own `shell_mask`. The fitted target has `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and `fitted_fixture` is in `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` has a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`); GH-3's matter term has `matter_tests.jl` — the acceptance on a static star with its `EinsteinTensor` matter, the lanes with matter, the anti-Cowling run, and a test adapter (`SampledMatter`) shaped as TreeGRRMHD's will be; GH-4's verbs have `verbs_tests.jl` — a script's integrator over two sets, and the limiters, the speed and the initial state on a segment |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 **Inconsistent:** the `test/` row says `prerequisite_tests.jl` checks what
@@ -4932,7 +5035,7 @@ ranges of `α`, `γ`'s spectrum, `|β|` and `Π`'s scale, and the gate radius;
 `bounds_project` in ADM variables, `gh_bounds_kernel!` behind
 `gh_stage_limiter!` — the state's third writer, the integrator's stage
 limiter beside the paste — `BoundsAccounting`, the validity monitor
-(`validity_rows`) and `evolved_nonfinite`, which is what `max_speed_of`
+(`validity_rows`) and `evolved_nonfinite`, which is what `max_speed(p, u, t)`
 and the record's `finite` read.
 - `test/evolution_cases.jl` has the E3 target
   (`CurvatureTarget`) and a `gh_outside_shell_norms(p, u, t)` method, and
