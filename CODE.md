@@ -106,6 +106,19 @@ research project; the inherited documents live in `notes/`.
   - [What it costs (predicted)](#what-it-costs-predicted)
   - [Validation](#validation)
   - [What this asks Erik to decide](#what-this-asks-erik-to-decide)
+- [A comoving grid frame for orbiting holes (proposed)](#a-comoving-grid-frame-for-orbiting-holes-proposed)
+  - [Why the tracked target is delicate](#why-the-tracked-target-is-delicate)
+  - [The three parts](#the-three-parts)
+  - [The frame](#the-frame)
+  - [The gauge in the frame](#the-gauge-in-the-frame)
+  - [The interior at rest](#the-interior-at-rest)
+  - [The control acts on the map](#the-control-acts-on-the-map)
+  - [The plunge and the merger](#the-plunge-and-the-merger)
+  - [What the frame retires and what it keeps](#what-the-frame-retires-and-what-it-keeps)
+  - [What the frame costs (predicted)](#what-the-frame-costs-predicted)
+  - [The ladder](#the-ladder)
+  - [What is not known](#what-is-not-known)
+  - [What the frame asks Erik to decide](#what-the-frame-asks-erik-to-decide)
 - [Possible extensions](#possible-extensions)
 - [Open questions](#open-questions)
 
@@ -6410,7 +6423,10 @@ merge and ring down, with the gravitational waves they emit as the result.
 under [Milestones G7 and G8](PLAN.md#milestones-g7-and-g8): two holes colliding
 head-on (G7), and an equal-mass binary through inspiral, merger and ringdown
 (G8). What it needs Erik to decide is under [What this asks Erik to
-decide](#what-this-asks-erik-to-decide).
+decide](#what-this-asks-erik-to-decide). A second route for the orbiting
+pair — the holes at rest on a grid that rotates with them, the damped
+harmonic gauge and `:fitted` — is under [A comoving grid frame for orbiting
+holes](#a-comoving-grid-frame-for-orbiting-holes-proposed).
 
 **Units.** The total mass is `M = 1`, so each hole of an equal-mass pair has
 `M_A = 1/2`. Every single-hole setting in [Single black holes: recommended
@@ -6972,6 +6988,343 @@ All six are **(open)**.
    hook at a smaller `L` if step B5 shows its reflection is small enough.
 6. **Subcycling in TreeAMR**: the largest cost lever, about `4×`, and not
    needed for G7 or G8.
+
+## A comoving grid frame for orbiting holes (proposed)
+
+*Status: a design for review. Nothing in this section is built or
+measured; every number it leans on was measured elsewhere, and says where.*
+It is a second route to [Binary black holes](#binary-black-holes-proposed)'s
+milestones for two holes that **orbit**: the holes are held at rest on the
+grid, the equations are given nothing that knows where a hole is, and the
+control loop steers the grid and nothing else. `PLAN.md`'s steps C1–C5 are
+the work breakdown. A grid that rotates rigidly is still one Cartesian grid:
+one box, one global rotation and translation, no blocks fitted to the holes
+and no shape maps.
+
+### Why the tracked target is delicate
+
+Pairing (α) — the tracked Kerr-Schild source with the tracked `:damped`
+target — holds one moving hole at the resting hole's level. What makes it
+delicate for two is not the layer. It is that three lines are defined
+separately and must agree to a fraction of a cell: the gauge source's, the
+layer target's, and the hole's own. And the target between them, the
+superposition, is not a solution. Measured on the branches that built those
+pieces (none of them on `main`):
+
+| finding | where it is measured |
+|---|---|
+| a tracked target one cell off its hole costs `24×` in `ℋ` just outside the horizon, four cells `286×` | step I2's quadrant rows Q1 and Q2, branch `claude/step-I2-held-interior` |
+| a source fed by the tracks ends every head-on row within `1 M`: the source carries the hole, the coordinates follow, the track follows the horizon, and the next piece's source carries it further | "What step B3 built and measured", [eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18) |
+| a PID law on the source's line holds the pair to `6 M`, with the line within `1.3` cells of the track and a layer residual of `5.6` that every feed shares — the superposed target's part | "The controlled source line", the same pull request |
+| a regular interior left to the equations collapses within `M/4`; held by a fixed source it is as good as the layer, and ends within `4 M` when that source is `1/16` of a cell off | step I1, [eschnett/TreeGeneralizedHarmonic.jl#19](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/19); step I2, as above |
+
+A puncture does not carry over either. BSSN's conformal factor absorbs the
+puncture and its slicing freezes it; this system evolves `g_ab`, whose
+spatial part grows as `1/r²` on a trumpet slice, so there is no finite
+state for the grid to hold.
+
+So the rule this design follows: **the equations never read anything derived
+from a found horizon to better than a few cells, and never read an analytic
+hole.** Three choices give it.
+
+### The three parts
+
+1. **The frame.** The grid rotates and translates rigidly with the pair, so
+   each hole is at rest on it and a quasi-circular binary is quasi-stationary
+   there. The mesh, the layers and the cached fits stop moving.
+2. **The gauge.** The damped harmonic gauge: it holds no mass, spin,
+   velocity or center.
+3. **The interior.** The `:fitted` layer per hole, whose target is the
+   evolved state's own continuation, so that it matches wherever its surface
+   sits.
+
+The evidence that the three fit together is the single hole **at rest**
+under the damped harmonic gauge with `:fitted`: it settles, with `ℋ` and
+`C_a` at `1.6×` and `1.3×` the Kerr-Schild hole's in `[3, 5)` and `1.2×` and
+`1.3×` in `[5, 8)`, and the same `M_irr`. The same hole **moving** at
+`v = 1/5` across the grid does not: `6–31×` at `1/32`, with a lag of
+`0.49 M` by `40 M` ("What step B1 built and measured", pull request 18
+above). The frame's purpose is to make every hole of a binary the first of
+those two rows. The frame alone does that for the grid and not for the
+gauge, which is not covariant and stays the inertial chart's: [The gauge in
+the frame](#the-gauge-in-the-frame) says what that leaves, and which shift
+the gauge damps is open.
+
+### The frame
+
+Grid coordinates are `x̄ = R(t)ᵀ (x − b(t))`, with `R` a rotation about `z`
+by `Φ(t)`, `Ω = Φ̇`, and `b` the pair's center. `x` are the inertial
+coordinates in which the solution is asymptotically Minkowski; they stay
+the coordinates of the physics.
+
+**The components are taken in the co-rotating basis (proposed).** The time
+index stays the inertial `∂_t`; each spatial index is rotated by `Rᵀ`. This
+is a basis that turns with the grid, not a rotating coordinate system:
+`g_tt` and `g_ti` stay bounded far away, where a rotating chart's would grow
+as `Ω² r²`. The alternative is SpEC's, inertial components on the moving
+grid. It needs the first and second derivatives rotated at every point, and
+it leaves a co-rotating state oscillating at `Ω` and `2Ω` at each grid
+point. In the co-rotating basis that state is constant in time.
+
+**The equations.** With `ū` the state in that basis as a function of
+`(t, x̄)`,
+
+    ∂_t ū = F(ū)  +  V̄^k ∂̄_k ū  −  Ω × ū,        V̄ = Ω × x̄ + Rᵀ ḃ       (FRAME)
+
+- `F` is `(EXPANDED)`'s right-hand side, **unchanged**, with the grid's own
+  stencils. The system is form-invariant under a rigid rotation: `η`, `√γ`
+  and `α` are, and `Γ_a` is a covector under linear maps.
+- `V̄^k ∂̄_k ū` is the grid's motion through the inertial coordinates. The
+  kernel has `∂̄h` and `∂̄Π` at the point already.
+- `Ω × ū` turns each spatial index: `(Ω × h_t·)_i` for `h_ti`, and one such
+  term per index for `h_ij`; the same for `Π`. It is algebraic.
+- The `∂_t g` inside `S0` is the inertial one, `β^i ∂_i h + (α/√γ) Π`, as
+  now. Only the two evolution equations gain the terms.
+
+A hole at rest on the grid has `∂_t ū = 0`, which is `∂_t u = −V·∂u` in the
+inertial frame: a hole moving at `V`.
+
+**The frame derivative rule.** Whatever is prescribed on the grid as
+`Q̄(x̄, t)` in the grid's basis — a gauge source's weights and parameters,
+Dirichlet data, a target — has the inertial time derivative
+
+    ∂_t Q |_x  =  ∂_t Q̄ |_x̄  −  V̄^k ∂̄_k Q̄  +  Ω × Q̄
+
+and that is the one the kernel must be given wherever it asks for `∂_t H`.
+It is the existing rule that a gauge source's `∂_t H` must be its own time
+derivative, stated for the frame.
+
+**What reads the map.**
+
+| reader | what changes |
+|---|---|
+| the right-hand side | `(FRAME)`'s two terms, behind a `Val` built with the problem; without a frame the kernel is today's bit for bit |
+| the speed and the time step | the characteristic speeds shift by `−V̄` |
+| initial data and the Dirichlet hook | the data sampled at `x = R x̄ + b`, its components rotated |
+| a prescribed gauge source | the frame derivative rule |
+| the horizon finder | nothing: `(γ_ij, K_ij)` in the grid's basis at the grid's points is valid data; `J`'s direction is rotated back for the record |
+| `Ψ₄`'s modes | spheres about the grid's origin; the inertial mode is the grid's times `e^{−imΦ(t)}` |
+| the symmetric domains | nothing: the mirror in `z` and the half turn about `z` commute with a rotation about `z` (the half turn needs `b = 0`). **No hole crosses the half turn's seam**, so the tuple of interiors never holds an image |
+| TreeGRRMHD | the vertex metric is in the grid's basis, and the consumer needs `V̄` and `Ω` for its own advection **(open)** |
+
+**The far zone.** `|V̄| = Ω r` exceeds the speed of light beyond `r = 1/Ω`.
+The step is global and set at the holes, so level `ℓ`, of spacing `h_ℓ` out
+to radius `R_ℓ`, costs nothing while `Ω R_ℓ / h_ℓ ≲ λ_f / h_f`, the finest
+level's own bound. Nested levels of about a hundred cells a radius, with
+`h_f = 1/32` and `λ_f ≈ 1.5`, give room to `Ω ≈ 0.4/M` **(predicted)**; a
+binary's orbital rate at merger is about half that. On a cube the outer
+faces then carry a normal grid velocity: half of each face is pure inflow
+and half pure outflow. The frozen Dirichlet data are supplied on all of it,
+which is right on the inflow half and over-specified on the outflow half
+**(open**, measured by step C3**)**.
+
+### The gauge in the frame
+
+**The gauge conditions are not covariant, and the gauge stays the inertial
+chart's (proposed).** `H_a = −Γ_a` fixes the coordinates, and `Γ_a` is a
+covector only under affine maps of spacetime. The grid's map
+`x = R(t) x̄ + b(t)` is not one. With `Γ̄` the comoving chart's and
+`A = R̈ x̄ + b̈`,
+
+    Γ^t = Γ̄^t,     Γ^i = R^i_j Γ̄^j + V^i Γ̄^t + (A^i − 2 (Ω × (β + V))^i) / α²
+
+so a chart that is harmonic on the grid is not harmonic in the inertial
+chart: the two differ by a centrifugal and a Coriolis term. The 3+1 pieces
+differ too. The slices are the same, so `α` and `γ_ij` are; the comoving
+chart's shift is `β + V`. A gauge that is "the same, only comoving" is
+therefore another gauge. This design does not take it: the coordinates of
+the physics stay the inertial ones, whose components are asymptotically
+Minkowski, and the grid is where the points sit and which basis the
+components are stored in.
+
+**How the source is evaluated.** `DampedHarmonicSource`'s closed form is
+invariant under one thing the frame uses: a rotation that does not depend
+on time. `α` and `√γ` are scalars under it, `β^i` a vector, `t_a` a
+covector, and the Gaussian is about the origin. At one instant the stored
+components are the inertial ones in axes turned by `R(t)`, so the same
+closed form on them returns `Rᵀ H`. `∂_a H_b` is the chain rule through
+`∂̄h` and the inertial `∂_t g` from `Π`, both tensors in the grid's basis;
+nothing is prescribed on the grid, so the frame derivative rule adds
+nothing. The closed form is **not** invariant under a boost, a Galilean
+shift or a rotation that depends on time (the shift changes by `V`), nor
+under a scaling (`√γ` changes).
+
+**What follows: the grid moves and the gauge does not.** A hole at rest on
+the grid moves at `V` through the gauge's frame. Near it the inertial shift
+is the resting hole's less `V`, and the gauge damps that toward zero. In
+the continuum this is step B1's moving hole, whichever grid it is computed
+on: its lag stays, and the frame removes only what the grid added.
+
+**Which shift is damped (open).** Two candidates, both run by step C2:
+
+- **The inertial shift**, `−μ_S γ_ai β^i/α`: SpECTRE's form as built, with
+  the consequence above.
+- **The comoving shift near each hole**: `β^i + V̄_A^i` under a weight a few
+  `M_A` wide about hole `A`, and `β^i` elsewhere. Near each hole this is the
+  gauge "the same, only comoving", and nowhere else. It is the resting row's
+  exact image only for a constant `V` and with the covector's time
+  component, `H_t − V̄_A^i H_i`, which the step that builds it derives and
+  tests. It reads each hole's position through a weight several `M_A` wide,
+  so it stays inside the rule above; it makes the gauge read the map's
+  velocity for the whole run.
+- **Not a candidate: the comoving shift everywhere.** It drives `β → −V`
+  through the whole near zone, which turns the inertial chart into a
+  rotating one inside the Gaussian.
+
+For a constant `V` and no rotation the map is affine, and the full image of
+the resting gauge is exact everywhere. Its far field is Minkowski in a
+Galilean chart, `g_ti → −V_i`, not a boosted hole's, so it is a test of the
+frame's terms and not a physical case.
+
+**The damped harmonic gauge is rolled on (proposed).**
+
+- **It rolls on from the composite Kerr-Schild source on grid-fixed
+  lines.** Each hole's center is its grid point and its velocity is `V̄`
+  there. With `Ω` steady that source is constant on the grid, and the frame
+  derivative rule supplies its `∂_t H`. After `5.2 σ_g` its weight has
+  underflowed, and from then on no hole parameter is in the equations.
+- **Far away the data's own source stays (proposed).** The damped harmonic
+  gauge is harmonic in the far field, and the Kerr-Schild Dirichlet data are
+  not: `C_a` grows at the outer faces (step B1's finding). A radial weight
+  keeps the roll-on's `from` source beyond `r_far`.
+- **The alternative start**: the damped harmonic gauge from `t = 0` with
+  `Π` from `gauge_consistent_momentum`. Then no hole-specific source exists
+  at any time, and the price is the gauge's transient on the initial data
+  **(open)**.
+
+**What step B1's moving row says about the two.** It lags by the same
+`0.49 M` at both spacings, which is the continuum's and so the gauge's,
+while its constraint excess falls at order `5.5–10`, which is the grid's.
+Under the inertial shift the frame removes the second and keeps the first:
+the hole drifts on the grid until the gauge has found its own equilibrium,
+and the map's control follows it. Under the comoving shift near the hole
+both should go **(predicted)**.
+
+### The interior at rest
+
+**`:fitted` per hole, on the tracked geometry (proposed).** A `HoleSpec`
+holds a `FittedSpec`; the composition, the masks and the tracks are those of
+[One interior per hole](#one-interior-per-hole). On the grid each hole is
+the resting `:fitted` hole, with the companion's tide in its fit.
+
+- **The margin is fixed in `M`, not in cells (proposed).** `:fitted` does
+  not converge outside the horizon at a margin fixed in cells: its target is
+  off the solution by the fit's truncation, which does not fall with `h`,
+  and what reaches the exterior is the grid-scale part of that mismatch,
+  attenuated per cell. At a fixed physical depth the mismatch is resolved
+  better and lies more cells away as `h` falls, so the excess converges
+  **(predicted**; step C2 measures the order**)**.
+- **No rate and no trailing side** while the holes are at rest on the grid.
+- **Excision** from the separate excision project replaces this part
+  without touching the other two, and a boundary at rest on the grid is its
+  easiest case.
+
+### The control acts on the map
+
+The map follows the found centers by the PID law built for the source line
+(`SourceLaw`): the angle of `c̄_2 − c̄_1` from the `x̄` axis steers `Φ`, and
+the centers' mean steers `b`, with `τ = 10–20 M` **(proposed)**. `Φ` and
+`b` are `C²` in time and handed to each piece about the piece's time, as a
+`TrackedHole` is.
+
+- **After the roll-on the map is not in the continuum problem.** A control
+  error moves the holes on the grid and costs truncation error. Its
+  tolerance is the width of the fine region and the tracked layers' reach,
+  cells to an `M`, not a fraction of a cell.
+- **During the roll-on the source reads the map.** That is the source
+  line's loop, whose gain is at most one at zero frequency and which the
+  slow law holds; it ends with the roll-on.
+- `Ω(0)` is the data's orbital rate.
+
+### The plunge and the merger
+
+A rotation does not remove the radial motion. Each hole creeps inward along
+`x̄` at `(32/5) ν (M/d)³` (the quadrupole formula; `ν = 1/4` for equal
+masses): `0.0016` at `d = 10 M`, a finest cell every `10 M` at `h = 1/64`,
+and `0.013` at `d = 5 M`. The level floors follow the tracks as they do
+now. The plunge is a `:fitted` hole moving at up to about `0.2` for about
+`20 M` **(predicted)**, with `trail_ramp = 9/10`; `:fitted` has held `0.3`
+for `13 M` at `2×` the resting hole's error, with a drift of the spinning
+hole's `J` ([the moving
+hole](SINGULARITY_HANDLING.md#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)).
+
+The handover is [The common horizon and the
+handover](#the-common-horizon-and-the-handover)'s, with one part less: there
+is no source to blend into a remnant's. After the common layer has taken
+over, `Ω` is held, or relaxed to zero over `20 M` **(proposed)**; the
+remnant spins about `z` and is at rest on a grid that turns about `z` at
+any rate.
+
+**A scale factor**, `x = a(t) R x̄ + b` with the spacing `a h̄`, would
+remove the creep and the plunge's motion too. It is noted and not planned:
+the holes grow on the grid as `a` falls, so the fine region and the step
+both pay for it.
+
+### What the frame retires and what it keeps
+
+For an orbiting pair it retires what exists to keep three lines together:
+the tracked analytic target and its rates, the source fed by the tracks or
+by a controlled line beyond the roll-on, the horizon offset's role in the
+target, and the quadratic prediction's cell-fraction accuracy. They stay
+for single holes, where the analytic layer is the accurate one, and as the
+controls of steps C2 and C4.
+
+It keeps the damped harmonic source and the roll-on, `HoleSpec` and the
+composition, the tracks and the finder, the PID law, `:fitted` with its
+cache, and the symmetric domains.
+
+### What the frame costs (predicted)
+
+- **The kernel:** two contractions with derivatives it has formed and twenty
+  algebraic terms, under `2 %` of a right-hand side.
+- **The step:** none, by the bound under "The far zone".
+- **The mesh:** static on the grid but for the creep, so the regrid's work
+  falls to the level floors' slow motion.
+- **The code:** a map type, the kernel's `Val` and terms, the speed, the
+  hooks and the frame derivative rule in the gauge sources; a `FittedSpec`
+  in `HoleSpec`.
+
+### The ladder
+
+`PLAN.md`'s steps C1–C5, each a claim that can fail:
+
+1. **The frame terms are the equations**: `(FRAME)` against automatic
+   differentiation of analytic data in the grid's basis; the gauge wave and
+   Kerr at the origin on a rotating grid against the same runs at rest.
+2. **A comoving grid makes a moving hole a resting one**: the boosted
+   `a = 0` hole at `v = 1/5` on a translating grid, damped harmonic and
+   `:fitted`, against step B1's two rows. This is the run that decides the
+   design.
+3. **The far zone and the faces hold a wave** on a grid that rotates faster
+   than light at its boundary.
+4. **Two holes at rest on the grid**: the head-on pair, with the map
+   following the centers.
+5. **The orbit**: a quasi-circular pair at `d = 10 M`.
+
+### What is not known
+
+All **(open)**.
+
+- Whether the moving hole's excess under the damped harmonic gauge is the
+  grid's or the gauge's, and which shift the gauge should damp (step C2).
+- A cube's outer faces under a superluminal rotation, and the far-field
+  weight.
+- Whether `:fitted` at a physical margin converges, and at which order.
+- The handover on the common horizon, which no route has run.
+- TreeGRRMHD on a moving grid.
+
+### What the frame asks Erik to decide
+
+1. **The basis**: co-rotating components **(proposed)**, or inertial
+   components as in SpEC.
+2. **The start**: the roll-on from the grid-fixed composite source
+   **(proposed)**, or the damped harmonic gauge from `t = 0`.
+3. **The shift the gauge damps**: the inertial one, or the comoving one
+   near each hole. Step C2 runs both.
+4. **Which route steps B4–B9 take**: this one from step C2's result on, or
+   pairing (α) with the controlled source line.
+5. **The interior**: `:fitted` now and excision when the excision project
+   delivers **(proposed)**, or wait for excision.
 
 ## Possible extensions
 

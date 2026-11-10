@@ -31,6 +31,12 @@ the proof of concept. The design is `CODE.md`, "Binary black holes", and Erik
 decides the gauge and interior pairing after B1 and B2. This file stays
 until G8 is done.
 
+**Steps C1–C5 are proposed and not started**: a second route to G7 and G8
+for holes that orbit — the holes at rest on a grid that rotates with them,
+the damped harmonic gauge and the `:fitted` interior. The design is
+`CODE.md`, "A comoving grid frame for orbiting holes". They start from steps
+B1–B3's code, and Erik decides the route of B4–B9 from step C2's report.
+
 The steps map onto the milestones G0–G6 ("Milestones" below), split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
 is a brief a single agent with a fresh context can carry. The order is
@@ -75,6 +81,13 @@ the dependency order.
 - [Step B7 — Merger: the common horizon and the handover (G7)](#step-b7--merger-the-common-horizon-and-the-handover-g7)
 - [Step B8 — Constraint-satisfying data from XCTS](#step-b8--constraint-satisfying-data-from-xcts)
 - [Step B9 — The inspiral (G8)](#step-b9--the-inspiral-g8)
+- [Steps C1–C5 — The comoving grid frame](#steps-c1c5--the-comoving-grid-frame)
+  - [Sharp edges for steps C1–C5](#sharp-edges-for-steps-c1c5)
+- [Step C1 — The frame's terms](#step-c1--the-frames-terms)
+- [Step C2 — A moving hole at rest on its grid](#step-c2--a-moving-hole-at-rest-on-its-grid)
+- [Step C3 — The far zone on a rotating grid](#step-c3--the-far-zone-on-a-rotating-grid)
+- [Step C4 — Two holes at rest on the grid](#step-c4--two-holes-at-rest-on-the-grid)
+- [Step C5 — The orbit](#step-c5--the-orbit)
 
 ## Milestones
 
@@ -1021,3 +1034,238 @@ and B3's case.
 
 **Accept:** G8 as "Milestones" above states it. Record the cost per `M` and per run
 beside the prediction under "What it costs".
+
+## Steps C1–C5 — The comoving grid frame
+
+A second route to G7 and G8 for holes that orbit. **The design is
+`CODE.md`, "A comoving grid frame for orbiting holes"; read it in full
+first**, then "Binary black holes". Nothing here is started. The steps are a
+proposal for Erik's review, and the section's "What the frame asks Erik to
+decide" lists what is to be settled.
+
+**What they start from.** Steps B1–B3's code: the damped harmonic source and
+the roll-on, `gauge_consistent_momentum`, the position and the time in the
+kernels, `HoleSpec` and the composition, the tracks of several holes, and
+the PID law of the source line. They are on
+[eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
+and not on `main`: **the C steps start once that pull request has landed.**
+
+**Order:**
+
+- **C1** first.
+- **C2 and C3** may run as two agents at once after C1; C3 needs no hole.
+- **Erik decides the route** of steps B4–B9 from C2's report: this design,
+  or pairing (α) with the controlled source line.
+- **C4**, then **C5**.
+- B5 and B6 (the far boundary, the wave, `Ψ₄`) do not depend on the route.
+  B4's half turn is simpler on this one: no hole crosses the seam. B7's
+  handover is the same with no source to blend.
+
+Each runs from a green suite on the merged branch and ends with the report
+under "Running a step as an agent". Branches are named
+`claude/step-C<n>-<slug>`.
+
+### Sharp edges for steps C1–C5
+
+- **The rule the design exists for.** The equations never read anything
+  derived from a found horizon to better than a few cells, and never an
+  analytic hole once the roll-on has ended. A change that feeds a track's
+  center, velocity or shape into a target or a source breaks it.
+- **The frame's terms change a validated equation.** `(FRAME)` needs its
+  own pointwise identity against automatic differentiation
+  (`CLAUDE.md`, "Inherit GHSO2's algebra"). Without a frame the kernel is
+  today's bit for bit, and the thread digest's lines stand.
+- **The basis and the coordinates are two things.** The time index is the
+  inertial one; only spatial indices turn. `g_tt` far away is `−1`, not
+  `−1 + Ω² r²`: if a far-field component grows with `r`, the basis has
+  become a rotating chart.
+- **The frame derivative rule.** Everything prescribed on the grid — a
+  source's weights and parameters, Dirichlet data, a roll-on's `from` — has
+  the inertial time derivative `∂_t Q̄ − V̄·∂̄Q̄ + Ω × Q̄`. A source whose
+  `∂_t H` is not that one grows `C_a` with no `H` to explain it.
+- **The gauge does not move with the grid.** `Γ_a` is a covector under
+  affine maps only, and the grid's map is not one. A closed form evaluated
+  on the stored components imposes the *inertial* chart's condition (it is
+  invariant under a rotation at one instant, and under nothing that depends
+  on time). A source meant to be comoving has to say so: the comoving shift
+  is `β + V`.
+- **`S0`'s `∂_t g` stays inertial.** Only the two evolution equations gain
+  the frame's terms.
+- **The map is `C²` in time and constant in kind within a piece**, handed
+  over about the piece's time as a `TrackedHole` is, and it goes into the
+  run state and the checkpoint.
+- **The frame's `Val` is built with the problem**, once per chunk. `V̄`
+  depends on the position, which is a `Vec` per axis on SIMD lanes; no
+  branch on it.
+- **The speed kernel must see `V̄`**, or the step is wrong in the far zone
+  and nothing reports it until the run ends there.
+- **A comparison between frames is to truncation, not to roundoff.** The
+  same run on a rotating grid has other stencils at every point. Compare
+  convergence orders and norms; assert bit identity only without a frame.
+- **Measure about the hole on the grid.** Shells and masks are about the
+  hole's grid point; the analytic center of a boosted hole is `R x̄ + b`.
+- **Price every test**, as for the B steps; runs longer than a minute go
+  into `test/octant_runs.jl` or `test/binary_runs.jl` options and to
+  Symmetry as job chains with their own remote directories.
+
+## Step C1 — The frame's terms
+
+`CODE.md`: "The frame"; "The equations"; "One right-hand-side evaluation";
+"The time step".
+
+**Changes:**
+
+- **A map type**, `isbits`: `Φ`, `Ω`, `Ω̇`, `b`, `ḃ`, `b̈` about a piece's
+  time, with `x(x̄, t)`, `V̄(x̄, t)` and the rotation of a state between the
+  bases. The identity map is no frame.
+- **The right-hand-side kernel**: `(FRAME)`'s advection and index terms for
+  `h` and `Π`, behind a `Val`, on both kernel widths and on a device.
+- **The speed kernel**: the speeds shifted by `−V̄`.
+- **Initial data, the error reference and the Dirichlet hook** through the
+  map: sampled at `x = R x̄ + b`, rotated into the grid's basis.
+- **The sampled and the algebraic gauge sources** under the frame derivative
+  rule.
+- **The record**: `Φ`, `Ω`, `b` per row; the horizon's `J` rotated back.
+- **`test/octant_runs.jl` options**: a constant `Ω` and a constant velocity
+  of the grid.
+
+**Accept:**
+
+- **Without a frame** the right-hand side, the monitors and the thread
+  digest are bit for bit what they were.
+- **The pointwise identity**: `(FRAME)`'s `∂_t ū` against forward-mode
+  differentiation of analytic data in the grid's basis — a boosted
+  Kerr-Schild hole seen from a rotating and translating grid — to roundoff,
+  at both element types.
+- **The gauge wave on a rotating Dirichlet box** converges at order `q` to
+  the analytic solution, with the error within `2×` the same box at rest.
+- **Minkowski with noise** on a rotating box is robustly stable, as the
+  octant's rows are.
+- **Kerr-Schild `a = 1/2` at the origin of a rotating grid**, `Ω = 1/10`,
+  `:damped`, to `8 M` at two spacings: the error and `ℋ` outside the horizon
+  within `1.5×` the resting fixture's, order four between the two.
+- **The boosted `a = 0` hole on a grid translating with it**, in its own
+  Kerr-Schild gauge with `:damped`: the resting hole's row to `1.5×`, with
+  no target rate.
+- The kernel's cost per point with the frame, on an H200 and on a CPU.
+
+## Step C2 — A moving hole at rest on its grid
+
+`CODE.md`: "The three parts", "The gauge in the frame", "The interior at
+rest", "The control acts on the map". **One hole. This is the run that
+decides the design.**
+
+**Changes:**
+
+- **The map's control**: the source line's PID law steering `b` (and, for
+  step C5, `Φ`) from the found center on the grid, `τ` an option.
+- **The far-field weight** of the roll-on: its `from` source kept beyond
+  `r_far`.
+- **The comoving shift near the hole**, the second candidate of "Which
+  shift is damped": `β^i + V̄_A^i` under a weight about the hole, with the
+  covector's time component, its `∂_a H_b` by the frame derivative rule,
+  and both checked against automatic differentiation of the closed form.
+- **`test/octant_runs.jl` options** for all three.
+
+**Accept**, on the boosted `a = 0` hole at `v = 1/5` on the quadrant, on a
+grid translating with it, the damped harmonic gauge rolled on over
+`σ_g = 10 M` with `:fitted` (`m = 16`, `n_L = 20`, `fit_cont = 2`), at
+`1/24` and `1/32`, to `40 M` — step B1's rows, whose data are the
+comparison — **under each of the two shifts**, the inertial one and the
+comoving one near the hole:
+
+- **The claim:** `ℋ` and `C_a` in `[3, 5)` and `[5, 8)` about the hole
+  within `2×` step B1's **resting** row at both spacings, flat from `20 M`,
+  and `M_irr` the resting row's. Step B1's moving row is `6–31×` at `1/32`.
+- **What separates the two shifts:** the hole's lag behind the boosted
+  hole's line (step B1's moving row: `0.49 M` by `40 M`, the gauge's) and
+  the horizon's contraction along the boost. Under the inertial shift the
+  lag is expected to stay and the constraints to fall; under the comoving
+  shift both are expected at the resting row's.
+- **The exact image, as a check of the terms:** the resting hole in the
+  Galilean chart `x = y + V t` under the resting gauge's full image is the
+  resting run to truncation, with `g_ti → −V_i` far away.
+- **The hole's drift on the grid** with the map open-loop, and with the
+  control: the offset stays under the tracked layer's reach, and `C_a` does
+  not read the control's `τ` after the roll-on (two values of `τ`).
+- **The faces**: `C_a` in the blocks at the outer faces with and without
+  the far-field weight, against step B1's `2.4·10⁻⁴` at `40 M`.
+- **The margin in `M`**: `:fitted` at a fixed physical depth at `1/16`,
+  `1/24` and `1/32` on the resting hole; record the order outside the
+  horizon beside the margin fixed in cells.
+- **If the claim fails under both shifts**, do not tune: report the rows
+  and what distinguishes them from step B1's resting row.
+- The runs in `SINGULARITY_HANDLING.md` under a section of their own, and
+  summarised under `CODE.md`'s "The three parts". The report says which
+  route its numbers favour.
+
+## Step C3 — The far zone on a rotating grid
+
+`CODE.md`: "The frame" ("The far zone"); "The outer boundary and the wave
+zone". **No hole.** Uses step B5's wave if B5 has run, and a gauge wave
+packet otherwise.
+
+**Accept:**
+
+- **The step's bound**: the measured largest speed per level on the
+  binary's mesh at `Ω = 1/20, 1/10, 1/5`, against `Ω R_ℓ / h_ℓ ≲ λ_f / h_f`;
+  the step is the resting mesh's at each.
+- **A wave through the far zone** on a grid whose outer faces move faster
+  than light: its error against the same wave on the grid at rest, at two
+  spacings, and what the coarse-fine faces add.
+- **The faces**: frozen Dirichlet data on a rotating cube, flat space with
+  noise and the wave, to `10` turns of the grid: stable, with the reflection
+  from the outflow half measured.
+- `CODE.md`'s **(predicted)** and **(open)** under "The far zone" replaced
+  by what was measured.
+
+## Step C4 — Two holes at rest on the grid
+
+`CODE.md`: "The interior at rest", "The control acts on the map"; "One
+interior per hole"; "Initial data" (item 1).
+
+**Changes:**
+
+- **A `FittedSpec` in a `HoleSpec`**: `:fitted` per hole in the
+  composition, each fit one hole's own, the cache refilled per hole.
+- **The roll-on from the composite source on grid-fixed lines** to the
+  damped harmonic gauge, for several holes.
+- **The map's control from several tracks**: the centers' mean steers `b`.
+- **`test/binary_runs.jl` options.**
+
+**Accept**, on step B3's head-on pair (`d = 8 M`, `1/24` and `1/48` at the
+holes), with the grid at rest but for `b`:
+
+- one hole in this path is step C2's hole bit for bit;
+- every find of both holes at every row to `12 M`, no refusal;
+- `C_a` and `ℋ` under the composite mask bounded and falling between the
+  two spacings, against step B3's seed-fed and controlled rows at `6 M`;
+- each layer's residual from its own fit at truncation level, where step
+  B3's tracked targets hold `5.6`;
+- the areas constant to the junk's absorption;
+- the cost per `M` beside step B3's.
+
+## Step C5 — The orbit
+
+`CODE.md`: "The control acts on the map", "The plunge and the merger";
+milestone G8.
+
+**Changes:**
+
+- **The control of `Φ`** from the angle of `c̄_2 − c̄_1`.
+- **The quasi-circular superposed Kerr-Schild pair** at `d = 10 M` as a
+  case, with `Ω(0)` the data's.
+- **The level floors along `x̄`** for the creep.
+
+**Accept**, on the bitant (and on the half-turn quarter if B4 has run), at
+`1/48` at the holes, to three orbits:
+
+- both holes found at every row, each within the fine region's margin of
+  its grid point, the control's error and `Ω(t)` recorded;
+- `C_a` and `ℋ` bounded, and at `1/64` to one orbit lower by the order;
+- each horizon's `M_irr` and `J` constant to the junk's absorption;
+- the separation's proper length along the axis falling;
+- the cost per `M` and per orbit.
+
+What follows — the plunge, the handover and the waveform — is B7's and
+B9's on this route.
