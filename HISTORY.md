@@ -24,7 +24,8 @@ The runs behind the black hole's interior are in
   measurement matrix, 8g excision (not needed);
 - step 8: a hole that moves (G5); step 8′: the trailing side;
 - step 9: infrastructure and the H200 (G6); step 10: the review pass;
-- steps B1–B9: binary black holes (G7, G8).
+- steps B1–B9: binary black holes (G7, G8);
+- steps C1–C5: the comoving grid frame, a second route to G7 and G8.
 
 The briefs of the finished steps are under
 [The implementation plan](#the-implementation-plan).
@@ -122,6 +123,7 @@ The briefs of the finished steps are under
 - [Binary black holes](#binary-black-holes)
   - [The design proposed on 2026-10-25](#the-design-proposed-on-2026-10-25)
   - [Steps B1–B3 and the review (2026-10-25 to 2026-10-30)](#steps-b1b3-and-the-review-2026-10-25-to-2026-10-30)
+  - [The comoving grid frame proposed on 2026-11-09](#the-comoving-grid-frame-proposed-on-2026-11-09)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -1594,6 +1596,68 @@ the line's: in every row they fall faster than free fall for `2 M`, stop near
 `test/binary_runs.jl feed=controlled` its runs, `test/fed_study.jl` and
 `test/binary_study.jl` their tables.
 
+### The comoving grid frame proposed on 2026-11-09
+
+On 2026-11-09 Erik asked for a mechanism for the singularity that is likely
+to work for orbiting holes, calling progress slow and the current best
+method, blending to a known solution, delicate, and noting that BSSN makes
+this much easier. Erik fixed three goals — the generalized harmonic system, a
+Cartesian grid (not a SpEC-like tracking multi-block system) and a
+finite-differencing-like discretization — and left everything else free,
+coordinates and gauge conditions included. The design in `CODE.md` ("A
+comoving grid frame for orbiting holes") and `PLAN.md`'s steps C1–C5 were
+proposed the same day, from the documents alone: nothing was run.
+
+**Decided by Erik on 2026-11-09:** a rigidly rotating Cartesian grid is
+within the Cartesian-grid goal, and the design is written up as a proposal.
+Its other choices are open, under `CODE.md`'s "What the frame asks Erik to
+decide".
+
+**Corrected the same day, on Erik's question.** The first write-up called
+the damped harmonic source "a covariant function" and treated the comoving
+shift as a fallback. Erik pointed out that the gauge conditions are not
+covariant. The section now says what the closed form is invariant under (a
+rotation at one instant), that the gauge stays the inertial chart's while
+the grid moves, and that which shift is damped — the inertial one, or the
+comoving one near each hole — is open, with step C2 running both.
+
+**Where its evidence stood that day.** None of it was on `main`. Steps
+B1–B3 (the damped harmonic gauge on one hole at rest and moving, the
+track-fed source's loop, the controlled source line) were on
+[eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18),
+open. Step I1, the layer-free interior, was the closed draft
+[eschnett/TreeGeneralizedHarmonic.jl#19](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/19),
+shelved by Erik on 2026-10-30. Step I2, the held interior, was the
+local branch `claude/step-I2-held-interior`. The excision steps X1–X8 were
+the closed draft
+[eschnett/TreeGeneralizedHarmonic.jl#7](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/7),
+shelved on 2026-10-19, with principled
+excision restarted as a separate project, TreeExcision. A comoving or
+rotating grid had not been considered in any of the documents before.
+
+**Considered and not proposed:**
+
+- **A puncture-like interior.** The system evolves `g_ab`, which has no
+  finite state on a trumpet slice, and step I1 measured the regular
+  substitute collapsing within `M/4` unless anchored at `10/M`, which is a
+  damping layer again.
+- **The analytic target on a comoving grid.** The target would rest on the
+  grid, but the hole would still have to be held on it to a quarter of a
+  cell, and the superposition is still not a solution.
+- **Excision as this package's interior.** It is the method with the
+  record in generalized harmonic codes, and it fits the design as a
+  replacement of `:fitted`. It was left to TreeExcision, where it is being
+  rebuilt.
+- **A diffusive fill**, the right-hand side switched off deep inside and
+  replaced by a heat equation in the fit's variables, so that the interior
+  is the evolved state's smooth continuation with no fit. It is local and
+  indifferent to the merger's topology, and it is unproven: `:frozen`,
+  its limit without the diffusion, ends at `13 M`. Not written into the
+  design.
+- **The damped harmonic gauge with `:fitted` on the inertial grid at a
+  finer spacing**, pairing (β) as step B1 left it: the fallback if a
+  rotating grid had been refused, priced there at several GPUs.
+
 ## Possible extensions
 
 ### Extensions since built
@@ -2784,7 +2848,7 @@ finished steps follow, as PLAN.md had them.
 G5's case, the moving hole at `a = 7/10`, was decided on 2026-09-23. The
 recommendation "more interior work, the spin drift first, before
 excision" was proposed in step 8′ (2026-09-25). Steps B1–B9 were added
-to the plan on 2026-10-25.
+to the plan on 2026-10-25, and steps C1–C5 on 2026-11-09.
 
 ### Step 0 — Scaffolding (G0)
 
