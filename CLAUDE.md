@@ -592,6 +592,13 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   `RK4` clashes with OrdinaryDiffEq's by name: the package `import`s it
   `as IRK`.
   See `CODE.md`, "Time integration".
+- **A script's verbs are `public`, not exported, and `rhs!` reads what
+  `prepare!` left.** `prepare!`, `rhs!`, `stage_limit!`, `step_limit!`,
+  `initial_state!` and `evolved_sets` share TreeGRRMHD's names: qualify
+  them. Anything that scatters between `prepare!` and `rhs!` (`max_speed`, a
+  monitor, `gh_dt`, `initial_state!`) makes `rhs!` evaluate another state,
+  and nothing checks. A segment must be a contiguous view, since the CPU
+  lanes store through a pointer. See `CODE.md`, "The verbs (GH-4)".
 - **The RHS never mutates `u`, and the state has exactly three writers**. Both limiters
   are **integrator keywords**, passed by `gh_integrator` (`src/stepping.jl`)
   and nowhere else. **Under IMEXRungeKutta the two are
@@ -880,7 +887,10 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   one parameter) and the SIMD width `W` are `Val`
   parameters built in `GHProblem`'s constructor.
   Building them per evaluation recompiles or dispatches dynamically on
-  every RK stage. See `CODE.md`, "One right-hand-side evaluation".
+  every RK stage. See `CODE.md`, "One right-hand-side evaluation". The
+  seventh, `HASMATTER`, is the exception that proves it: `gh_rhs!` builds
+  it per call from the matter adapter's *type* (`has_matter`), which is
+  static. Never from a value. See `CODE.md`, "What this package takes (GH-3)".
 - **On the CPU the kernel's algebra runs on SIMD lanes, so it must stay generic
   in its number type** (`CODE.md`, "The right-hand side on a CPU"). Everything `gh_rhs_head` and
   `gh_rhs_pi` reach — `metric_quantities`, the lean source, `metric_divergences`,
