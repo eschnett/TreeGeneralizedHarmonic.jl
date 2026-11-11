@@ -42,6 +42,17 @@
 # points. Its motion axis is `x`, as on the quadrant, and `hz_J` is `J`'s
 # component along z, as on the rotating quadrant.
 #
+# From 2026-11-11 (step H1) the hole may be Kerr in harmonic coordinates
+# (`case=harmonic`, `harmonic_kerr_case`): `H ≡ 0`, so no gauge source, at
+# rest at the origin on the mirrored or the rotating octant, with either
+# interior. Its horizon is at `M` on the equator and `√(M² − a²)` at the
+# poles, half the Kerr-Schild hole's radius, and every default that is a
+# radius about the hole — the layer, the shells, the gate, the noise's core —
+# is the harmonic chart's own: the areal radius less `M`. A moving harmonic
+# hole is step H2's and is refused here.
+#
+#     julia --project=. --threads=4 test/octant_runs.jl case=harmonic L=8 N=16 roots=1 radii=4,2,1 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/harm
+#
 #     julia --project=. --threads=4 test/octant_runs.jl case=ks octant=quadrant v=1/5 x0=-1 L=8 N=16 roots=1 radii=4,3,2 r_0=5/8 r_1=23/16 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/quad
 #
 #     julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating_quadrant a=1/2 v=1/5 x0=-1 L=8 N=24 roots=1 radii=4,3,2 r_0=3/4 r_1=23/16 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/spin
@@ -64,7 +75,9 @@
 # numbers and the track, is written to `records.csv` at the end.
 #   t_end=128 chunk=1 cfl=1/4 q=4   the run
 #   eps=1/2 gamma0=1 gamma2=0       ε_KO, γ0, γ2
-#   case=minkowski|ks               flat space, or the Kerr-Schild hole
+#   case=minkowski|ks|harmonic      flat space, the Kerr-Schild hole, or (added
+#                                   2026-11-11) Kerr in harmonic coordinates, with
+#                                   no gauge source, at rest on an octant
 #   octant=reflecting|rotating|quadrant|rotating_quadrant|bitant
 #                                   three mirrors (a = 0 only), or the
 #                                   quarter turn about z and the mirror at z = 0
@@ -110,6 +123,7 @@
 #                                   r_0 > a for :damped, which the ring of radius
 #                                   a must be inside)
 #   r_0=3/4 r_1=3/2 source=algebraic|sampled   the hole's layer and gauge source
+#                                   (harmonic: r_0=2/5 r_1=3/4, and no source)
 #   interior=damped|fitted          step 5's analytic layer, or step 8's fitted
 #                                   target on the tracked horizon (margin m=8,
 #                                   lmax_shape=4, lmax_fit=8, the finder every
@@ -141,7 +155,9 @@
 #                                   √(r₊² + a²) = √(2 r₊) by default, 2 at a = 0:
 #                                   the KS horizon of a spinning hole is oblate, so
 #                                   the band inside it also holds points outside
-#                                   the horizon near the poles
+#                                   the horizon near the poles. Harmonic:
+#                                   1,5/4,2,4,7, the same areal radii less M (the
+#                                   equator at M)
 #   amplitude=1e-8 seed=20261002    the noise (amplitude=0: none)
 #   backend=cpu|cuda                cuda needs CUDA in the active environment
 #   simd=                           the CPU kernel's SIMD width (1: the scalar
@@ -236,8 +252,11 @@ function abort_all(err)
     MPI.Abort(MPI.COMM_WORLD, 1)
 end
 casename = opt("case", "minkowski")
-casename in ("minkowski", "ks") || error("case is minkowski or ks, got $casename")
-hole = casename == "ks"
+casename in ("minkowski", "ks", "harmonic") ||
+    error("case is minkowski, ks or harmonic, got $casename")
+hole = casename != "minkowski"
+# Kerr in harmonic coordinates (added 2026-11-11, step H1): `H ≡ 0`.
+harmonic = casename == "harmonic"
 symmetry = opt("octant", "reflecting")
 symmetry in ("reflecting", "rotating", "quadrant", "rotating_quadrant", "bitant") ||
     error("octant is reflecting, rotating, quadrant, rotating_quadrant or bitant, got $symmetry")
@@ -265,6 +284,9 @@ x0_hole = rat(opt("x0", "0"))
 path_x = haskey(OPTIONS, "path") ? rat(OPTIONS["path"]) : v_hole * t_end
 moving_domain && !hole &&
     error("octant = $symmetry is the moving hole's domain, and needs case = ks")
+moving_domain && harmonic &&
+    error("octant = $symmetry is the moving hole's domain, and a moving harmonic " *
+          "hole is step H2's: case = harmonic runs at rest on the octants for now")
 moving_domain || (iszero(v_hole) && iszero(x0_hole) && !haskey(OPTIONS, "path")) ||
     error("v = $v_hole, x0 = $x0_hole and path = are a hole on an axis, which " *
           "only octant = quadrant or bitant (x) or rotating_quadrant (z) maps onto itself " *
@@ -277,20 +299,23 @@ split_on = hole && opt("split", moving_domain ? "1" : "0") in ("1", "true")
 v_dir = v_hole < 0 ? -one(T) : one(T)
 contraction_expected = sqrt(1 - T(v_hole)^2)
 # The Kerr-Schild horizon (`M = 1`): `r₊` at the poles and `√(r₊² + a²) = √(2 r₊)`
-# at the equator.
+# at the equator. The harmonic chart's (added 2026-11-11) is the same surface
+# with the radius less `M`: `r₊ − 1 = √(1 − a²)` at the poles and `1` at the
+# equator. `M_irr = √(r₊/2)` in both.
 r_plus = 1 + sqrt(1 - T(a_spin)^2)
-r_equator = sqrt(2 * r_plus)
+r_pole = harmonic ? r_plus - 1 : r_plus
+r_equator = harmonic ? one(T) : sqrt(2 * r_plus)
 M_irr_kerr = sqrt(r_plus / 2)
 # The horizon's extent along the motion over the extent across it (added
 # 2026-10-21): the contraction times the rest frame's ratio, `1` along x and
 # the polar over the equatorial radius, `r₊/√(r₊² + a²)`, along the spin axis z.
-ratio_expected = axis == 3 ? contraction_expected * (r_plus / r_equator) :
+ratio_expected = axis == 3 ? contraction_expected * (r_pole / r_equator) :
                  contraction_expected
 # The least radius of a hole moving at `v`: along the spin, `r₊` contracted
 # along the boost, exactly `r₊` at rest; across it (from 2026-10-24) the pole's
 # `r₊` or the equator's `√(r₊² + a²)` contracted, whichever is less.
-r_hmin = axis == 3 ? r_plus * contraction_expected :
-         min(r_plus, r_equator * contraction_expected)
+r_hmin = axis == 3 ? r_pole * contraction_expected :
+         min(r_pole, r_equator * contraction_expected)
 
 backend = if opt("backend", "cpu") == "cuda"
     @eval using CUDA
@@ -315,9 +340,17 @@ comm = use_mpi ? communicator(MPI.COMM_WORLD;
 roots = haskey(OPTIONS, "roots") ? parse(Int, OPTIONS["roots"]) : Int(L ÷ N)
 haskey(OPTIONS, "roots") || roots * N == L ||
     error("L = $L must be a multiple of N = $N (one root block is N cells of h = 1)")
+# The chart's case (added 2026-11-11): Kerr-Schild with its gauge source and
+# its motion, or the harmonic hole, which has neither.
+hole_chart_case(; motion=(;), kw...) =
+    harmonic ? harmonic_kerr_case(T; a=a_spin, kw...) :
+    kerr_schild_case(T; a=a_spin, motion..., kw...)
 case = if hole
-    src = opt("source", "algebraic")
-    src in ("algebraic", "sampled") || error("source is algebraic or sampled, got $src")
+    src = opt("source", harmonic ? "none" : "algebraic")
+    harmonic && src != "none" &&
+        error("source = $src: the harmonic hole has H ≡ 0 and takes no gauge source")
+    harmonic || src in ("algebraic", "sampled") ||
+        error("source is algebraic or sampled, got $src")
     # The layer by step 8c's rule at this order: `ρ_max = 4/M` (the default),
     # `ρ_ramp = 1`, `r_1 − r_0 ≥ n_L h`; GHSO2's `ε_KO`, the Gaussian `γ0`.
     gs = src == "algebraic" ? :algebraic : nothing
@@ -340,19 +373,26 @@ case = if hole
         # along the boost to `r₊ √(1 − v²)` for a moving hole (`a = 0`).
         hfine = T(L) / (roots * N) / 2^length(radii)    # the finest spacing
         r_gate = min(T(9 // 10), r_hmin - (m + 2 * (q ÷ 2 + 1)) * hfine)
-        kerr_schild_case(T; a=a_spin, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
-                         octant=Symbol(symmetry), motion...,
-                         gauge_source=gs, interior=spec,
-                         horizon=Horizon(T; every=1, N=12, spin=true),
-                         bounds=default_bounds(T; M=1, r_gate=r_gate))
+        # The harmonic chart's data stay inside `default_bounds` down to
+        # `r ≈ 0.2 M` at `a = 0` (`α ≥ 0.32`, `λ ≤ 36`, `K ≤ 75`; measured
+        # 2026-11-11), so the Kerr-Schild ranges serve it too.
+        hole_chart_case(; motion=motion, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
+                        octant=Symbol(symmetry), gauge_source=gs, interior=spec,
+                        horizon=Horizon(T; every=1, N=12, spin=true),
+                        bounds=default_bounds(T; M=1, r_gate=r_gate))
     else
         haskey(OPTIONS, "variant") &&
             error("variant= is the tracked geometry's (interior = fitted); the " *
                   "sphere here is :damped")
-        kerr_schild_case(T; a=a_spin, halfwidth=L, r_0=rat(opt("r_0", "3/4")),
-                         r_1=rat(opt("r_1", "3/2")), ρ_ramp=1, chunk=chunk, ε_KO=ε_KO,
-                         γ2=γ2, octant=Symbol(symmetry), motion..., gauge_source=gs,
-                         margin=parse(Int, opt("margin", "8")), horizon=finder)
+        # The harmonic layer's defaults are the Kerr-Schild ones scaled by the
+        # horizon's least radius, `M` against `2 M` (CODE.md, "What harmonic
+        # gauge costs").
+        hole_chart_case(; motion=motion, halfwidth=L,
+                        r_0=rat(opt("r_0", harmonic ? "2/5" : "3/4")),
+                        r_1=rat(opt("r_1", harmonic ? "3/4" : "3/2")), ρ_ramp=1,
+                        chunk=chunk, ε_KO=ε_KO, γ2=γ2, octant=Symbol(symmetry),
+                        gauge_source=gs, margin=parse(Int, opt("margin", "8")),
+                        horizon=finder)
     end
 else
     minkowski_octant_case(T; L=L, ε_KO=ε_KO, γ0=γ0, γ2=γ2, chunk=chunk,
@@ -388,12 +428,12 @@ isrank0 && @printf("        case %s, t_end = %s, chunk = %s, cfl = %s, q = %d, �
                                 contraction_expected)
 rquadrant && isrank0 && @printf("        moving: v = %s along z from z0 = %s (at z = %s at t_end), shells swept along %s; z/x extent √(1 − v²) · r₊/√(r₊² + a²) = %.6f · %.6f = %.6f\n",
                                  v_hole, x0_hole, x0_hole + v_hole * t_end, path_x,
-                                 contraction_expected, r_plus / r_equator, ratio_expected)
+                                 contraction_expected, r_pole / r_equator, ratio_expected)
 hole && isrank0 && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin,
                 case.interior isa FittedSpec ?
                 "fitted target, tracked, margin $(case.interior.margin)" :
                 "damped layer, r_0 = $(case.interior.r_0), r_1 = $(case.interior.r_1)",
-                case.gauge === nothing ? "sampled" : "algebraic")
+                harmonic ? "none (H ≡ 0)" : case.gauge === nothing ? "sampled" : "algebraic")
 isrank0 && @printf("        noise %.3g (seed %d), backend %s, %d threads, %d rank(s)\n",
                    amplitude, seed, typeof(backend), Threads.nthreads(),
                    use_mpi ? MPI.Comm_size(MPI.COMM_WORLD) : 1)
@@ -417,6 +457,7 @@ hole && push!(cols, "err_l2_bnd")
 # their inner radius (`_in` for the band inside).
 shell_r = !hole ? T[] : haskey(OPTIONS, "shells") ?
           [T(rat(x)) for x in split(OPTIONS["shells"], ',')] :
+          harmonic ? vcat([r_equator], T[5 // 4, 2, 4, 7]) :
           vcat([r_equator], T[9 // 4, 3, 5, 8])
 shell_names = hole ? vcat(["in"], [@sprintf("r%g", r) for r in shell_r]) : String[]
 for nm in shell_names, c in ("ham_l2", "ham_linf", "mom_l2", "gauge_l2", "err_l2", "err_linf")
@@ -639,7 +680,8 @@ if hole
     setup["a"] = Float64(a_spin)
     setup["M_irr_kerr"] = M_irr_kerr
     setup["interior"] = case.interior isa FittedSpec ? "fitted" : "damped"
-    setup["gauge_source"] = case.gauge === nothing ? "sampled" : "algebraic"
+    setup["gauge_source"] = harmonic ? "none" :
+                           case.gauge === nothing ? "sampled" : "algebraic"
     case.interior isa FittedSpec ? (setup["margin_cells"] = case.interior.margin) :
                                    (setup["r_0"] = Float64(case.interior.r_0);
                                     setup["r_1"] = Float64(case.interior.r_1))
@@ -677,7 +719,7 @@ function draw_images()
             [("ham.svg", "ℋ by shell", ["ham_l2_$nm" for nm in shell_names],
               "Point-weighted L2 of ℋ against t/M, log scale: $colours."),
              ("err.svg", "error by shell", ["err_l2_$nm" for nm in shell_names],
-              "Point-weighted L2 of the error against Kerr-Schild, log scale: $colours."),
+              "Point-weighted L2 of the error against the exact solution, log scale: $colours."),
              # The two halves of the shell just outside the horizon (2026-10-20).
              (split_on ? [("split.svg", "trailing and leading",
                            ["err_l2_trail_$eq_shell", "err_l2_lead_$eq_shell",
@@ -935,10 +977,11 @@ restarting = get(ckw, :restart_file, nothing) !== nothing
 # A hole's frozen core is left alone: it is never evolved, and its stale data
 # at the corner is not of definite parity (see `add_noise!`). The default
 # `r_core` of a `:fitted` hole is the horizon's least radius less `5/4` (`3/4`
-# at `a = 0`, as before).
+# at `a = 0`, as before); the harmonic hole's (added 2026-11-11) less `5/8`,
+# the same depth in a chart whose radii are half the size.
 core² = !hole ? zero(T) : case.interior isa FittedSpec ?
         (haskey(OPTIONS, "r_core") ? T(rat(OPTIONS["r_core"])) :
-         r_hmin - 5 // 4)^2 : case.interior.r_0^2
+         max(r_hmin - (harmonic ? 5 // 8 : 5 // 4), zero(T)))^2 : case.interior.r_0^2
 fitkw = if hole && case.interior isa FittedSpec
     nL = case.interior.n_L > 0 ? case.interior.n_L :
          TreeGeneralizedHarmonic.layer_cells(q ÷ 2 + 1, T(4), one(T))
