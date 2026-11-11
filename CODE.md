@@ -120,6 +120,16 @@ research project; the inherited documents live in `notes/`.
   - [The ladder](#the-ladder)
   - [What is not known](#what-is-not-known)
   - [What the frame asks Erik to decide](#what-the-frame-asks-erik-to-decide)
+- [Harmonic gauge for the inspiral (proposed)](#harmonic-gauge-for-the-inspiral-proposed)
+  - [What harmonic gauge removes](#what-harmonic-gauge-removes)
+  - [What the package has measured in this chart](#what-the-package-has-measured-in-this-chart)
+  - [What harmonic gauge costs](#what-harmonic-gauge-costs)
+  - [The data](#the-data)
+  - [The merger](#the-merger)
+  - [On which grid](#on-which-grid)
+  - [The ladder of this route](#the-ladder-of-this-route)
+  - [What is not known on this route](#what-is-not-known-on-this-route)
+  - [What this route asks Erik to decide](#what-this-route-asks-erik-to-decide)
 - [Possible extensions](#possible-extensions)
 - [Open questions](#open-questions)
 
@@ -6615,7 +6625,9 @@ head-on (G7), and an equal-mass binary through inspiral, merger and ringdown
 decide](#what-this-asks-erik-to-decide). A second route for the orbiting
 pair — the holes at rest on a grid that rotates with them, the damped
 harmonic gauge and `:fitted` — is under [A comoving grid frame for orbiting
-holes](#a-comoving-grid-frame-for-orbiting-holes-proposed).
+holes](#a-comoving-grid-frame-for-orbiting-holes-proposed). A third choice
+of gauge, with no source at all until the merger, is under [Harmonic gauge
+for the inspiral](#harmonic-gauge-for-the-inspiral-proposed).
 
 **Units.** The total mass is `M = 1`, so each hole of an equal-mass pair has
 `M_A = 1/2`. Every single-hole setting in [Single black holes: recommended
@@ -6752,6 +6764,13 @@ head-on collision is the first test of either through a merger.
 A third pairing is noted and not planned: a Kerr-Schild source near each
 hole, with the damped harmonic gauge between and beyond the holes. It is the
 same composite with a third weight.
+
+**A third candidate has no source**: `H ≡ 0` on superposed harmonic data,
+with the damped harmonic gauge rolled on from zero before the merger. It
+has no rest frame, so nothing has to move with the holes. It is not
+expected to survive the merger on its own, hence the roll-on, and it costs
+a level at the holes: [Harmonic gauge for the
+inspiral](#harmonic-gauge-for-the-inspiral-proposed).
 
 **The initial momentum follows from the gauge.** Whatever the source, the
 data are `(γ_ij, K_ij)` with a lapse and a shift, and `Π` needs `∂_t α` and
@@ -7365,6 +7384,10 @@ the resting gauge is exact everywhere. Its far field is Minkowski in a
 Galilean chart, `g_ti → −V_i`, not a boosted hole's, so it is a test of the
 frame's terms and not a physical case.
 
+**In harmonic gauge the question has no object.** With `H ≡ 0` nothing is
+damped and nothing is evaluated on the grid: [Harmonic gauge for the
+inspiral](#harmonic-gauge-for-the-inspiral-proposed), "On which grid".
+
 **The damped harmonic gauge is rolled on (proposed).**
 
 - **It rolls on from the composite Kerr-Schild source on grid-fixed
@@ -7509,11 +7532,256 @@ All **(open)**.
 2. **The start**: the roll-on from the grid-fixed composite source
    **(proposed)**, or the damped harmonic gauge from `t = 0`.
 3. **The shift the gauge damps**: the inertial one, or the comoving one
-   near each hole. Step C2 runs both.
+   near each hole. Step C2 runs both. Neither, if the inspiral is in
+   harmonic gauge.
 4. **Which route steps B4–B9 take**: this one from step C2's result on, or
    pairing (α) with the controlled source line.
 5. **The interior**: `:fitted` now and excision when the excision project
    delivers **(proposed)**, or wait for excision.
+
+## Harmonic gauge for the inspiral (proposed)
+
+*Status: a design for review. Nothing in this section is built or
+measured; every number it leans on was measured elsewhere, and says where.*
+It is a third choice of gauge for [Binary black
+holes](#binary-black-holes-proposed), beside the two under [The
+gauge](#the-gauge): **no gauge source at all**. The data are superposed Kerr
+holes in harmonic coordinates, `H ≡ 0` holds until shortly before the
+merger, and there the damped harmonic gauge is rolled on from zero. The
+interior is `:fitted` per hole. The route runs on the inertial grid or on
+[the comoving one](#a-comoving-grid-frame-for-orbiting-holes-proposed), and
+on the comoving grid it leaves that section's open question about the gauge
+without an object. `PLAN.md`'s steps H1–H5 are the work breakdown; the first
+three need nothing that is not on `main`.
+
+### What harmonic gauge removes
+
+[Why the tracked target is delicate](#why-the-tracked-target-is-delicate)
+counts the lines that must agree to a fraction of a cell. Per route:
+
+| | pairing (α) | damped harmonic, `:fitted` | harmonic, `:fitted` |
+|---|---|---|---|
+| the gauge source's line | the track, or a controlled line | the composite's, during the roll-on | none |
+| the layer target's line | the track | none | none |
+| the gauge's rest frame | each hole's, through its track | the inertial frame | none |
+
+- **Nothing is prescribed.** There is no source function, so there is no
+  source line and no control loop on the equations. The kernel is the one
+  compiled without a source: no `Hsrc`, no closed form and no `∂_a H_b`.
+  With `:fitted` the equations read no analytic hole at any time, the
+  frozen data at the outer faces apart.
+- **The gauge has no rest frame.** `□x^a = 0` is Lorentz covariant, so a
+  hole moving at a constant velocity is the boosted solution, in this
+  gauge, exactly. The damped harmonic gauge damps the shift toward zero in
+  one frame, and a hole that moves through that frame lags behind the
+  boosted hole's line: `0.49 M` by `40 M` at both spacings ("What step B1
+  built and measured",
+  [eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)).
+  Here there is no frame to lag against.
+- **A moving hole has an exact reference**, `boost(Harmonic(M, a), v)`, so
+  the one-hole steps read an error and not only constraints.
+- **The faces agree with the gauge.** Frozen harmonic data at the outer
+  faces are harmonic. Step B1's `C_a` there, `2.4·10⁻⁴` and growing, is
+  Kerr-Schild data under a gauge that is harmonic far away.
+- **The chart is post-Newtonian theory's.** A quasi-circular inspiral is
+  quasi-stationary in harmonic coordinates in the co-rotating frame, and
+  the tracks compare with post-Newtonian orbits directly **(predicted)**.
+
+### What the package has measured in this chart
+
+Every harmonic run is an early one: on CPUs, to `13 M` at most, the moving
+ones at `q = 2` with a thin layer (`m = 4`, `n_L = 8`). The Kerr-Schild
+campaigns — fourth order, an H200, the octant and the quadrant, to `128 M`
+— were never repeated here.
+
+| run | what it shows | where |
+|---|---|---|
+| `Harmonic(1, 0)` at rest, `h = 5/128`, to `10 M` | `:fitted` and `:damped` agree to `5 %`; the error is the chart's, steep between the layer and the horizon, and grows slowly | [the measurement matrix](SINGULARITY_HANDLING.md#the-generic-interior-the-measurement-matrix-step-8f) |
+| `Harmonic(1, 7/10)` at rest, `h = 5/256`, `:fitted`, to `10 M` | every fit valid; `M_irr` `0.30 %` low, `J` `1.0 %` high; ends at `0.5–3.5 M` at `5/128` | the same |
+| the same hole boosted at `0.3` across its spin, to `13 M` | the horizon's contraction `0.9534` against `0.95394`; no failed find; with `trail_ramp = 9/10` the error is `2.05×` the resting hole's and grows at `0.11` a `M` against `0.02`; `J` drifts by `0.013` a `M` | [the moving hole](SINGULARITY_HANDLING.md#the-moving-hole-step-8), [the trailing side](SINGULARITY_HANDLING.md#the-trailing-side-step-8) |
+| `Harmonic(1, 9/10)` | refused, or a fit that is not good enough | [The spinning harmonic chart](#the-spinning-harmonic-chart) |
+
+So the route's first step is the campaign the Kerr-Schild hole had, on this
+chart. What the early rows leave open is listed under [What is not known on
+this route](#what-is-not-known-on-this-route).
+
+### What harmonic gauge costs
+
+- **The finest level is twice as fine.** The spacing follows from the
+  horizon's smallest coordinate radius ([the three
+  radii](#the-interior-a-pointwise-damping-layer)): `2 M` for Kerr-Schild at
+  `a = 0`, `M` here; `1.71 M` against `0.71 M` at `a = 7/10`. The settings
+  of [Single black holes: recommended
+  settings](#single-black-holes-recommended-settings), scaled by that
+  radius, are `:damped` from `1/32` (`r_0 = 2/5`, `r_1 = 3/4`) and `:fitted`
+  from `1/48` (`m = 16`, `n_L = 20`) at `a = 0` **(predicted**: a guess to
+  screen, as the table's own unmeasured rows are**)**. In a binary's units
+  that is `1/96` to `1/128` at the holes.
+- **With spin the room is the equator's.** The layer and its margin lie
+  between the horizon's equator at `M` and the disk at `a`: `M/2` at
+  `a = 1/2` and `0.3 M` at `a = 7/10`, against `M` less the core at
+  `a = 0`. So `a = 7/10` costs about one level more **(predicted)**; its
+  early row ran at `5/256` with a layer thinner than the calibrated one.
+- **Outside the horizon the spacing buys nothing (predicted).** The chart's
+  fields vary there on the scale `M`, as Kerr-Schild's do; what needs the
+  cells is the room inside a horizon of half the radius, where the metric
+  grows as `M²/r²` toward the origin.
+- **In points and steps (predicted):** one more level within about `M_A` of
+  each hole, and half the time step, since the step is global. With `s` the
+  finest level's share of a Kerr-Schild run's points, a level that follows
+  the holes has as many points as the one below it, and the cost is
+  `2 (1 + s)` times that run's: `2–4×`. On a capsule along a path the new
+  level has twice the points of the one below it, `2 (1 + 2s)`, up to `6×`,
+  and a ring along the orbit is longer than any path run so far.
+- **So the fine level must stay with the holes**: by the tracked floors of
+  [Refinement for two holes](#refinement-for-two-holes) on the inertial
+  grid, or because the holes rest on the comoving grid.
+- **The spin is limited to `a ≤ 7/10`.** The chart's singular set is the
+  equatorial disk of radius `a`, and the horizon's polar radius is
+  `√(M² − a²)`; the two meet at `a = M/√2`. SpEC's superposed harmonic data
+  have the same limit (Varma, Scheel and Pfeiffer 2018). Its extension to
+  `0.8–0.9` is a chart that is harmonic in time only (Ma, Giesler, Scheel
+  and Varma 2021), which has a spatial gauge source and so is not this
+  route.
+
+### The data
+
+**Superposed boosted harmonic holes (proposed).** `g = η + Σ_A (g_A − η)`
+with each `g_A` a boosted, translated `Harmonic(M_A, a_A)`: item 1 of
+[Initial data](#initial-data) with another chart.
+
+- **`Π` comes from `C_a = 0`.** Each `g_A` has `Γ_a = 0` and the sum does
+  not, at second order in the fields. `gauge_consistent_momentum` with
+  `H = 0` chooses `∂_t α` and `∂_t β^i` so that `Γ_a = 0` at `t = 0`.
+- **The Einstein constraints** are violated where the fields overlap, as
+  the superposed Kerr-Schild data's are, and the constraint damping removes
+  that as junk. SpEC reports less junk from harmonic free data than from
+  Kerr-Schild's, on solved data.
+- **Solved data (open).** XCTS's free data are superposed Kerr-Schild.
+  Harmonic free data are a change there. Any solved lapse and shift can
+  start a harmonic evolution, since `Γ_a = 0` fixes only their time
+  derivatives; whether the result is as quiet as the superposed chart's is
+  not known.
+
+### The merger
+
+**Pure harmonic gauge is not expected to survive the merger (predicted).**
+Between merging horizons the lapse collapses and `√γ/α` grows without a
+bound; the damped harmonic gauge exists to prevent that (Lindblom and
+Szilágyi 2009; Szilágyi, Lindblom and Scheel 2009). Whether a
+finite-difference code with a relaxed interior meets the same failure, and
+when, is what step H4 measures first.
+
+**The damped harmonic gauge is rolled on before it (proposed).**
+`H = (1 − f(t)) H_DH(g)` with `f = 1` up to `t_0` and
+`f = e^{−((t − t_0)/σ_g)⁴}` after it: the roll-on of [The gauge](#the-gauge)
+with nothing to roll on from.
+
+- **It still holds no line.** `H_DH` reads the state and a Gaussian about
+  the origin, where an equal-mass pair merges.
+- **It starts exact.** At `t_0` the source and its first three time
+  derivatives are zero.
+- **`t_0` is an event**: the first row at which the tracks' coordinate
+  separation is below `d_g`. It is read from found horizons to the accuracy
+  of a row, which is inside the rule of [Why the tracked target is
+  delicate](#why-the-tracked-target-is-delicate). It belongs to the run
+  state and the checkpoint.
+- **`d_g = 6 M` and `σ_g = 15 M` (proposed).** A quasi-circular equal-mass
+  pair at `d = 6 M` has about `100 M` to its merger (the quadrupole
+  formula), and the roll-on is within `1 %` of complete after `1.5 σ_g`.
+  A head-on pair from rest at `d = 8 M` falls in about `25 M` (Newtonian),
+  so there `t_0 = 0`.
+- **The gauge's width `σ_r`** is small against the box, so that the faces
+  stay harmonic.
+- **What the roll-on brings back.** For its last tens of `M` the holes move
+  at `0.2–0.4` through the damped harmonic gauge's frame, which is step
+  B1's moving hole. There its excess over the resting hole fell at order
+  `5.5–10` from `1/24` to `1/32`; this route's holes have twice those cells
+  across their horizons **(predicted** to be enough; not measured**)**.
+- **The remnant is at rest in that frame**, which is step B1's resting
+  hole: `ℋ` and `C_a` at `1.2–1.6×` the Kerr-Schild hole's, flat from
+  `20 M`.
+
+The handover is [The common horizon and the
+handover](#the-common-horizon-and-the-handover)'s, with no source to blend.
+
+**The alternative: the roll-on at `t_0 = 0`** on the same data, which is
+close to how SpEC evolves such data. It needs no event. It keeps the
+gauge's rest frame for the whole inspiral, and so step B1's moving hole for
+the whole run and not for its last orbit.
+
+### On which grid
+
+The route needs no frame. What a frame adds is unchanged, and what it asks
+is less:
+
+- **On the inertial grid** each hole is a moving `:fitted` hole for the
+  whole run: the layer takes its target's rate, has a trailing side, and
+  the fine level follows the track. The early rows above are this case at
+  `q = 2`; the Kerr-Schild hole at `q = 4` held `40 M` at `v = 1/5`.
+- **On the comoving grid** each hole is the resting `:fitted` hole, and the
+  fine level is static but for the creep. `(FRAME)`'s terms are kinematics
+  for any gauge.
+- **[The gauge in the frame](#the-gauge-in-the-frame) has nothing to
+  decide.** `H ≡ 0` is the inertial chart's condition and nothing is
+  evaluated on the grid, so no shift is damped until the roll-on. From then
+  on the gauge damps the inertial shift, and its rest frame is the
+  remnant's.
+- **Step C2 becomes a test of the frame's terms alone**: the boosted
+  harmonic hole on a grid translating with it has an exact reference, and
+  must be this route's resting row to truncation.
+
+**(Proposed:)** steps H1–H3 run on the inertial grid, and the ratio of the
+moving hole to the resting one at `40 M` decides whether the pair needs the
+frame.
+
+### The ladder of this route
+
+`PLAN.md`'s steps H1–H5, each a claim that can fail:
+
+1. **A harmonic hole at rest runs as the Kerr-Schild hole does**: fourth
+   order outside the horizon and stationary to `128 M`, at twice the cells
+   per `M`.
+2. **A moving harmonic hole is a resting one**: within `2×` the resting
+   row to `40 M` at `v = 1/5`, which is step B1's moving row without its
+   gauge.
+3. **Spin up to `a = 7/10`**, at rest, along the motion and across it, and
+   whether the early rows' drift of `J` is still there at fourth order.
+4. **Two holes with no source**: the head-on pair in pure harmonic gauge to
+   wherever it ends, then with the roll-on through the merger.
+5. **The orbit**, on the grid that step H2's ratio chooses.
+
+### What is not known on this route
+
+All **(open)**.
+
+- Whether a harmonic hole is stationary for `128 M`. Nothing drives the
+  chart toward stationarity; the early row grows slowly over `10 M` at a
+  spacing that under-resolves it.
+- Whether the moving spinning hole's drift of `J` and its uniform growth
+  are the chart's, the layer's or the early rows' order and resolution.
+- Whether `:fitted` converges outside the horizon, on this chart or any
+  other, at a margin fixed in `M`.
+- How pure harmonic gauge fails at a merger in this code, and whether the
+  roll-on's `d_g` and `σ_g` leave it time.
+- Whether superposed data without a solve settle in a gauge that has no
+  damping of its own.
+- Reflections of the gauge's own waves from frozen Dirichlet faces, which
+  is [The outer boundary and the wave
+  zone](#the-outer-boundary-and-the-wave-zone)'s question on every route.
+
+### What this route asks Erik to decide
+
+1. **The gauge of the inspiral**: harmonic **(proposed)**, the damped
+   harmonic gauge from `t = 0` on the same data, or pairing (α).
+2. **The merger**: the roll-on at `d_g` **(proposed)**, decided again from
+   step H4's pure harmonic run.
+3. **The spin**: `a ≤ 7/10` for G7 and G8 on this route **(proposed)**,
+   with higher spins left to a chart that has a source.
+4. **The grid**: decided after step H2 **(proposed)**, or the comoving grid
+   from the start.
+5. **The order**: steps H1–H3 now, since they need only `main`
+   **(proposed)**, or after the binary steps B1–B3 have landed.
 
 ## Possible extensions
 

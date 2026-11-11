@@ -25,7 +25,8 @@ The runs behind the black hole's interior are in
 - step 8: a hole that moves (G5); step 8′: the trailing side;
 - step 9: infrastructure and the H200 (G6); step 10: the review pass;
 - steps B1–B9: binary black holes (G7, G8);
-- steps C1–C5: the comoving grid frame, a second route to G7 and G8.
+- steps C1–C5: the comoving grid frame, a second route to G7 and G8;
+- steps H1–H5: harmonic gauge for the inspiral, a third route to G7 and G8.
 
 The briefs of the finished steps are under
 [The implementation plan](#the-implementation-plan).
@@ -124,6 +125,7 @@ The briefs of the finished steps are under
 - [Binary black holes](#binary-black-holes)
   - [The design proposed on 2026-10-25](#the-design-proposed-on-2026-10-25)
   - [The comoving grid frame proposed on 2026-11-09](#the-comoving-grid-frame-proposed-on-2026-11-09)
+  - [Harmonic gauge for the inspiral proposed on 2026-11-11](#harmonic-gauge-for-the-inspiral-proposed-on-2026-11-11)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -1558,6 +1560,54 @@ rotating grid had not been considered in any of the documents before.
   finer spacing**, pairing (β) as step B1 left it: the fallback if a
   rotating grid had been refused, priced there at several GPUs.
 
+### Harmonic gauge for the inspiral proposed on 2026-11-11
+
+The comoving grid frame's proposal was merged on 2026-11-10
+([eschnett/TreeGeneralizedHarmonic.jl#28](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/28)).
+On 2026-11-11 Erik asked whether the fallback named beside it — the damped
+harmonic gauge with `:fitted` on the inertial grid at a finer spacing — was
+expected to hold holes that move across the grid. It was not: step B1 had
+priced that run and not made it, its moving hole had not settled at `1/24`
+or `1/32`, and after the correction of 2026-11-09 the comoving grid with
+the inertial shift damped is the same problem in the continuum.
+
+Erik then proposed going back to a black hole in harmonic coordinates,
+which simplifies the gauge conditions, at the price of more resolution — a
+price that was being paid anyway. The design in `CODE.md` ("Harmonic gauge
+for the inspiral") and `PLAN.md`'s steps H1–H5 were written the same day on
+Erik's request, from the documents alone: nothing was run.
+
+**What the proposal adds to Erik's suggestion:** the damped harmonic gauge
+rolled on from zero before the merger, where pure harmonic gauge is
+reported to fail; and that the route makes the comoving grid's open
+question, which shift the gauge damps, without an object.
+
+**Where its evidence stood that day.** The package's harmonic runs were
+those of steps 8f, 8 and 8′, of late September 2026: on CPUs, to `13 M`
+at most, the moving ones at `q = 2`. The binary design of 2026-10-25 had
+considered two gauges, the tracked Kerr-Schild source and the damped
+harmonic gauge, and not `H ≡ 0`. Steps B1–B3 were still on
+[eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18),
+open.
+
+**Considered and not proposed:**
+
+- **The roll-on at `t_0 = 0`** on harmonic data, close to how SpEC evolves
+  superposed harmonic data: it keeps the gauge's rest frame, and with it
+  step B1's moving hole, for the whole inspiral. It is the alternative the
+  section lists.
+- **A chart that is harmonic in time only** (Ma, Giesler, Scheel and Varma
+  2021), which reaches spins of `0.8–0.9`: it has a spatial gauge source,
+  and so a line again.
+- **A damped wave equation for `H_t` alone**, Pretorius's first gauge: it
+  evolves the source as a field, which this system's algebraic sources
+  avoid.
+
+**Corrected the same day.** The first estimate of the cost on a fixed
+capsule, eight times a Kerr-Schild run's, counted the new level as covering
+the old one's volume. It covers half the radius: the section's
+`2 (1 + 2s)` replaces it.
+
 ## Possible extensions
 
 ### Extensions since built
@@ -2681,7 +2731,8 @@ finished steps follow, as PLAN.md had them.
 G5's case, the moving hole at `a = 7/10`, was decided on 2026-09-23. The
 recommendation "more interior work, the spin drift first, before
 excision" was proposed in step 8′ (2026-09-25). Steps B1–B9 were added
-to the plan on 2026-10-25, and steps C1–C5 on 2026-11-09.
+to the plan on 2026-10-25, steps C1–C5 on 2026-11-09 and steps H1–H5 on
+2026-11-11.
 
 ### Step 0 — Scaffolding (G0)
 
