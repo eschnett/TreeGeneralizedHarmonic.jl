@@ -117,6 +117,18 @@ moves) is next.
 next, and in the same paragraph that step 8, the moving hole, has run
 (2026-09-24), and step 8′ (2026-09-25) after it.
 
+**Binary black holes (G7, G8): steps B1–B3 are done.** The package has the
+gauge sources a pair needs — the composite tracked Kerr-Schild source, the
+damped harmonic gauge and a roll-on between them — a `:damped` layer that
+takes its target and its center from the horizon track, and a case of several
+holes: superposed Kerr-Schild data, one interior per hole, the holes tracked
+and found together. A head-on pair from rest at `d = 8 M` runs to `6 M` on one
+H200 with every find successful, its gauge source riding a controlled source
+line (a PID loop on the tracks). Steps B4–B9 — the symmetric domains, the far
+boundary and the wave zone, `Ψ₄`, merger, constraint-satisfying data and the
+inspiral — are not started. `CODE.md`, "Binary black holes", has the design
+and the measurements; `PLAN.md` the steps.
+
 ## Documentation
 
 See [CODE.md](CODE.md) for the design and the measured results,

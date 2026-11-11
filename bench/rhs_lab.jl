@@ -159,8 +159,11 @@ function k_fused!(du, work, spacings, src, γ0, γ2, ε, ::Val{N}, ::Val{STATIC}
     st, sv, sb = STATIC ? strides_static(Val(N)) : TGH.work_strides(work)
     var = work_base(st, sb, i, j, k, b)
     inv_h = inv(@inbounds spacings[b])
-    Fh, FΠ = gh_rhs_at_point(T, wk, src, (i, j, k), b, var, st, sv, inv_h, γ0, γ2,
-                             ε * inv_h, Val(Q), Val(HASH), Val(true))
+    # The position and the time (step B1) are read only by a source that needs
+    # them, and the lab's do not.
+    Fh, FΠ = gh_rhs_at_point(T, wk, src, (i, j, k), b, (zero(T), zero(T), zero(T)),
+                             zero(T), var, st, sv, inv_h, γ0, γ2, ε * inv_h, Val(Q),
+                             Val(HASH), Val(true))
     o = du_base(Val(N), i, j, k, b)
     store!(du, o, N^3, 0, Fh)
     store!(du, o, N^3, NC, FΠ)

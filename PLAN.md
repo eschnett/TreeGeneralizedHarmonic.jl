@@ -25,11 +25,18 @@ first, before excision" (proposed) awaiting Erik's decision.
 Step 9 (G6), which does not depend on it, is running (started
 2026-09-25).**
 
-**Steps B1–B9 are proposed and not started**: binary
-black holes, toward the milestones G7 and G8 ("Milestones" below), which go beyond
-the proof of concept. The design is `CODE.md`, "Binary black holes", and Erik
-decides the gauge and interior pairing after B1 and B2. This file stays
-until G8 is done.
+**Steps B1–B9 are proposed; B1–B3 are done** (B1 ran on 2026-10-25, B2 and
+B3 on 2026-10-26, B3's review to 2026-10-30; B4–B9 not started): binary black
+holes, toward the milestones G7 and G8 ("Milestones" below), which go beyond
+the proof of concept. The design is `CODE.md`, "Binary black holes". **Erik
+decided the pairing on 2026-10-26: (α)**, the composite tracked Kerr-Schild
+source fed by the per-hole tracks with B2's tracked `:damped` target per hole —
+and `GHCase(…; holes)`, and the superposed metric kept here. **And on what
+feeds that source, the same day (`CODE.md`'s item 7):** a slow control law for
+the track-fed source, tested on one moving hole fed by its own track first —
+built in B3's review, which in its second round, on Erik's request, turned the
+model off and added an integral: the PID loop without the model is proposed for
+B4 (`CODE.md`, "The controlled source line"). This file stays until G8 is done.
 
 **Steps C1–C5 are proposed and not started**: a second route to G7 and G8
 for holes that orbit — the holes at rest on a grid that rotates with them,
@@ -768,126 +775,24 @@ findings set the steps below:
 
 ## Step B1 — Two gauge sources and the initial momentum
 
-`CODE.md`: "The gauge" (under "Binary black holes"); "Gauge and constraint
-damping" (the algebraic source); "Open questions", "Gauge sources that know
-less about the hole". **One hole only**: the binary case is B3's.
-
-**Changes**, all in `src/gauge.jl`, evaluated in the kernels as
-`KerrSchildSource` is, generic in the number type for the SIMD lanes and
-closure-free for a device:
-
-- **The composite tracked Kerr-Schild source**, `K` holes: each hole's
-  `M_A` and `S_A`, the piece's line `c_A(t)`, `u_A(t)` and `du_A/dt`, and
-  the partition of unity with `p = 4`. `∂_a H_b` includes `∂w_A` and the
-  `du_A/dt` term.
-- **The damped harmonic source** in SpECTRE's form (`A_L1`, `A_L2`, `A_S`,
-  `e`, `σ_r`).
-- **The roll-on** `f(t) H_from + (1 − f(t)) H_to`, with
-  `f = e^{−((t − t_0)/σ_g)⁴}` and its `∂_t f`.
-- **`gauge_consistent_momentum`**: `∂_t α` and `∂_t β^i` from
-  `C_a = 0`, given `(γ, K, α, β)`, their spatial derivatives and the
-  source.
-- **`test/octant_runs.jl` options** for the source and the roll-on.
-
-**Accept:**
-
-- The composite with one hole is `KerrSchildSource` bit for bit: the
-  right-hand side of the moving quadrant hole.
-- `H` and `∂H` of each new source agree with forward-mode differentiation
-  of its closed form, at random states near Kerr-Schild, to roundoff.
-- `gauge_consistent_momentum` returns a boosted Kerr-Schild hole's
-  analytic `Π` under its own source to roundoff, and gives `C_a = 0` at
-  `t = 0` for a perturbed lapse.
-- **The damped harmonic gauge rolled on**, on the boosted `a = 0` hole on
-  the quadrant (`v = 1/5`, `:fitted`, `1/24` and `1/32` in `M_A`) to
-  `40 M`, against the same hole in its own Kerr-Schild gauge. Record:
-  - `ℋ` and `C_a` just outside the horizon;
-  - the horizon's `M_irr`;
-  - the hole's coordinate trajectory;
-  - the static hole too, which Lindblom and Szilágyi saw settle.
-- The kernel's cost per point with each source.
-- The runs in `SINGULARITY_HANDLING.md` under a section of their own, and
-  summarised under `CODE.md`'s "The gauge".
+Done (it ran 2026-10-25). What it built and measured is `CODE.md`'s "What
+step B1 built and measured", its runs `SINGULARITY_HANDLING.md`'s "The damped
+harmonic gauge rolled on"; the brief is in `HISTORY.md`, "Step B1 — Two
+gauge sources and the initial momentum".
 
 ## Step B2 — The tracked analytic target
 
-`CODE.md`: "One interior per hole", "The tracks"; "The interior" (step 8c's
-rule, the moving `:damped` layer, `core_follows`). **One hole only.**
-
-**Changes:**
-
-- **`src/tracking.jl`:**
-  - the quadratic prediction, a least-squares fit in time over the last
-    four finds (today's line until there are four);
-  - its blend into the previous prediction over the next interval;
-  - the center-jump check, the found origin within `G h/2` of the
-    prediction;
-  - the find interval from the predicted acceleration, `a Δt² ≤ G h/4`;
-  - the prediction's error in the record.
-- **`src/interior.jl` and `src/driver.jl`:** a `:damped` interior whose
-  target and center come from a track. The target is the boosted,
-  translated Kerr-Schild hole with the hole's `M_A` and `S_A` on the
-  piece's line, rebuilt every piece, with the core following its target
-  and the target's rate along the line.
-- **`test/octant_runs.jl`:** the tracked target, and knobs that perturb its
-  mass, velocity and center.
-
-**Accept:**
-
-- **The prediction on synthetic finds** on a circle at `d = 10` and
-  `d = 3`, a host test: its error under `G h/4` at the proposed cadence.
-- **On the moving `a = 0` hole** on the quadrant (`v = 1/5`, `1/24` and
-  `1/32` in `M_A`) to `40 M`, the tracked target:
-  - `ℋ` just outside the horizon within `1.5×` the analytic `:damped`
-    layer's;
-  - order four between the two spacings.
-- **The sensitivity**, recorded for each perturbation: `ℋ` and the error
-  outside the horizon, and the layer residual.
-  - the target's mass off by `±1 %`;
-  - its velocity off by `±0.02`;
-  - its center off by `±1` cell.
-- **Recovery:** a track started with a velocity off by `0.05` recovers
-  within a few finds, with no refusal.
-- **The report** says, beside B1's, which pairing its numbers favour.
+Done (it ran 2026-10-26). What it built and measured is `CODE.md`'s "What
+step B2 built and measured", its runs `SINGULARITY_HANDLING.md`'s "The
+tracked analytic target"; the brief is in `HISTORY.md`, "Step B2 — The
+tracked analytic target".
 
 ## Step B3 — Several holes in one case
 
-`CODE.md`: "A case without a background", "One interior per hole",
-"Refinement for two holes", "The record", "Initial data" (item 1). **Starts
-after Erik's decision on the pairing.**
-
-**Changes:**
-
-- **The case:** `HoleSpec`, and `GHCase(…; holes)` with the background as
-  data. A `binary_case` constructor on the full box.
-- **The data:** an `isbits` superposition with the optional attenuation,
-  here, unless Erik takes it to `SpacetimeMetrics` first.
-- **The kernel:** the interior a tuple with the composition rule, built
-  from B2's tracked target or `:fitted` per hole. The composite mask, used
-  by every norm, the indicator, the projection's gate and the finder's
-  guard. `γ0` as three Gaussians, and `ε_KO` per hole.
-- **The driver:** per-hole tracks and finds in `evolve!`, and the gauge
-  source of the chosen pairing fed by the tracks. Per-hole level floors,
-  their union taken. Per-hole record rows, and the separation and phase.
-- **The run state:** the `K` tracks in the checkpoint.
-- **MPI:** the `K` finds in rank 0's analysis.
-
-**Accept:**
-
-- **One hole is the old case:** `holes = (spec,)` bit for bit, `u` after
-  two chunks and the record. Run on the suite's fixture and on the moving
-  quadrant hole, at one thread and at four.
-- **The composition is local:** the composite right-hand side equals the
-  single-hole kernel of the nearer hole at every point where only one
-  layer acts. Compared point by point on a two-hole mesh.
-- **A head-on pair** from rest at `d = 8 M` on the box, `h = 1/24` at the
-  holes, to `2 M`:
-  - every find succeeds and no assertion fires;
-  - the separation falls as free fall predicts, to the finder's accuracy;
-  - the constraints stay bounded;
-  - the cost is recorded.
-- **Restarts:** that run's checkpoint chain is the uninterrupted run, bit
-  for bit.
+Done (it ran 2026-10-26, on Erik's decisions of that day; its review, to
+2026-10-30, added the controlled source line). What it built and measured is
+`CODE.md`'s "What step B3 built and measured" and "The controlled source
+line"; the brief is in `HISTORY.md`, "Step B3 — Several holes in one case".
 
 ## Step B4 — The symmetric domains and the half turn
 
@@ -1059,9 +964,9 @@ decide" lists what is to be settled.
 **What they start from.** Steps B1–B3's code: the damped harmonic source and
 the roll-on, `gauge_consistent_momentum`, the position and the time in the
 kernels, `HoleSpec` and the composition, the tracks of several holes, and
-the PID law of the source line. They are on
-[eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
-and not on `main`: **the C steps start once that pull request has landed.**
+the PID law of the source line. They came to `main` with
+[eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18),
+which the C steps waited for.
 
 **Order:**
 

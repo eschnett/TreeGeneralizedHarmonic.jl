@@ -130,6 +130,7 @@ three-rank group's, which the others restart from.
   fit on rank 0, the other ranks serving its fills and interpolations, a
   regrid that moves data between ranks, and the geometry rebuilt on the new
   mesh.
+- **Two holes** (added in step B3): both finds and both tracks on rank 0.
 - **The static hole with checkpoints**, uninterrupted, and restarted from the
   three-rank group's checkpoint at chunk 2.
 - **A wall-time stop**, decided from each rank's own clock and agreed.
@@ -174,6 +175,21 @@ function mpi_cases(comm, dir, from)
     mpi_result(lines, "tracked",
                evolve!(T, tracked; forest=tforest, q=Q, ops=OPS, t_end=T(1 // 10),
                        regrid=true, observer=mpi_watch(lines, "tracked")))
+
+    # Two holes (added in step B3): `holes_tests.jl`'s pair, one chunk — the
+    # re-seeding finds on the data, both holes' finds and tracks on rank 0, the
+    # composite's masks in the finder's guard and in every fold, and the rows per
+    # hole, which are rank 0's bits on every rank.
+    pair_holes = head_on_holes(T; d=8, masses=(1, 1),
+                               interior=TrackedSpec(T; r_0=T(3 // 5), r_1=T(7 // 5),
+                                                    margin=4))
+    pair = binary_case(T; holes=pair_holes, halfwidth=8, chunk=T(1 // 10),
+                       horizon=Horizon(T; every=1, N=12, spin=false))
+    mpi_result(lines, "pair",
+               evolve!(T, pair; forest=holes_forest(T, pair; N=8, roots=2,
+                                                    radii=(T(4), T(3), T(8 // 5)),
+                                                    comm=comm),
+                       q=Q, ops=OPS, t_end=T(1 // 10), observer=mpi_watch(lines, "pair")))
 
     # The checkpointed static hole, uninterrupted. Every chunk is written,
     # none deleted, so that the other groups find chunk 2's file in `from`;

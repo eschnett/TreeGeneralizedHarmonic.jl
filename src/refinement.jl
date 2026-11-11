@@ -413,6 +413,20 @@ struct LevelBounds{T,F}
 end
 
 """
+    UnionLevelBounds(forest, parts)
+
+The level bounds of several holes (added in step B3): one [`LevelBounds`](@ref)
+per hole, and at a block the largest of their floors under their common
+ceiling ([`block_level_bounds`](@ref)).
+"""
+struct UnionLevelBounds{T,K,F}
+    forest::F
+    parts::NTuple{K,LevelBounds{T,F}}
+end
+
+const AnyLevelBounds{T} = Union{LevelBounds{T},UnionLevelBounds{T}}
+
+"""
     horizon_floor_level(forest, interior, background, G) -> Int
 
 The level `L_h` the floor asks for around the horizon: the coarsest level
@@ -507,11 +521,29 @@ function level_bounds(case::GHCase{T}, forest::Forest{3}, t,
         "`refinement = Refinement(T; refine_tol, coarsen_tol, maxlevel_cap, " *
         "…)`. CODE.md's driver flags with the masked Löhner verdict and with " *
         "nothing else."))
+    interior isa HoleInteriors &&
+        return level_bounds(case, forest, t, G, interior; travel=travel)
     int = interior
-    int isa FittedSpec && throw(ArgumentError(
+    int isa Union{FittedSpec,TrackedSpec,HolesSpec} && throw(ArgumentError(
         "the level bounds of a tracked case are stated about its geometry, " *
         "which is built from the track once per chunk: pass `interior = " *
         "fitted_interior(…)` (the driver does)."))
+    return _level_bounds(case, forest, t, G, int, case.background, travel)
+end
+
+# Several holes (step B3): one floor per hole, each from its own layer and its
+# own horizon (`c.own`), and the mesh takes their union — a block's floor is the
+# largest of the holes' (`CODE.md`, "Refinement for two holes").
+function level_bounds(case::GHCase{T}, forest::Forest{3}, t, G::Integer,
+                      int::HoleInteriors{K}; travel=zero(T)) where {T,K}
+    parts = ntuple(A -> _level_bounds(case, forest, t, G, int.holes[A], int.own[A],
+                                      travel), Val(K))
+    return UnionLevelBounds{T,K,typeof(forest)}(forest, parts)
+end
+
+function _level_bounds(case::GHCase{T}, forest::Forest{3}, t, G::Integer, int,
+                       background, travel) where {T}
+    ref = case.refinement
     c = int === nothing ? SVector{3,T}(zero(T), zero(T), zero(T)) :
         center_at(int.center, T(t))
     # Through the two accessors (amended in step 8d), so that the floor's
@@ -521,8 +553,8 @@ function level_bounds(case::GHCase{T}, forest::Forest{3}, t,
         (zero(T), -one(T), 0)
     else
         (max(_floor_inner_radius(int) - T(travel), zero(T)),
-         geometry_radii(int, case.background)[2] + ref.floor_margin + T(travel),
-         horizon_floor_level(forest, int, case.background, G))
+         geometry_radii(int, background)[2] + ref.floor_margin + T(travel),
+         horizon_floor_level(forest, int, background, G))
     end
     L ≤ ref.maxlevel_cap || throw(ArgumentError(
         "the interior's radius requirements need level $L around this hole — " *
@@ -603,6 +635,15 @@ size, and the remedies — a larger box, a narrower ceiling margin, a smaller
 interior needs, is caught once by [`level_bounds`](@ref) rather than per
 block.)
 """
+function block_level_bounds(lb::UnionLevelBounds{T,K}, k::MortonKey{3}) where {T,K}
+    flo, cap = block_level_bounds(lb.parts[1], k)
+    for A in 2:K
+        f, c = block_level_bounds(lb.parts[A], k)
+        flo, cap = max(flo, f), min(cap, c)
+    end
+    return flo, cap
+end
+
 function block_level_bounds(lb::LevelBounds{T}, k::MortonKey{3}) where {T}
     ext = block_extent(T, lb.forest, k)
     flo = lb.floor_level > 0 &&
@@ -694,7 +735,7 @@ bounding boxes the sweep already reports, at cell resolution, weighted by
 each block's firing count and cell volume. It is `nothing` when nothing
 fired anywhere.
 """
-function refine_flags(τfs::FieldSet{T,3}, lb::LevelBounds{T},
+function refine_flags(τfs::FieldSet{T,3}, lb::AnyLevelBounds{T},
                       ref::Refinement{T}; slot::Integer=DIAG_TAU,
                       buffer::Integer=0) where {T}
     forest = τfs.forest
@@ -753,7 +794,7 @@ end
 # margin and the bounds are applied to the whole vector alike on every rank,
 # and this rank's slice is returned, which is what `regrid!` takes (added
 # 2026-10-19). Serially the flags go in as they are.
-function buffered_marks(lb::LevelBounds, flags::AbstractVector, buffer::Integer)
+function buffered_marks(lb::AnyLevelBounds, flags::AbstractVector, buffer::Integer)
     forest = lb.forest
     isdistributed_over(forest) ||
         return clamp_marks(lb, buffered_flags(forest, flags, buffer))
@@ -775,7 +816,7 @@ flag again. A capped block the margin promoted becomes `Keep` rather than
 `Coarsen`: the margin wanted it held, and the ceiling only says it may not
 go finer.
 """
-function clamp_marks(lb::LevelBounds{T}, marks::AbstractVector) where {T}
+function clamp_marks(lb::AnyLevelBounds{T}, marks::AbstractVector) where {T}
     forest = lb.forest
     return map(1:length(marks)) do b
         k = forest.leaves[b]

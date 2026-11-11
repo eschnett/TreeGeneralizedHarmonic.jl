@@ -1608,6 +1608,137 @@ function with_variant(spec::FittedSpec{T}, variant::Symbol) where {T}
 end
 
 """
+    TrackedSpec(T = Float64; r_0, r_1, w_ramp = 1//2, ρ_ramp = 1//2, margin = 8,
+                ρ_max = 0, max_misses = 3, lmax_shape = 4, quadratic = true,
+                max_interval = 0, mass_factor = 1, velocity_offset = (0, 0, 0),
+                center_offset = (0, 0, 0), seed_velocity_offset = (0, 0, 0),
+                source_feed = :own, control_time = 0, control_integral = true,
+                control_model = false)
+
+What a [`GHCase`](@ref) holds as its `interior` for the **tracked analytic
+target** (added in step B2; `CODE.md`, "One interior per hole" — "Tracked
+`:damped`"): not a layer, but the rule a layer is built by, once per piece of
+a chunk, from the horizon track ([`tracked_interior`](@ref)). The layer is step
+5's `:damped` sphere — `r_0`, `r_1`, the ramps and `margin` are
+[`Interior`](@ref)'s, in units of the hole's mass — about the **tracked**
+center, and its target is the boosted, translated Kerr-Schild hole of the
+case's own mass and spin ([`hole_mass`](@ref), the background's spin) on the
+track's line, rebuilt every piece; its core follows that target with the
+target's rate, as a moving analytic sphere's does ([`core_follows`](@ref)).
+What it replaces is where the target and the center come from: the analytic
+background, which a binary will not have.
+
+- `ρ_max = 0` is the driver's default `4/M`; `max_misses` and `lmax_shape` are
+  [`FittedSpec`](@ref)'s.
+- `quadratic` predicts the center along the quadratic of the last four finds
+  (`CODE.md`, "The tracks"; [`update_track`](@ref)); `false` along the line
+  of step 8d. `max_interval` caps the find interval, `0` meaning the chunk:
+  the driver finds as often as `|a| Δt² ≤ G h/4` asks and at least once a
+  chunk, at the pieces' boundaries ([`find_count`](@ref)).
+- The **perturbations** of step B2's sensitivity study, each zero (or one)
+  by default: the target's mass times `mass_factor`, its velocity plus
+  `velocity_offset` and its center plus `center_offset` — the target and its
+  sphere together, the track unchanged — and the seed's velocity plus
+  `seed_velocity_offset`, which the track itself must recover from.
+
+- `source_feed` and `control_time` (added in step B3): what the case's gauge
+  source rides on. `:own` — the default, and what every run before them did —
+  is the case's own source, the analytic hole's; `:seed` is the seed's line, a
+  [`CompositeKerrSchildSource`](@ref) of one [`TrackedHole`](@ref) on it
+  rebuilt every piece; `:tracks` is the track's state at each piece, step B3's
+  pairing (α) as decided; `:controlled` is the **controlled source line**
+  ([`SourceLine`](@ref), [`advance_source_lines`](@ref)): a critically damped
+  second-order loop of time `control_time` — in units of the hole's mass, as
+  the radii are — driven by the track's position and velocity. Every feed but
+  `:own` needs the case's source to be the one-hole composite (`gauge_source =
+  :composite`); a case of several holes takes its feed from the case
+  ([`binary_case`](@ref)'s `source_feed`), its holes' specs staying at `:own`,
+  and the time from its holes' specs, so `control_time` is read only where the
+  line is controlled. `control_integral` and `control_model` are its law
+  ([`SourceLaw`](@ref), amended in step B3's review): the PID loop (the default,
+  proposed for B4) or the PD one, and the Newtonian model of the other holes
+  (several holes only, off by default; their specs must agree).
+
+`isbits`, as a case's interior must be; every "use the rule" value is spelled
+`0`.
+"""
+struct TrackedSpec{T}
+    r_0::T
+    r_1::T
+    w_ramp::T
+    ρ_ramp::T
+    margin::Int
+    ρ_max::T
+    max_misses::Int
+    lmax_shape::Int
+    quadratic::Bool
+    max_interval::T
+    mass_factor::T
+    velocity_offset::SVector{3,T}
+    center_offset::SVector{3,T}
+    seed_velocity_offset::SVector{3,T}
+    source_feed::Int
+    control_time::T
+    control_integral::Bool
+    control_model::Bool
+end
+
+# The codes of a tracked hole's source feed (step B3), `isbits` where a symbol is
+# not.
+const FEED_OWN = 0
+const FEED_SEED = 1
+const FEED_TRACKS = 2
+const FEED_CONTROLLED = 3
+const FEED_NAMES = (:own, :seed, :tracks, :controlled)
+feed_code(s::Symbol) = (k = findfirst(==(s), FEED_NAMES); k === nothing ?
+    throw(ArgumentError("source_feed is one of $(FEED_NAMES), got :$s.")) : k - 1)
+feed_name(k::Integer) = FEED_NAMES[k + 1]
+
+function TrackedSpec(::Type{T}=Float64; r_0, r_1, w_ramp=T(1 // 2),
+                     ρ_ramp=T(1 // 2), margin::Integer=8, ρ_max=zero(T),
+                     max_misses::Integer=3, lmax_shape::Integer=4,
+                     quadratic::Bool=true, max_interval=zero(T),
+                     mass_factor=one(T), velocity_offset=(0, 0, 0),
+                     center_offset=(0, 0, 0),
+                     seed_velocity_offset=(0, 0, 0), source_feed::Symbol=:own,
+                     control_time=zero(T), control_integral::Bool=true,
+                     control_model::Bool=false) where {T}
+    # The sphere's own refusals, once, here rather than at the first piece.
+    Interior(T; center=(0, 0, 0), r_0=r_0, r_1=r_1, ρ_max=ρ_max, w_ramp=w_ramp,
+             ρ_ramp=ρ_ramp, margin=margin)
+    max_misses ≥ 1 || throw(ArgumentError(
+        "max_misses counts failed finds the track may coast through and must " *
+        "be at least 1, got $max_misses."))
+    lmax_shape ≥ 0 || throw(ArgumentError(
+        "lmax_shape is a spherical-harmonic degree, got $lmax_shape."))
+    T(max_interval) ≥ 0 || throw(ArgumentError(
+        "max_interval caps the find interval and is a time, or 0 for the " *
+        "chunk, got $max_interval."))
+    T(mass_factor) > 0 || throw(ArgumentError(
+        "mass_factor scales the target's mass and must be positive, got " *
+        "$mass_factor."))
+    vec3(x, what) = (length(x) == 3 || throw(ArgumentError(
+        "$what is a 3-vector, got $x.")); SVector{3,T}(T(x[1]), T(x[2]), T(x[3])))
+    feed = feed_code(source_feed)
+    τ = T(control_time)
+    (τ ≥ 0 && (feed != FEED_CONTROLLED || τ > 0)) || throw(ArgumentError(
+        "the controlled source line follows the track through a loop of time " *
+        "control_time, which must be positive for source_feed = :controlled " *
+        "(Inf: the seed's line, never corrected) and is not negative otherwise, " *
+        "got $control_time."))
+    return TrackedSpec{T}(T(r_0), T(r_1), T(w_ramp), T(ρ_ramp), Int(margin),
+                          T(ρ_max), Int(max_misses), Int(lmax_shape), quadratic,
+                          T(max_interval), T(mass_factor),
+                          vec3(velocity_offset, "velocity_offset"),
+                          vec3(center_offset, "center_offset"),
+                          vec3(seed_velocity_offset, "seed_velocity_offset"), feed, τ,
+                          control_integral, control_model)
+end
+
+interior_variant(::TrackedSpec) = :damped
+layer_radii(spec::TrackedSpec) = (spec.r_0, spec.r_1)
+
+"""
     layer_cells(G, ρ_max, M) -> Int
 
 Step 8c's rule for the ramp of a layer relaxing at `ρ_max` around a hole of
