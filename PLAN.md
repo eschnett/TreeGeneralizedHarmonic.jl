@@ -37,6 +37,12 @@ the damped harmonic gauge and the `:fitted` interior. The design is
 `CODE.md`, "A comoving grid frame for orbiting holes". They start from steps
 B1–B3's code, and Erik decides the route of B4–B9 from step C2's report.
 
+**Steps H1–H5 are proposed and not started**: a third route to G7 and G8 —
+harmonic gauge with no source for the inspiral, the damped harmonic gauge
+rolled on before the merger, and the `:fitted` interior. The design is
+`CODE.md`, "Harmonic gauge for the inspiral". Steps H1–H3 are single holes
+and need only `main`.
+
 The steps map onto the milestones G0–G6 ("Milestones" below), split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
 is a brief a single agent with a fresh context can carry. The order is
@@ -88,6 +94,13 @@ the dependency order.
 - [Step C3 — The far zone on a rotating grid](#step-c3--the-far-zone-on-a-rotating-grid)
 - [Step C4 — Two holes at rest on the grid](#step-c4--two-holes-at-rest-on-the-grid)
 - [Step C5 — The orbit](#step-c5--the-orbit)
+- [Steps H1–H5 — Harmonic gauge for the inspiral](#steps-h1h5--harmonic-gauge-for-the-inspiral)
+  - [Sharp edges for steps H1–H5](#sharp-edges-for-steps-h1h5)
+- [Step H1 — A harmonic hole at rest](#step-h1--a-harmonic-hole-at-rest)
+- [Step H2 — A moving harmonic hole](#step-h2--a-moving-harmonic-hole)
+- [Step H3 — Spin in the harmonic chart](#step-h3--spin-in-the-harmonic-chart)
+- [Step H4 — Two holes with no source](#step-h4--two-holes-with-no-source)
+- [Step H5 — The orbit in harmonic gauge](#step-h5--the-orbit-in-harmonic-gauge)
 
 ## Milestones
 
@@ -1269,3 +1282,226 @@ milestone G8.
 
 What follows — the plunge, the handover and the waveform — is B7's and
 B9's on this route.
+
+## Steps H1–H5 — Harmonic gauge for the inspiral
+
+A third route to G7 and G8. **The design is `CODE.md`, "Harmonic gauge for
+the inspiral"; read it in full first**, then "Binary black holes" and "A
+comoving grid frame for orbiting holes". Nothing here is started. The steps
+are a proposal for Erik's review, and the section's "What this route asks
+Erik to decide" lists what is to be settled.
+
+**What they start from.**
+
+- **H1–H3** are single holes and start from `main`: the `Harmonic`
+  backgrounds and `harmonic_kerr_case`, both interiors, the octant, the
+  quadrant, the rotating quadrant and the bitant, and
+  `test/octant_runs.jl`.
+- **H4 and H5** start from steps B1–B3's code —
+  `gauge_consistent_momentum`, the damped harmonic source and the roll-on,
+  `HoleSpec` and the composition, the tracks of several holes,
+  `test/binary_runs.jl` — which is on
+  [eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
+  and not on `main`: they start once that pull request has landed.
+
+**Order:**
+
+- **H1** first: it sets the spacing every later step uses.
+- **H2 and H3** may run as two agents at once after H1.
+- **Erik decides the grid** from H2's report, the moving hole against the
+  resting one: the inertial grid with the fine level following the holes,
+  or the comoving grid, which needs step C1 first.
+- **H4**, then **H5**.
+
+**How the C steps change on this route.** C1 and C3 do not. C2 becomes the
+boosted harmonic hole on a grid translating with it, against H1's resting
+row: no shift to choose, no roll-on and no far-field weight. C4 and C5 are
+H4 and H5 on the grid.
+
+Each runs from a green suite and ends with the report under "Running a step
+as an agent". Branches are named `claude/step-H<n>-<slug>`.
+
+### Sharp edges for steps H1–H5
+
+- **Units.** In H1–H3 `M = 1` is the hole's mass. In H4 and H5 it is the
+  total mass, each hole has `M_A = 1/2`, and every single-hole spacing and
+  radius halves.
+- **The horizon is at `M`, not `2 M`.** Its smallest radius is
+  `√(M² − a²)` and its equator is at `M`. Every radius copied from a
+  Kerr-Schild row — the layer's, the shells', the finest level's cube, the
+  capsule's — is wrong by about a factor of two.
+- **A harmonic radius is the areal radius less `M`.** A shell `[3, 5)`
+  here is not the Kerr-Schild rows' `[3, 5)`. Compare harmonic rows with
+  harmonic rows; between charts compare orders and stationarity.
+- **The chart's singular set must be inside `r_0`, or inside the core
+  surface**: the origin at `a = 0`, where `|h|` reaches `10` at `0.4 M`,
+  and the equatorial disk of radius `a` with spin. Nothing checks it for a
+  target (`CLAUDE.md`, "A layer target is evaluated wherever the layer
+  is").
+- **`:fitted` is the route's interior and `:damped` its control.** Run
+  both wherever the analytic target fits. A binary has no analytic target.
+- **A convergence series keeps the layer fixed in `M`**, the `:fitted`
+  margin included; record the margin fixed in cells beside it.
+- **A moving layer takes its target's rate.** `trail_ramp = 9/10` helped
+  this chart's early rows at `q = 2` and hurt the Kerr-Schild hole at
+  `q = 4`: run with and without.
+- **`boost(m, v)` moves the hole at `−v`**, and a boosted harmonic
+  background is harmonic: it needs no source and is allowed to move.
+- **A level more along a capsule has twice the points of the level below
+  it**, and the step halves. Price the mesh before submitting:
+  Kerr-Schild's `1/48` capsule did not fit one H200.
+- **Before `t_0` a run with the roll-on is the run without a source, bit
+  for bit.** The source enters the problem at the chunk that begins at
+  `t_0`; until then the kernel is the one compiled without a source.
+- **`t_0` is run state.** It goes into the loop's carried state and the
+  checkpoint, or a restart rolls on at another time.
+- **Price every test**, as for the B steps. Runs longer than a minute go
+  into `test/octant_runs.jl` or `test/binary_runs.jl` options and to
+  Symmetry as job chains with a checkpoint and a remote directory of their
+  own.
+- **The numbers** go into `SINGULARITY_HANDLING.md` under a section per
+  step, and the settings that hold into `CODE.md`'s "Single black holes:
+  recommended settings" as harmonic rows.
+
+## Step H1 — A harmonic hole at rest
+
+`CODE.md`: "What the package has measured in this chart", "What harmonic
+gauge costs"; "Single black holes: recommended settings". **`a = 0`, on the
+mirrored octant.**
+
+**Changes:**
+
+- **`case=harmonic` in `test/octant_runs.jl`**, through
+  `harmonic_kerr_case`, with `a=`, both interiors, the error reference and
+  the shells about the hole.
+- Nothing in `src/` unless a run shows a defect; then the defect first.
+
+**Accept**, at `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, `ρ_max = 4/M`:
+
+- **The settings**, screened to `8 M`: `:damped` about `r_0 = 2/5`,
+  `r_1 = 3/4` at `1/32`; `:fitted` about `m = 16`, `n_L = 20` at `1/48`.
+  Report the coarsest spacing at which each holds.
+- **The order**: `:damped` at three spacings from that one, to `24 M`:
+  order four in the error and in `ℋ` outside the horizon, in the shells
+  `[2, 4)` and `[4, 7)` (the Kerr-Schild rows' `[3, 5)` and `[5, 8)` in
+  areal radius).
+- **`:fitted`** at the same spacings, with the margin fixed in `M` and
+  fixed in cells: its `ℋ` and error against `:damped`'s, and its order.
+- **Stationary**: both variants to `128 M` at the coarsest convergent
+  spacing: the shells' error, `ℋ` and `C_a` flat from `24 M`, `M_irr`
+  constant to the Kerr-Schild row's level, the horizon's radius `M`.
+- **The price**: the spacing at which this chart's shell error equals the
+  Kerr-Schild `a = 0` hole's at `1/24`, and the cost per `M` of both on an
+  H200.
+- **If the hole is not stationary**, report the growth's rate, where it
+  sits and its order, and stop: the route rests on this row.
+- `CODE.md`'s **(predicted)** settings and costs replaced by what was
+  measured.
+
+## Step H2 — A moving harmonic hole
+
+`CODE.md`: "What harmonic gauge removes", "On which grid". **`a = 0`, on
+the quadrant. This is the run that decides the grid.**
+
+**Changes:**
+
+- The quadrant's options for the harmonic case: `v`, `x0`, `path`, the
+  variant, `trail_ramp`.
+- **A row whose fine level follows the hole**, on the tracked floors, on an
+  H200: the route needs it on the inertial grid, and the production rows so
+  far ran on frozen capsules.
+
+**Accept**, on `boost(Harmonic(1, 0), v)` at `v = 1/5` to `40 M`, at step
+H1's coarsest convergent spacing and the next, against step H1's resting
+rows — and at `v = 1/2` to `20 M` at one spacing:
+
+- **The claim:** the error and `ℋ` in the shells about the hole within
+  `2×` the resting row's at `40 M` at both spacings, and growing no faster.
+  The early row was `2.05×` at `13 M` and growing five times faster.
+- **No lag:** the track against the boosted hole's line converges at order
+  four, and the horizon's extent along the boost over its extent across it
+  is `√(1 − v²)` to the finder's accuracy. Step B1's moving row under the
+  damped harmonic gauge lags `0.49 M` and loses the contraction.
+- **The order** outside the horizon: four for `:damped` with its target's
+  rate; `:fitted`'s recorded.
+- **`trail_ramp`**: with and without, on this chart at fourth order.
+- **The following mesh** against the capsule at one spacing: the error's
+  ratio and the cost per `M`.
+- The report gives the ratio of the moving hole to the resting one per
+  variant and says which grid its numbers favour.
+
+## Step H3 — Spin in the harmonic chart
+
+`CODE.md`: "What harmonic gauge costs" (the spin's room), "The spinning
+harmonic chart", "The fitted target". **`a = 1/2` and `a = 7/10`,
+`:fitted`.**
+
+**Accept:**
+
+- **The settings** per spin, screened at rest on the rotating octant: the
+  margin and the depth that fit between the horizon's equator and the
+  disk, and the spacing they need. If `a = 7/10` does not fit one H200,
+  report its price and run `a = 1/2`.
+- **At rest** to `24 M`: stable, with `M_irr` and `J` constant at the
+  Kerr-Schild rows' level and falling with the spacing.
+- **Along the spin** at `v = 1/5` on the rotating quadrant, and **across
+  it** on the bitant, to `20 M`: within `2×` the resting row outside the
+  horizon.
+- **The early drift**: `a = 7/10` at `v = 3/10` across the spin drifted in
+  `J` by `0.013` a `M` at `q = 2`. The same configuration at fourth order:
+  the drift's size and order, at rest and moving.
+- Harmonic rows in "Single black holes: recommended settings".
+
+## Step H4 — Two holes with no source
+
+`CODE.md`: "The data", "The merger"; "One interior per hole"; "The common
+horizon and the handover". **Starts once the binary steps B1–B3 are on
+`main`.**
+
+**Changes:**
+
+- **Superposed boosted harmonic holes** as a case, with `Π` from
+  `gauge_consistent_momentum` at `H = 0`.
+- **A `FittedSpec` in a `HoleSpec`**, as in step C4.
+- **The roll-on from zero**: `H = (1 − f) H_DH`, its `t_0` an event of the
+  tracks' separation, in the run state and the checkpoint.
+- **`test/binary_runs.jl` options** for the chart, `d_g` and `σ_g`.
+
+**Accept**, on the head-on pair from rest at `d = 8 M`, at `1/96` and
+`1/128` at the holes:
+
+- one hole in this path is step H1's hole bit for bit;
+- `C_a` at `t = 0` at roundoff, and the data's `ℋ` beside the superposed
+  Kerr-Schild pair's;
+- **in pure harmonic gauge**: every find of both holes to the end of the
+  run, and how it ends — the smallest lapse and the largest `√γ/α` between
+  the holes against time. This is a measurement, not a pass;
+- **with the roll-on at `t_0 = 0`**, `σ_g = 5 M` and `10 M`: every find to
+  the first common horizon, `C_a` and `ℋ` under the composite mask bounded
+  and falling between the two spacings;
+- each layer's residual from its own fit at truncation level;
+- the handover, if step B7 has run;
+- the cost per `M` beside step B3's.
+
+## Step H5 — The orbit in harmonic gauge
+
+`CODE.md`: "On which grid", "The merger"; milestone G8.
+
+**Changes:**
+
+- **The quasi-circular superposed harmonic pair** at `d = 10 M` as a case.
+- On the inertial grid: the tracked floors for two holes at this spacing.
+  On the comoving grid: step C5's control of the map.
+
+**Accept**, on the bitant (and on the half-turn quarter if B4 has run), at
+`1/96` at the holes, to three orbits:
+
+- both holes found at every row;
+- `C_a` and `ℋ` bounded, and at `1/128` to one orbit lower by the order;
+- each horizon's `M_irr` and `J` constant to the junk's absorption;
+- the tracks' separation and phase beside the post-Newtonian orbit in
+  harmonic coordinates, and the data's eccentricity;
+- the cost per `M` and per orbit.
+
+What follows — the roll-on at `d_g`, the plunge, the handover and the
+waveform — is B7's and B9's on this route.
