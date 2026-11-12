@@ -40,8 +40,9 @@ B1–B3's code, and Erik decides the route of B4–B9 from step C2's report.
 **Steps H1–H5**: a third route to G7 and G8 —
 harmonic gauge with no source for the inspiral, the damped harmonic gauge
 rolled on before the merger, and the `:fitted` interior. The design is
-`CODE.md`, "Harmonic gauge for the inspiral". **Step H1 is done** (it ran
-2026-11-11); steps H2–H5 are proposed and not started. Steps H1–H3 are
+`CODE.md`, "Harmonic gauge for the inspiral". **Steps H1 and H2 are done**
+(they ran 2026-11-11 and 2026-11-12); steps H3–H5 are proposed and not
+started, and the grid is Erik's decision from H2's report. Steps H1–H3 are
 single holes and need only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
@@ -1295,8 +1296,8 @@ B9's on this route.
 
 A third route to G7 and G8. **The design is `CODE.md`, "Harmonic gauge for
 the inspiral"; read it in full first**, then "Binary black holes" and "A
-comoving grid frame for orbiting holes". Step H1 is done; nothing else here
-is started. The steps are a proposal for Erik's review, and the section's "What this route asks
+comoving grid frame for orbiting holes". Steps H1 and H2 are done; nothing
+else here is started. The steps are a proposal for Erik's review, and the section's "What this route asks
 Erik to decide" lists what is to be settled.
 
 **What they start from.**
@@ -1384,35 +1385,15 @@ hole at rest". The coarsest convergent spacings it hands to step H2 are
 
 ## Step H2 — A moving harmonic hole
 
-`CODE.md`: "What harmonic gauge removes", "On which grid". **`a = 0`, on
-the quadrant. This is the run that decides the grid.**
-
-**Changes:**
-
-- The quadrant's options for the harmonic case: `v`, `x0`, `path`, the
-  variant, `trail_ramp`.
-- **A row whose fine level follows the hole**, on the tracked floors, on an
-  H200: the route needs it on the inertial grid, and the production rows so
-  far ran on frozen capsules.
-
-**Accept**, on `boost(Harmonic(1, 0), v)` at `v = 1/5` to `40 M`, at step
-H1's coarsest convergent spacing and the next, against step H1's resting
-rows — and at `v = 1/2` to `20 M` at one spacing:
-
-- **The claim:** the error and `ℋ` in the shells about the hole within
-  `2×` the resting row's at `40 M` at both spacings, and growing no faster.
-  The early row was `2.05×` at `13 M` and growing five times faster.
-- **No lag:** the track against the boosted hole's line converges at order
-  four, and the horizon's extent along the boost over its extent across it
-  is `√(1 − v²)` to the finder's accuracy. Step B1's moving row under the
-  damped harmonic gauge lags `0.49 M` and loses the contraction.
-- **The order** outside the horizon: four for `:damped` with its target's
-  rate; `:fitted`'s recorded.
-- **`trail_ramp`**: with and without, on this chart at fourth order.
-- **The following mesh** against the capsule at one spacing: the error's
-  ratio and the cost per `M`.
-- The report gives the ratio of the moving hole to the resting one per
-  variant and says which grid its numbers favour.
+Done (it ran 2026-11-12). Its runs are in `SINGULARITY_HANDLING.md`, "A
+moving harmonic hole (step H2, 2026-11-12)", its settings in `CODE.md`'s
+"Single black holes: recommended settings" (the *harmonic, moving* rows), its
+verdict in "On which grid" and the ladder's item 2; the brief is in
+`HISTORY.md`, "Step H2 — A moving harmonic hole". At `v = 1/5` the moving
+hole is the resting one from `5/4 M` out with no lag, and a fine level that
+follows it costs `0.6–0.8×` the capsule; just outside the horizon the trailing
+side carries `1.6–3×` (`:damped`) and `12–18×` (`:fitted`) in `ℋ`; at
+`v = 1/2` `:fitted` does not hold. The grid is Erik's decision.
 
 ## Step H3 — Spin in the harmonic chart
 

@@ -127,6 +127,7 @@ The briefs of the finished steps are under
   - [The comoving grid frame proposed on 2026-11-09](#the-comoving-grid-frame-proposed-on-2026-11-09)
   - [Harmonic gauge for the inspiral proposed on 2026-11-11](#harmonic-gauge-for-the-inspiral-proposed-on-2026-11-11)
   - [Step H1 measured on 2026-11-11](#step-h1-measured-on-2026-11-11)
+  - [Step H2 measured on 2026-11-12](#step-h2-measured-on-2026-11-12)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -192,6 +193,7 @@ The briefs of the finished steps are under
   - [Step 8 — A hole that moves (G5)](#step-8--a-hole-that-moves-g5)
   - [Step 8′ — The trailing side](#step-8--the-trailing-side)
   - [Step H1 — A harmonic hole at rest](#step-h1--a-harmonic-hole-at-rest)
+  - [Step H2 — A moving harmonic hole](#step-h2--a-moving-harmonic-hole)
 
 ## Goals
 
@@ -1648,6 +1650,68 @@ study's with one level more); `:fitted`'s margin fixed in `M` as the offset
 to `128 M`; and a Kerr-Schild `1/24` control on the same day's code for the
 price's cost.
 
+### Step H2 measured on 2026-11-12
+
+Erik asked for step H2 on 2026-11-12, from step H1's branch (pull request
+#32), with a smoke run on Symmetry first and then the campaign. During it he
+approved two additions: the `1/40` pair at `v = 1/2` (`qd40v2`, `qd40v2s`),
+and the `1/48` `:fitted` row on two H200s over MPI once it had failed twice on
+one. The runs and their numbers are in `SINGULARITY_HANDLING.md`, "A moving
+harmonic hole (step H2, 2026-11-12)". What they replaced in `CODE.md`:
+
+- **"On which grid"** said **(proposed)** that steps H1–H3 run on the
+  inertial grid and that H2's ratio decides whether the pair needs the frame.
+  It now gives the ratio and the reading: the inertial grid with a following
+  fine level for the inspiral to `v = 1/5`, `:fitted` failing at `v = 1/2`,
+  and the grid an open decision of Erik's.
+- **The ladder's item 2** and "What is not known on this route" gained the
+  measured answer and three open items: `:fitted`'s trailing excess just
+  outside the horizon, the error's late rise over `32–40 M`, and the speed
+  between `1/5` and `1/2` at which `:fitted` stops holding.
+- **"So the fine level must stay with the holes"** gained the following
+  mesh's measured cost, and "Single black holes: recommended settings" two
+  *harmonic, moving* rows.
+
+**The code.** `harmonic_kerr_case` takes `v`, `x0` and `axis` through the
+moving-hole case it now shares with `kerr_schild_case`; a boosted harmonic
+chart needs no source, so the refusal of a moving harmonic hole went
+(`d05d943`). `test/octant_runs.jl mesh=follow` gives a moving hole the
+indicator's mesh, regridded every chunk with the floor on the tracked
+horizon. Two failures of that mesh on an H200 were fixed in `369e070`:
+
+- **The checkpoint saved a closure.** The initial-data cycle's flag function
+  was a local named `criterion` — the name of the recipe's regridding
+  criterion, which the checkpoint saves — so in the same body that variable
+  became the closure, and a `:damped` run with `adapt = true` failed at its
+  first checkpoint (`qd24f`, job 596493). It is `cycle_flags` now; the
+  `:fitted` cycle is another branch and never did this, and
+  `test/checkpoint_tests.jl` has a chain on such a run.
+- **The regrid ran out of memory at `1/48`.** The new `GHProblem` was
+  allocated beside the old chunk's four state-sized RK4 vectors (`8.3 GiB`
+  short, job 596494). The regrid is now `regrid_forest` and `rebuild`, and
+  the scratch is dropped between them. The next attempt built the problem and
+  ran out allocating the next chunk's scratch on a mesh that had grown
+  (`12.7 GiB` short, job 596604), so the row went to two GPUs (job 596628).
+
+**Decided in the step without asking** (each a choice of what to measure):
+
+- the domain and path: `x0 = −4`, `path = 8` at `v = 1/5`, `x0 = −5`,
+  `path = 10` at `v = 1/2`, so the hole crosses the origin;
+- each resting control on the moving row's own capsule and code, with step
+  H1's octant `hf48` extended to `40 M` (`hf48x`) as the control of the
+  following-mesh row `qf48f`, which has no capsule at `1/48`;
+- `r_1 = 7/10` at `v = 1/2`, since `3/4` is `3.7` cells inside the
+  contracted horizon at `1/32`;
+- `floor_margin = 3` for the following mesh;
+- `:fitted` at `v = 1/2` on the following mesh at `1/48`, the one spacing at
+  which `:fitted` holds at rest and that pair of speed and mesh might fit;
+- not repeating `:fitted` at `v = 1/2` over MPI, after two chunks of growth
+  on the trailing side.
+
+`qf48v2f` was first submitted without `trail_ramp = 9/10`, which the brief
+asked to vary for the moving `:fitted` rows; that run is kept as the row
+without it, and the rerun with it failed the same way.
+
 ## Possible extensions
 
 ### Extensions since built
@@ -2774,7 +2838,8 @@ excision" was proposed in step 8′ (2026-09-25). Steps B1–B9 were added
 to the plan on 2026-10-25, steps C1–C5 on 2026-11-09 and steps H1–H5 on
 2026-11-11. Step H1 ran on 2026-11-11. On 2026-11-12 Erik decided that
 steps B1–B3 (pull request #18) will not land; where the C steps and steps
-H4 and H5 start instead is open.
+H4 and H5 start instead is open. Step H2 ran on 2026-11-12; the grid it was
+to decide is Erik's decision from its report.
 
 ### Step 0 — Scaffolding (G0)
 
@@ -3864,3 +3929,37 @@ mirrored octant.**
   sits and its order, and stop: the route rests on this row.
 - `CODE.md`'s **(predicted)** settings and costs replaced by what was
   measured.
+
+### Step H2 — A moving harmonic hole
+
+Added to the plan on 2026-11-11 with steps H1 and H3–H5; ran 2026-11-12.
+
+`CODE.md`: "What harmonic gauge removes", "On which grid". **`a = 0`, on
+the quadrant. This is the run that decides the grid.**
+
+**Changes:**
+
+- The quadrant's options for the harmonic case: `v`, `x0`, `path`, the
+  variant, `trail_ramp`.
+- **A row whose fine level follows the hole**, on the tracked floors, on an
+  H200: the route needs it on the inertial grid, and the production rows so
+  far ran on frozen capsules.
+
+**Accept**, on `boost(Harmonic(1, 0), v)` at `v = 1/5` to `40 M`, at step
+H1's coarsest convergent spacing and the next, against step H1's resting
+rows — and at `v = 1/2` to `20 M` at one spacing:
+
+- **The claim:** the error and `ℋ` in the shells about the hole within
+  `2×` the resting row's at `40 M` at both spacings, and growing no faster.
+  The early row was `2.05×` at `13 M` and growing five times faster.
+- **No lag:** the track against the boosted hole's line converges at order
+  four, and the horizon's extent along the boost over its extent across it
+  is `√(1 − v²)` to the finder's accuracy. Step B1's moving row under the
+  damped harmonic gauge lags `0.49 M` and loses the contraction.
+- **The order** outside the horizon: four for `:damped` with its target's
+  rate; `:fitted`'s recorded.
+- **`trail_ramp`**: with and without, on this chart at fourth order.
+- **The following mesh** against the capsule at one spacing: the error's
+  ratio and the cost per `M`.
+- The report gives the ratio of the moving hole to the resting one per
+  variant and says which grid its numbers favour.

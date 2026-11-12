@@ -21,6 +21,7 @@ here; links have been pointed at the right file.
 - [Aligned spin and velocity: which holes the algorithm holds (2026-10-22)](#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22)
 - [Spin across the motion: the bitant (2026-10-24)](#spin-across-the-motion-the-bitant-2026-10-24)
 - [A harmonic hole at rest (step H1, 2026-11-11)](#a-harmonic-hole-at-rest-step-h1-2026-11-11)
+- [A moving harmonic hole (step H2, 2026-11-12)](#a-moving-harmonic-hole-step-h2-2026-11-12)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -3754,6 +3755,256 @@ stationary near the hole to `128 M`, with `:fitted` as good as the analytic
 layer from `1/48`. It does so at `2.3–3.3×` the cells per `M` for the same
 accuracy, not `2×`, so `CODE.md`'s binary costs scale by `1.15–1.65×` more
 in spacing than it assumed.
+
+## A moving harmonic hole (step H2, 2026-11-12)
+
+The second step of `CODE.md`'s [Harmonic gauge for the
+inspiral](CODE.md#harmonic-gauge-for-the-inspiral-proposed), and the run that
+decides its grid: step H1's hole
+([above](#a-harmonic-hole-at-rest-step-h1-2026-11-11)), boosted. The questions
+were whether the moving hole is the resting one within `2×` at `40 M`, whether
+it lags the boosted hole's line, and what a fine level that follows the hole
+costs against the frozen capsule the Kerr-Schild campaigns used.
+
+**The setup** (jobs 596485–596497, 596603–596605, 596610, 596613 and 596628,
+Symmetry `harm-h2`, one H200 a row and two for `qf48f`; the CSVs and logs in
+`.claude/data/harm-h2`, with the study's tables printed by
+`test/harmonic_moving_study.jl`):
+
+- `boost(Harmonic(1, 0), v)` on the quadrant (`test/octant_runs.jl
+  case=harmonic octant=quadrant`): `[−64, 64] × [0, 64]²`, root brick `4`,
+  cubes `R = 32, 16, 8, 4` about the hole, so `h = 1/N` at the finest level.
+  No gauge source. The hole starts at `x0 = −4` and crosses `8 M` in `40 M`
+  at `v = 1/5`; at `v = 1/2` it starts at `−5` and crosses `10 M` in `20 M`.
+- Step H1's numerics: `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, `ρ_max = 4/M`, the
+  Gaussian `γ0`, the finder every chunk, `chunk = M`, a checkpoint every
+  `4 M`. The layers are H1's: `:damped` at `r_0 = 2/5`, `r_1 = 3/4` with the
+  target's rate, and `:fitted` at `m = 16`, `n_L = 20`, `fit_cont = 2`,
+  `lmax_fit = 8`. At `v = 1/2` the horizon's extent along the boost is
+  `√3/2 = 0.866`, so `:damped` takes `r_1 = 7/10`: `5.3` cells inside it at
+  `1/32` and `6.6` at `1/40`, the ramp `9.6` and `12`.
+- **Two meshes.** The *capsule* is the Kerr-Schild campaigns': the four cubes
+  swept along the path and frozen (`path = 8`; `856` blocks, `11.8`, `28.0`
+  and `54.8 M` points at `1/24`, `1/32` and `1/40`; `968` blocks at
+  `v = 1/2`, `31.7` and `62.0 M` points). The *following mesh*
+  (`mesh = follow`) is new here: the indicator and a regrid every chunk, with
+  the tracked floor three `M` beyond the horizon (`floor_margin = 3`), so the
+  fine level moves with the hole. It has `562–667` blocks over the crossing
+  (`632` at the start, `8.7 M` points at `1/24`, `40.4 M` at `1/40`,
+  `69.9 M` at `1/48`).
+- Each moving row has a resting control on the same mesh and the same day's
+  code (`v = 0`, `…s`), except `qf48f`, whose control is step H1's `hf48` on
+  the octant, extended from `24 M` to `40 M` for this step.
+- The shells are H1's, point-weighted, about the boosted hole's centre
+  `c(t)`; `test/octant_runs.jl` also splits each into its trailing and leading
+  half (`x < c_x` and `x ≥ c_x`).
+
+| row | variant | `h` | mesh | `v` | to | `s/M` |
+|---|---|---|---|---|---|---|
+| `qd24`, `qd24s` | `:damped` | `1/24` | capsule | `1/5`, `0` | `40 M` | `27`, `31` |
+| `qd24f` | `:damped` | `1/24` | following | `1/5` | `40 M` | `22` |
+| `qd32`, `qd32s` | `:damped` | `1/32` | capsule | `1/5`, `0` | `40 M` | `81`, `78` |
+| `qf40`, `qf40s` | `:fitted` | `1/40` | capsule | `1/5`, `0` | `40 M` | `190`, `177` |
+| `qf40t` | `:fitted`, `trail_ramp = 9/10` | `1/40` | capsule | `1/5` | `40 M` | `188` |
+| `qf40f` | `:fitted` | `1/40` | following | `1/5` | `40 M` | `115` |
+| `qf48f` | `:fitted` | `1/48` | following, two H200s over MPI | `1/5` | `40 M` | `160` |
+| `qd32v2`, `qd32v2s` | `:damped`, `r_1 = 7/10` | `1/32` | capsule | `1/2`, `0` | `20 M` | `91`, `91` |
+| `qd40v2`, `qd40v2s` | `:damped`, `r_1 = 7/10` | `1/40` | capsule | `1/2`, `0` | `20 M` | `193`, `185` |
+| `qf48v2f` | `:fitted`, with and without `trail_ramp` | `1/48` | following | `1/2` | ended at `1` and `2 M` | — |
+
+**At `v = 1/5` the moving hole is the resting one outside `5/4`, and its
+excess is on the trailing side just outside the horizon.** The moving row
+over its resting row at `40 M`:
+
+| row | `ℋ [1, 5/4)` | `ℋ [5/4, 2)` | `ℋ [2, 4)` | `ℋ [4, 7)` | error `[1, 5/4)` | error `[5/4, 2)` | error `[2, 4)` | error `[4, 7)` |
+|---|---|---|---|---|---|---|---|---|
+| `qd24` (`:damped`, `1/24`) | `1.61×` | `1.50×` | `1.05×` | `1.12×` | `2.35×` | `1.69×` | `1.81×` | `1.83×` |
+| `qd32` (`:damped`, `1/32`) | `2.97×` | `1.01×` | `1.04×` | `1.00×` | `1.34×` | `1.24×` | `1.42×` | `1.62×` |
+| `qf40` (`:fitted`, `1/40`) | `14.2×` | `0.99×` | `1.03×` | `1.03×` | `1.66×` | `1.09×` | `1.24×` | `1.59×` |
+| `qf40t` (the same, `trail_ramp`) | `11.6×` | `1.08×` | `1.07×` | `1.06×` | `1.28×` | `1.34×` | `1.56×` | `1.80×` |
+| `qf48f` (`:fitted`, `1/48`, against `hf48`) | `18.0×` | `1.12×` | `1.09×` | `1.00×` | `1.38×` | `1.31×` | `1.53×` | `1.63×` |
+
+- **The claim, `2×` at both spacings, holds for the error from `1/32`** and
+  for `ℋ` from `5/4` out in every row. It fails in two places, both in the
+  first shell. `qd24`'s error there is `2.35×`, `1.34×` at `1/32`. And `ℋ`
+  there is `1.6–3.0×` for `:damped` and `12–18×` for `:fitted`.
+- **`:damped`'s first shell fails by the resting row's layer term.** The
+  resting `ℋ` there converges at `9.7` (`qd24s → qd32s`, as in step H1), the
+  moving one at `7.6–8.0`, so the ratio grows with resolution while both fall
+  faster than order four.
+- **`:fitted`'s `ℋ` just outside the horizon is the trailing side's, and it
+  does not converge relative to the resting row** (`14.2×` at `1/40`, `18.0×`
+  at `1/48`). In absolute terms it falls at order `2.6` (`1.55·10⁻⁴` to
+  `9.6·10⁻⁵`). The Kerr-Schild hole's moving `:fitted` row was `13–15×` there
+  at `1/24` and did not converge either
+  ([above](#the-boosted-kerr-schild-hole-at-binary-speed-2026-10-20)).
+- **Growing no faster** holds to `32 M` and not over the last `8 M`. The
+  ratios are flat from `8 M` to `32 M` in every shell (`qd32`'s error in
+  `[2, 4)` `1.12–1.18×`, `qf40`'s `ℋ` from `5/4` out `0.94–1.04×` from
+  `16 M`). From `32 M` to `40 M` the moving error from `5/4` out rises by
+  `1.8×` at `1/24` (`qd24` and `qd24f` alike, so not the capsule's end) and
+  `1.3–1.5×` in `qd32`, `qf40t` and `qf48f`, against `1.0–1.25×` at rest;
+  `qf40` alone stays flat. The rise converges at order `4.9–5.3`
+  (`qd24 → qd32` at `40 M`), faster than the bulk. Its cause is **(open)**;
+  the spinning Kerr-Schild hole moving along its axis had a late `1.1–1.6×`
+  in the error too.
+- **`:fitted` has a transient at `4 M`**: `ℋ` just outside the horizon
+  `168×` the resting row's at `1/40` and `47×` at `1/48`, the error `9.1×`
+  and `2.7×`, which settles by `16 M`. `trail_ramp = 9/10` cuts it to `22×`
+  at `1/40`.
+
+**No lag, and the contraction.** `hz_x − c_x`, the found horizon's origin
+against the boosted hole's line, is at most `7.2·10⁻⁵ M` at `1/24` and
+`1.2·10⁻⁵ M` at `1/32` at `40 M`, order `6.2` (`5.4` at `16 M`); `:fitted`'s
+is `1.2·10⁻⁶` (`1/40`) and `2.5·10⁻⁶` (`1/48`), at the finder's accuracy, and
+`5.8·10⁻⁶` with the trailing ramp. Step B1's moving hole under the damped
+harmonic gauge lagged `0.49 M`. The horizon's extent along the boost over its
+extent across is `√(1 − v²)` to `1·10⁻⁵` at `1/24`, `1.3·10⁻⁶` at `1/32`,
+`5·10⁻⁷` at `1/40` and `2·10⁻⁷` at `1/48`. Every find in every row succeeds.
+
+**The order outside the horizon** (`1/24 → 1/32` for `:damped`, moving):
+
+- the error `3.9–5.3` in every shell from `5/4` out at every time, and
+  `4.6–6.2` in `[1, 5/4)`;
+- `ℋ` `4.0–5.3` from `5/4` out from `16 M` (up to `7.3` during the first
+  `8 M`'s transient), and `7.4–8.1` in `[1, 5/4)`;
+- the resting pair: the error `3.7–4.5`, `ℋ` `3.9–4.8` from `5/4` out from
+  `8 M` and `9.7` in `[1, 5/4)`.
+
+So `:damped` with its target's rate converges at order four or faster outside
+the horizon, and its excess over the resting hole converges faster than that.
+
+**`:fitted`'s order** (`qf40f → qf48f`, both on the following mesh, and
+`qf40 → qf48f`, which agree to two digits): `3.8–4.5` in every shell at
+`1 M`; between `4 M` and `24 M` it swings between `3` and `14` as the
+transient, smaller at `1/48`, passes each shell; at `40 M` `ℋ` `2.6` in `[1, 5/4)` and `3.4–3.8` from `5/4` out, the error
+`5.2` in `[1, 5/4)` and `3.0–3.4` from `5/4` out. Recorded, not claimed: the
+pair is close and the late rise above sits in it. `M_irr − 1` at `40 M` is
+`4.06·10⁻⁶` at `1/40` and `1.79·10⁻⁶` at `1/48`, order `4.5`; the moving
+rows' `M_irr − 1` is `1.10–1.23×` the resting rows' (`qd24` `2.94·10⁻⁵`
+against `2.39·10⁻⁵`, `qd32` `9.62·10⁻⁶` against `8.75·10⁻⁶`, `qf40`
+`4.06·10⁻⁶` against `3.53·10⁻⁶`).
+
+**The trailing side.** `ℋ` in `[1, 5/4)` at `40 M`, trailing, leading and
+resting:
+
+| row | trailing | leading | resting |
+|---|---|---|---|
+| `qd24` | `1.87·10⁻³` | `6.06·10⁻⁴` | `8.75·10⁻⁴` |
+| `qd32` | `2.22·10⁻⁴` | `3.66·10⁻⁵` | `5.34·10⁻⁵` |
+| `qf40` | `2.21·10⁻⁴` | `9.63·10⁻⁶` | `1.09·10⁻⁵` |
+| `qf40t` | `1.80·10⁻⁴` | `9.68·10⁻⁶` | `1.09·10⁻⁵` |
+
+The leading side is at or below the resting hole in every row, and the
+trailing excess is steady from about `8 M`. In `[5/4, 2)` both sides are
+within `0.9–1.1×` of the resting row from `1/32` on (at `1/24` the trailing
+side is `1.9×`). Inside the horizon the trailing band is
+`3.7·10⁻²` for `:fitted` against `2.9·10⁻⁴` at rest (`130×`), and `1.5·10⁻²`
+with the trailing ramp. This is `CLAUDE.md`'s "a moving layer exports what it
+holds through its trailing side", at fourth order and in this chart.
+
+**`trail_ramp = 9/10`** (`qf40t` against `qf40`): near and inside the horizon
+it helps — the `4 M` transient `22×` against `168×`, `ℋ` just outside `11.6×`
+against `14.2×`, the error there `1.28×` against `1.66×`, the trailing band
+inside `2.5×` lower. From `5/4` out it costs `1.1–1.25×` in the error at
+`40 M`, and the lag is `5×` larger (`5.8·10⁻⁶`, still at the finder's
+accuracy). On the Kerr-Schild hole at `q = 4` it raised the error just outside
+the horizon `1.5–2.4×`, so its sign there is the chart's. Neither is decisive
+at `v = 1/5`; at `v = 1/2` it does not rescue `:fitted` (below).
+
+**The following mesh is the capsule near the hole, at `0.6–0.8×` the
+cost.** `qd24f` equals `qd24` to three digits in every shell to `[2, 4)` at
+every time, and in `[4, 7)`, on the level `2h`, within `0.45–1.2×` (`0.97×`
+at `40 M`); `qf40f` equals `qf40` to three digits to `[2, 4)`, and
+`0.45–1.15×` in `[4, 7)`. The cost: `22` against `27 s/M` at `1/24` (`0.81×`),
+`115` against `190 s/M` at `1/40` (`0.61×`), with `562–667` blocks against
+the capsule's `856`.
+
+**`1/48` does not fit one H200 on either mesh**, and two do. The capsule at
+`1/48` is `95 M` points; the following mesh starts at `69.9 M` (about
+`115 GB` with the RK4 scratch) and grows as its finest level does, from `176`
+blocks to `232`. On one H200 `qf48f` ran out of memory in the regrid's new
+`GHProblem` (`8.3 GiB`, job 596494); after the regrid was split so the
+integrator's scratch is dropped first (commit `369e070`), it built the problem
+and ran out allocating the next chunk's scratch (`12.7 GiB`, job 596604). On
+two H200s over MPI (HPC-X, `mpiexec --bind-to none -n 2`, staged through the
+host, job 596628) it ran `40 M` in `6729 s`, `160 s/M`, with its `t = 1` and
+`2 M` rows equal to the one-H200 run's to every printed digit. `nvidia-smi`
+read `72–143 GB` a GPU, the memory pool. One H200 would cost about `240 s/M`
+at `1/48` by `qf40f`'s rate per point and step, so two H200s run it at `1.5×`
+that speed.
+
+**At `v = 1/2` the trailing excess is large, and it converges.** `:damped`
+at `r_1 = 7/10`, the moving row over its resting row at `20 M`:
+
+| row | `ℋ [1, 5/4)` | `ℋ [5/4, 2)` | `ℋ [2, 4)` | `ℋ [4, 7)` | error `[1, 5/4)` | error `[5/4, 2)` | error `[2, 4)` | error `[4, 7)` |
+|---|---|---|---|---|---|---|---|---|
+| `qd32v2` (`1/32`) | `16.2×` | `41.9×` | `14.3×` | `16.1×` | `4.03×` | `3.79×` | `6.12×` | `5.43×` |
+| `qd40v2` (`1/40`) | `46.0×` | `26.5×` | `9.5×` | `20.3×` | `2.73×` | `3.04×` | `4.32×` | `4.34×` |
+
+- **The orders, moving** (`1/32 → 1/40`, `8–20 M`): `ℋ` `4.2` in
+  `[1, 5/4)`, `6.4` in `[5/4, 2)`, `6.1–6.9` in `[2, 4)` and `3.3–10.8` in
+  `[4, 7)`, where the settling front is passing; the error `5.5–5.8` in
+  `[1, 5/4)` and `4.6–7.2` from `5/4` out. **At rest**: `ℋ` `8.9–9.0` in
+  `[1, 5/4)` and `3.8–4.5` from `5/4` out, the error `3.7–4.3`. So the
+  moving excess is truncation error that converges faster than the bulk
+  from `5/4` out, and in the first shell the resting row's layer term
+  outruns it.
+- **The excess is the trailing side's.** `ℋ` at `20 M`, trailing, leading,
+  resting: in `[1, 5/4)` `2.10·10⁻³`, `6.89·10⁻⁵`, `9.12·10⁻⁵` at `1/32` and
+  `8.18·10⁻⁴`, `8.26·10⁻⁶`, `1.25·10⁻⁵` at `1/40`; in `[5/4, 2)`
+  `3.25·10⁻⁴`, `6.58·10⁻⁶`, `5.46·10⁻⁶` at `1/32`. The leading side is the
+  resting hole.
+- **Where `2×` would come.** In `[5/4, 4)` the ratio falls from `14–42×` to
+  `9.5–26×` between `1/32` and `1/40`, and at that rate reaches `2×` near
+  `1/95–1/140`; in `[4, 7)` it rises, `16×` to `20×`. The error's ratio falls
+  from `3.8–6.1×` to `2.7–4.3×`.
+- **The Kerr-Schild hole at `v = 1/2`** (`a = 0` along `z`) was `4.9×` in the
+  error in `[3, 5)` and `0.8–2.0×` in `ℋ`. The harmonic chart's trailing
+  side at `v = 1/2` is an order of magnitude worse in `ℋ`.
+- No lag: `hz_x − c_x` is `4.8·10⁻⁶` and `5.8·10⁻⁶` at `20 M`. The
+  contraction is off by `−1.2·10⁻⁵` and `−1.5·10⁻⁵` in `x/y`, the same at
+  both spacings, which puts it at the finder's (`N_ah = 12` on a surface
+  `13 %` shorter along `x`). `M_irr − 1` at `20 M` is `5.74·10⁻⁶` against
+  `5.52·10⁻⁶` at `1/32`, and `−2.56·10⁻⁶` against `2.39·10⁻⁶` at `1/40`;
+  both moving rows start `5–8·10⁻⁶` below Kerr's at `1 M`, and the `1/40` row
+  stays below.
+
+**`:fitted` at `v = 1/2` fails**, at `1/48` on the following mesh, with and
+without the trailing ramp. Without it (job 596497), `ℋ` in `[1, 5/4)` on the
+trailing side is `2.8·10⁻²` after `1 M` (the leading side `1.8·10⁻⁶`) and the
+trailing band inside the horizon `2.8`. With `trail_ramp = 9/10` (job 596605)
+it is `1.29·10⁻²` after `1 M` and `7.7·10⁻²` after `2 M`, and `ℋ` in
+`[5/4, 2)` grows from `6.5·10⁻⁵` to `2.7·10⁻³`: `6×` and `42×` in a `M`,
+against `:damped`'s `8.2·10⁻⁴` at `1/40`. Both runs then ran out of memory on
+one H200 (in `target_cache`, `20.9 GiB`, and in `regrid!`, `27.1 GiB`). They
+were not repeated over MPI: two chunks of growth on the trailing side at
+`6–40×` a `M` are not a row that `40 M` would rescue. Whether a speed between
+`1/5` and `1/2` holds is **(open)**.
+
+**What it settles for the route** (`CODE.md`, [The ladder of this
+route](CODE.md#the-ladder-of-this-route), item 2, and [On which
+grid](CODE.md#on-which-grid)):
+
+- At `v = 1/5` a moving harmonic hole is the resting one from `5/4 M` out —
+  `ℋ` `1.0–1.1×`, the error `1.1–1.6×` at `40 M` from `1/32` — with no lag,
+  the contraction to `10⁻⁶` and order four or better. Just outside the horizon
+  the trailing side carries an excess: `1.6–3.0×` in `ℋ` for `:damped`, and
+  `12–18×` for `:fitted`, which does not converge against the resting row.
+- At `v = 1/2` `:damped` holds, with a trailing excess of `10–46×` in `ℋ` and
+  `3–4×` in the error that converges at order `4–6`; `:fitted`, the route's
+  interior for a binary, does not hold.
+- The fine level that follows the hole gives the capsule's numbers at
+  `0.6–0.8×` the cost, and at `1/48` it needs two H200s.
+
+So the numbers favour the inertial grid with the following mesh for the
+inspiral. An equal-mass pair's holes each move at `½ √(M/d)`, so `v = 1/5` is
+`d ≈ 6 M`, the separation at which the route rolls the damped harmonic gauge
+on; the inspiral before it is slower. They do not support `:fitted` on the
+inertial grid at `v = 1/2`, a speed the holes reach only in the plunge, and
+between `1/5` and `1/2` they say nothing. The comoving grid, on which each
+hole rests, would remove the trailing side there, at the price of step C1.
+Which grid the route takes is Erik's decision.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 
