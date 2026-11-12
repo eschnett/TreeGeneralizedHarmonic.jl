@@ -37,11 +37,12 @@ the damped harmonic gauge and the `:fitted` interior. The design is
 `CODE.md`, "A comoving grid frame for orbiting holes". They start from steps
 B1–B3's code, and Erik decides the route of B4–B9 from step C2's report.
 
-**Steps H1–H5 are proposed and not started**: a third route to G7 and G8 —
+**Steps H1–H5**: a third route to G7 and G8 —
 harmonic gauge with no source for the inspiral, the damped harmonic gauge
 rolled on before the merger, and the `:fitted` interior. The design is
-`CODE.md`, "Harmonic gauge for the inspiral". Steps H1–H3 are single holes
-and need only `main`.
+`CODE.md`, "Harmonic gauge for the inspiral". **Step H1 is done** (it ran
+2026-11-11); steps H2–H5 are proposed and not started. Steps H1–H3 are
+single holes and need only `main`.
 
 The steps map onto the milestones G0–G6 ("Milestones" below), split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -1287,8 +1288,8 @@ B9's on this route.
 
 A third route to G7 and G8. **The design is `CODE.md`, "Harmonic gauge for
 the inspiral"; read it in full first**, then "Binary black holes" and "A
-comoving grid frame for orbiting holes". Nothing here is started. The steps
-are a proposal for Erik's review, and the section's "What this route asks
+comoving grid frame for orbiting holes". Step H1 is done; nothing else here
+is started. The steps are a proposal for Erik's review, and the section's "What this route asks
 Erik to decide" lists what is to be settled.
 
 **What they start from.**
@@ -1365,38 +1366,13 @@ as an agent". Branches are named `claude/step-H<n>-<slug>`.
 
 ## Step H1 — A harmonic hole at rest
 
-`CODE.md`: "What the package has measured in this chart", "What harmonic
-gauge costs"; "Single black holes: recommended settings". **`a = 0`, on the
-mirrored octant.**
-
-**Changes:**
-
-- **`case=harmonic` in `test/octant_runs.jl`**, through
-  `harmonic_kerr_case`, with `a=`, both interiors, the error reference and
-  the shells about the hole.
-- Nothing in `src/` unless a run shows a defect; then the defect first.
-
-**Accept**, at `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, `ρ_max = 4/M`:
-
-- **The settings**, screened to `8 M`: `:damped` about `r_0 = 2/5`,
-  `r_1 = 3/4` at `1/32`; `:fitted` about `m = 16`, `n_L = 20` at `1/48`.
-  Report the coarsest spacing at which each holds.
-- **The order**: `:damped` at three spacings from that one, to `24 M`:
-  order four in the error and in `ℋ` outside the horizon, in the shells
-  `[2, 4)` and `[4, 7)` (the Kerr-Schild rows' `[3, 5)` and `[5, 8)` in
-  areal radius).
-- **`:fitted`** at the same spacings, with the margin fixed in `M` and
-  fixed in cells: its `ℋ` and error against `:damped`'s, and its order.
-- **Stationary**: both variants to `128 M` at the coarsest convergent
-  spacing: the shells' error, `ℋ` and `C_a` flat from `24 M`, `M_irr`
-  constant to the Kerr-Schild row's level, the horizon's radius `M`.
-- **The price**: the spacing at which this chart's shell error equals the
-  Kerr-Schild `a = 0` hole's at `1/24`, and the cost per `M` of both on an
-  H200.
-- **If the hole is not stationary**, report the growth's rate, where it
-  sits and its order, and stop: the route rests on this row.
-- `CODE.md`'s **(predicted)** settings and costs replaced by what was
-  measured.
+Done (it ran 2026-11-11). Its runs are in `SINGULARITY_HANDLING.md`, "A
+harmonic hole at rest (step H1, 2026-11-11)", its settings in `CODE.md`'s
+"Single black holes: recommended settings" (the *harmonic* rows) and "What
+harmonic gauge costs"; the brief is in `HISTORY.md`, "Step H1 — A harmonic
+hole at rest". The coarsest convergent spacings it hands to step H2 are
+`1/24` (`:damped`, `r_0 = 2/5`, `r_1 = 3/4`) and `1/40` (`:fitted`,
+`m = 16`, `n_L = 20`).
 
 ## Step H2 — A moving harmonic hole
 

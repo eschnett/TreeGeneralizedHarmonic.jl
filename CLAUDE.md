@@ -435,8 +435,8 @@ julia test/star_study.jl dir=.claude/data/star-damping
 ```
 
 The octant runs are `test/octant_runs.jl`, one run per
-call, `key=value` options listed in its header — the case (`case=minkowski`
-or `ks`, `interior=damped|fitted`, margins, `fit_cont`;
+call, `key=value` options listed in its header — the case (`case=minkowski`,
+`ks` or `harmonic`, `interior=damped|fitted`, margins, `fit_cont`;
 `octant=reflecting|rotating` and the spin `a=`, which needs `rotating`), the mesh (`L`, `N`,
 `roots`, `radii`), the run (`t_end`, `cfl`, `chunk`), noise, `backend=cuda`,
 `out=<dir>` (CSV, `records.csv`, `simwatch.toml` — with
@@ -453,6 +453,18 @@ On Symmetry they ran one H200 each from a copy with `CUDA` added to its
 julia --project=. --threads=4 test/octant_runs.jl case=ks interior=fitted L=8 N=16 roots=2 radii=4,2 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/smoke
 julia test/octant_study.jl out/study t_from=8 series=dA64,dA96,dA128:16,24,32
 julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=1/2 L=8 N=16 roots=1 radii=4,2,1 r_0=3/4 r_1=5/4 t_end=1/2 chunk=1/4 out=out/spin
+```
+
+`case=harmonic` is Kerr in harmonic coordinates at rest on an octant, with
+no gauge source (step H1). Its defaults are the harmonic chart's radii, half
+Kerr-Schild's: the layer `r_0 = 2/5`, `r_1 = 3/4` and the shells
+`1, 5/4, 2, 4, 7`. A moving harmonic hole is refused (step H2's). Step H1's
+rows ran on `L = 64`, cubes `32, 16, 8, 4`, one H200 each (`harm-h1`); the
+line below is its `:fitted` row at `1/48`, two minutes a `M`:
+
+```bash
+julia --project=. --threads=4 test/octant_runs.jl case=harmonic L=8 N=32 roots=1 radii=4,4,2 t_end=1 chunk=1/4 cfl=1/2 amplitude=0 out=out/harm
+julia --project=. test/octant_runs.jl backend=cuda case=harmonic L=64 roots=2 radii=32,16,8,4 N=96 interior=fitted fit_cont=2 lmax_fit=8 margin=16 n_L=20 t_end=24 chunk=1 cfl=1/2 amplitude=0 group=h1 out=out/hf48 checkpoint=out/hf48/ck checkpoint_every=4 walltime=40000
 ```
 
 The same script runs a hole moving along `x` on the quadrant

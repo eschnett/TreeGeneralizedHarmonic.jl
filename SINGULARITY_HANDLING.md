@@ -20,6 +20,7 @@ here; links have been pointed at the right file.
 - [A spinning hole along its axis (2026-10-21)](#a-spinning-hole-along-its-axis-2026-10-21)
 - [Aligned spin and velocity: which holes the algorithm holds (2026-10-22)](#aligned-spin-and-velocity-which-holes-the-algorithm-holds-2026-10-22)
 - [Spin across the motion: the bitant (2026-10-24)](#spin-across-the-motion-the-bitant-2026-10-24)
+- [A harmonic hole at rest (step H1, 2026-11-11)](#a-harmonic-hole-at-rest-step-h1-2026-11-11)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -3546,6 +3547,213 @@ is the resting hole's.
   These rows show that the Kerr-Schild chart's analytic layer holds the same
   geometry.
 - **Circular orbits**; unchanged.
+
+## A harmonic hole at rest (step H1, 2026-11-11)
+
+The first step of `CODE.md`'s [Harmonic gauge for the
+inspiral](CODE.md#harmonic-gauge-for-the-inspiral-proposed): the
+campaign the Kerr-Schild hole had on the octant
+([above](#single-holes-on-the-octant-a--0-to-910-2026-10-02-to-2026-10-07)),
+repeated for Kerr at `a = 0` in harmonic coordinates. The question was
+whether the chart runs as the Kerr-Schild hole does — fourth order outside
+the horizon and stationary to `128 M` — at twice the cells per `M`, and what
+that costs.
+
+**The setup** (jobs 596078–596087, 596102, 596103 and 596163, Symmetry
+`harm-h1`, one H200 a row; the CSVs and logs in `.claude/data/harm-h1`):
+
+- `harmonic_kerr_case`, `M = 1`, `a = 0`, at rest at the origin of the
+  mirrored octant (`test/octant_runs.jl case=harmonic`). No gauge source:
+  `H ≡ 0` and the kernel compiled without one.
+- The octant `[0, 64]³`, root brick `2³`, cubes `R = 32, 16, 8, 4`, so the
+  finest level `[0, 4]³` has `h = 2/N`. That is the Kerr-Schild study's
+  mesh (cubes `32, 16, 8`, `h = 4/N`) with one level more. `N = 48, 64, 80,
+  96, 128` give `h = 1/24, 1/32, 1/40, 1/48, 1/64` on `4.0, 9.4, 18.4, 31.9,
+  75.5 M` points.
+- `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, `ρ_max = 4/M`, the Gaussian `γ0`, the
+  finder every chunk (`N_ah = 12`, with the spin), `chunk = M`, no noise, a
+  checkpoint every `4 M`.
+- The shells, point-weighted: the evolved band inside the horizon (`in`),
+  then `[1, 5/4)`, `[5/4, 2)`, `[2, 4)`, `[4, 7)` and `r ≥ 7`. They are the
+  Kerr-Schild rows' `[2, 9/4)`, `[9/4, 3)`, `[3, 5)`, `[5, 8)` and `r ≥ 8` in
+  areal radius, which is the harmonic radius plus `M`. The first three lie on
+  the finest level in both studies; `[4, 7)` and beyond lie on the level `2h`
+  here, where `[5, 8)` lies on the finest level there.
+- The layers: `:damped` at `r_0 = 2/5`, `r_1 = 3/4` (Kerr-Schild's `3/4`,
+  `3/2` scaled by the horizon's radius), `ρ_ramp = 1`; `:fitted` with
+  `fit_cont = 2`, `lmax_fit = 8`, `fit_initial_depth = n_L h` and
+  `default_bounds` gated `2G` spacings inside the offset surface. The
+  harmonic data stay inside `default_bounds` down to `r ≈ 0.2 M` (`α ≥ 0.32`,
+  `λ ≤ 36`, `K ≤ 75`).
+
+| row | variant | `h` | layer | to |
+|---|---|---|---|---|
+| `hd24` | `:damped` | `1/24` | `r_0 = 2/5`, `r_1 = 3/4` (`r_1` `6` cells inside, `margin = 4`; the ramp `8.4` cells) | `128 M` |
+| `hd32` | `:damped` | `1/32` | the same (`8` cells; `11.2`) | `128 M` |
+| `hd48` | `:damped` | `1/48` | the same (`12`; `16.8`) | `24 M` |
+| `hd64` | `:damped` | `1/64` | the same (`16`; `22.4`) | `24 M` |
+| `hf40` | `:fitted` | `1/40` | `m = 16`, `n_L = 20` (the core surface at `0.1 M`) | `128 M` |
+| `hf48` | `:fitted` | `1/48` | `m = 16`, `n_L = 20` (at `0.25 M`) | `24 M` |
+| `hf64` | `:fitted` | `1/64` | `m = 16`, `n_L = 20` (at `0.44 M`) | `24 M` |
+| `hf32m` | `:fitted` | `1/32` | `m = 8`, `n_L = 10`: the offset `M/4`, the ramp `5M/16` | `24 M` |
+| `hf48m` | `:fitted` | `1/48` | `m = 12`, `n_L = 15`: the same in `M` | `24 M` |
+| `ks24` | Kerr-Schild `:damped` | `1/24` | `r_0 = 3/4`, `r_1 = 3/2`, the algebraic source, cubes `32, 16, 8` | `24 M` |
+
+`hf64` is the finest row of both `:fitted` series: `m = 16`, `n_L = 20` fixed
+in cells (`hf40`, `hf48`, `hf64`), and the offset `M/4` and the ramp `5M/16`
+fixed in `M` (`hf32m`, `hf48m`, `hf64`). `m = 16`, `n_L = 20` does not fit at
+`1/32`, where `36` cells reach past the origin. `ks24` is the Kerr-Schild
+study's `dA96` on today's code, for the price. It reproduces `dA96` (run on
+2026-10-02) to every printed digit in every shell.
+
+**`:damped` converges at order four outside the horizon from `1/24`.** At
+`24 M`:
+
+| `h` | `ℋ [1, 5/4)` | `ℋ [5/4, 2)` | `ℋ [2, 4)` | `ℋ [4, 7)` | error `[1, 5/4)` | error `[2, 4)` | error `[4, 7)` |
+|---|---|---|---|---|---|---|---|
+| `1/24` | `9.14·10⁻⁴` | `1.67·10⁻⁵` | `1.52·10⁻⁶` | `1.70·10⁻⁷` | `1.84·10⁻³` | `1.77·10⁻⁵` | `3.23·10⁻⁶` |
+| `1/32` | `5.54·10⁻⁵` | `5.50·10⁻⁶` | `4.68·10⁻⁷` | `4.69·10⁻⁸` | `6.23·10⁻⁴` | `5.08·10⁻⁶` | `9.11·10⁻⁷` |
+| `1/48` | `5.09·10⁻⁶` | `9.95·10⁻⁷` | `8.57·10⁻⁸` | `8.41·10⁻⁹` | `1.21·10⁻⁴` | `9.28·10⁻⁷` | `1.68·10⁻⁷` |
+| `1/64` | `1.55·10⁻⁶` | `3.04·10⁻⁷` | `2.63·10⁻⁸` | `2.58·10⁻⁹` | `3.67·10⁻⁵` | `2.85·10⁻⁷` | `5.14·10⁻⁸` |
+
+- **The orders**, `1/24 → 1/32 → 1/48 → 1/64`: the error `3.8`, `4.0`,
+  `4.1` in `[1, 5/4)` and `4.2–4.4`, `4.15–4.2`, `4.1` from `5/4` out;
+  `ℋ` from `5/4` out `3.9–4.5` (`5.7` beyond `7`), `4.2`, `4.1`; `C_a`
+  `4.0–4.5`, `4.1–4.4`, `4.1–4.2`. At `8 M`, before the settling front has
+  left the near zone, the error, `ℋ` and `C_a` in every shell from `5/4` out
+  converge at `4.0–4.9`, `4.0–4.3` and `4.0–4.13`. `ℋ` in `[1, 5/4)` falls at
+  `9.7`, `5.9`, `4.1`: a layer term that falls faster than the bulk, as in
+  Kerr-Schild's first shell (`6.9`, `4.25`). Inside the horizon the band is
+  `6–10`.
+- **`1/24` is the coarsest spacing, not the predicted `1/32`.** Its `r_1` is
+  `6` cells inside the horizon, below the Kerr-Schild rule's `8`, and its ramp
+  `8.4` cells against the rule's `12`, and it converges with the rest. The
+  layer residual is `9.5` at `1/24`, `7.6` at `1/32` and `3.3` at `1/48`. The
+  harmonic fields there are about `100×` Kerr-Schild's (`Π ≈ 1000` at `r_0`),
+  so that is `0.7 %` relative against Kerr-Schild's `0.16 %`.
+- **The mass drift is truncation error.** `M_irr − 1` at `24 M` is
+  `1.65·10⁻⁵`, `6.55·10⁻⁶`, `1.28·10⁻⁶`, `3.91·10⁻⁷`, and `dM_irr/dt` over
+  `8–24 M` `8.06·10⁻⁷`, `2.70·10⁻⁷`, `5.09·10⁻⁸`, `1.56·10⁻⁸` per `M`:
+  orders `3.8`, `4.1`, `4.1`. Kerr-Schild's at `1/16`, `1/24` and `1/32` was
+  `2.1·10⁻⁸`, `4.1·10⁻⁹`, `1.3·10⁻⁹`.
+- Every find succeeds in every row. The horizon's mean radius is `M` to
+  `5·10⁻⁵` at `128 M` at `1/24`, and `J` is `5.2·10⁻⁸` (the finder's).
+
+**`:fitted` at `m = 16`, `n_L = 20` is `:damped` outside the horizon.** At
+`1/48`, `ℋ` in `[1, 5/4)` is `1.03×` `:damped`'s at `8 M` and `24 M`, and the
+error there and everything from `5/4` out are equal to three digits. At
+`1/64` `ℋ` there is `1.22×` at `8 M` and `1.20×` at `24 M`, and the error
+`1.00×`. The Kerr-Schild hole's best `:fitted` was `1.6×` in `ℋ` just outside
+its horizon at `1/24` and `2.6×` at `1/32` (above). The band inside the
+horizon is `5×` `:damped`'s at `1/48` and `34×` at `1/64`; it does not
+converge (`2.34·10⁻⁴` at both). The mass drift is `:damped`'s to `0.2 %`
+(`5.08·10⁻⁸/M` against `5.09·10⁻⁸` at `1/48`, `1.565·10⁻⁸` against
+`1.562·10⁻⁸` at `1/64`). Every find succeeds and every fit is valid; the fit
+residual is `0.0044–0.0053`. The layer residual against the background is `430` at `1/48`
+and `4100` at `1/40`: the fit's distance from the exact solution deep in the
+layer, where `Π` reaches `10⁴`.
+
+- **The coarsest spacing is `1/40`**, with the core surface at `0.1 M` where
+  `|h| ≈ 100`. It holds to `128 M` (below). Outside the
+  horizon it is `2.1×` `:damped` at `1/48` in every shell, which is
+  `:damped`'s error at `1/40` (`(48/40)⁴ = 2.07`). The range projection fires
+  at `t = 0` (`223` points) and in the first `M` (`714`), where the analytic
+  initial data reach `K ≈ 540` at the core surface, and never after.
+- **The margin fixed in cells converges at order four outside**:
+  `1/40 → 1/48 → 1/64` at `8 M`, `ℋ` `3.95`, `3.57` in `[1, 5/4)` and
+  `4.0–4.2` from `5/4` out, the error `4.0–4.2` in every shell outside.
+- **The margin fixed in `M` converges too, from a leaky start.** At `1/32`
+  (`m = 8`, `n_L = 10`) `ℋ` in `[1, 5/4)` is `17×` `:damped`'s and the error
+  there `2.1×`, and by `24 M` the leak has reached `[4, 7)` (`ℋ` `2.1×`) and
+  `r ≥ 7` (`4.7×`). At `1/48` (`12`, `15`) it is `2.5×` and `1.0×`, and at
+  `1/64` `1.22×` and `1.0×`. The orders at `8 M`: `ℋ` `10.7`, `6.7` in
+  `[1, 5/4)`, the error `5.8`, `4.2` there, and `4.0–4.5` from `2` out.
+  `CODE.md`'s open question — whether `:fitted` converges outside the horizon
+  at a margin fixed in `M` — has its answer for this hole: yes, faster than
+  order four until the margin holds enough cells, then at four.
+
+**Stationary to `128 M`** (`hd24` and `hd32`; `:fitted`'s `hf40` below).
+From `24 M` to `128 M` at `1/24`, and the same at `1/32`:
+
+- Near the hole nothing moves: `ℋ` in `[1, 5/4)` `9.135 → 9.151·10⁻⁴`, `ℳ_i`
+  there `5.30 → 5.31·10⁻⁴`, `C_a` `2.46·10⁻⁵` throughout, the band inside the
+  horizon `1.376 → 1.378·10⁻²`, the layer residual `9.515 → 9.506`. At
+  `1/32` `ℋ` there `5.544 → 5.565·10⁻⁵` and `C_a` `5.70 → 5.44·10⁻⁶`. All
+  `129` finds succeed in both rows.
+- Farther out `ℋ` and `C_a` rise at a falling rate as the settling front
+  moves outward: `ℋ` in `[2, 4)` `1.52 → 1.94·10⁻⁶` (`+19 %` over
+  `24–48 M`, `+0.9 %` over `96–128 M`), in `[4, 7)` `×1.58`, and beyond
+  `7` `×2.2`, still rising. The front reaches the outer boundary at about
+  `64–96 M` (the boundary band's `ℋ` `3.5·10⁻¹²` to `1.6·10⁻⁹`), as
+  Kerr-Schild's did in its twice larger box at about `128 M`.
+- **The hole grows, slowly and decelerating**: `dM_irr/dt` is `8.1·10⁻⁷`,
+  `4.2·10⁻⁷`, `2.8·10⁻⁷`, `2.3·10⁻⁷`, `2.1·10⁻⁷` per `M` over `8–24`,
+  `24–48`, `48–64`, `64–96` and `96–128 M`, `M_irr − 1 = 4.5·10⁻⁵` at
+  `128 M`, the mean horizon radius with it. The error grows with it — in
+  `[1, 5/4)` `×1.7`, in `[2, 4)` `×3.5` from `24 M` to `128 M` — which is the
+  Kerr-Schild rows' "slightly different hole spreading outward". **It is
+  truncation error to the end**: from `1/24` to `1/32` `dM_irr/dt` converges
+  at `3.8`, `4.25`, `4.6`, `4.75` and `4.9` over the five intervals, and
+  `M_irr − 1` at `128 M` (`4.53·10⁻⁵`, `1.43·10⁻⁵`) at `4.0`; at `1/32` the
+  rate falls from `2.7·10⁻⁷` to `5.3·10⁻⁸` per `M`. The outer shells' `ℋ`
+  converges at `128 M` at `3.9–4.25`, and the error at `4.0–4.9`.
+- **`:fitted` at `1/40` is stationary to `128 M` in the same way**
+  (`hf40`): `ℋ` in `[1, 5/4)` `1.083 → 1.115·10⁻⁵`, `ℳ_i` there
+  `4.076 → 4.074·10⁻⁶`, `C_a` `2.32 → 2.22·10⁻⁶`, the band inside the horizon
+  `2.977·10⁻⁴` throughout, the fit residual `0.0053` and the layer residual
+  `4125` constant; the outer shells settle as `:damped`'s do (`ℋ` in `[2, 4)`
+  `×1.30`). All `129` finds succeed and all `129` fits are valid, and the
+  projection never fires after the first `M`. `dM_irr/dt` falls from
+  `1.08·10⁻⁷` to `1.85·10⁻⁸` per `M`, `:damped`'s at `1/40` (`2.2·10⁻⁸`
+  over `96–128 M`, from `1/32` at order four); `M_irr − 1 = 5.5·10⁻⁶` at
+  `128 M`.
+- So the hole is stationary in the sense the Kerr-Schild hole was: the
+  constraints flat where the hole is, the outer shells settling, and the
+  mass drift truncation error. `M_irr` is not constant to the Kerr-Schild
+  row's level at `1/24`: its drift there is `200×` Kerr-Schild's at `1/24`
+  (`4.1·10⁻⁹/M`), and harmonic Kerr matches that at about `1/90` (order four
+  from `1/48`).
+
+**The price** — the spacing at which this chart's shell error equals the
+Kerr-Schild hole's at `1/24` (`ks24`), shell against shell at the same areal
+radius, extrapolated at order four from `1/48` and from `1/64`, which agree
+to `2 %` at `16–24 M`. `1/24` and `1/32` give the same to `7 %`, except `ℋ`
+in `[1, 5/4)`, which converges faster than order four from them:
+
+| shell (harmonic; Kerr-Schild) | error, absolute | error, relative to the field | `ℋ` |
+|---|---|---|---|
+| `[1, 5/4)`; `[2, 9/4)` | `1/138` | `1/78` | `1/65` |
+| `[5/4, 2)`; `[9/4, 3)` | `1/106` | `1/76` | `1/59` |
+| `[2, 4)`; `[3, 5)` | `1/76` | `1/65` | `1/56` |
+
+- The exact state's RMS in the harmonic shells is `9.95×`, `3.83×` and
+  `1.84×` the Kerr-Schild ones (`3.83`, `1.14`, `0.34` against `0.385`,
+  `0.297`, `0.187`), which is the "relative" column: `h*` times that ratio to
+  the quarter.
+- **So the chart costs `2.3–3.3×` in spacing, not `2×`**: `2.3–2.7×` for
+  `ℋ`, `2.7–3.3×` for the relative error. `[4, 7)` and beyond are not like
+  for like (a level coarser here) and are left out. `CODE.md`'s prediction
+  that the spacing buys nothing outside the horizon does not hold: at the
+  same `h` the error in `[2, 4)` is `90–120×` Kerr-Schild's in `[3, 5)`,
+  `50–65×` relative to the fields, which vary there on the harmonic radius and
+  not the areal one.
+- **On an H200**, `chunk = M`, the finder every chunk: Kerr-Schild at `1/24`
+  `59 s/M` (`25.7 M` points); harmonic `:damped` `8.6`, `26`, `112` and
+  `309 s/M` at `1/24`, `1/32`, `1/48` and `1/64` (`4.0`–`75.5 M` points);
+  `:fitted` `57`, `115` and `293 s/M` at `1/40`, `1/48` and `1/64`. That is
+  `21–27 ns` a point and step in both charts. The step is `h/(2 · 1.71)`,
+  against Kerr-Schild's `h/(2 · 1.75)`: the chart's coordinate speeds cost
+  nothing. At the matched spacing `1/64` the harmonic hole costs `5.2×`
+  Kerr-Schild's `1/24` on the octant, at `1/48` `1.9×`; the prediction
+  `2 (1 + s)` was for a level that follows the hole at `2×` the cells.
+
+**What it settles for the route** (`CODE.md`, [The ladder of this
+route](CODE.md#the-ladder-of-this-route), item 1): a harmonic hole at rest
+runs as the Kerr-Schild hole does, at order four outside the horizon,
+stationary near the hole to `128 M`, with `:fitted` as good as the analytic
+layer from `1/48`. It does so at `2.3–3.3×` the cells per `M` for the same
+accuracy, not `2×`, so `CODE.md`'s binary costs scale by `1.15–1.65×` more
+in spacing than it assumed.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 
