@@ -44,6 +44,13 @@ rolled on before the merger, and the `:fitted` interior. The design is
 2026-11-11); steps H2–H5 are proposed and not started. Steps H1–H3 are
 single holes and need only `main`.
 
+**Steps B1–B3 will not land** (Erik, 2026-11-12):
+[eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
+stays unmerged. What the C steps and steps H4 and H5 took from it — the damped
+harmonic source and the roll-on, `gauge_consistent_momentum`, `HoleSpec` and
+the composition, the tracks of several holes — is not on `main`, and where
+they start instead is **(open)**.
+
 The steps map onto the milestones G0–G6 ("Milestones" below), split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
 is a brief a single agent with a fresh context can carry. The order is
@@ -1303,7 +1310,8 @@ Erik to decide" lists what is to be settled.
   `HoleSpec` and the composition, the tracks of several holes,
   `test/binary_runs.jl` — which is on
   [eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
-  and not on `main`: they start once that pull request has landed.
+  and not on `main`. That pull request will not land (2026-11-12), so
+  where H4 and H5 start is **(open)**.
 
 **Order:**
 

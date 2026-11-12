@@ -2772,7 +2772,9 @@ G5's case, the moving hole at `a = 7/10`, was decided on 2026-09-23. The
 recommendation "more interior work, the spin drift first, before
 excision" was proposed in step 8′ (2026-09-25). Steps B1–B9 were added
 to the plan on 2026-10-25, steps C1–C5 on 2026-11-09 and steps H1–H5 on
-2026-11-11. Step H1 ran on 2026-11-11.
+2026-11-11. Step H1 ran on 2026-11-11. On 2026-11-12 Erik decided that
+steps B1–B3 (pull request #18) will not land; where the C steps and steps
+H4 and H5 start instead is open.
 
 ### Step 0 — Scaffolding (G0)
 
