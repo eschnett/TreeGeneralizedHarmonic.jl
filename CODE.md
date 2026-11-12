@@ -3377,8 +3377,15 @@ integrator per chunk**, stepping the run's own state vector in place
 between pieces through a `ProblemRef` (`swappable = true`) instead of a new
 `init`, and each chunk's integrator takes over the previous chunk's scratch
 while the mesh is unchanged (`reuse`, IMEXRungeKutta 1.2),
-so the scratch is allocated once per mesh and not once per chunk. What
-follows from it:
+so the scratch is allocated once per mesh and not once per chunk. A regrid
+that moves the mesh drops the scratch *before* the new problem is
+allocated: the four state-sized vectors are what a run that fills a device
+cannot hold beside the new problem's arrays. The following mesh at `1/48`
+on an H200 (`115` of `143` GB) ran out of memory in the new problem's
+constructor at its first regrid that moved the mesh; with the scratch
+dropped it built the new problem, and then ran out allocating the next
+chunk's scratch on a mesh that had grown. That row ran on two H200s over
+MPI, at `160 s/M` ([step H2](SINGULARITY_HANDLING.md#a-moving-harmonic-hole-step-h2-2026-11-12)). What follows from it:
 
 - **The limiters: one, on every state vector.** IMEXRungeKutta calls its stage limiter only on the three stage
   values of a step that `f_exp!` reads and its step limiter once on the
@@ -4649,6 +4656,14 @@ than bound — with host staging, which is as fast as the direct path here.
 `bench/symmetry_mpi_*.sh` pass the flag. MPICH_jll stays for the CPU and
 the test suite.
 
+**A mesh that follows a hole runs the same way.** Step H2's `:fitted` hole at
+`1/48` on the following mesh (`test/octant_runs.jl mesh=follow mpi=true
+deviceaware=false`, `70–95 M` points over the crossing, a regrid every chunk)
+did not fit one H200 and ran `40 M` on two of one node, `mpiexec --bind-to none
+-n 2` with host staging, at `160 s/M`: about `1.5×` one H200's rate scaled from
+`1/40`. Its first rows equal the one-H200 run's to every printed digit
+([step H2](SINGULARITY_HANDLING.md#a-moving-harmonic-hole-step-h2-2026-11-12)).
+
 **What TreeAMR needs for the step to scale further** (the fill is 9.5 of a
 38 ms right-hand side on one GPU and 15 of 22.5 on four; on the CPU it is
 two thirds of one), in the order of what it buys here:
@@ -4767,7 +4782,7 @@ with a changed criterion** as the first thing it does, before its next
 step: the flags are computed again from the restored state with the
 indicator the restart is given — the record computes them last, from
 nothing the other rows leave behind, so with the same criterion they are
-the same flags — and the regrid is the loop's own code (`regrid_mesh` in
+the same flags — and the regrid is the loop's own code (`regrid_forest` and `rebuild` in
 `driver.jl`), which is what makes the replay exact. The price is one
 indicator evaluation per restart. A second consequence: **the last chunk is
 a restart point too**, where `t_end` is a whole number of chunks in `T`
@@ -5926,7 +5941,11 @@ rules below the table, and none of it is a guarantee. The rows marked
 rest](SINGULARITY_HANDLING.md#a-harmonic-hole-at-rest-step-h1-2026-11-11))
 are Kerr at `a = 0` in harmonic coordinates at rest on the mirrored octant,
 with no gauge source; its horizon is at `M`, and its radii are the areal
-radii less `M`. Common to every row:
+radii less `M`. The rows marked *harmonic, moving* are the same hole boosted
+along `x` on the quadrant (step H2, [a moving harmonic
+hole](SINGULARITY_HANDLING.md#a-moving-harmonic-hole-step-h2-2026-11-12)),
+radii `32, 16, 8, 4` about the hole, on the capsule or on a mesh that follows
+the hole (`mesh = follow`, `floor_margin = 3`). Common to every row:
 `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, `ρ_max = 4/M`, the Gaussian `γ0`
 (`1/M → 1/(10M)`), the algebraic source, the rotating octant (the mirrored
 one at `a = 0`), a finest level whose cube contains the whole horizon, and
@@ -5950,6 +5969,8 @@ Earlier versions of this table and its rules: [history](HISTORY.md#single-black-
 | 0, *along `z`* (`v = 1/5`, `1/2`) | `:damped` (the core at `max(ρ_max, 12 |v|/r_0)`) | `1/16`; `1/24` at `v = 1/2` (`1/16`, `1/24`, `1/32`) | `r_0 = 1/2`, `r_1 = 19/16` (`8.7` cells inside the contracted pole `1.732` at `v = 1/2` and `1/16`; the ramp `11` cells) | measured to `20 M`: order 4 in the error outside the horizon; moving over resting in `[3, 5)` `1.38×` at `1/5` and `4.9×` at `1/2`, the same at every `h` (the moving solution and its position); `ℋ` `0.8–2.0×` at `1/2`, `0.65–1.01×` at `1/5` |
 | 0, *harmonic* | `:damped` | `1/24` (`1/24`, `1/32`, `1/48`, `1/64`) | `r_0 = 2/5`, `r_1 = 3/4` (`6` cells inside the horizon at `1/24`, the ramp `8.4`) | measured to `24 M` and at `1/24`, `1/32` to `128 M`: order 4 outside the horizon from `1/24` (`ℋ` just outside it `9.7`, `5.9`, `4.1`, a layer term); stationary near the hole; the mass drift truncation error; the Kerr-Schild row's accuracy at `1/24` needs `1/56–1/65` (`ℋ`) and `1/65–1/78` (the relative error) |
 | 0, *harmonic* | `:fitted` | `1/40` (`1/40`, `1/48`, `1/64`) | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8` (the core surface at `0.1 M` at `1/40`; the projection fires in the first `M` only) | measured to `24 M`, and at `1/40` to `128 M` (stationary near the hole, the mass drift `:damped`'s): `:damped`'s outside the horizon from `1/48` (`ℋ` just outside `1.03×`, every other shell equal), order 4 there with the margin fixed in cells and in `M`; the band inside does not converge |
+| 0, *harmonic, moving* (`v = 1/5`, `1/2` along `x`) | `:damped` (with the target's rate) | `1/24` at `v = 1/5` (`1/24`, `1/32`); `1/32` at `v = 1/2` (`1/32`, `1/40`) | `r_0 = 2/5`, `r_1 = 3/4` at `1/5`; `r_1 = 7/10` at `1/2` (the contracted horizon `0.866`; `5.3` cells inside at `1/32`) | measured to `40 M` (`1/5`) and `20 M` (`1/2`): no lag, order 4 or better outside the horizon; at `1/5` `ℋ` from `5/4` out `1.0–1.5×` the resting hole's and the error `1.2–1.8×`, just outside the horizon `ℋ` `1.6×` (`1/24`) and `3.0×` (`1/32`, the resting row's layer term converging at `9.7`); at `1/2` the trailing side `10–46×` in `ℋ` and `3–4×` in the error, converging at `4–6` |
+| 0, *harmonic, moving* (`v = 1/5` along `x`) | `:fitted` | `1/40` (`1/40`, `1/48`; `1/48` needs two H200s) | `m = 16`, `n_L = 20`, `fit_cont = 2`, `lmax_fit = 8`; `trail_ramp = 9/10` optional | measured to `40 M`: from `5/4` out `ℋ` `1.0–1.1×` the resting hole's and the error `1.1–1.6×`; just outside the horizon `ℋ` `14×` (`1/40`) and `18×` (`1/48`) on the trailing side, not converging against rest; a transient at `4 M` (`168×`, `22×` with `trail_ramp`); order `3–4` at `40 M`; **unstable at `v = 1/2`** at `1/48`, with and without `trail_ramp` |
 | 0.3 | `:damped` | `1/16` (`1/16`, `1/24`) | `r_0 = 3/4`, `r_1 = 3/2` | the rules |
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:damped` (with the target's rate) | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 23/16` (`9.4` cells inside the contracted pole `r₊ √(1 − v²) = 1.828` at `1/24`) | measured to `40 M` at `4/M`, with `1/40`: `ℋ` `0.81–1.08×` the resting hole's in every shell at every `h` and time, the error `1.1–1.6×` (the hole's position, late); order 4 outside the horizon in both pairs; `J − a` drifts at the resting hole's rate, order 4 |
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:fitted` | `1/32` (the ring: at `1/24` the core surface is at `0.35 < a` on the equator) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured to `40 M`: stable, but `ℋ` just outside the horizon `43×` `:damped`'s at `1/32` and `176×` at `1/40`, `10–15×` its own resting hole; it does not converge from `1/32` to `1/40` at `m` fixed in cells, even at rest |
@@ -7602,8 +7623,8 @@ All **(open)**.
 
 ## Harmonic gauge for the inspiral (proposed)
 
-*Status: a design for review. Step H1, the harmonic hole at rest, is
-measured ([What the package has measured in this
+*Status: a design for review. Steps H1 and H2, the harmonic hole at rest
+and moving, are measured ([What the package has measured in this
 chart](#what-the-package-has-measured-in-this-chart)); nothing else in this
 section is built, and every other number it leans on was measured elsewhere,
 and says where.*
@@ -7654,15 +7675,16 @@ counts the lines that must agree to a fraction of a cell. Per route:
 ### What the package has measured in this chart
 
 Step H1 repeated the Kerr-Schild hole's octant campaign at `a = 0` —
-fourth order, an H200, to `128 M` — and it is the first row below. The
+fourth order, an H200, to `128 M` — and step H2 its quadrant campaign, the
+hole moving at `v = 1/5` and `1/2`; they are the first two rows below. The
 other harmonic runs are early ones: on CPUs, to `13 M` at most, the moving
-ones at `q = 2` with a thin layer (`m = 4`, `n_L = 8`). The Kerr-Schild
-quadrant campaigns, the moving and the spinning holes, were not repeated
-here.
+ones at `q = 2` with a thin layer (`m = 4`, `n_L = 8`). The spinning holes'
+campaigns were not repeated here.
 
 | run | what it shows | where |
 |---|---|---|
 | `Harmonic(1, 0)` at rest on the octant, `q = 4`, `1/24` to `1/64`, to `24 M` and `128 M` | order four outside the horizon from `1/24` (`:damped`) and `1/40` (`:fitted`); `:fitted` at `m = 16`, `n_L = 20` equal to `:damped` outside from `1/48`; stationary near the hole to `128 M`, the mass drift truncation error; Kerr-Schild's `1/24` accuracy at `1/56–1/78` | [a harmonic hole at rest](SINGULARITY_HANDLING.md#a-harmonic-hole-at-rest-step-h1-2026-11-11) |
+| `boost(Harmonic(1, 0), v)` on the quadrant, `v = 1/5` to `40 M` (`1/24`–`1/48`) and `v = 1/2` to `20 M` (`1/32`, `1/40`), against resting rows | at `1/5` the resting hole from `5/4` out (`ℋ` `1.0–1.1×`, the error `1.1–1.6×` from `1/32`), no lag (`10⁻⁵ M`), the contraction to `10⁻⁶`, `:damped` order four or better; just outside the horizon a trailing excess in `ℋ`, `1.6–3.0×` for `:damped` and `12–18×` for `:fitted`, which does not converge against rest; at `1/2` `:damped` `10–46×` in `ℋ` and `3–4×` in the error on the trailing side, converging at `4–6`, and `:fitted` unstable; a fine level that follows the hole gives the capsule's numbers at `0.6–0.8×` the cost, and at `1/48` needs two H200s | [a moving harmonic hole](SINGULARITY_HANDLING.md#a-moving-harmonic-hole-step-h2-2026-11-12) |
 | `Harmonic(1, 0)` at rest, `h = 5/128`, to `10 M` | `:fitted` and `:damped` agree to `5 %`; the error is the chart's, steep between the layer and the horizon, and grows slowly | [the measurement matrix](SINGULARITY_HANDLING.md#the-generic-interior-the-measurement-matrix-step-8f) |
 | `Harmonic(1, 7/10)` at rest, `h = 5/256`, `:fitted`, to `10 M` | every fit valid; `M_irr` `0.30 %` low, `J` `1.0 %` high; ends at `0.5–3.5 M` at `5/128` | the same |
 | the same hole boosted at `0.3` across its spin, to `13 M` | the horizon's contraction `0.9534` against `0.95394`; no failed find; with `trail_ramp = 9/10` the error is `2.05×` the resting hole's and grows at `0.11` a `M` against `0.02`; `J` drifts by `0.013` a `M` | [the moving hole](SINGULARITY_HANDLING.md#the-moving-hole-step-8), [the trailing side](SINGULARITY_HANDLING.md#the-trailing-side-step-8) |
@@ -7718,7 +7740,11 @@ route](#what-is-not-known-on-this-route).
   `5.2×` on the octant at rest.
 - **So the fine level must stay with the holes**: by the tracked floors of
   [Refinement for two holes](#refinement-for-two-holes) on the inertial
-  grid, or because the holes rest on the comoving grid.
+  grid, or because the holes rest on the comoving grid. Measured for one
+  moving hole (step H2): the indicator's mesh regridded every chunk with its
+  floor on the tracked horizon gives the frozen capsule's numbers near the
+  hole at `0.81×` its cost at `1/24` and `0.61×` at `1/40`; at `1/48` it is
+  `70–95 M` points and needs two H200s.
 - **The spin is limited to `a ≤ 7/10`.** The chart's singular set is the
   equatorial disk of radius `a`, and the horizon's polar radius is
   `√(M² − a²)`; the two meet at `a = M/√2`. SpEC's superposed harmonic data
@@ -7800,8 +7826,11 @@ is less:
 
 - **On the inertial grid** each hole is a moving `:fitted` hole for the
   whole run: the layer takes its target's rate, has a trailing side, and
-  the fine level follows the track. The early rows above are this case at
-  `q = 2`; the Kerr-Schild hole at `q = 4` held `40 M` at `v = 1/5`.
+  the fine level follows the track. Step H2 measured it at `q = 4`: at
+  `v = 1/5`, a pair's speed at `d ≈ 6 M`, the moving hole is the resting
+  one from `5/4 M` out, with `:fitted`'s `ℋ` just outside the horizon
+  `12–18×` the resting hole's on the trailing side; at `v = 1/2` `:fitted`
+  does not hold ([a moving harmonic hole](SINGULARITY_HANDLING.md#a-moving-harmonic-hole-step-h2-2026-11-12)).
 - **On the comoving grid** each hole is the resting `:fitted` hole, and the
   fine level is static but for the creep. `(FRAME)`'s terms are kinematics
   for any gauge.
@@ -7814,9 +7843,14 @@ is less:
   harmonic hole on a grid translating with it has an exact reference, and
   must be this route's resting row to truncation.
 
-**(Proposed:)** steps H1–H3 run on the inertial grid, and the ratio of the
-moving hole to the resting one at `40 M` decides whether the pair needs the
-frame.
+Steps H1–H3 run on the inertial grid, and step H2's ratio of the moving hole
+to the resting one at `40 M` was to decide whether the pair needs the frame.
+**Its numbers favour the inertial grid with a following fine level for the
+inspiral** to the roll-on at `d_g = 6 M`, where each hole moves at about
+`1/5`. They leave the plunge, at `0.3–0.5`, without a `:fitted` hole on that
+grid. **(Open, Erik's decision:)** the inertial grid throughout, the comoving
+grid throughout, or the inertial grid with `:fitted` measured first between
+`v = 1/5` and `1/2`.
 
 ### The ladder of this route
 
@@ -7829,12 +7863,15 @@ frame.
    the same accuracy, not `2×`.
 2. **A moving harmonic hole is a resting one**: within `2×` the resting
    row to `40 M` at `v = 1/5`, which is step B1's moving row without its
-   gauge.
+   gauge. *Measured (step H2):* from `5/4 M` out it is, for both variants,
+   with no lag and the contraction to `10⁻⁶`; just outside the horizon the
+   trailing side is `1.6–3.0×` in `ℋ` for `:damped` and `12–18×` for
+   `:fitted`. At `v = 1/2` `:damped` holds at `3–46×` and `:fitted` does not.
 3. **Spin up to `a = 7/10`**, at rest, along the motion and across it, and
    whether the early rows' drift of `J` is still there at fourth order.
 4. **Two holes with no source**: the head-on pair in pure harmonic gauge to
    wherever it ends, then with the roll-on through the merger.
-5. **The orbit**, on the grid that step H2's ratio chooses.
+5. **The orbit**, on the grid chosen from step H2's ratio.
 
 ### What is not known on this route
 
@@ -7845,6 +7882,12 @@ All **(open)**, except where answered.
   rate, as truncation error at order four.
 - Whether the moving spinning hole's drift of `J` and its uniform growth
   are the chart's, the layer's or the early rows' order and resolution.
+- *Answered for `a = 0` at `v = 1/5` (step H2):* a moving harmonic hole has
+  no lag in this gauge and is the resting hole outside `5/4 M`. Open:
+  `:fitted`'s trailing excess just outside the horizon, which does not
+  converge against the resting row; the error's late rise outside the
+  horizon over `32–40 M` (`1.3–1.8×`, converging at order five); and the
+  speed between `1/5` and `1/2` at which `:fitted` stops holding.
 - *Answered for the harmonic hole at rest (step H1):* `:fitted` converges
   outside the horizon at a margin fixed in `M` — faster than order four
   while the margin gains cells, then at four. Open on any other chart and
@@ -7865,8 +7908,9 @@ All **(open)**, except where answered.
    step H4's pure harmonic run.
 3. **The spin**: `a ≤ 7/10` for G7 and G8 on this route **(proposed)**,
    with higher spins left to a chart that has a source.
-4. **The grid**: decided after step H2 **(proposed)**, or the comoving grid
-   from the start.
+4. **The grid**: step H2 has reported ([On which grid](#on-which-grid)):
+   the inertial grid with a following fine level holds the inspiral to
+   `v = 1/5`, and `:fitted` on it fails at `v = 1/2`.
 5. **The order**: steps H1–H3 now, since they need only `main`
    **(proposed)**, or after the binary steps B1–B3 have landed.
 

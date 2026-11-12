@@ -458,13 +458,30 @@ julia --project=. --threads=4 test/octant_runs.jl case=ks octant=rotating a=1/2 
 `case=harmonic` is Kerr in harmonic coordinates at rest on an octant, with
 no gauge source (step H1). Its defaults are the harmonic chart's radii, half
 Kerr-Schild's: the layer `r_0 = 2/5`, `r_1 = 3/4` and the shells
-`1, 5/4, 2, 4, 7`. A moving harmonic hole is refused (step H2's). Step H1's
+`1, 5/4, 2, 4, 7`. Step H1's
 rows ran on `L = 64`, cubes `32, 16, 8, 4`, one H200 each (`harm-h1`); the
 line below is its `:fitted` row at `1/48`, two minutes a `M`:
 
 ```bash
 julia --project=. --threads=4 test/octant_runs.jl case=harmonic L=8 N=32 roots=1 radii=4,4,2 t_end=1 chunk=1/4 cfl=1/2 amplitude=0 out=out/harm
 julia --project=. test/octant_runs.jl backend=cuda case=harmonic L=64 roots=2 radii=32,16,8,4 N=96 interior=fitted fit_cont=2 lmax_fit=8 margin=16 n_L=20 t_end=24 chunk=1 cfl=1/2 amplitude=0 group=h1 out=out/hf48 checkpoint=out/hf48/ck checkpoint_every=4 walltime=40000
+```
+
+The harmonic hole moves too, on the quadrant (`octant=quadrant v= x0=
+path=`), with no source (step H2), and **`mesh=follow`** gives a moving hole
+the indicator's mesh regridded every chunk, with the floor on the tracked
+horizon out to `floor_margin` (no `path`). Step H2's rows ran in `harm-h2`;
+the first line is a local smoke run of the following mesh, the second the
+`:fitted` row at `1/48` on two H200s of one node over MPI (from the HPC-X
+environment `bench/symmetry_mpi_gpu_env.sh` builds, through `MPI.mpiexec()`
+with `--bind-to none -n 2`; about `160 s/M`), and the third prints
+`SINGULARITY_HANDLING.md`'s "A moving harmonic hole" from
+`.claude/data/harm-h2` and step H1's `.claude/data/harm-h1`, with no package:
+
+```bash
+julia --project=. --threads=4 test/octant_runs.jl case=harmonic octant=quadrant v=1/5 x0=-1 L=8 N=24 roots=1 radii=4,3,2 margin=4 mesh=follow floor_margin=1 t_end=1/2 chunk=1/4 cfl=1/2 amplitude=0 out=out/hquad
+mpiexec --bind-to none -n 2 julia --threads=8 --project=<hpcx-env> test/octant_runs.jl backend=cuda mpi=true deviceaware=false case=harmonic octant=quadrant L=64 roots=4 radii=32,16,8,4 N=48 interior=fitted fit_cont=2 lmax_fit=8 margin=16 n_L=20 v=1/5 x0=-4 mesh=follow floor_margin=3 t_end=40 chunk=1 cfl=1/2 amplitude=0 group=h2 out=out/qf48f checkpoint=out/qf48f/ck checkpoint_every=4 walltime=40000
+julia test/harmonic_moving_study.jl
 ```
 
 The same script runs a hole moving along `x` on the quadrant
@@ -894,8 +911,8 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   own asymmetry.
 - **The ring rule limits `:fitted` to `h ≤ 1/32` at `a = 1/2`** (`CODE.md`, "Single black holes: recommended settings").
 - **`hz_J` is a component on the rotating quadrant and a magnitude elsewhere** (`CODE.md`, "The rotating quadrant: a hole moving along its spin axis"). Say which one a comparison reads.
-- **`1/48` on the moving hole's capsule does not fit one H200** (`CODE.md`, "Single black holes: recommended settings"). A finer or longer run needs several GPUs (`mpi=true`) or a mesh
-  that follows the hole.
+- **`1/48` on the moving hole's capsule does not fit one H200** (`CODE.md`, "Single black holes: recommended settings"), and in the harmonic chart a mesh that follows the hole does not either: it grows past
+  one H200 at its regrids (`CODE.md`, "Time integration"). Run it on several GPUs (`mpi=true`).
 - **On a GPU the analysis row, not the evolution, is the expensive part** (`CODE.md`, "The analysis cadence on an H200"). Use `chunk=1
   split=0` for production, and the split only to diagnose a moving layer's
   sides. Before adding a monitor to the

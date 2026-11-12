@@ -227,6 +227,22 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         @test isequal(changed.records[1:2], ref.records[1:2])
     end
 
+    # Guards the recipe of a run whose mesh the initial-data cycle chose: the
+    # cycle's flag function once shared the name of the regridding criterion
+    # the checkpoint saves, and replaced it with a closure, so every `:damped`
+    # run with `adapt = true` failed at its first checkpoint (step H2,
+    # 2026-11-12). The `:fitted` cycle is another branch and never did.
+    @full_tier @testset "a chain whose mesh the initial-data cycle chose is the run" begin
+        case = adaptive_hole_fixture(T)
+        forest = gh_forest(T, case; N=8, roots=4)
+        ref = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                      t_end=T(3 // 20), adapt=true, regrid=true)
+        out, jobs, _ = chain(case, forest, T(3 // 20); adapt=true, regrid=true)
+        @test jobs == 3
+        @test out.criterion_changed == Symbol[]
+        test_same(out, ref)
+    end
+
     # The tracked `:fitted` hole on the adaptive fixture, with a corner the
     # first regrid coarsens: the track, both fits, the finder's seed, the
     # gauge source's sample (Kerr-Schild is not harmonic) and the geometry

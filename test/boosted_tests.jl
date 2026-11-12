@@ -1054,3 +1054,48 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         @test diff ≤ eps(T)^(2 // 3) * scale
     end
 end
+
+# A boosted harmonic hole (added 2026-11-12, step H2): `harmonic_kerr_case(; v,
+# x0)` is `kerr_schild_case`'s motion on `Harmonic(M, a)`, and takes no gauge
+# source because a boost of the harmonic chart is harmonic. No evolution: the
+# runs are `test/octant_runs.jl case=harmonic octant=quadrant`.
+@testset verbose = true "A boosted harmonic hole is a case with no gauge source" begin
+    # Guards the route's premise and the case's plumbing: the hole at
+    # `x0 + v t` (the boost's sign), no source field set, the static hole when
+    # it does not move, and the boosted chart still harmonic — a sign or an
+    # order of boost and translation that broke `□x^a = 0` would make the exact
+    # solution a gauge transient under `H ≡ 0`.
+    T = Float64
+    v, x0 = 1 // 5, -4
+    kw = (; halfwidth=T(8), r_0=T(2 // 5), r_1=T(3 // 4), chunk=T(1 // 2))
+    quad = harmonic_kerr_case(T; v=v, x0=x0, kw..., octant=:quadrant)
+    full = harmonic_kerr_case(T; v=v, x0=x0, kw...)
+    for case in (full, quad)
+        @test hole_velocity(case.background) == SVector{3,T}(1 // 5, 0, 0)
+        @test case.center.v == SVector{3,T}(1 // 5, 0, 0)
+        @test center_at(case.center, zero(T)) == SVector{3,T}(-4, 0, 0)
+        @test center_at(case.center, T(10)) ≈ SVector{3,T}(-2, 0, 0) atol = 8eps(T)
+        @test case.gauge === nothing
+    end
+    @test quad.box == ((T(-8), T(8)), (zero(T), T(8)), (zero(T), T(8)))
+    @test harmonic_kerr_case(T; kw...).background === SM.Harmonic(one(T), zero(T))
+    @test_throws "Leave center unset" harmonic_kerr_case(T; v=v, kw...,
+                                                         center=(T(1), 0, 0))
+    @test_throws "axis is the coordinate" harmonic_kerr_case(T; v=v, axis=0, kw...)
+    # `−Γ_a = 0` at `t = 10`, one to five M from where the hole is then, against
+    # the size of the connection there; and the metric singular where the
+    # center says the hole is, read beside the point, never on it.
+    bg = quad.background
+    worst = zero(T)
+    for x in (SVector{3,T}(0, 2, 1), SVector{3,T}(-6, -3, 2), SVector{3,T}(-2, 1, -4))
+        p = SVector{4,T}(10, x...)
+        Hs, _ = SM.gauge_source_grad(bg, p)
+        _, dg = SM.dmetric(bg, p)
+        worst = max(worst, maximum(abs, Hs) / maximum(abs, dg))
+    end
+    @test worst ≤ 1e-13
+    δ = T(1 // 1000)
+    gtt(t, x) = SM.metric(bg, SVector{4,T}(t, x...))[1, 1]
+    @test abs(gtt(10, center_at(quad.center, T(10)) + SVector{3,T}(0, δ, 0))) > 10
+    @test abs(gtt(10, SVector{3,T}(-6, δ, 0))) < 10
+end

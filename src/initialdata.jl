@@ -890,13 +890,21 @@ Every other keyword is [`hole_case`](@ref)'s.
 """
 function kerr_schild_case(::Type{T}=Float64; M=one(T), a=zero(T), v=zero(T),
                           x0=zero(T), axis::Integer=1, kwargs...) where {T}
+    return moving_hole_case(T, KerrSchild(T(M), T(a)), "Kerr-Schild"; M=M, v=v, x0=x0,
+                            axis=axis, kwargs...)
+end
+
+# The hole `bg` moved to `(x0 + v t)` along `axis`: `kerr_schild_case`'s motion,
+# shared with `harmonic_kerr_case` (added 2026-11-12, step H2). With `v` and
+# `x0` both zero it is the static hole at `center`, as before.
+function moving_hole_case(::Type{T}, bg, chart::AbstractString; M, v, x0,
+                          axis::Integer, kwargs...) where {T}
     axis in 1:3 || throw(ArgumentError(
         "axis is the coordinate the hole sits and moves on, 1, 2 or 3, got $axis."))
-    bg = KerrSchild(T(M), T(a))
     iszero(v) && iszero(x0) && return hole_case(T, bg; M=T(M), kwargs...)
     xyz = ("x", "y", "z")[axis]
     haskey(kwargs, :center) && throw(ArgumentError(
-        "a moving or translated Kerr-Schild case is placed by x0, the hole's " *
+        "a moving or translated $chart case is placed by x0, the hole's " *
         "$xyz at t = 0 on the $xyz axis, and its center is x0 along it; got " *
         "center = $(kwargs[:center]) beside v = $v and x0 = $x0. Leave center " *
         "unset."))
@@ -907,7 +915,8 @@ function kerr_schild_case(::Type{T}=Float64; M=one(T), a=zero(T), v=zero(T),
 end
 
 """
-    harmonic_kerr_case(T = Float64; M = 1, a = 0, halfwidth, r_0, r_1, chunk, …)
+    harmonic_kerr_case(T = Float64; M = 1, a = 0, v = 0, x0 = 0, axis = 1, halfwidth,
+                       r_0, r_1, chunk, …)
 
 `CODE.md`'s fifth row: a hole in **fully harmonic** Cartesian coordinates,
 horizon penetrating and harmonic — `H ≡ 0` exactly, so no `Hsrc` field set
@@ -919,10 +928,19 @@ Its horizon's smallest coordinate radius is `√(M² − a²)`, which is `M` at
 expensive one, and `CODE.md` names those bounds, not the exterior, as what
 sets the finest spacing a run needs.
 
+`v`, `x0` and `axis` (added 2026-11-12, step H2) move the hole as
+[`kerr_schild_case`](@ref)'s do: it is at `x0 + v t` along `axis`, the
+background `translate(boost(Harmonic(M, a), −v ê), x0 ê)`. A boost of a
+harmonic chart is harmonic, so the moving hole takes no gauge source either —
+the route of `CODE.md`'s "Harmonic gauge for the inspiral".
+
 Every other keyword is [`hole_case`](@ref)'s.
 """
-harmonic_kerr_case(::Type{T}=Float64; M=one(T), a=zero(T), kwargs...) where {T} =
-    hole_case(T, Harmonic(T(M), T(a)); M=T(M), kwargs...)
+function harmonic_kerr_case(::Type{T}=Float64; M=one(T), a=zero(T), v=zero(T),
+                            x0=zero(T), axis::Integer=1, kwargs...) where {T}
+    return moving_hole_case(T, Harmonic(T(M), T(a)), "harmonic Kerr"; M=M, v=v, x0=x0,
+                            axis=axis, kwargs...)
+end
 
 """
     gh_forest(T = Float64, case::GHCase; N, roots, refined = false, comm = nothing)

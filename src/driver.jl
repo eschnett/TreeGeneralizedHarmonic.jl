@@ -746,15 +746,18 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             acycle(g) = fitmode ? with_variant(g, :damped) : g
             fitmode && check_interior_radii(forest, acycle(geom), case.background,
                                             G; t=zero(T), center=case.center)
-            criterion(fs) = indicator_flags(fs, case, zero(T); G=G,
-                                            buffer=bufferwidth, travel=travel,
-                                            interior=fitted ?
-                                                     acycle(geometry(fs.forest,
-                                                                     zero(T), tr)) :
-                                                     case.interior).flags
+            # Not `criterion`: that name is the recipe's regridding criterion,
+            # which the checkpoint saves, and a local function of the same name
+            # in this body would be that variable (step H2, 2026-11-12).
+            cycle_flags(fs) = indicator_flags(fs, case, zero(T); G=G,
+                                              buffer=bufferwidth, travel=travel,
+                                              interior=fitted ?
+                                                       acycle(geometry(fs.forest,
+                                                                       zero(T), tr)) :
+                                                       case.interior).flags
             schedule, passes, converged = adapt_to_initial_data!(
                 U, ops; initial=state_callback(case, zero(T); interior=acycle(geom)),
-                flags=criterion, buffer=0, maxpasses=maxpasses,
+                flags=cycle_flags, buffer=0, maxpasses=maxpasses,
                 boundary=dirichlet(case, zero(T)))
             converged || throw(ErrorException(
                 "the initial-data cycle had not converged after $passes passes: " *
@@ -1215,11 +1218,19 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # through the transfer would be work thrown away (amended in step 6;
     # `CODE.md`'s loop lists all three). It returns what it rebuilt rather
     # than assigning it, so that the loop's `p` and `u` are not captured.
-    function regrid_mesh(p, u, schedule, stop, flags)
+    #
+    # **The regrid and the rebuild are two calls (amended in step H2,
+    # 2026-11-12)**, so that the loop drops the previous chunk's integrator
+    # between them: its scratch is four state-sized vectors, and a run that
+    # fills a device — the following mesh at `1/48` on an H200, 115 of 143 GB
+    # — cannot hold them beside the new problem's arrays. Dropped there and
+    # not before the regrid, a regrid that leaves the mesh as it was keeps
+    # the scratch for the next chunk.
+    regrid_forest(schedule, stop, flags) =
+        regrid!(U.forest, U => schedule; flags=flags, buffer=0,
+                boundary=dirichlet(case, stop))
+    function rebuild(stop)
         mesh = U.forest
-        moved = regrid!(mesh, U => schedule; flags=flags, buffer=0,
-                        boundary=dirichlet(case, stop))
-        moved || return (; moved, p, u, schedule, geom)
         schedule = GhostSchedule(U, ops)
         # A tracked geometry is rebuilt on the new mesh from the same track —
         # its offset and ramp are stated in the mesh's spacings — and the
@@ -1242,7 +1253,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # the same call — and the `:pasted` variant's paste, which every other
         # variant compiles away: `stage_limit!` (GH-4).
         stage_limit!(u, p, stop)
-        return (; moved, p, u, schedule, geom=g)
+        return (; p, u, schedule, geom=g)
     end
 
     # **A restart regrids first** (decided 2026-10-01): the checkpoint was
@@ -1253,9 +1264,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # uninterrupted run regridded.
     if ck !== nothing && regrid && c_done < nchunks && case.refinement !== nothing
         ind0 = gh_indicator!(p, u, t_saved; buffer=bufferwidth, travel=travel)
-        rg = regrid_mesh(p, u, schedule, t_saved, ind0.flags)
-        if rg.moved
+        if regrid_forest(schedule, t_saved, ind0.flags)
             nregrids += 1
+            rg = rebuild(t_saved)
             p, u, schedule, geom = rg.p, rg.u, rg.schedule, rg.geom
             fitted && ((geom_sampled, sample_t, sample_track) = (geom, t_saved, tr))
         end
@@ -1447,10 +1458,10 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # (5) the regrid. **Not after the last chunk**: the forest that comes
         # back is then the one the returned state was computed on.
         if regrid && c < nchunks && ind !== nothing
-            rg = regrid_mesh(p, u, schedule, stop, ind.flags)
-            if rg.moved
+            if regrid_forest(schedule, stop, ind.flags)
                 nregrids += 1
                 integ_prev = nothing        # its scratch is the old mesh's
+                rg = rebuild(stop)
                 p, u, schedule, geom = rg.p, rg.u, rg.schedule, rg.geom
                 fitted && ((geom_sampled, sample_t, sample_track) = (geom, stop, tr))
             end
