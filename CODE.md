@@ -3323,8 +3323,15 @@ integrator per chunk**, stepping the run's own state vector in place
 between pieces through a `ProblemRef` (`swappable = true`) instead of a new
 `init`, and each chunk's integrator takes over the previous chunk's scratch
 while the mesh is unchanged (`reuse`, IMEXRungeKutta 1.2),
-so the scratch is allocated once per mesh and not once per chunk. What
-follows from it:
+so the scratch is allocated once per mesh and not once per chunk. A regrid
+that moves the mesh drops the scratch *before* the new problem is
+allocated: the four state-sized vectors are what a run that fills a device
+cannot hold beside the new problem's arrays. The following mesh at `1/48`
+on an H200 (`115` of `143` GB) ran out of memory in the new problem's
+constructor at its first regrid that moved the mesh; with the scratch
+dropped it built the new problem, and then ran out allocating the next
+chunk's scratch on a mesh that had grown. That row needs two GPUs (step
+H2). What follows from it:
 
 - **The limiters: one, on every state vector.** IMEXRungeKutta calls its stage limiter only on the three stage
   values of a step that `f_exp!` reads and its step limiter once on the
@@ -4713,7 +4720,7 @@ with a changed criterion** as the first thing it does, before its next
 step: the flags are computed again from the restored state with the
 indicator the restart is given — the record computes them last, from
 nothing the other rows leave behind, so with the same criterion they are
-the same flags — and the regrid is the loop's own code (`regrid_mesh` in
+the same flags — and the regrid is the loop's own code (`regrid_forest` and `rebuild` in
 `driver.jl`), which is what makes the replay exact. The price is one
 indicator evaluation per restart. A second consequence: **the last chunk is
 a restart point too**, where `t_end` is a whole number of chunks in `T`
