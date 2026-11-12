@@ -48,10 +48,20 @@
 # interior. Its horizon is at `M` on the equator and `√(M² − a²)` at the
 # poles, half the Kerr-Schild hole's radius, and every default that is a
 # radius about the hole — the layer, the shells, the gate, the noise's core —
-# is the harmonic chart's own: the areal radius less `M`. A moving harmonic
-# hole is step H2's and is refused here.
+# is the harmonic chart's own: the areal radius less `M`.
+#
+# From 2026-11-12 (step H2) the harmonic hole moves too, on the quadrants and
+# the bitant as the Kerr-Schild hole does (`case=harmonic octant=quadrant v=1/5
+# x0=-1`): a boosted harmonic chart is harmonic, so it still takes no source.
+# And a moving hole's mesh may follow it (`mesh=follow`): the indicator's mesh
+# from the initial-data cycle on, regridded every chunk, with the level floor
+# on the tracked horizon out to `r_h,max + floor_margin` and the cap at the
+# hierarchy's finest level (the shells of `radii` are then only the cycle's
+# starting mesh); the CSV adds the blocks per level.
 #
 #     julia --project=. --threads=4 test/octant_runs.jl case=harmonic L=8 N=16 roots=1 radii=4,2,1 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/harm
+#
+#     julia --project=. --threads=4 test/octant_runs.jl case=harmonic octant=quadrant v=1/5 x0=-1 L=8 N=24 roots=1 radii=4,3,2 margin=4 mesh=follow floor_margin=1 t_end=1/2 chunk=1/4 cfl=1/2 amplitude=0 out=out/hquad
 #
 #     julia --project=. --threads=4 test/octant_runs.jl case=ks octant=quadrant v=1/5 x0=-1 L=8 N=16 roots=1 radii=4,3,2 r_0=5/8 r_1=23/16 t_end=1 chunk=1/2 cfl=1/2 amplitude=0 out=out/quad
 #
@@ -77,23 +87,24 @@
 #   eps=1/2 gamma0=1 gamma2=0       ε_KO, γ0, γ2
 #   case=minkowski|ks|harmonic      flat space, the Kerr-Schild hole, or (added
 #                                   2026-11-11) Kerr in harmonic coordinates, with
-#                                   no gauge source, at rest on an octant
+#                                   no gauge source, at rest on an octant or (from
+#                                   2026-11-12) moving on the quadrants
 #   octant=reflecting|rotating|quadrant|rotating_quadrant|bitant
 #                                   three mirrors (a = 0 only), or the
 #                                   quarter turn about z and the mirror at z = 0
 #                                   (any a), or (added 2026-10-20) the quadrant
 #                                   [−L, L] × [0, L]² with mirrors at y = 0 and
 #                                   z = 0, for a hole on the x axis moving along
-#                                   it (ks, a = 0 only): a (2r, r, r) root brick
+#                                   it (a = 0 only): a (2r, r, r) root brick
 #                                   and the shells swept along the path; or
 #                                   (added 2026-10-21) the rotating quadrant
 #                                   [0, L]² × [−L, L], the quarter turn about z
 #                                   and no mirror, for a hole spinning about z
-#                                   and moving along it (ks, any a): a (r, r, 2r)
+#                                   and moving along it (any a): a (r, r, 2r)
 #                                   root brick and the shells swept along z; or
 #                                   (added 2026-10-24) the bitant [−L, L]² × [0, L],
 #                                   the mirror at z = 0 alone, for a hole spinning
-#                                   about z and moving along x (ks, any a): a
+#                                   about z and moving along x (any a): a
 #                                   (2r, 2r, r) root brick and the shells swept
 #                                   along x
 #   v=0 x0=0                        the quadrants and the bitant only: the hole's
@@ -104,6 +115,15 @@
 #   path=v·t_end                    the same domains only: the length along the
 #                                   motion axis of the segment from x0 the shells
 #                                   are swept along (the capsule mesh, frozen; in M)
+#   mesh=capsule|follow             the same domains only (added 2026-11-12): the
+#                                   capsule, or the mesh that follows the hole —
+#                                   the indicator's, regridded every chunk, its
+#                                   floor on the tracked horizon (no path=)
+#   floor_margin=0 refine_tol=2/5 coarsen_tol=1/10
+#                                   mesh=follow only: the floor's reach beyond the
+#                                   horizon's largest radius (in M) and the
+#                                   indicator's thresholds (test/hole_runs.jl's
+#                                   moving rows')
 #   split=0|1                       also each shell's trailing ((x − c(t))·v̂ < 0)
 #                                   and leading (> 0) half, and the horizon's
 #                                   extents and their ratio along/across the motion
@@ -283,10 +303,18 @@ v_hole = rat(opt("v", "0"))
 x0_hole = rat(opt("x0", "0"))
 path_x = haskey(OPTIONS, "path") ? rat(OPTIONS["path"]) : v_hole * t_end
 moving_domain && !hole &&
-    error("octant = $symmetry is the moving hole's domain, and needs case = ks")
-moving_domain && harmonic &&
-    error("octant = $symmetry is the moving hole's domain, and a moving harmonic " *
-          "hole is step H2's: case = harmonic runs at rest on the octants for now")
+    error("octant = $symmetry is the moving hole's domain, and needs case = ks or harmonic")
+# The mesh of a moving hole (added 2026-11-12, step H2): the capsule, frozen
+# shells swept along the path, or `follow`, the indicator's mesh regridded
+# every chunk with the level floor on the tracked horizon (`CODE.md`,
+# "Refinement and regridding").
+meshname = opt("mesh", "capsule")
+meshname in ("capsule", "follow") || error("mesh is capsule or follow, got $meshname")
+follow = meshname == "follow"
+follow && !(moving_domain && hole) &&
+    error("mesh = follow is a moving hole's mesh, on the quadrants or the bitant")
+follow && haskey(OPTIONS, "path") &&
+    error("path = is the capsule's; mesh = follow sweeps nothing")
 moving_domain || (iszero(v_hole) && iszero(x0_hole) && !haskey(OPTIONS, "path")) ||
     error("v = $v_hole, x0 = $x0_hole and path = are a hole on an axis, which " *
           "only octant = quadrant or bitant (x) or rotating_quadrant (z) maps onto itself " *
@@ -343,8 +371,18 @@ haskey(OPTIONS, "roots") || roots * N == L ||
 # The chart's case (added 2026-11-11): Kerr-Schild with its gauge source and
 # its motion, or the harmonic hole, which has neither.
 hole_chart_case(; motion=(;), kw...) =
-    harmonic ? harmonic_kerr_case(T; a=a_spin, kw...) :
+    harmonic ? harmonic_kerr_case(T; a=a_spin, motion..., kw...) :
     kerr_schild_case(T; a=a_spin, motion..., kw...)
+# The following mesh's refinement (added 2026-11-12): `test/hole_runs.jl`'s
+# moving rows' thresholds, the cap at the hierarchy's finest level, the floor
+# on the tracked horizon out to `r_h,max + floor_margin`, and the ceiling of
+# one coarse cell at the outer faces.
+refinement = follow ?
+             Refinement(T; refine_tol=T(rat(opt("refine_tol", "2/5"))),
+                        coarsen_tol=T(rat(opt("coarsen_tol", "1/10"))),
+                        maxlevel_cap=length(radii),
+                        floor_margin=T(rat(opt("floor_margin", "0"))), ceiling_cells=1) :
+             nothing
 case = if hole
     src = opt("source", harmonic ? "none" : "algebraic")
     harmonic && src != "none" &&
@@ -379,7 +417,8 @@ case = if hole
         hole_chart_case(; motion=motion, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
                         octant=Symbol(symmetry), gauge_source=gs, interior=spec,
                         horizon=Horizon(T; every=1, N=12, spin=true),
-                        bounds=default_bounds(T; M=1, r_gate=r_gate))
+                        bounds=default_bounds(T; M=1, r_gate=r_gate),
+                        refinement=refinement)
     else
         haskey(OPTIONS, "variant") &&
             error("variant= is the tracked geometry's (interior = fitted); the " *
@@ -392,7 +431,7 @@ case = if hole
                         r_1=rat(opt("r_1", harmonic ? "3/4" : "3/2")), ρ_ramp=1,
                         chunk=chunk, ε_KO=ε_KO, γ2=γ2, octant=Symbol(symmetry),
                         gauge_source=gs, margin=parse(Int, opt("margin", "8")),
-                        horizon=finder)
+                        horizon=finder, refinement=refinement)
     end
 else
     minkowski_octant_case(T; L=L, ε_KO=ε_KO, γ0=γ0, γ2=γ2, chunk=chunk,
@@ -408,7 +447,8 @@ forest0 = moving_domain ?
           hole_forest(T, case; N=N,
                       roots=ntuple(d -> d == axis || (bitant && d ≤ 2) ? 2 * roots : roots, 3),
                       center=on_axis(x0_hole), radii=radii, shape=:cube,
-                      path=iszero(path_x) ? nothing : on_axis(path_x), comm=comm) :
+                      path=iszero(path_x) || follow ? nothing : on_axis(path_x),
+                      comm=comm) :
           hole_forest(T, case; N=N, roots=roots, center=(0, 0, 0), radii=radii,
                       shape=:cube, comm=comm)
 nlev = length(radii) + 1
@@ -474,6 +514,9 @@ if split_on
     append!(cols, ["c_$axname", "hz_found", "hz_$axname", "hz_M_irr", "hz_J", "hz_dx",
                    "hz_dy", "hz_dz", "hz_ratio"])
 end
+# The following mesh's blocks, overall and per level (added 2026-11-12), last:
+# what a chunk cost, since the mesh changes.
+follow && append!(cols, vcat(["blocks"], ["blocks_L$ℓ" for ℓ in 0:(nlev - 1)]))
 isrank0 && !isfile(csvpath) && open(io -> println(io, join(cols, ',')), csvpath, "w")
 
 # `mom` and `gauge` are reported as the largest component's norm: the
@@ -868,6 +911,10 @@ function observe(p, t, u, rec)
                       rec.origin === nothing ? NaN : Float64(rec.origin[axis]),
                       something(rec.M_irr, NaN), hz_J, ext..., hz_ratio))
     end
+    if follow
+        lv = level.(p.U.forest.leaves)
+        append!(row, vcat([length(lv)], [count(==(ℓ), lv) for ℓ in 0:(nlev - 1)]))
+    end
     isrank0 && open(csvpath, "a") do io
         println(io, join((x isa Real ? @sprintf("%.10g", x) : string(x) for x in row), ','))
     end
@@ -1018,6 +1065,7 @@ out = try
     evolve!(T, case; forest=restarting ? nothing : forest0, q=q,
             ops=Operators(prolongation=q + 2, restriction=q + 2), t_end=t_end,
             chunk=chunk, cfl=cfl, backend=backend, observer=observe,
+            adapt=follow, regrid=follow,
             perturb=perturb, comm=comm, fitkw..., findkw..., ckw...)
 catch err
     # Over MPI the status file's write is collective, and a failure may be
