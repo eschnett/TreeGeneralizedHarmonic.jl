@@ -1070,6 +1070,60 @@ right-hand-side kernel therefore forms the point's position
 unconditionally — three fused multiply-adds, which the compiler drops
 where the profile is constant and there is no interior.
 
+**On a star, `1/M` is not the recipe.** The near-hole value grows a mode
+inside a star. TreeGRRMHD found it on its TOV star (its `PLAN.md`, GH-8):
+`R/M = 6.85`, flat at `γ0 M ≤ 1/10`, growing from `1/4`, doubling every
+`25 M` at `1`, at a rate independent of `h`. This package's Plummer star
+shows the same mode. The measurement below is of 2026-11-11 (`test/star_runs.jl`,
+`test/star_study.jl`), with the matter held fixed (GH-3's anti-Cowling setting), a
+sampled `H_a`, `ε_KO = 1/2`, `q = 4`, `h = R/16`, the box `(−2R, 2R)³`, and
+constant `γ0` and `γ2`, to `500 M`. The table gives the e-folding time of
+the largest change of the state over the last half of the run, in `M`
+(`∞`: it does not grow); the change itself at `500 M` is in parentheses.
+
+| `γ0 R` | `R/M = 5` | `R/M = 10` | `R/M = 20` |
+|---|---|---|---|
+| 0.5–2.5 | ∞ (2e−6) | ∞ (1e−6, 2e−6) | ∞ (7e−7, `γ0 R = 2`) |
+| 5 | 4400 (1e−5) | ∞ (6e−6) | ∞ (3e−6) |
+| 10 | 68 (0.3) | 434 (6e−5) | 2036 (1e−5) |
+| 20 | levels off at 0.4 | 86 (7e−3) | 520 (7e−5) |
+| 40 | | 68 (0.15) | 245 (5e−4) |
+| 80–100 | | levels off at 0.16 | 160 (3e−3, `γ0 R = 80`) |
+
+`γ0 = 0` stays at `1e−6` on `R/M = 10`.
+
+- **The onset is fixed in `γ0 R`, between 5 and 10, on all three stars.** In
+  units of `M` it moves by a factor of four with the star. The box scales with
+  `R` here, so `R` and the box's crossing time are not separated. The mode peaks
+  at the centre and is thirty times smaller at the box's faces, and GH-8 found
+  that a box twice as wide does not change the interior. The growth rate above
+  the onset is not a function of `γ0 R` alone: at `γ0 R = 10` the e-folding is
+  `14 R`, `43 R` and `100 R` from the most to the least compact star.
+- **The threshold does not transfer between stars.** The TOV star's onset is
+  between `γ0 R = 1` and `1.7`, five times lower than Plummer's at a similar `R/M`. The TOV
+  star has a surface, and its truncation error converges at second order there
+  (GH-8: `2.5×` for `h` divided by `1.6`). A rule for a new matter case has to
+  be measured on that case, as TreeGRRMHD's `1/(10M)` was.
+- **The rate is a property of the equations, and the truncation error seeds
+  the mode.** At `γ0 M = 1` on `R/M = 10` the e-folding is 428, 434 and
+  `441 M` at `h = R/12`, `R/16` and `R/24`. The amplitude at `250 M` falls by
+  3.1 and 5.0 between the three, against `3.16` and `5.06` at order four.
+- **What grows is the diagonal spatial metric at the centre.** The change is
+  in `h_xx = h_yy = h_zz`, largest within `R/4` of the centre, and falls
+  smoothly to the box. `Π` is smaller by about the growth rate, which makes
+  this a growth without oscillation, not a wave.
+- **`γ2` decides it.** `γ2 = −1/2` holds the change flat at `γ0 R = 10` and at
+  `γ0 R = 40` (`4e−6`, `7e−6` at `500 M`), as on the TOV star. `γ2 = +1` at
+  `γ0 R = 10` is a different mode: it is in `Π`, at `r ≈ R`, with an e-folding
+  time of `10 M`, and the change reaches 1 at `110 M`.
+
+The suite's star (`star_case` in `test/matter_tests.jl`) runs at `γ0 = 1`
+with `M = 1/10` and `R = 1`: `γ0 M = 1/10` and `γ0 R = 1`, on the flat side of
+the onset. It is the table's `R/M = 10`, `γ0 R = 1` row, which stays at `1e−6`
+to `500 M`. (GH-8 calls it `10/M`, which it is not.) On a Plummer star the
+hole's `1/M` stays flat only for `R/M ≲ 5`. Any other matter case should use
+`γ2 = −1/2` or measure its own threshold.
+
 ## Boundaries
 
 ### Periodic
@@ -4976,7 +5030,7 @@ says that TreeAMR's `[compat]` selects **0.1.1**.
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's. `GHCase` is in `initialdata.jl` |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
-| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop (after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions. The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl`: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. The hole has `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here (following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`). The range projection has `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. The layer's calibration has the E3 target `CurvatureTarget` in `evolution_cases.jl`, its claims in `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. The tracked geometry has `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and `evolution_cases.jl`'s shell norms are the interior's own `shell_mask`. The fitted target has `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and `fitted_fixture` is in `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` has a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`); GH-3's matter term has `matter_tests.jl` — the acceptance on a static star with its `EinsteinTensor` matter, the lanes with matter, the anti-Cowling run, and a test adapter (`SampledMatter`) shaped as TreeGRRMHD's will be; GH-4's verbs have `verbs_tests.jl` — a script's integrator over two sets, and the limiters, the speed and the initial state on a segment |
+| `test/` | one `*_tests.jl` per section above, `prerequisite_tests.jl` (what the two pinned dependencies must still provide), `type_tests.jl`, `threading_tests.jl`, `device_tests.jl`, the standalone `thread_workload.jl`, and `evolution_cases.jl` — a *helper*, the runs the convergence and noise studies are made of, which lives in `test/` because what it wraps is the integrator loop (after TreeAMR's `test/wave.jl`). `pointwise.jl`'s tests are **two** files over a shared `pointwise_backgrounds.jl` — `pointwise_tests.jl` for the algebra as a function of the state, `pointwise_identity_tests.jl` for the two identities that need derivatives of it — because between them they compile the metric library's nested dual passes for six backgrounds at two precisions. The interface-order table has a file of its own, `interface_tests.jl`, rather than a testset in `convergence_tests.jl`: it is fifteen evolutions on a mesh where the ghost fill costs four times what it costs on a uniform one, and separating it keeps the cheap order study cheap. The hole has `interior_tests.jl` (the profiles, the core rule, the masks, the radius assertions, and one right-hand-side evaluation on a mesh), `driver_tests.jl` (the runs), the hole fixture in `evolution_cases.jl`, and the **standalone** `test/hole_runs.jl` — the `t = 50 M` runs, `q = 4`, and the two harmonic charts, which are minutes rather than seconds and are run by hand with their numbers recorded here (following `PLAN.md`'s instruction to put what cannot fit a test file in a script under `test/`). The range projection has `bounds_tests.jl` (the projection on synthetic states and on every background, its `Float32` row, planted failures on the fixture's mesh, and the bitwise control) and `hole_runs.jl`'s `bounds` section. The layer's calibration has the E3 target `CurvatureTarget` in `evolution_cases.jl`, its claims in `interior_tests.jl` and `driver_tests.jl`, and `hole_runs.jl`'s `calibration` section. The tracked geometry has `tracking_tests.jl` — the real harmonics against `AbstractSphericalHarmonics`, the seed against the charts' quartic, the depth of an oblate spheroid, the footprint guard on a non-spherical surface, the e-folds against `dispersion.jl`, the bit-identity of a fitted sphere with step 5's layer, one find of the fixture, and the tracked runs — and `evolution_cases.jl`'s shell norms are the interior's own `shell_mask`. The fitted target has `fit_tests.jl` — the fit's harmonics against `shape_series` and `ash_evaluate`, the whole ansatz recovered by `solve_fit`, the static hole's fit against its truncation and the interpolation order, the validity sweep on three holes and the `g_ab` mean control, the evaluator against the model at `Float64` and `Float32`, and the fit of the tracked run's final state; and the `:fitted` right-hand side against `:damped`'s bit for bit, the fixture's `:fitted` run to `0.15 M` and one chunk of it at `Float32` — and `fitted_fixture` is in `evolution_cases.jl` beside `tracked_fixture_run`, the one tracked run `tracking_tests.jl` and `fit_tests.jl` share; `hole_runs.jl` has a `fitted` section (the fixture's initial-data study to `1 M`, the boosted seed, harmonic `a = 9/10`); GH-3's matter term has `matter_tests.jl` — the acceptance on a static star with its `EinsteinTensor` matter, the lanes with matter, the anti-Cowling run, and a test adapter (`SampledMatter`) shaped as TreeGRRMHD's will be; the star and its fixed matter are `plummer_star.jl`'s, which the standalone damping study `star_runs.jl` (one run) and `star_study.jl` (its tables) share; GH-4's verbs have `verbs_tests.jl` — a script's integrator over two sets, and the limiters, the speed and the initial state on a segment |
 | `bin/` | `gh.jl` (the CLI, after GHSO2's `gh3d.jl`), viewers, `benchmark.jl`, `backend.jl`, own `Project.toml` |
 
 **Inconsistent:** the `test/` row says `prerequisite_tests.jl` checks what
