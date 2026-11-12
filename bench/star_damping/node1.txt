@@ -1,0 +1,16 @@
+# The star-damping study, node 1 (GH-8): the Plummer star at R/M = 10
+# (M = 1/10, R = 1, L = 2R), h = R/16, to 500 M. The γ0 scan at γ2 = 0, the
+# γ2 rows, and the resolution pair at γ0 M = 1.
+a10-g0      M=1/10 gamma0M=0
+a10-g1_10   M=1/10 gamma0M=1/10
+a10-g1_4    M=1/10 gamma0M=1/4
+a10-g1_2    M=1/10 gamma0M=1/2
+a10-g1      M=1/10 gamma0M=1
+a10-g2      M=1/10 gamma0M=2
+a10-g4      M=1/10 gamma0M=4
+a10-g10     M=1/10 gamma0M=10
+a10-g1-c-1_2  M=1/10 gamma0M=1 gamma2=-1/2
+a10-g4-c-1_2  M=1/10 gamma0M=4 gamma2=-1/2
+a10-g1-c1     M=1/10 gamma0M=1 gamma2=1
+a10-g1-h12  M=1/10 gamma0M=1 N=12 roots=4
+a10-g1-h24  M=1/10 gamma0M=1 N=24 roots=4 threads=12

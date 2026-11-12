@@ -1,0 +1,15 @@
+# The star-damping study, node 2 (GH-8): the same star at R/M = 5 (M = 1/5) and
+# R/M = 20 (M = 1/20), R = 1, L = 2R, h = R/16, to 500 M — whether the threshold
+# is fixed in γ0 M (set by M) or in γ0 R (set by R).
+a5-g1_10    M=1/5 gamma0M=1/10 threads=5
+a5-g1_4     M=1/5 gamma0M=1/4 threads=5
+a5-g1_2     M=1/5 gamma0M=1/2 threads=5
+a5-g1       M=1/5 gamma0M=1 threads=5
+a5-g2       M=1/5 gamma0M=2 threads=5
+a5-g4       M=1/5 gamma0M=4 threads=5
+a20-g1_10   M=1/20 gamma0M=1/10
+a20-g1_4    M=1/20 gamma0M=1/4
+a20-g1_2    M=1/20 gamma0M=1/2
+a20-g1      M=1/20 gamma0M=1
+a20-g2      M=1/20 gamma0M=2
+a20-g4      M=1/20 gamma0M=4

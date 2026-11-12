@@ -419,6 +419,23 @@ numbers, `near = 1/M`, `far = 1/(10 M)`, `width = 3 M`: `CODE.md` asked for
 and left them open. The flat-space cases of steps 3 and 4 kept their
 arithmetic, a bare number wrapped in `ConstantDamping`.
 
+2026-11-11: TreeGRRMHD's GH-8 note (its branch `claude/step-11-dynamical-tov`,
+commit `ff4e8f1`) reported that `γ0 = 1/M` grows a mode on its TOV star, and it
+left open which scale sets the threshold. Erik asked for the measurement on this
+package's Plummer star, run on Symmetry. Twenty-five runs went to `500 M`: three
+stars (`R/M = 5, 10, 20`), `γ0 M` from 0 to 10, `γ2 = −1/2` and `+1`, and
+`h = R/12` and `R/24`. They ran as jobs 595935 and 595936 on `amdpreq`, several
+runs to a node. The first job was pre-empted six times and continued from its
+checkpoints each time. The results are in `CODE.md`, "Gauge and constraint
+damping": within the Plummer family the onset is fixed in `γ0 R`, and the TOV
+star's is five times lower. The data are in `.claude/data/star-damping` (not
+committed), and on Symmetry under
+`/mnt/beegfs/eschnetter/claude/TreeGeneralizedHarmonic/star-damping/out`.
+`star_case`'s `γ0 = 1` is `1/(10M)`, not the `10/M` that GH-8 and a comment
+in `test/matter_tests.jl` said, and it is below the onset, so it was left as it is. The
+star and its matter moved from `test/matter_tests.jl` to `test/plummer_star.jl`,
+which the study script shares.
+
 ## Boundaries
 
 ### Periodic

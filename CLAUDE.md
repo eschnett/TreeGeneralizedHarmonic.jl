@@ -421,6 +421,19 @@ rsynced directory, `. "$R/bench/simwatch.sh"` with `R` that directory — not
 the running studies' scripts name and source again at their exit, which stay
 as they are.
 
+The star-damping study is `test/star_runs.jl`. Each call is one Plummer star
+with its matter held fixed, run to `500 M` at a given `γ0 M` and `γ2`; the
+options are listed in its header. A run continues from `out/ck.jls` and refuses
+to start again once it is done. `test/star_study.jl` prints the tables; it needs
+no package. On Symmetry, `bench/symmetry_star_damping.sh` runs the lists in
+`bench/star_damping/` several to a node (about 1.5 h a run at `R/M = 10`). That
+is `CODE.md`, "Gauge and constraint damping":
+
+```bash
+julia --project=. --threads=4 test/star_runs.jl M=1/10 gamma0M=1 t_end=20 out=out/star
+julia test/star_study.jl dir=.claude/data/star-damping
+```
+
 The octant runs are `test/octant_runs.jl`, one run per
 call, `key=value` options listed in its header — the case (`case=minkowski`
 or `ks`, `interior=damped|fitted`, margins, `fit_cont`;
