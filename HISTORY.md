@@ -126,6 +126,7 @@ The briefs of the finished steps are under
   - [The design proposed on 2026-10-25](#the-design-proposed-on-2026-10-25)
   - [The comoving grid frame proposed on 2026-11-09](#the-comoving-grid-frame-proposed-on-2026-11-09)
   - [Harmonic gauge for the inspiral proposed on 2026-11-11](#harmonic-gauge-for-the-inspiral-proposed-on-2026-11-11)
+  - [Step H1 measured on 2026-11-11](#step-h1-measured-on-2026-11-11)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -190,6 +191,7 @@ The briefs of the finished steps are under
   - [Step 8g — Excision by a host reference (only if 8f says so)](#step-8g--excision-by-a-host-reference-only-if-8f-says-so)
   - [Step 8 — A hole that moves (G5)](#step-8--a-hole-that-moves-g5)
   - [Step 8′ — The trailing side](#step-8--the-trailing-side)
+  - [Step H1 — A harmonic hole at rest](#step-h1--a-harmonic-hole-at-rest)
 
 ## Goals
 
@@ -1608,6 +1610,44 @@ capsule, eight times a Kerr-Schild run's, counted the new level as covering
 the old one's volume. It covers half the radius: the section's
 `2 (1 + 2s)` replaces it.
 
+### Step H1 measured on 2026-11-11
+
+Erik asked for step H1 the day the route was proposed, and approved the
+Symmetry campaign (ten H200 rows, then the `128 M` extensions). The runs
+and their numbers are in `SINGULARITY_HANDLING.md`, "A harmonic hole at rest
+(step H1, 2026-11-11)"; what they replaced in `CODE.md`'s "What harmonic
+gauge costs":
+
+- **The settings** were predicted by scaling the Kerr-Schild table by the
+  horizon's radius: `:damped` from `1/32` and `:fitted` from `1/48`, both
+  marked as guesses to screen. Measured: `1/24` and `1/40`, each a step
+  coarser than predicted, with the predicted layers.
+- **"The finest level is twice as fine"** was the prediction for the price.
+  Measured: at the spacing that runs, it is `1.5–1.7×` (`1/24` against
+  `1/16`, `1/40` against `1/24`); for the Kerr-Schild hole's accuracy at
+  `1/24`, shell against shell
+  at the same areal radius, it is `2.3–3.3×`. In a binary's units the
+  predicted `1/96` to `1/128` at the holes became `1/48` and `1/80` to run,
+  and `1/112–1/156` for the accuracy.
+- **"Outside the horizon the spacing buys nothing (predicted)"** was
+  refuted: at the same `h` the harmonic hole's error in `[2, 4)` is
+  `90–120×` the Kerr-Schild hole's at the same areal radii, `50–65×` relative
+  to the fields.
+- **The binary's cost** `2 (1 + s)` for one level more is kept as the
+  prediction it was; H1 adds that the same accuracy is `1.2–1.7` levels
+  more, and `5.2×` on the octant at rest.
+- Two of "What is not known on this route" were answered for the harmonic
+  hole at rest: it is stationary for `128 M` where the hole is, and `:fitted`
+  converges outside the horizon at a margin fixed in `M`.
+
+Decided in the step without asking (each a choice of what to measure, not of
+the design): the mesh, `L = 64` with cubes `32, 16, 8, 4` (the Kerr-Schild
+study's with one level more); `:fitted`'s margin fixed in `M` as the offset
+`M/4` and the ramp `5M/16`, the one series that fits integer cells at
+`1/32`, `1/48` and `1/64`; the coarsest rows of each variant as the ones run
+to `128 M`; and a Kerr-Schild `1/24` control on the same day's code for the
+price's cost.
+
 ## Possible extensions
 
 ### Extensions since built
@@ -2732,7 +2772,7 @@ G5's case, the moving hole at `a = 7/10`, was decided on 2026-09-23. The
 recommendation "more interior work, the spin drift first, before
 excision" was proposed in step 8′ (2026-09-25). Steps B1–B9 were added
 to the plan on 2026-10-25, steps C1–C5 on 2026-11-09 and steps H1–H5 on
-2026-11-11.
+2026-11-11. Step H1 ran on 2026-11-11.
 
 ### Step 0 — Scaffolding (G0)
 
@@ -3785,3 +3825,40 @@ then G5 *(Done.)* — or not, with the trailing side's excess per lever in
 `CODE.md`'s open question and a recommendation between the interior and
 excision's price (step 8g); the suite green at one and four threads; the
 step-8 record completed from the unread jobs.
+
+### Step H1 — A harmonic hole at rest
+
+Added to the plan on 2026-11-11 with steps H2–H5; ran the same day.
+
+`CODE.md`: "What the package has measured in this chart", "What harmonic
+gauge costs"; "Single black holes: recommended settings". **`a = 0`, on the
+mirrored octant.**
+
+**Changes:**
+
+- **`case=harmonic` in `test/octant_runs.jl`**, through
+  `harmonic_kerr_case`, with `a=`, both interiors, the error reference and
+  the shells about the hole.
+- Nothing in `src/` unless a run shows a defect; then the defect first.
+
+**Accept**, at `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, `ρ_max = 4/M`:
+
+- **The settings**, screened to `8 M`: `:damped` about `r_0 = 2/5`,
+  `r_1 = 3/4` at `1/32`; `:fitted` about `m = 16`, `n_L = 20` at `1/48`.
+  Report the coarsest spacing at which each holds.
+- **The order**: `:damped` at three spacings from that one, to `24 M`:
+  order four in the error and in `ℋ` outside the horizon, in the shells
+  `[2, 4)` and `[4, 7)` (the Kerr-Schild rows' `[3, 5)` and `[5, 8)` in
+  areal radius).
+- **`:fitted`** at the same spacings, with the margin fixed in `M` and
+  fixed in cells: its `ℋ` and error against `:damped`'s, and its order.
+- **Stationary**: both variants to `128 M` at the coarsest convergent
+  spacing: the shells' error, `ℋ` and `C_a` flat from `24 M`, `M_irr`
+  constant to the Kerr-Schild row's level, the horizon's radius `M`.
+- **The price**: the spacing at which this chart's shell error equals the
+  Kerr-Schild `a = 0` hole's at `1/24`, and the cost per `M` of both on an
+  H200.
+- **If the hole is not stationary**, report the growth's rate, where it
+  sits and its order, and stop: the route rests on this row.
+- `CODE.md`'s **(predicted)** settings and costs replaced by what was
+  measured.
