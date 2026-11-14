@@ -805,11 +805,15 @@ end
                                interior=TrackedSpec(T; r_0=T(2 // 5), r_1=T(11 // 10),
                                                     seed_velocity_offset=(1 // 20, 0, 0)))
         @test seed_track(off, 0).pred.v ≈ SVector{3,T}(1 // 4, 0, 0)
-        # Refused: the target needs a Kerr-Schild hole, and the sphere's radii
-        # are the spec's.
-        @test_throws ArgumentError hole_case(T, SM.Harmonic(one(T), zero(T));
-                                             halfwidth=T(5 // 2), chunk=T(1 // 10),
-                                             interior=spec)
+        # Refused: the target needs a hole — Kerr-Schild, or harmonic Kerr since
+        # step H4, whose target is then harmonic — and the sphere's radii are
+        # the spec's.
+        @test_throws ArgumentError hole_case(T, SM.Minkowski(); halfwidth=T(5 // 2),
+                                             chunk=T(1 // 10), interior=spec)
+        hc = hole_case(T, SM.Harmonic(one(T), zero(T)); halfwidth=T(5 // 2),
+                       chunk=T(1 // 10), interior=spec)
+        @test isharmonic(tracked_interior(spec, seed_track(hc, 0), zero(T); mass=1,
+                                          spin=0, harmonic=true).target)
         @test_throws "carries its own radii" kerr_schild_case(T; kw..., interior=spec,
                                                               r_0=T(2 // 5))
         @test_throws ArgumentError TrackedSpec(T; r_0=1, r_1=1 // 2)
