@@ -741,8 +741,12 @@ _apply_bounds!(bd::StateBounds, ::Nothing, p, u, t) = throw(ArgumentError(
     "problem built with `interior = nothing` has no center to measure r " *
     "from. Build the problem with the case's own interior."))
 
-function _apply_bounds!(bd::StateBounds, int::Union{Interior,FittedInterior}, p,
-                        u, t)
+_apply_bounds!(bd::StateBounds, int::Union{Interior,FittedInterior}, p, u, t) =
+    _apply_bounds_kernel!(bd, int, p, u, t)
+
+# The projection's launch and its accounting, for any interior with a center —
+# one hole's, or several holes' (`holes.jl`, step B3).
+function _apply_bounds_kernel!(bd::StateBounds, int, p, u, t)
     T = eltype(p.U.work)
     map_blocks!(gh_bounds_kernel!, p.U, statearray(u, p.U), p.diag.work,
                 p.origins, p.spacings, bd, int, T(t))

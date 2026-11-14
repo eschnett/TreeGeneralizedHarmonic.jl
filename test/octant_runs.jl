@@ -144,10 +144,37 @@
 #                                   a must be inside)
 #   r_0=3/4 r_1=3/2 source=algebraic|sampled   the hole's layer and gauge source
 #                                   (harmonic: r_0=2/5 r_1=3/4, and no source)
-#   interior=damped|fitted          step 5's analytic layer, or step 8's fitted
+#   gauge=ks|dh                     (added in step B1) the hole's own Kerr-Schild
+#                                   gauge, or the damped harmonic gauge rolled on
+#                                   from it, H = f H_KS + (1 − f) H_DH with
+#                                   f = exp(−((t − t0)/sigma_g)⁴) after t0:
+#   sigma_g=10 t0=0                 the roll-on, in M
+#   sigma_r=32 A_L1=1 A_L2=0 A_S=1  the damped harmonic gauge (SpECTRE's form):
+#   e=2 (or e_L1= e_L2= e_S=)       the Gaussian about the origin and the
+#                                   amplitudes (1/M) and exponents of
+#                                   μ_L1 L + μ_L2 log(1/α) and μ_S
+#   interior=damped|fitted|tracked  step 5's analytic layer, or step 8's fitted
 #                                   target on the tracked horizon (margin m=8,
 #                                   lmax_shape=4, lmax_fit=8, the finder every
-#                                   chunk with the spin, default_bounds at 9/10)
+#                                   chunk with the spin, default_bounds at 9/10),
+#                                   or (added in step B2) the tracked analytic
+#                                   target: step 5's sphere (r_0, r_1) about the
+#                                   horizon track, relaxing toward the boosted
+#                                   Kerr-Schild hole on the track's line, rebuilt
+#                                   every piece, the finder every chunk
+#   prediction=quadratic|line       interior=tracked only (step B2): the track's
+#                                   prediction, the quadratic of the last four
+#                                   finds or step 8d's line
+#   find_interval=0                 interior=tracked only: the longest interval
+#                                   between two finds, in M (0: the chunk; the
+#                                   cadence |a| Δt² ≤ G h/4 may ask for less)
+#   target_mass=1 target_dv=0       interior=tracked only: the sensitivity
+#   target_dx=0 seed_dv=0           study's perturbations — the target's mass
+#                                   times target_mass, its velocity plus target_dv
+#                                   and its center plus target_dx finest cells,
+#                                   along the motion axis, the track unchanged;
+#                                   and the seed track's velocity plus seed_dv
+#                                   along it (the recovery run)
 #   margin=8                        cells from the horizon to the layer's outer edge
 #                                   (:damped: the check on r_1; :fitted: the offset)
 #   n_L=0 lmax_fit=8                :fitted only: the ramp in cells (0: step 8c's
@@ -168,6 +195,11 @@
 #   rho=                            a fixed ρ_max in 1/M (default: 4/M)
 #   finder=1                        find the horizon every chunk (0: never; :fitted
 #                                   always does)
+#   shell_center=analytic|track     (added in step B1) the shells and the split about
+#                                   the analytic center c(t), or about the tracked
+#                                   horizon's center (interior=fitted): under a gauge
+#                                   that moves the hole off c(t) (gauge=dh) a shell
+#                                   about c(t) cuts through the horizon
 #   shells=2,9/4,3,5,8              radii of the shells outside the horizon whose
 #                                   norms the CSV carries (and one beyond the last;
 #                                   and the evolved band inside the horizon). The
@@ -324,6 +356,9 @@ abs(v_hole) < 1 || error("v = $v_hole is the hole's speed in units of c, and mus
 # CSV columns, so on by default only for the quadrant, which has no older CSVs
 # to match. `v̂` is `+x` for a hole at rest.
 split_on = hole && opt("split", moving_domain ? "1" : "0") in ("1", "true")
+shell_track = opt("shell_center", "analytic") == "track"
+opt("shell_center", "analytic") in ("analytic", "track") ||
+    error("shell_center is analytic or track, got $(opt("shell_center", ""))")
 v_dir = v_hole < 0 ? -one(T) : one(T)
 contraction_expected = sqrt(1 - T(v_hole)^2)
 # The Kerr-Schild horizon (`M = 1`): `r₊` at the poles and `√(r₊² + a²) = √(2 r₊)`
@@ -391,14 +426,25 @@ case = if hole
         error("source is algebraic or sampled, got $src")
     # The layer by step 8c's rule at this order: `ρ_max = 4/M` (the default),
     # `ρ_ramp = 1`, `r_1 − r_0 ≥ n_L h`; GHSO2's `ε_KO`, the Gaussian `γ0`.
-    gs = src == "algebraic" ? :algebraic : nothing
+    gs0 = src == "algebraic" ? :algebraic : nothing
+    gauge_kind = opt("gauge", "ks")
+    gauge_kind in ("ks", "dh") || error("gauge is ks or dh, got $gauge_kind")
     finder = opt("finder", "1") != "0" ? Horizon(T; every=1, N=12, spin=true) : nothing
     # The hole's motion, exact (the case converts it into `T` once), passed
     # only on the quadrants so that the octants' cases are built as before, and
     # the axis only on the rotating quadrant, so the quadrant's is as before.
     motion = quadrant || bitant ? (v=v_hole, x0=x0_hole) :
              rquadrant ? (v=v_hole, x0=x0_hole, axis=3) : (;)
-    if opt("interior", "damped") == "fitted"
+    interior_kind = opt("interior", "damped")
+    interior_kind in ("damped", "fitted", "tracked") ||
+        error("interior is damped, fitted or tracked, got $interior_kind")
+    interior_kind == "tracked" || !any(k -> haskey(OPTIONS, k),
+                                       ("prediction", "find_interval", "target_mass",
+                                        "target_dv", "target_dx", "seed_dv")) ||
+        error("prediction=, find_interval=, target_mass=, target_dv=, target_dx=, " *
+              "and seed_dv= are the tracked analytic target's " *
+              "(interior = tracked)")
+    build_case(gs) = if interior_kind == "fitted"
         m = parse(Int, opt("margin", "8"))
         spec = FittedSpec(T; variant=Symbol(opt("variant", "fitted")), margin=m,
                           n_L=parse(Int, opt("n_L", "0")), lmax_shape=4,
@@ -419,6 +465,30 @@ case = if hole
                         horizon=Horizon(T; every=1, N=12, spin=true),
                         bounds=default_bounds(T; M=1, r_gate=r_gate),
                         refinement=refinement)
+    elseif interior_kind == "tracked"
+        # The tracked analytic target (added in step B2): the `:damped` sphere
+        # of `r_0`, `r_1` about the track, its perturbations along the motion
+        # axis, in finest cells for the center.
+        haskey(OPTIONS, "variant") &&
+            error("variant= is the tracked geometry's (interior = fitted); the " *
+                  "tracked analytic target is :damped")
+        pred = opt("prediction", "quadratic")
+        pred in ("quadratic", "line") || error("prediction is quadratic or line, got $pred")
+        hfine = T(L) / (roots * N) / 2^length(radii)
+        along(s) = ntuple(d -> d == axis ? T(s) : zero(T), 3)
+        spec = TrackedSpec(T; r_0=rat(opt("r_0", "3/4")), r_1=rat(opt("r_1", "3/2")),
+                           ρ_ramp=1, margin=parse(Int, opt("margin", "8")),
+                           quadratic=pred == "quadratic",
+                           max_interval=T(rat(opt("find_interval", "0"))),
+                           mass_factor=T(rat(opt("target_mass", "1"))),
+                           velocity_offset=along(rat(opt("target_dv", "0"))),
+                           center_offset=along(rat(opt("target_dx", "0")) * hfine),
+                           seed_velocity_offset=along(rat(opt("seed_dv", "0"))))
+        harmonic && error("interior=tracked relaxes toward a boosted Kerr-Schild " *
+                          "hole on the track's line; the harmonic chart's is not built")
+        kerr_schild_case(T; a=a_spin, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
+                         octant=Symbol(symmetry), motion..., gauge_source=gs,
+                         interior=spec, horizon=Horizon(T; every=1, N=12, spin=true))
     else
         haskey(OPTIONS, "variant") &&
             error("variant= is the tracked geometry's (interior = fitted); the " *
@@ -433,6 +503,26 @@ case = if hole
                         gauge_source=gs, margin=parse(Int, opt("margin", "8")),
                         horizon=finder, refinement=refinement)
     end
+    c = build_case(gs0)
+    # The damped harmonic gauge (added in step B1), rolled on from the hole's own
+    # algebraic source: the case is built once for that source and once more
+    # with the roll-on, which `GHCase` checks at `t = 0`, where it is the
+    # hole's own source.
+    if gauge_kind == "dh"
+        c.gauge === nothing &&
+            error("gauge=dh rolls on from the hole's algebraic source; source=sampled has none")
+        e_all = parse(Int, opt("e", "2"))
+        dh = DampedHarmonicSource(T; σ_r=T(rat(opt("sigma_r", "32"))),
+                                  A_L1=T(rat(opt("A_L1", "1"))),
+                                  A_L2=T(rat(opt("A_L2", "0"))),
+                                  A_S=T(rat(opt("A_S", "1"))),
+                                  e_L1=parse(Int, opt("e_L1", string(e_all))),
+                                  e_L2=parse(Int, opt("e_L2", string(e_all))),
+                                  e_S=parse(Int, opt("e_S", string(e_all))))
+        c = build_case(RolledGaugeSource(c.gauge, dh; σ_g=T(rat(opt("sigma_g", "10"))),
+                                         t_0=T(rat(opt("t0", "0")))))
+    end
+    c
 else
     minkowski_octant_case(T; L=L, ε_KO=ε_KO, γ0=γ0, γ2=γ2, chunk=chunk,
                           rotating=rotating)
@@ -472,8 +562,23 @@ rquadrant && isrank0 && @printf("        moving: v = %s along z from z0 = %s (at
 hole && isrank0 && @printf("        hole: a = %s, %s, gauge source %s\n", a_spin,
                 case.interior isa FittedSpec ?
                 "fitted target, tracked, margin $(case.interior.margin)" :
+                case.interior isa TrackedSpec ?
+                "tracked analytic target, r_0 = $(case.interior.r_0), r_1 = " *
+                "$(case.interior.r_1), $(case.interior.quadratic ? "quadratic" : "line") " *
+                "prediction, find interval ≤ " *
+                "$(iszero(case.interior.max_interval) ? "the chunk" : case.interior.max_interval), " *
+                "target mass × $(case.interior.mass_factor), velocity + " *
+                "$(Tuple(case.interior.velocity_offset)), center + " *
+                "$(Tuple(case.interior.center_offset)), seed velocity + " *
+                "$(Tuple(case.interior.seed_velocity_offset))" :
                 "damped layer, r_0 = $(case.interior.r_0), r_1 = $(case.interior.r_1)",
-                harmonic ? "none (H ≡ 0)" : case.gauge === nothing ? "sampled" : "algebraic")
+                harmonic ? "none (H ≡ 0)" : case.gauge === nothing ? "sampled" :
+                case.gauge isa RolledGaugeSource ?
+                "$(opt("source", "algebraic")), rolled on to the damped harmonic gauge " *
+                "(t0 = $(case.gauge.t_0), σ_g = $(case.gauge.σ_g), σ_r = " *
+                "$(case.gauge.to.σ_r), A = ($(case.gauge.to.A_L1), $(case.gauge.to.A_L2), " *
+                "$(case.gauge.to.A_S)), e = ($(case.gauge.to.e_L1), $(case.gauge.to.e_L2), " *
+                "$(case.gauge.to.e_S)))" : opt("source", "algebraic"))
 isrank0 && @printf("        noise %.3g (seed %d), backend %s, %d threads, %d rank(s)\n",
                    amplitude, seed, typeof(backend), Threads.nthreads(),
                    use_mpi ? MPI.Comm_size(MPI.COMM_WORLD) : 1)
@@ -722,9 +827,32 @@ setup = Dict{String,Any}(
 if hole
     setup["a"] = Float64(a_spin)
     setup["M_irr_kerr"] = M_irr_kerr
-    setup["interior"] = case.interior isa FittedSpec ? "fitted" : "damped"
+    setup["interior"] = case.interior isa FittedSpec ? "fitted" :
+                        case.interior isa TrackedSpec ? "tracked" : "damped"
+    if case.interior isa TrackedSpec
+        sp = case.interior
+        setup["tracked"] = Dict("prediction" => sp.quadratic ? "quadratic" : "line",
+                                "max_interval" => Float64(sp.max_interval),
+                                "mass_factor" => Float64(sp.mass_factor),
+                                "velocity_offset" => Float64.(collect(sp.velocity_offset)),
+                                "center_offset" => Float64.(collect(sp.center_offset)),
+                                "seed_velocity_offset" =>
+                                    Float64.(collect(sp.seed_velocity_offset)))
+    end
     setup["gauge_source"] = harmonic ? "none" :
-                           case.gauge === nothing ? "sampled" : "algebraic"
+                           case.gauge === nothing ? "sampled" : opt("source", "algebraic")
+    if case.gauge isa RolledGaugeSource
+        dh = case.gauge.to
+        setup["gauge"] = "damped harmonic, rolled on"
+        setup["rollon"] = Dict("t0" => Float64(case.gauge.t_0),
+                               "sigma_g" => Float64(case.gauge.σ_g))
+        setup["damped_harmonic"] = Dict("sigma_r" => Float64(dh.σ_r),
+                                        "A" => Float64.([dh.A_L1, dh.A_L2, dh.A_S]),
+                                        "e" => [dh.e_L1, dh.e_L2, dh.e_S])
+    else
+        setup["gauge"] = "Kerr-Schild"
+    end
+    setup["shell_center"] = shell_track ? "track" : "analytic"
     case.interior isa FittedSpec ? (setup["margin_cells"] = case.interior.margin) :
                                    (setup["r_0"] = Float64(case.interior.r_0);
                                     setup["r_1"] = Float64(case.interior.r_1))
@@ -798,7 +926,17 @@ function observe(p, t, u, rec)
     vol = record_norms(p)
     # The shells about the hole: about its analytic center `c(t)`, the origin
     # for a hole at rest there (amended 2026-10-20: the origin always).
-    c_t = hole ? SVector{3,T}(center_at(case.center, T(t))) : zero(SVector{3,T})
+    # About the tracked horizon's center with `shell_center=track` (added in step
+    # B1), the analytic one otherwise.
+    # For the tracked analytic target (added in step B2) the track's own
+    # center, which the row carries — the sphere's is the target's, and a
+    # perturbed target's center is not the hole's.
+    c_t = !hole ? zero(SVector{3,T}) :
+          shell_track && p.interior isa FittedInterior ?
+          SVector{3,T}(center_at(p.interior.center, T(t))) :
+          shell_track && case.interior isa TrackedSpec && rec.track_center !== nothing ?
+          SVector{3,T}(rec.track_center) :
+          SVector{3,T}(center_at(case.center, T(t)))
     edges = if hole
         r_in = case.interior isa FittedSpec ?
                shell_r[1] - case.interior.margin * minimum_spacing(T, p.U.forest) :
@@ -1092,11 +1230,21 @@ end
 # The run's own record, the horizon's numbers and the track included.
 fields = (:t, :steps, :err_l2, :err_linf, :residual, :drift, :gauge_l2, :horizon_success,
           :r_min, :r_mean, :r_max, :area, :M_irr, :J, :M_ch, :track_offset,
-          :track_r_min, :fit_valid, :fit_residual, :bounds_hits, :variant)
+          :track_r_min, :fit_valid, :fit_residual, :bounds_hits, :variant,
+          # The track's prediction and cadence (added in step B2): the row's
+          # prediction error and the chunk's largest, in finest cells, the finds
+          # the chunk made, the find interval and the predicted acceleration.
+          :track_prediction, :track_prediction_max, :track_finds, :track_interval,
+          :track_acceleration)
 isrank0 && open(joinpath(outdir, "records.csv"), "w") do io
-    println(io, join(fields, ','))
+    # And the track's center and velocity along the motion axis (step B2).
+    println(io, join(fields, ','), ",track_c,track_v")
     for rec in out.records
-        println(io, join((string(get(rec, f, missing)) for f in fields), ','))
+        tc = get(rec, :track_center, nothing)
+        tv = get(rec, :track_velocity, nothing)
+        println(io, join((string(get(rec, f, missing)) for f in fields), ','), ',',
+                tc === nothing ? missing : tc[axis], ',',
+                tv === nothing ? missing : tv[axis])
     end
 end
 isrank0 && @printf("done: t = %.4f, %d steps, dt = %.6g, finished = %s, wall %.1f s\n",
