@@ -45,9 +45,10 @@ B1–B3's code, and Erik decides the route of B4–B9 from step C2's report.
 harmonic gauge with no source for the inspiral, the damped harmonic gauge
 rolled on before the merger, and the `:fitted` interior. The design is
 `CODE.md`, "Harmonic gauge for the inspiral". **Steps H1–H3 are done**
-(they ran 2026-11-11 to 2026-11-13); steps H4 and H5 are proposed and not
-started, and the grid is Erik's decision from H2's and H3's reports. Steps
-H1–H3 were single holes and needed only `main`.
+(they ran 2026-11-11 to 2026-11-13); step H4 is started (2026-11-14, on the
+inertial grid, Erik's choice): the harmonic pair with no source and the roll-on
+from zero are built, `:fitted` per hole and the runs are not. Step H5 is not
+started. Steps H1–H3 were single holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
 [eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
@@ -1265,8 +1266,10 @@ as an agent". Branches are named `claude/step-H<n>-<slug>`.
   it**, and the step halves. Price the mesh before submitting:
   Kerr-Schild's `1/48` capsule did not fit one H200.
 - **Before `t_0` a run with the roll-on is the run without a source, bit
-  for bit.** The source enters the problem at the chunk that begins at
-  `t_0`; until then the kernel is the one compiled without a source.
+  for bit.** The case carries the roll-on from zero throughout; until `t_0`
+  a launch is handed no source and takes the harmonic kind's zeros
+  (`CODE.md`, "What step H4 has built"; amended 2026-11-14 from a kernel
+  compiled anew at `t_0`).
 - **`t_0` is run state.** It goes into the loop's carried state and the
   checkpoint, or a restart rolls on at another time.
 - **Price every test**, as for the B steps. Runs longer than a minute go
@@ -1315,6 +1318,13 @@ not. The early rows' drift of `J` is resolution. `a = 7/10` runs at rest only
 at `1/128` on two H200s, and is not stationary by `24 M`.
 
 ## Step H4 — Two holes with no source
+
+**Started 2026-11-14 on the inertial grid** (Erik's choice), on branch
+`claude/step-H4-prep`: built are the harmonic chart for a hole, the pair with no
+source and `Π` from `C_a = 0` in its data and its targets, the roll-on from zero
+with `t_0` a time or the separation's event, and `test/binary_runs.jl`'s options
+(`CODE.md`, "What step H4 has built"). **Left:** a `FittedSpec` in a `HoleSpec`,
+and the runs below.
 
 `CODE.md`: "The data", "The merger"; "One interior per hole"; "The common
 horizon and the handover". **Starts from steps B1–B3's code on its own

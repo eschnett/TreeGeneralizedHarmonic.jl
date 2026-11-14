@@ -128,6 +128,7 @@ research project; the inherited documents live in `notes/`.
   - [The merger](#the-merger)
   - [On which grid](#on-which-grid)
   - [The ladder of this route](#the-ladder-of-this-route)
+  - [What step H4 has built](#what-step-h4-has-built)
   - [What is not known on this route](#what-is-not-known-on-this-route)
   - [What this route asks Erik to decide](#what-this-route-asks-erik-to-decide)
 - [Possible extensions](#possible-extensions)
@@ -8370,9 +8371,10 @@ route](#what-is-not-known-on-this-route).
 
 ### The data
 
-**Superposed boosted harmonic holes (proposed).** `g = η + Σ_A (g_A − η)`
+**Superposed boosted harmonic holes (built in step H4).** `g = η + Σ_A (g_A − η)`
 with each `g_A` a boosted, translated `Harmonic(M_A, a_A)`: item 1 of
-[Initial data](#initial-data) with another chart.
+[Initial data](#initial-data) with another chart ([What step H4 has
+built](#what-step-h4-has-built)).
 
 - **`Π` comes from `C_a = 0`.** Each `g_A` has `Γ_a = 0` and the sum does
   not, at second order in the fields. `gauge_consistent_momentum` with
@@ -8498,8 +8500,58 @@ grid throughout, or the inertial grid with `:fitted` measured first between
    rest at `1/128` on two H200s, not stationary by `24 M`; its moving rows
    were priced, not run.
 4. **Two holes with no source**: the head-on pair in pure harmonic gauge to
-   wherever it ends, then with the roll-on through the merger.
+   wherever it ends, then with the roll-on through the merger. *Started
+   (step H4):* the case, the roll-on from zero and the runs' options are
+   built ([What step H4 has built](#what-step-h4-has-built)); `:fitted` per
+   hole is not, and nothing has run at the step's spacings.
 5. **The orbit**, on the grid chosen from step H2's ratio.
+
+### What step H4 has built
+
+The pair's code, on steps B1–B3's composition (`test/harmonic_holes_tests.jl`;
+`test/binary_runs.jl chart=harmonic`). Not yet built: `:fitted` per hole — a
+`HoleSpec` still refuses a `FittedSpec`, so every layer of a pair is B2's tracked
+`:damped` target — and nothing has run at `1/96` or `1/128`.
+
+- **A hole's chart.** `HoleSpec(…; chart = :harmonic)` is harmonic Kerr on its
+  line (`hole_on_line`); its seed, its radius checks and its tracked target read
+  that metric. Every hole of a case is in one chart, refused by name otherwise.
+  `holes = (spec,)` in the harmonic chart is the tracked harmonic case bit for
+  bit, the state and every row, as it is in Kerr-Schild.
+- **No source.** `binary_case` gives harmonic holes `gauge_source = nothing`; a
+  superposition of harmonic holes answers `isharmonic`, which is what the kernel
+  reads for "has gauge source". The superposition is not harmonic where the
+  fields overlap; its `C_a = 0` at `t = 0` comes from `Π`.
+- **`Π` from `C_a = 0`, in the data and in the targets.** `momentum = :gauge`
+  is the default for harmonic holes, and the superposition carries it in its
+  type (`SuperposedMetric{…,C}`): its state is `gauge_consistent_state` at
+  `H = 0` wherever it is evaluated — the initial data, the boundary and every
+  layer target built from it. **Why in the targets.** With the superposition's
+  own `Π` in the targets, as steps B3's `b3sg48` had, the layer residual of the
+  suite's harmonic pair started at `2.9` and the layers pulled `Π` toward data
+  that violate `C_a`; with it, the residual starts at `0`. Pointwise, `C_a` at
+  `t = 0` is below `10⁻¹⁴` with it and `10⁻⁴` and more without; on the suite's
+  `h = 1/16` pair the grid's `C_a` is `2.0·10⁻⁴` against `5.3·10⁻³`, a
+  truncation error.
+- **The roll-on from zero.** `RolledGaugeSource(ZeroGaugeSource(T), to; σ_g,
+  t_0)` is `H = (1 − f) H_to`. Up to `t_0` `effective_source` hands a launch
+  `nothing`, which an algebraic problem's kernel takes as the harmonic kind's
+  pair of zeros, so the run is the one without a source **bit for bit** — not
+  a kernel compiled anew at `t_0`, as `PLAN.md` first proposed, since the case
+  keeps one type throughout. `t_0` is a time, or with `t_0 = Inf` an event:
+  `evolve!(…; rollon_separation = d_g)` sets it to the first row whose tracks
+  are `d_g` apart, the next chunk being the first that carries the source. It
+  is in the run state and the checkpoint (`rollon_t0`) and in the record.
+- **The record and the runs.** `test/binary_runs.jl` takes `chart=`, `masses=`,
+  `t0=`, `d_g=`, `sigma_g=` and `sigma_r=`, and writes the smallest lapse and
+  the largest `√γ/α` outside both horizons and in the slab between the holes,
+  the pure harmonic run's measurement.
+- **A harmonic hole costs `h = 1/16 M_A` at `q = 2`.** Its horizon is at
+  `r = M_A`, so `r_1` four cells inside it and a ramp of six cells need that
+  spacing; the suite's pair of unit holes at `d = 8` is 1296 blocks. The
+  tracked `:damped` layer's residual on one such hole grows to `24` by
+  `t = M/10` at this spacing, and the pair's to `21` — the single hole's, not
+  the pair's.
 
 ### What is not known on this route
 

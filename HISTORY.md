@@ -131,6 +131,7 @@ The briefs of the finished steps are under
   - [Step H2 measured on 2026-11-12](#step-h2-measured-on-2026-11-12)
   - [Step H3 measured on 2026-11-12 and 2026-11-13](#step-h3-measured-on-2026-11-12-and-2026-11-13)
   - [Steps B1–B3's code taken for step H4 (2026-11-14)](#steps-b1b3s-code-taken-for-step-h4-2026-11-14)
+  - [Step H4 started: two harmonic holes with no source (2026-11-14)](#step-h4-started-two-harmonic-holes-with-no-source-2026-11-14)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2388,6 +2389,29 @@ and it has not been run. What none of the laws gives is a fall: the coordinate s
 gauge's for at least `6 M` whatever the line does, and B7's measure of the fall
 must be gauge-invariant.
 
+
+### Step H4 started: two harmonic holes with no source (2026-11-14)
+
+Erik asked to start step H4 on the inertial grid. Built on 2026-11-14: a hole's
+chart, the harmonic pair with no source and `Π` from `C_a = 0`, the roll-on from
+zero, and `test/binary_runs.jl`'s options (`CODE.md`, "What step H4 has built").
+Two choices departed from the plan as written:
+
+- **The targets carry the gauge's momentum, not only the data.** The first
+  build gave the data `Π` from `C_a = 0` and the layer targets the
+  superposition's own `Π`, as step B3's `momentum = :gauge` rows had. On the
+  suite's harmonic pair the layer residual then started at `2.9`, the distance
+  between the two `Π`s, and the layers relaxed toward data that violate the
+  gauge constraint. The superposition now carries the choice in its type, and
+  the residual starts at `0`. Its growth to `21` by `M/10` stayed: one harmonic
+  hole on the same layer grows to `24`.
+- **The roll-on is one kernel, not two.** `PLAN.md` had the source enter the
+  problem at the chunk that begins at `t_0`, a kernel compiled without a source
+  before it. A case whose `t_0` is an event cannot change its type at the event
+  without rebuilding the problem mid-run, so the case carries
+  `RolledGaugeSource(ZeroGaugeSource(T), to)` throughout, and a launch before
+  `t_0` is handed no source, which the kernel takes as the harmonic kind's
+  zeros: the run without a source bit for bit, measured on one harmonic hole.
 
 ## Possible extensions
 

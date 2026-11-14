@@ -608,6 +608,16 @@ julia --project=. test/binary_runs.jl backend=cuda d=8 L=32 roots=8 radii=16,8,4
 Their tables were printed by `test/binary_study.jl`, which stays on pull request
 #18 with the rows' data.
 
+Step H4's harmonic pair is the same script with `chart=harmonic`: no gauge
+source, or the damped harmonic gauge rolled on from zero at `t0=` or when the
+tracks are `d_g=` apart (`sigma_g=`, `sigma_r=`), and the lapse rows between the
+holes. A unit harmonic hole needs `h = 1/16` at `q = 2`, so the smoke run is
+1296 blocks, about four minutes at four threads, most of it set-up:
+
+```bash
+julia --project=. --threads=4 test/binary_runs.jl chart=harmonic d=8 L=8 N=8 roots=2 radii=4,3,2,6/5 q=2 masses=1,1 r_0=7/20 r_1=37/50 margin=4 t_end=1/10 chunk=1/20 finder_N=12 spin=0 adm=0 d_g=7.99999 sigma_g=1 out=out/hpair
+```
+
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
 and device tests behind
@@ -1129,6 +1139,14 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   (`reseed_holes!`) and corrects every find by it; the record's `holes[A]` has
   `origin` (the find's) and `track_center` (the hole's). Compare separations of
   the tracks, not of the found origins.
+- **A harmonic pair's data and targets carry `Π` from `C_a = 0`**, in the
+  superposition's type (`SuperposedMetric{…,C}`, `CODE.md`, "What step H4 has
+  built"). A target built from that superposition by hand must keep its `C`, or
+  the layers relax toward data that violate the gauge constraint.
+- **A roll-on from zero is no source until `t_0`, by `nothing`**: `effective_source`
+  hands the launch `nothing`, and every kernel path that evaluates a source must
+  take `nothing` as the harmonic kind's zeros (`gauge_source`, `_source_value`,
+  `check_gauge_source`). `t_0 = Inf` leaves the start to `rollon_separation`.
 - **A case of one hole is not run through the path of several** (`CODE.md`, "What step B3 built and measured").
   `holes = (spec,)` is the single-hole case, bit for bit — its analytic source,
   its record — and the vector of tracks, the per-hole rows and the track-fed
