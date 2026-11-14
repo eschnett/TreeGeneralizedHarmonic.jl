@@ -40,10 +40,10 @@ B1–B3's code, and Erik decides the route of B4–B9 from step C2's report.
 **Steps H1–H5**: a third route to G7 and G8 —
 harmonic gauge with no source for the inspiral, the damped harmonic gauge
 rolled on before the merger, and the `:fitted` interior. The design is
-`CODE.md`, "Harmonic gauge for the inspiral". **Steps H1 and H2 are done**
-(they ran 2026-11-11 and 2026-11-12); steps H3–H5 are proposed and not
-started, and the grid is Erik's decision from H2's report. Steps H1–H3 are
-single holes and need only `main`.
+`CODE.md`, "Harmonic gauge for the inspiral". **Steps H1–H3 are done**
+(they ran 2026-11-11 to 2026-11-13); steps H4 and H5 are proposed and not
+started, and the grid is Erik's decision from H2's and H3's reports. Steps
+H1–H3 were single holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
 [eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
@@ -1296,7 +1296,7 @@ B9's on this route.
 
 A third route to G7 and G8. **The design is `CODE.md`, "Harmonic gauge for
 the inspiral"; read it in full first**, then "Binary black holes" and "A
-comoving grid frame for orbiting holes". Steps H1 and H2 are done; nothing
+comoving grid frame for orbiting holes". Steps H1–H3 are done; nothing
 else here is started. The steps are a proposal for Erik's review, and the section's "What this route asks
 Erik to decide" lists what is to be settled.
 
@@ -1397,25 +1397,18 @@ side carries `1.6–3×` (`:damped`) and `12–18×` (`:fitted`) in `ℋ`; at
 
 ## Step H3 — Spin in the harmonic chart
 
-`CODE.md`: "What harmonic gauge costs" (the spin's room), "The spinning
-harmonic chart", "The fitted target". **`a = 1/2` and `a = 7/10`,
-`:fitted`.**
-
-**Accept:**
-
-- **The settings** per spin, screened at rest on the rotating octant: the
-  margin and the depth that fit between the horizon's equator and the
-  disk, and the spacing they need. If `a = 7/10` does not fit one H200,
-  report its price and run `a = 1/2`.
-- **At rest** to `24 M`: stable, with `M_irr` and `J` constant at the
-  Kerr-Schild rows' level and falling with the spacing.
-- **Along the spin** at `v = 1/5` on the rotating quadrant, and **across
-  it** on the bitant, to `20 M`: within `2×` the resting row outside the
-  horizon.
-- **The early drift**: `a = 7/10` at `v = 3/10` across the spin drifted in
-  `J` by `0.013` a `M` at `q = 2`. The same configuration at fourth order:
-  the drift's size and order, at rest and moving.
-- Harmonic rows in "Single black holes: recommended settings".
+Done (it ran 2026-11-12 and 2026-11-13). Its runs are in
+`SINGULARITY_HANDLING.md`, "A spinning harmonic hole (step H3, 2026-11-12 to
+2026-11-13)", printed by `test/harmonic_spin_study.jl`; its settings in
+`CODE.md`'s "Single black holes: recommended settings" (the *harmonic* rows at
+`a = 1/2` and `7/10`), its verdict in the ladder's item 3 and "What harmonic
+gauge costs"; the brief is in `HISTORY.md`, "Step H3 — Spin in the harmonic
+chart". At `a = 1/2` the hole at rest converges from `1/48` (`:damped`) and
+`1/64` (`:fitted`, the margin fixed in `M`), with `J`'s drift at the
+Kerr-Schild rows' level; moving at `v = 1/5`, `:damped` at `1/96` is within
+`2×` in the error along the spin and across it, and `:fitted` at `1/64` is
+not. The early rows' drift of `J` is resolution. `a = 7/10` runs at rest only
+at `1/128` on two H200s, and is not stationary by `24 M`.
 
 ## Step H4 — Two holes with no source
 

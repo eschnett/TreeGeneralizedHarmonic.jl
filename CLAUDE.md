@@ -484,6 +484,32 @@ mpiexec --bind-to none -n 2 julia --threads=8 --project=<hpcx-env> test/octant_r
 julia test/harmonic_moving_study.jl
 ```
 
+The spinning harmonic hole (step H3) is `case=harmonic a=` on the rotating
+octant at rest, on the rotating quadrant along its spin and on the bitant
+across it, cubes `32, 16, 8, 4, 2` about the hole. Step H3's rows ran in
+`harm-h3`; the first line is the `:damped` row across the spin at `1/96`
+(four H200s over MPI, about `530 s/M`), and the second prints
+`SINGULARITY_HANDLING.md`'s "A spinning harmonic hole" from
+`.claude/data/harm-h3`, with no package:
+
+```bash
+mpiexec --bind-to none -n 4 julia --threads=8 --project=<hpcx-env> test/octant_runs.jl backend=cuda mpi=true deviceaware=false case=harmonic L=64 radii=32,16,8,4,2 octant=bitant roots=2 x0=-2 path=4 a=1/2 N=96 r_0=3/5 r_1=3/4 margin=4 v=1/5 t_end=20 chunk=1 cfl=1/2 amplitude=0 group=h3 out=out/b5d96 checkpoint=out/b5d96/ck checkpoint_every=4 walltime=40000
+julia test/harmonic_spin_study.jl
+```
+
+**On Nibi** (the `nibi-hpc` skill has the cluster): step H3's `v = 3/10` pair
+ran on eight H100s of one node from an environment with Symmetry's HPC-X
+environment's `Project.toml` and `Manifest.toml` and
+`MPIPreferences.use_system_binary(; extra_paths = [<openmpi>/lib])` against the
+system's Open MPI 5.0.10, with `OpenMPI_jll`'s library paths pointed there as
+on Symmetry. Use the Alliance's Julia, not juliaup's, which cannot load that
+library, and launch with `srun`:
+
+```bash
+module load StdEnv/2026 julia/1.13.0
+srun --mpi=pmix --cpu-bind=none $EBROOTJULIA/bin/julia --project=<ompi-env> --threads=12 test/octant_runs.jl backend=cuda mpi=true deviceaware=false …
+```
+
 The same script runs a hole moving along `x` on the quadrant
 (`octant=quadrant v= x0= path=`; `variant=` and `trail_ramp=` for a tracked
 layer, `rho=` for the rate), and `test/boosted_study.jl` reads a directory of

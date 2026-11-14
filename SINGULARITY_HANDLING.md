@@ -22,6 +22,7 @@ here; links have been pointed at the right file.
 - [Spin across the motion: the bitant (2026-10-24)](#spin-across-the-motion-the-bitant-2026-10-24)
 - [A harmonic hole at rest (step H1, 2026-11-11)](#a-harmonic-hole-at-rest-step-h1-2026-11-11)
 - [A moving harmonic hole (step H2, 2026-11-12)](#a-moving-harmonic-hole-step-h2-2026-11-12)
+- [A spinning harmonic hole (step H3, 2026-11-12 to 2026-11-13)](#a-spinning-harmonic-hole-step-h3-2026-11-12-to-2026-11-13)
 - [The interior's questions, opened in step 5 and closed through step 8′](#the-interiors-questions-opened-in-step-5-and-closed-through-step-8)
 
 ## Step 5: the static hole's interior and the driver (G4a)
@@ -4005,6 +4006,336 @@ inertial grid at `v = 1/2`, a speed the holes reach only in the plunge, and
 between `1/5` and `1/2` they say nothing. The comoving grid, on which each
 hole rests, would remove the trailing side there, at the price of step C1.
 Which grid the route takes is Erik's decision.
+
+## A spinning harmonic hole (step H3, 2026-11-12 to 2026-11-13)
+
+The third step of `CODE.md`'s [Harmonic gauge for the
+inspiral](CODE.md#harmonic-gauge-for-the-inspiral-proposed): steps H1's and
+H2's hole ([above](#a-harmonic-hole-at-rest-step-h1-2026-11-11)) with spin.
+The questions were the settings that fit between the horizon's equator and
+the chart's singular ring, whether the hole is stationary at rest with `M_irr`
+and `J` at the Kerr-Schild rows' level, whether it moving along its spin and
+across it is the resting hole within `2×`, and what became of G5's early drift
+of `J` (`0.013` a `M` at `a = 7/10`, `v = 3/10` across the spin, `:fitted`,
+`q = 2`) at fourth order.
+
+**The setup** (Symmetry `harm-h3`: the screens 596797–596809, the resting rows
+596903, 596904, 596912–596915 and 597094, the rows along the spin 596900,
+596901, 596905, 596906, 596937, 597095, 597101, 597102 and 597104, across it
+596902, 596907–596910, 596938 and 597672–597674; Nibi 27188314 and 27188316;
+the CSVs and logs in `.claude/data/harm-h3`, with the tables printed by
+`test/harmonic_spin_study.jl`):
+
+- `Harmonic(1, a)` spinning about `z`, with no gauge source
+  (`test/octant_runs.jl case=harmonic`), `L = 64`, root brick `2`, cubes
+  `R = 32, 16, 8, 4, 2` about the hole — one level more than steps H1 and H2,
+  so `h = 1/N` at the finest level again. **At rest** on the rotating octant
+  (`43` blocks, `38.0 M` points at `1/96`, `90.2 M` at `1/128`). **Along the
+  spin** on the rotating quadrant, from `z = −2` at `v = 1/5` on a `4 M`
+  capsule (`156` blocks, `41 M` points at `1/64`, `138 M` at `1/96`).
+  **Across it** on the bitant, along `x` from `x = −2` at `v = 1/5` on a
+  `4 M` capsule (`312` blocks, `82 M` and `276 M` points), and from `x = −3`
+  at `v = 3/10` on a `6 M` capsule (`301 M` points at `1/96`).
+- Steps H1's and H2's numerics: `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`,
+  `ρ_max = 4/M` with the target's rate, the Gaussian `γ0`, the finder every
+  chunk, `chunk = M`, a checkpoint every `4 M`. Each moving row has a resting
+  control on its own capsule and code (`…s`); the `v = 3/10` rows at `1/64`
+  are compared with the `4 M` capsule's, which equal the `6 M` capsule's to
+  `1.00×` in the two shells just outside the horizon and `0.94–1.25×` beyond
+  (`b5d96s` against `b5d96v3s`).
+- **The room.** The horizon's equator is at `M` and its pole at
+  `√(M² − a²)`: `0.866` at `a = 1/2`, `0.714` at `7/10`. The singular ring is
+  at `a`. A spherical layer must lie between the ring and the pole: at
+  `a = 1/2` that is `[1/2, 0.866)`, and at `a = 7/10` it is `0.014 M` wide,
+  so **`:damped` does not fit at `a = 7/10`** and only the offset surface of
+  `:fitted` can hold that hole.
+- **`:damped`** at `a = 1/2`: `r_0 = 3/5`, `r_1 = 3/4` (`margin = 4`), `r_1`
+  `7.4` cells inside the pole at `1/64` and `11` at `1/96`, `6.3` at `1/64`
+  inside the pole contracted along the spin (`0.849`); at `1/48` `r_0 = 23/40`,
+  since `3/5` gives a ramp of `7.2` cells and the assertion asks for `8`
+  (job 596911 refused it).
+- **`:fitted`**: `fit_cont = 2`, `lmax_fit = 8`, the margin `m` and the ramp
+  `n_L` in cells. At `a = 1/2` the series fixed in `M` is the offset `M/4` and
+  the ramp `3M/16` — `m = 16`, `n_L = 12` at `1/64` and `24`, `18` at `1/96` —
+  which puts the core surface `7/16 M` inside the horizon, `M/16` outside the
+  ring on the equator.
+
+| row | `a` | `h` | mesh | `v` | interior | on | to | `s/M` |
+|---|---|---|---|---|---|---|---|---|
+| `r5d48`, `r5d64`, `r5d96` | `1/2` | `1/48`, `1/64`, `1/96` | rotating octant | `0` | `:damped` | one H200 | `24 M` | `27`, `60`, `232` |
+| `r5f64`, `r5f96m` | `1/2` | `1/64`, `1/96` | rotating octant | `0` | `:fitted`, the margin fixed in `M` | one H200 | `24 M` | `59`, `254` |
+| `r5f96` | `1/2` | `1/96` | rotating octant | `0` | `:fitted` `m = 16`, `n_L = 12` (fixed in cells) | one H200 | `24 M` | `252` |
+| `r7f128` | `7/10` | `1/128` | rotating octant | `0` | `:fitted` `m = 16`, `n_L = 12` | two H200s | `24 M` | `404` |
+| `z5d48`, `z5d48s` | `1/2` | `1/48` | rotating quadrant | `1/5`, `0` | `:damped` | one H200 | `20 M` | `76`, `69` |
+| `z5d64`, `z5d64s` | `1/2` | `1/64` | rotating quadrant | `1/5`, `0` | `:damped` | one H200 | `20 M` | `176`, `178` |
+| `z5d96`, `z5d96s` | `1/2` | `1/96` | rotating quadrant | `1/5`, `0` | `:damped` | two H200s | `20 M` | `495`, `413` |
+| `z5f64`, `z5f64t`, `z5f64s` | `1/2` | `1/64` | rotating quadrant | `1/5`, `1/5`, `0` | `:fitted`; `z5f64t` with `trail_ramp = 9/10` | one H200 | `20 M` | `175`, `187`, `166` |
+| `b5d64`, `b5d64s` | `1/2` | `1/64` | bitant | `1/5`, `0` | `:damped` | two H200s | `20 M` | `212`, `198` |
+| `b5d96`, `b5d96s` | `1/2` | `1/96` | bitant | `1/5`, `0` | `:damped` | four H200s | `20 M` | `529`, `540` |
+| `b5f64`, `b5f64t`, `b5f64s` | `1/2` | `1/64` | bitant | `1/5`, `1/5`, `0` | `:fitted`; `b5f64t` with `trail_ramp = 9/10` | two H200s | `20 M` | `215`, `211`, `209` |
+| `b5d64v3` | `1/2` | `1/64` | bitant, `6 M` | `3/10` | `:damped` | two H200s | `20 M` | `203` |
+| `b5f64v3` | `1/2` | `1/64` | bitant, `6 M` | `3/10` | `:fitted` | two H200s | ended at `2 M` | — |
+| `b5d96v3`, `b5d96v3s` | `1/2` | `1/96` | bitant, `6 M` | `3/10`, `0` | `:damped` | eight H100s (Nibi) | `20 M` | `444`, `397` |
+
+Every find in every row succeeds.
+
+**The screens, at rest to `8 M`.** `ℋ` just outside the horizon, in `[1, 5/4)`,
+and `J`'s drift over `[2, 8] M`:
+
+| `a` | `h` | variant | `ℋ [1, 5/4)` | `dJ/dt` |
+|---|---|---|---|---|
+| `1/2` | `1/48` | `:fitted` `m = 8`, `n_L = 12` | `5.17·10⁻⁴` | `+1.1·10⁻⁵` |
+| `1/2` | `1/64` | `:fitted` `m = 8`, `12`, `16` (`n_L = 12`) | `3.61·10⁻⁴`, `9.46·10⁻⁵`, `2.99·10⁻⁵` | `+5.3·10⁻⁶`, `−1.9·10⁻⁸`, `−3.3·10⁻⁷` |
+| `1/2` | `1/64` | `:damped` | `1.80·10⁻⁵` | `−8.4·10⁻⁸` |
+| `1/2` | `1/96` | `:fitted` `m = 16`, `n_L = 20`; `m = 24`, `n_L = 12` | `1.38·10⁻⁶`, `1.45·10⁻⁶` | `−6.5·10⁻⁸`, `−6.2·10⁻⁸` |
+| `1/2` | `1/96` | `:damped` | `9.81·10⁻⁷` | `−4.1·10⁻⁸` |
+| `7/10` | `1/80` | `:fitted` `m = 6`, `n_L = 12` | `3.67·10⁻³` | `−7.4·10⁻⁵` |
+| `7/10` | `1/96` | `:fitted` `m = 8`, `12` (`n_L = 12`) | `2.44·10⁻³`, `5.71·10⁻⁴` | `−4.3·10⁻⁵`, `−3.4·10⁻⁵` |
+
+- From `[2, 4)` out every `a = 1/2` screen at one spacing is the same to two
+  digits but `m = 8` at `1/64` (`1.25×` in `ℋ`); the margin acts on the first
+  shell and on `J`.
+- **At `a = 1/2` the margin is a depth in `M`.** The core surface's depth
+  below the horizon, `(m + n_L) h`, orders the rows: `5/16 M` (`m = 8` at
+  `1/64`) leaks `20×` `:damped` just outside the horizon and drifts `J` at
+  `5·10⁻⁶`; `3/8 M` is `5×` at `1/64` and `1.4–1.5×` at `1/96` (both rows);
+  `7/16 M` is `1.7×` at `1/64`. The `24 M` rows below confirm it.
+- **At `a = 7/10` nothing fits one H200 that holds.** The `1/80` and `1/96`
+  rows leak `600–3700×` the `a = 1/2` hole's at `1/96` and drift `J` at
+  `3–7·10⁻⁵`; `1/128` ran out of memory on one H200 at its first step
+  (`13.4 GiB` short, jobs 596808 and 596809) and went to two (`r7f128`).
+
+**At rest, `a = 1/2`: order four outside the horizon, stationary, and the
+spin at the Kerr-Schild rows' level.** The shells at `24 M`:
+
+| row | `ℋ [1, 5/4)` | error `[1, 5/4)` | `ℋ [5/4, 2)` | error `[5/4, 2)` | `ℋ [2, 4)` | error `[2, 4)` | `ℋ [4, 7)` | error `[4, 7)` |
+|---|---|---|---|---|---|---|---|---|
+| `r5d48` | `2.06e−4` | `9.37e−4` | `2.66e−6` | `2.55e−5` | `2.45e−7` | `3.25e−6` | `1.70e−8` | `5.06e−7` |
+| `r5d64` | `1.69e−5` | `1.08e−4` | `5.93e−7` | `8.44e−6` | `7.11e−8` | `9.04e−7` | `4.69e−9` | `1.21e−7` |
+| `r5d96` | `1.03e−6` | `1.86e−5` | `1.12e−7` | `1.13e−6` | `1.34e−8` | `1.19e−7` | `5.87e−10` | `2.14e−8` |
+| `r5f64` | `3.04e−5` | `2.27e−4` | `6.33e−7` | `6.68e−6` | `6.94e−8` | `7.29e−7` | `3.47e−9` | `1.18e−7` |
+| `r5f96m` | `1.01e−6` | `1.85e−5` | `1.12e−7` | `1.15e−6` | `1.37e−8` | `1.19e−7` | `6.02e−10` | `2.14e−8` |
+| `r5f96` | `2.00e−5` | `1.06e−4` | `1.93e−7` | `2.16e−6` | `1.37e−8` | `1.85e−7` | `1.65e−9` | `2.83e−8` |
+| `r7f128` | `1.63e−4` | `1.88e−3` | `2.35e−6` | `7.09e−5` | `1.45e−7` | `4.95e−6` | `2.06e−8` | `3.23e−7` |
+
+- **`:damped`'s orders.** `1/48 → 1/64`: from `5/4` out the error `3.9–5.3`
+  and `ℋ` `3.8–5.2` at every time; in `[1, 5/4)` `ℋ` `7.5–8.7` and the error
+  `4.4–7.5`, the layer term of steps H1 and H2. `1/64 → 1/96`: from `5/4`
+  out the error `4.0–5.0` and `ℋ` `3.7–5.1`; in `[1, 5/4)` `ℋ` `6.9–7.2` from
+  `4 M` and the error `4.0–4.4`. So `1/48` is convergent at `r_0 = 23/40`.
+- **Stationary near the hole.** In `r5d96` `ℋ` in `[1, 5/4)` is
+  `9.1·10⁻⁷` at `4 M` and `1.03·10⁻⁶` at `24 M`, and `C_a` over the evolved
+  region `1.04·10⁻⁶` from `4 M` to `24 M`. The error from `5/4` out grows over
+  the run (in `[2, 4)` `2.0·10⁻⁸` at `4 M`, `1.2·10⁻⁷` at `24 M`), at order
+  four to five between the spacings: truncation error.
+- **`:fitted` with the margin fixed in `M` is `:damped`.** `r5f96m` over
+  `r5d96` is `0.97–1.03×` in every shell at `4 M` and at `24 M`, and its `J`
+  and `M_irr` drift at `:damped`'s rates. `r5f64` is `1.8×` `:damped` in `ℋ`
+  just outside the horizon at `24 M` and `2.1×` in the error there, and
+  `0.74–1.07×` beyond. `r5f64 → r5f96m`: `ℋ` `8.0–8.5` and the error
+  `5.3–6.2` in `[1, 5/4)`, `3.7–4.6` from `5/4` out.
+- **With the margin fixed in cells it does not converge just outside the
+  horizon.** `r5f96` (`m = 16`, `n_L = 12` at `1/96`, the core surface
+  `0.29 M` deep) is `19×` `:damped` in `ℋ` and `5.7×` in the error in
+  `[1, 5/4)` at `24 M`, `1.0–2.8×` from `5/4` out; `r5f64 → r5f96` there
+  falls to order `1.0` in `ℋ` and `1.9` in the error by `16 M`, and `J` drifts at `−3.4·10⁻⁷`,
+  `37×` `:damped`'s.
+
+**The horizon at rest** (`M_K = √(r₊/2) = 0.965926`; the slopes
+least-squares fits over `[4, 24] M`):
+
+| row | `M_irr − M_K` | `dM_irr/dt` | `J − a` | `dJ/dt` |
+|---|---|---|---|---|
+| `r5d48` | `3.14e−6` | `1.32e−7` | `9.79e−6` | `+4.72e−7` |
+| `r5d64` | `9.97e−7` | `3.93e−8` | `−3.15e−6` | `−8.59e−8` |
+| `r5d96` | `2.51e−7` | `7.76e−9` | `−4.05e−7` | `−9.21e−9` |
+| `r5f64` | `1.23e−6` | `4.32e−8` | `−5.86e−7` | `+1.17e−7` |
+| `r5f96m` | `2.48e−7` | `7.67e−9` | `−4.54e−7` | `−1.16e−8` |
+| `r5f96` | `2.25e−7` | `5.88e−9` | `−7.91e−6` | `−3.41e−7` |
+| `r7f128` | `−7.33e−6` | `−4.63e−8` | `2.07e−5` | `−1.40e−6` |
+
+- **`J` is at the Kerr-Schild rows' level from `1/64`, and falls with the
+  spacing.** The Kerr-Schild `a = 1/2` hole at rest drifts `J` at
+  `1.28·10⁻⁷`, `4.05·10⁻⁸` and `1.65·10⁻⁸` a `M` at `1/24`, `1/32` and `1/40`
+  ([a spinning hole along its
+  axis](#a-spinning-hole-along-its-axis-2026-10-21)); the harmonic hole's
+  `8.6·10⁻⁸` at `1/64` and `9.2·10⁻⁹` at `1/96` are its `1/24` and better than
+  its `1/40`. The order `1/64 → 1/96` is `5.5`.
+- **`M_irr` converges at order four, above the Kerr-Schild level.** Its
+  offset is `3.1·10⁻⁶`, `1.0·10⁻⁶` and `2.5·10⁻⁷` (orders `4.0`, `3.4`) and its
+  drift `1.3·10⁻⁷`, `3.9·10⁻⁸` and `7.8·10⁻⁹` a `M` (`4.2`, `4.0`). The
+  Kerr-Schild hole's at `1/40` are `1.2·10⁻⁸` and `−9.4·10⁻¹⁰`, so at `1/96` the
+  harmonic hole's offset is `20×` and its drift `8×` that, by truncation error.
+
+**At rest, `a = 7/10` runs at `1/128` on two H200s and is not stationary by
+`24 M`.** `r7f128` (`:fitted`, `m = 16`, `n_L = 12`, the core surface `0.08 M`
+— `10` cells — outside the ring) holds `ℋ` just outside the horizon flat at
+`1.6·10⁻⁴` from `8 M`, `160×` the `a = 1/2` hole's at `1/96` and `5×` its
+`1/64` `:fitted` row's. From about `10 M` the shells beyond `5/4` grow: from
+`10 M` to `24 M` `ℋ` in `[5/4, 2)` from `6.0·10⁻⁷` to `2.4·10⁻⁶`, in `[2, 4)`
+from `5.3·10⁻⁹` to `1.5·10⁻⁷` and in `[4, 7)` from `2.0·10⁻¹⁰` to `2.1·10⁻⁸`,
+and the error in `[2, 4)` from `7.0·10⁻⁸` to `5.0·10⁻⁶` — a front that leaves
+the hole and grows as it moves out, its growth slowing in `[2, 4)` after
+`18 M` and not in `[4, 7)`. `J` drifts at `−1.4·10⁻⁶` a `M`, `150×` the
+`a = 1/2` hole's at `1/96`. One spacing gives no order, and whether the front
+saturates is **(open)**.
+
+**Along the spin, `:damped` at `1/96` is the resting hole within `1.7×` in
+the error, and `ℋ` carries a pulse.** The moving row over its resting row at
+`20 M`:
+
+| row | `ℋ [1, 5/4)` | `ℋ [5/4, 2)` | `ℋ [2, 4)` | `ℋ [4, 7)` | error `[1, 5/4)` | error `[5/4, 2)` | error `[2, 4)` | error `[4, 7)` |
+|---|---|---|---|---|---|---|---|---|
+| `z5d48` (`1/48`) | `1.00×` | `1.03×` | `2.62×` | `3.28×` | `1.08×` | `2.67×` | `2.86×` | `2.21×` |
+| `z5d64` (`1/64`) | `0.98×` | `1.63×` | `2.41×` | `6.91×` | `1.46×` | `2.29×` | `3.34×` | `2.75×` |
+| `z5d96` (`1/96`) | `1.03×` | `0.98×` | `1.14×` | `6.02×` | `1.07×` | `1.24×` | `1.34×` | `1.38×` |
+| `z5f64` (`:fitted`, `1/64`) | `1.56×` | `6.09×` | `7.34×` | `84.6×` | `1.59×` | `6.46×` | `10.4×` | `8.09×` |
+| `z5f64t` (the same, `trail_ramp`) | `33.4×` | `78.9×` | `61.5×` | `152×` | `11.6×` | `27.9×` | `28.3×` | `14.9×` |
+
+- **The excess is a pulse that leaves the hole at about `4 M`.** In `z5d96`
+  `ℋ`'s ratio peaks at `1.62×` in `[5/4, 2)` at `8 M`, `1.73×` in `[2, 4)` at
+  `12 M` and `9.5×` in `[4, 7)` at `16 M` (`6.0×` at `20 M`); behind it the
+  ratio returns to `1.0–1.1×`. The error's ratio is at most `1.38×` at `20 M`
+  and `1.66×` over the run (in `[4, 7)` at `4 M`, a step every moving row
+  takes at the start).
+- **No trailing side.** In `[1, 5/4)` at `20 M` the trailing half of `z5d96`
+  has `1.05·10⁻⁶`, the leading `1.01·10⁻⁶`, the resting row `1.01·10⁻⁶`; the
+  same holds at `1/64`.
+- **The excess converges fast from `1/64`.** Its order `1/64 → 1/96`: the
+  error `7.0–10.6` in every shell once the pulse has reached it, `ℋ`
+  `7.2–12.5` in the shells the pulse is crossing. From `1/48` to `1/64` it is
+  not asymptotic (between `−5.5` and `8.5`). The resting
+  rows converge at `4.0–4.9` in the error.
+- **`:fitted` does not hold.** `z5f64`'s ratio grows outward with the pulse —
+  `ℋ` in `[4, 7)` `1.2×` at `8 M`, `12×` at `12 M`, `45×` at `16 M`, `85×` at
+  `20 M` — and its trailing half just outside the horizon is `2×` the leading
+  half's. `trail_ramp = 9/10` makes it worse everywhere.
+
+**Across the spin, `:damped` at `v = 1/5` and `1/96` is the resting hole
+within `1.8×` in the error, with a trailing excess in `ℋ` just outside the
+horizon.** The moving row over its resting row at `20 M`:
+
+| row | `ℋ [1, 5/4)` | `ℋ [5/4, 2)` | `ℋ [2, 4)` | `ℋ [4, 7)` | error `[1, 5/4)` | error `[5/4, 2)` | error `[2, 4)` | error `[4, 7)` |
+|---|---|---|---|---|---|---|---|---|
+| `b5d64` (`1/64`) | `13.9×` | `3.46×` | `3.19×` | `6.32×` | `12.1×` | `2.65×` | `3.47×` | `3.10×` |
+| `b5d96` (`1/96`) | `4.29×` | `1.14×` | `1.25×` | `3.10×` | `1.79×` | `1.80×` | `1.82×` | `1.68×` |
+| `b5d64v3` (`v = 3/10`, `1/64`) | `28.8×` | `11.9×` | `12.7×` | `28.5×` | `28.7×` | `7.74×` | `9.45×` | `9.65×` |
+| `b5d96v3` (`v = 3/10`, `1/96`) | `15.7×` | `3.30×` | `4.65×` | `9.35×` | `5.03×` | `3.33×` | `2.91×` | `2.70×` |
+| `b5f64` (`:fitted`, `1/64`) | `61.9×` | `64.1×` | `142×` | `349×` | `57.9×` | `68.3×` | `95.2×` | `79.5×` |
+| `b5f64t` (the same, `trail_ramp`) | `42.8×` | `93.4×` | `68.8×` | `137×` | `24.4×` | `28.9×` | `37.8×` | `29.0×` |
+
+- **Two excesses.** `ℋ` in `[1, 5/4)` steps up in the first `2 M` and stays
+  (`b5d96` `3.5×` at `2 M`, `4.3–4.6×` from `4 M`), and it is the trailing
+  side's: at `20 M` the trailing half has `6.15·10⁻⁶`, the leading
+  `7.7·10⁻⁷`, the resting row `1.02·10⁻⁶`. And the same outward pulse as along
+  the spin crosses the shells from `8 M` (`ℋ` in `[4, 7)` `3.0×` at `16 M` and
+  `20 M`). Inside the horizon the trailing band is `1.8×` the resting one.
+- **The error's ratio rises over the run**: in `b5d96` from `1.1–1.4×` at
+  `1 M` to `1.7–1.8×` at `20 M` in every shell, as step H2's late rise did;
+  `40 M` would test it.
+- **The excess converges at order about ten.** `b5d64 − b5d64s` to
+  `b5d96 − b5d96s`: `ℋ` `10.2–10.7` in `[1, 5/4)` at every time from `2 M`
+  and `7.8–17` beyond as the pulse passes; the error `10.8–11.6` in
+  `[1, 5/4)` and `6.7–7.4` beyond at `20 M`. The resting pair converges at
+  `4.0–4.9` in the error and `6.9–7.2` in `ℋ` just outside the horizon, so
+  the ratio there falls more slowly than the excess.
+- **At `v = 3/10` the same, larger.** `b5d96v3`'s `ℋ` just outside the
+  horizon is `15–16×` from `2 M`, its trailing half `2.27·10⁻⁵` against a
+  leading `1.21·10⁻⁶`, and the error's ratio rises to `2.7–5.0×` by `20 M`.
+  The excess converges at `8.0–8.5` in `ℋ` and `7.5–9.2` in the error at
+  `20 M` (`b5d64v3 → b5d96v3`). In `[1, 5/4)` the ratio of `ℋ` falls only
+  `1.8×` from `1/64` to `1/96`, the resting row's layer term outrunning the
+  excess.
+- **Where `2×` would come**, extrapolating each shell's ratio less one at its
+  measured rate: at `v = 1/5` everywhere at about `1/136`; at `v = 3/10` the
+  error at about `1/132`, and `ℋ` just outside the horizon near `1/500`.
+- **`:fitted` does not hold across the spin.** `b5f64` is `503×` in `ℋ` just
+  outside the horizon after `1 M` and `60–350×` everywhere at `20 M`; its `J`
+  drifts at `−9.8·10⁻⁶` a `M`. `trail_ramp = 9/10` lowers it to `43–137×` in
+  `ℋ` and `24–38×` in the error, and the drift to `+5.8·10⁻⁷`. At `v = 3/10` (`b5f64v3`) `ℋ` just outside the
+  horizon is `3500×` the resting row's after `1 M` and the global error `0.48`;
+  a kernel threw a `DomainError` at `2 M` (job 596910).
+
+**No lag, and the contraction.** The found horizon along the motion against
+the boosted hole's line is within `1.5·10⁻⁷ M` at `1/96` in every `:damped`
+row (`z5d96` `3.3·10⁻⁸`, `b5d96` `4.7·10⁻⁸`, `b5d96v3` `1.5·10⁻⁷` at `20 M`)
+and `3.8·10⁻⁶` at `1/64`; its extent along the motion over its extent across,
+against the resting row's times `√(1 − v²)`, is off by at most `2·10⁻⁷` at
+`1/96`. `:fitted`'s lag is up to `3.7·10⁻⁵` across the spin and `7.8·10⁻⁶`
+along it.
+
+**The spin and the mass of the moving hole** (`[4, 20] M`, moving / resting):
+
+| row | `dJ/dt` | `J − a` at `20 M` | `M_irr − M_K` at `20 M` |
+|---|---|---|---|
+| `z5d64` | `+4.0e−8` / `−8.3e−8` | `−6.6e−7` / `−2.8e−6` | `1.28e−6` / `9.03e−7` |
+| `z5d96` | `−1.13e−8` / `−1.19e−8` | `−2.2e−7` / `−4.0e−7` | `2.88e−7` / `2.41e−7` |
+| `b5d64` | `−1.01e−6` / `−8.2e−8` | `−1.95e−5` / `−2.75e−6` | `1.26e−6` / `8.93e−7` |
+| `b5d96` | `−1.50e−8` / `−1.17e−8` | `−5.1e−7` / `−4.0e−7` | `2.47e−7` / `2.39e−7` |
+| `b5d64v3` | `+2.51e−6` / `−8.2e−8` | `+4.50e−5` / `−2.75e−6` | `1.18e−6` / `8.93e−7` |
+| `b5d96v3` | `+3.75e−8` / `−1.15e−8` | `+4.8e−7` / `−3.9e−7` | `2.68e−7` / `2.37e−7` |
+
+- **Along the spin `J` drifts at the resting hole's rate** at `1/96` (`0.95×`),
+  as the Kerr-Schild hole's did.
+- **Across it the drift is an excess that converges at order ten or faster.** The
+  moving row's drift less the resting row's is `−9.3·10⁻⁷` and `−3.3·10⁻⁹` a `M`
+  at `v = 1/5` (`1/64`, `1/96`: `280×`, order `14`), and `2.59·10⁻⁶` and
+  `4.9·10⁻⁸` at `v = 3/10` (`53×`, order `9.8`).
+- **G5's early drift is resolution.** At `v = 3/10` across the spin `J`'s
+  excess over the first `4 M` is `2.1·10⁻⁶` a `M` at `1/64` and `5.1·10⁻⁸` at
+  `1/96` (order `9.1`), against G5's `0.013` at `q = 2`: `6000×` smaller at
+  `1/64` and falling at order nine. The `a = 1/2` hole with `:damped` does not
+  have it. `:fitted` at `v = 3/10` fails within `2 M` and drifts `J` at
+  `−4.6·10⁻⁵` before it does; the `a = 7/10` hole moving was not run (below).
+- `M_irr` moving is `1.0–1.4×` the resting row's offset at every spacing.
+
+**The cost, and what `a = 7/10` would cost.** On an H200 a point and `M` costs
+`6.1 µs` of one GPU at `1/96` at rest (`r5d96`), `7.7 µs` across four GPUs
+(`b5d96`, `80 %` of one GPU's rate) and `9.0 µs` for `:fitted` at `a = 7/10`
+on two (`r7f128`); the eight H100s of Nibi ran `b5d96v3` at `11.8 µs`.
+`nvidia-smi` read `1.5 KB` a point for `:damped` (`101 GB` on each of four
+H200s for `b5d96`) and `1.9 KB` for `r7f128` (`86 GB` on each of two), the
+memory pool. At `a = 7/10` and `1/128`, which is the coarsest spacing that ran
+and has no pair:
+
+- along the spin, the rotating quadrant's capsule is `327 M` points, about
+  `620 GB`: five H200s, `33` GPU-hours for the moving row and its control to
+  `20 M`;
+- across it, the bitant's is `654 M` points, about `1.24 TB`: more than one
+  node of eight H200s, `65` GPU-hours for the pair;
+- a resting pair needs `1/192` as well: `304 M` points, about `580 GB`, five
+  H200s.
+
+These are estimates from `r7f128`'s rate. They were not run: the hole they
+would move is the one that is not stationary at rest.
+
+**What it settles for the route** (`CODE.md`, [The ladder of this
+route](CODE.md#the-ladder-of-this-route), item 3):
+
+- At `a = 1/2` the harmonic hole at rest converges at order four from `1/48`
+  (`:damped`) and is stationary to `24 M`, with `J`'s drift at the
+  Kerr-Schild rows' level from `1/64` and falling, and `M_irr`'s converging at
+  order four above it. `:fitted` with its margin fixed in `M` is `:damped` at
+  `1/96`; with the margin fixed in cells it does not converge just outside the
+  horizon.
+- Moving at `v = 1/5`, `:damped` is the resting hole within `2×` in the error
+  at `1/96` along the spin and across it, and within `2×` in `ℋ` along the spin
+  but for a pulse that leaves the hole at `4 M`; across the spin `ℋ` just
+  outside the horizon is `4.3×` on the trailing side. Every excess converges
+  at order `7–11`. At `v = 3/10` across the spin the excess is `3–16×` at
+  `1/96`, converging at order `8–9`.
+- **`:fitted`, the route's interior for a binary, does not hold a moving
+  spinning hole** at `1/64`: `1.6–85×` along the spin and `60–350×` across it
+  at `v = 1/5`, and a failure within `2 M` at `v = 3/10`. At `a = 0` (step H2)
+  it was the resting hole from `5/4 M` out.
+- G5's drift of `J` is resolution and `q = 2`: at fourth order with `:damped`
+  it is `6000×` smaller at `1/64` and converges at order nine.
+- `a = 7/10` needs `1/128` and two H200s at rest, and there its error outside
+  the horizon grows from `10 M`. Its moving rows were priced, not run.
+
+So a spinning hole on the inertial grid holds at `a = 1/2` with `:damped` at
+`1/96`, and not with `:fitted` at `1/64`; whether `:fitted` holds at a finer
+spacing or with its margin chosen for the moving hole is **(open)**.
 
 ## The interior's questions, opened in step 5 and closed through step 8′
 

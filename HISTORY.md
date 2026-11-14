@@ -128,6 +128,7 @@ The briefs of the finished steps are under
   - [Harmonic gauge for the inspiral proposed on 2026-11-11](#harmonic-gauge-for-the-inspiral-proposed-on-2026-11-11)
   - [Step H1 measured on 2026-11-11](#step-h1-measured-on-2026-11-11)
   - [Step H2 measured on 2026-11-12](#step-h2-measured-on-2026-11-12)
+  - [Step H3 measured on 2026-11-12 and 2026-11-13](#step-h3-measured-on-2026-11-12-and-2026-11-13)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -194,6 +195,7 @@ The briefs of the finished steps are under
   - [Step 8′ — The trailing side](#step-8--the-trailing-side)
   - [Step H1 — A harmonic hole at rest](#step-h1--a-harmonic-hole-at-rest)
   - [Step H2 — A moving harmonic hole](#step-h2--a-moving-harmonic-hole)
+  - [Step H3 — Spin in the harmonic chart](#step-h3--spin-in-the-harmonic-chart)
 
 ## Goals
 
@@ -1728,6 +1730,79 @@ horizon. Two failures of that mesh on an H200 were fixed in `369e070`:
 `qf48v2f` was first submitted without `trail_ramp = 9/10`, which the brief
 asked to vary for the moving `:fitted` rows; that run is kept as the row
 without it, and the rerun with it failed the same way.
+
+### Step H3 measured on 2026-11-12 and 2026-11-13
+
+Erik asked for step H3 on 2026-11-12, from step H2's branch (pull request
+#33), on Symmetry, with step H1's and H2's checkpoints deleted there. During
+it he approved the rows that measure the moving excess's order (the `1/48`
+and `1/96` pairs along the spin, `b5d64v3`, `b5d96` and `b5d96s`, and the
+`1/96` pair at `v = 3/10`), and, with Symmetry's H200s busy, moving the
+`v = 3/10` pair to Nibi's H100s once a smoke run there had passed; the
+Symmetry copies stayed queued until the Nibi runs were measured. `b5d96s`
+was submitted to Nibi too, started on Symmetry first, and the Nibi copy was
+cancelled before it ran. The runs and their numbers are in
+`SINGULARITY_HANDLING.md`, "A spinning harmonic hole (step H3, 2026-11-12 to
+2026-11-13)". What they replaced in `CODE.md`:
+
+- **"With spin the room is the equator's"** predicted that `a = 7/10` costs
+  about one level more than `a = 0`. Measured: `a = 1/2` converges at twice
+  (`:damped`) and `1.6×` (`:fitted`) `a = 0`'s spacing, and `a = 7/10` runs
+  only as `:fitted`, from `1/128`, `1.7` levels more, where it is not
+  stationary by `24 M`. The bullet now also says that a spherical layer's
+  room is the pole's, which rules out `:damped` at `a = 7/10`.
+- **The ladder's item 3**, "On which grid" and "What is not known on this
+  route" gained the measured answer: the drift of `J` was resolution, and
+  `:fitted` does not hold a moving spinning hole at `1/64`. Three items stay
+  open: `:fitted` at a finer spacing, the outgoing pulse, and `a = 7/10`'s
+  growth at rest.
+- **"Single black holes: recommended settings"** gained six harmonic rows
+  and a rule for the spinning harmonic chart.
+
+**The code.** None changed: the rotating octant, the rotating quadrant and the
+bitant took `case=harmonic` with `a=` as they were. `test/harmonic_spin_study.jl`
+prints the tables.
+
+**What failed on the way:**
+
+- `r5d48` at `r_0 = 3/5` was refused by `check_interior_radii` (job 596911):
+  the ramp is `7.2` cells at `1/48`, and the rule asks for `8`. It ran at
+  `r_0 = 23/40` (job 597094), and the `1/48` rows along the spin took the same.
+- `a = 7/10` at `1/128` ran out of memory on one H200 at its first step
+  (`13.4 GiB` short, jobs 596808 and 596809); `r7f128` ran on two.
+- `b5f64v3` (`:fitted` across the spin at `v = 3/10`) threw a `DomainError`
+  in a kernel at `2 M` (job 596910) after its trailing side had grown
+  `3500×`; `b5d64v3` replaced it with `:damped`.
+- The first smoke run on Nibi was at `1/32`, where `r_1 = 3/4` is not four
+  cells inside the pole, and was refused (job 27185498); the smoke at `1/48`
+  passed (job 27187282).
+
+**Running on Nibi.** The pair ran from an environment whose `Project.toml` and
+`Manifest.toml` were Symmetry's HPC-X environment's, with
+`MPIPreferences.use_system_binary` pointed at Open MPI 5.0.10 of the Alliance's
+`StdEnv/2026`, launched by `srun --mpi=pmix --cpu-bind=none` with the Alliance's
+`julia/1.13.0` module. juliaup's Julia cannot load that Open MPI: the system
+loader needs `libze_loader.so.1` from the Gentoo compatibility layer, and
+putting that layer on `LD_LIBRARY_PATH` crashed Julia.
+
+**Decided in the step without asking** (each a choice of what to measure):
+
+- the mesh: cubes `32, 16, 8, 4, 2`, one level more than steps H1 and H2, so
+  `h = 1/N` at the hole again;
+- `:damped` at `r_0 = 3/5`, `r_1 = 3/4`, between the ring and the pole at
+  every spacing from `1/48`, and `:fitted`'s series fixed in `M` as the offset
+  `M/4` and the ramp `3M/16`, the one that fits integer cells at `1/64` and
+  `1/96`;
+- the moving rows at `a = 1/2`, as the brief allows when `a = 7/10` does not
+  fit one H200, and `a = 7/10` priced from its resting row;
+- the capsules: `4 M` from `−2` at `v = 1/5`, `6 M` from `−3` at `v = 3/10`,
+  each moving row with its resting control on its own capsule, but
+  `b5d64v3`, compared with the `4 M` capsule's after `b5d96s` and `b5d96v3s`
+  showed the two capsules' resting rows equal near the hole;
+- `trail_ramp = 9/10` on `:fitted` along and across the spin, added after the
+  first `4 M` of the rows without it;
+- `:damped` at `v = 3/10` once `:fitted` failed there, and no moving
+  `:fitted` row at `1/96`.
 
 ## Possible extensions
 
@@ -3980,3 +4055,28 @@ rows — and at `v = 1/2` to `20 M` at one spacing:
   ratio and the cost per `M`.
 - The report gives the ratio of the moving hole to the resting one per
   variant and says which grid its numbers favour.
+
+### Step H3 — Spin in the harmonic chart
+
+Added to the plan on 2026-11-11 with steps H1, H2, H4 and H5; ran 2026-11-12
+and 2026-11-13.
+
+`CODE.md`: "What harmonic gauge costs" (the spin's room), "The spinning
+harmonic chart", "The fitted target". **`a = 1/2` and `a = 7/10`,
+`:fitted`.**
+
+**Accept:**
+
+- **The settings** per spin, screened at rest on the rotating octant: the
+  margin and the depth that fit between the horizon's equator and the
+  disk, and the spacing they need. If `a = 7/10` does not fit one H200,
+  report its price and run `a = 1/2`.
+- **At rest** to `24 M`: stable, with `M_irr` and `J` constant at the
+  Kerr-Schild rows' level and falling with the spacing.
+- **Along the spin** at `v = 1/5` on the rotating quadrant, and **across
+  it** on the bitant, to `20 M`: within `2×` the resting row outside the
+  horizon.
+- **The early drift**: `a = 7/10` at `v = 3/10` across the spin drifted in
+  `J` by `0.013` a `M` at `q = 2`. The same configuration at fourth order:
+  the drift's size and order, at rest and moving.
+- Harmonic rows in "Single black holes: recommended settings".

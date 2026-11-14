@@ -5945,7 +5945,14 @@ radii less `M`. The rows marked *harmonic, moving* are the same hole boosted
 along `x` on the quadrant (step H2, [a moving harmonic
 hole](SINGULARITY_HANDLING.md#a-moving-harmonic-hole-step-h2-2026-11-12)),
 radii `32, 16, 8, 4` about the hole, on the capsule or on a mesh that follows
-the hole (`mesh = follow`, `floor_margin = 3`). Common to every row:
+the hole (`mesh = follow`, `floor_margin = 3`). The *harmonic* rows at
+`a = 1/2` and `7/10` are step H3's ([a spinning harmonic
+hole](SINGULARITY_HANDLING.md#a-spinning-harmonic-hole-step-h3-2026-11-12-to-2026-11-13)):
+the hole spinning about `z` at rest on the rotating octant, moving along its
+spin on the rotating quadrant (*harmonic, along `z`*) and across it on the
+bitant (*harmonic, across*), radii `32, 16, 8, 4, 2` about the hole and the
+moving rows on a `4 M` capsule; the horizon's pole is at `√(M² − a²)`, its
+equator at `M` and the ring at `a`. Common to every row:
 `q = 4`, `cfl = 1/2`, `ε_KO = 1/2`, `ρ_max = 4/M`, the Gaussian `γ0`
 (`1/M → 1/(10M)`), the algebraic source, the rotating octant (the mirrored
 one at `a = 0`), a finest level whose cube contains the whole horizon, and
@@ -5976,11 +5983,17 @@ Earlier versions of this table and its rules: [history](HISTORY.md#single-black-
 | 0.5, *moving* (`v = 1/5` along `z`, its spin) | `:fitted` | `1/32` (the ring: at `1/24` the core surface is at `0.35 < a` on the equator) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured to `40 M`: stable, but `ℋ` just outside the horizon `43×` `:damped`'s at `1/32` and `176×` at `1/40`, `10–15×` its own resting hole; it does not converge from `1/32` to `1/40` at `m` fixed in cells, even at rest |
 | 0.5, *along `z`* (`v = 1/5`, `1/2`) | `:damped` (the core's transit rate) | `1/24` (`1/24`, `1/32`, `1/40`) | `r_0 = 3/4`, `r_1 = 5/4` (`8.8` cells inside the contracted pole `1.616` at `v = 1/2` and `1/24`) | measured to `20 M`: order 4 in the error outside the horizon; moving over resting in `[3, 5)` `1.13×` and `2.79×`; `J`'s drift `1.74–1.77·10⁻⁸/M` at `1/40` at every speed, order 4; at `v = 1/2` `ℋ` in `[3, 5)` converges at only `2.5–3.0` from `1/32` to `1/40` from `10 M` on, and the layer residual rises again at `1/40` |
 | 0.5, *across* (`v = 1/5`, `1/2` along `x`, the spin along `z`) | `:damped` (the core's transit rate) | `1/24` at `v = 1/5`; at `v = 1/2` `1/32` is not yet asymptotic (`1/24`, `1/32`; `1/40` does not fit one H200 on the bitant) | `r_0 = 3/4`, `r_1 = 5/4`, the aligned layer (`10.2` cells inside the contracted equator `1.673` at `v = 1/2` and `1/24`) | measured to `20 M`: stable; near the horizon the error is `4.1×` (`v = 1/5`) and `7.5×` (`1/2`) the aligned hole's at `1/24`, `1.6×` and `2.5×` at `1/32`, falling at order `7–8`; at `v = 1/2` the layer residual stays at `1.0` and `J`'s drift is `2.2×` the aligned hole's at `1/32` |
+| 0.5, *harmonic* | `:damped` | `1/48` (`1/48`, `1/64`, `1/96`) | `r_0 = 3/5`, `r_1 = 3/4` (`7.4` cells inside the pole `0.866` at `1/64`); `r_0 = 23/40` at `1/48`, for a ramp of `8` cells | measured to `24 M`: order 4 outside the horizon from `1/48` (`ℋ` just outside it `7–8.7`, the layer term); stationary near the hole; `J`'s drift `8.6·10⁻⁸` and `9.2·10⁻⁹/M` at `1/64` and `1/96`, the Kerr-Schild rows' at `1/24` and below their `1/40`; `M_irr`'s order 4, `8×` the Kerr-Schild rows' at `1/40` at `1/96` |
+| 0.5, *harmonic* | `:fitted` | `1/64` (`1/64`, `1/96`, the margin fixed in `M`) | the offset `M/4` and the ramp `3M/16`: `m = 16`, `n_L = 12` at `1/64`, `m = 24`, `n_L = 18` at `1/96` (the core surface `M/16` outside the ring); `fit_cont = 2`, `lmax_fit = 8` | measured to `24 M`: `:damped`'s at `1/96` (`0.97–1.03×` in every shell, and its drifts); at `1/64` `ℋ` just outside the horizon `1.8×` `:damped`'s; with the margin fixed in cells (`m = 16`, `n_L = 12` at `1/96`) `19×` there, not converging, and `J`'s drift `37×` |
+| 0.5, *harmonic, along `z`* (`v = 1/5`) | `:damped` (with the target's rate) | `1/96` (`1/64`, `1/96`; two H200s at `1/96`) | the resting layer | measured to `20 M`: the error `1.07–1.38×` the resting hole's at `20 M`; `ℋ` `1.0–1.14×` but for a pulse that leaves the hole at about `4 M` (`6–9.5×` in `[4, 7)`); every excess converging at order `7–10`; no trailing side; `J`'s drift the resting hole's; at `1/64` the error `2.3–3.3×` |
+| 0.5, *harmonic, across* (`v = 1/5`, `3/10` along `x`) | `:damped` (with the target's rate) | `1/96` (`1/64`, `1/96`; four H200s at `1/96`) | the resting layer (the least radius across the spin is the pole's) | measured to `20 M`: at `v = 1/5` the error `1.7–1.8×` (rising from `1.1–1.4×` at `1 M`), `ℋ` just outside the horizon `4.3×` on the trailing side and the pulse `3.1×`; at `v = 3/10` `3–16×`; every excess converging at order `8–11`, and `J`'s drift's at `10–14` (`6000×` below G5's `0.013/M` at `1/64`) |
+| 0.5, *harmonic, moving* (along `z` and across, `v = 1/5`) | `:fitted` | none holds at `1/64` | the resting margin, `m = 16`, `n_L = 12` | measured to `20 M` at `1/64`: `1.6–85×` the resting hole's along the spin and `60–350×` across it (`43–137×` with `trail_ramp = 9/10`, which along the spin is worse); across it at `v = 3/10` it fails within `2 M` |
 | 0.3 | `:fitted` | `1/24` | `m = 16`, `n_L = 18`, `fit_cont = 2`, `lmax_fit = 12` | the rules (`fit_cont = 2` not yet run with spin) |
 | 0.6 | `:damped` | `1/24` (`1/24`, `1/32`) | `r_0 = 3/4`, `r_1 = 3/2` | measured: order `4.0`; `1/16` is not convergent |
 | 0.6 | `:fitted` | `1/32` (`1/32`, `1/48`) | `m = 20`, `n_L = 18`, `fit_cont = 1`, `lmax_fit = 12` | measured at `1/32`: `ℋ` outside `3.2×`, the error equal; the pair predicted |
 | 0.7 | `:damped` | `1/32` (`1/32`, `1/48`) | `r_0 = 0.85`, `r_1 = 1.45` | the rules |
 | 0.7 | `:fitted` | `1/48` | `m = 18`, `n_L = 24`, `fit_cont = 1`, `lmax_fit = 12` | a guess: screen the depth first |
+| 0.7, *harmonic* | `:fitted` | `1/128`, no pair (two H200s) | `m = 16`, `n_L = 12`, `fit_cont = 2`, `lmax_fit = 8` (the core surface `0.08 M` outside the ring); `:damped` does not fit (the ring at `0.7`, the pole at `0.714`) | measured to `24 M` at rest: `ℋ` just outside the horizon flat at `1.6·10⁻⁴` (`160×` the `a = 1/2` hole's at `1/96`), but the error from `5/4` out grows from `10 M` (`70×` in `[2, 4)` by `24 M`) and `J` drifts at `−1.4·10⁻⁶/M`; `1/80` and `1/96` leak `600–3700×` (`8 M` screens); the moving rows were priced, not run |
 | 0.8 | `:damped` | `1/32` (`1/32`, `1/48`) | `r_0 = 0.95`, `r_1 = 1.35` | the rules |
 | 0.8 | `:fitted` | `1/64` | `m = 16`, `n_L = 30`, `fit_cont = 1`, `lmax_fit = 12` | a guess: screen the depth first |
 | 0.9 | `:damped` | `1/96` (`1/96`, `1/128`) | `r_0 = 19/20`, `r_1 = 5/4` | measured: order `4.0` outside the horizon from `1/96` (from `1/72` except `ℋ` just outside it), to `32 M`; stationary to `128 M`; `1/48` is not convergent at `r_0 = 19/20` or `1` (`1/48 → 1/96` is `1935×` just outside); `r_0 = 1` equals `19/20` outside the horizon at `1/96` and is `13×` worse inside |
@@ -6011,7 +6024,14 @@ Earlier versions of this table and its rules: [history](HISTORY.md#single-black-
   offset surface must stay within `0.19 M` of the polar horizon (`0.21 M` holds
   a bounded ring at the pole, `0.25 M` grows on the axis), while `0.625 M` is
   fine at `3/5`; between the two it is unknown. `fit_cont = 2` won every pair
-  at `a = 0`; the spinning runs have used `fit_cont = 1` only.
+  at `a = 0`; the spinning Kerr-Schild runs have used `fit_cont = 1` only.
+- **In the harmonic chart with spin** (step H3) a spherical layer lies
+  between the ring `a` and the pole `√(M² − a²)`: `:damped` takes `r_0`
+  outside the ring and fits only well below `a = M/√2` (`[1/2, 0.866)` at
+  `a = 1/2`; `0.014 M` at `7/10`, where only `:fitted` runs). `:fitted`'s
+  margin is a depth in `M`: the core surface `(m + n_L) h` below the horizon
+  orders the rows, `7/16 M` holds at `a = 1/2` (`M/16` outside the ring on the
+  equator), and fixed in cells it stops converging just outside the horizon.
 - **A moving hole** (measured at `a = 0`, `v = 1/5`):
   - **`:damped` at the default `4/M`, with the target's rate.** Without `(1 − w) ∂_t u_exact` in the layer and the core's
     own rate the layer lagged a moving target by `|∂_t u|/ρ_max` — a
@@ -7709,11 +7729,20 @@ route](#what-is-not-known-on-this-route).
   in the error relative to the fields: `2.3–3.3×` the cells per `M`, not
   `2×`. In a binary's units that is `1/48` and `1/80` for a layer to run,
   and `1/112–1/156` at the holes for Kerr-Schild's accuracy at `1/48`.
-- **With spin the room is the equator's.** The layer and its margin lie
-  between the horizon's equator at `M` and the disk at `a`: `M/2` at
-  `a = 1/2` and `0.3 M` at `a = 7/10`, against `M` less the core at
-  `a = 0`. So `a = 7/10` costs about one level more **(predicted)**; its
-  early row ran at `5/256` with a layer thinner than the calibrated one.
+- **With spin the room is the equator's for `:fitted` and the pole's for
+  `:damped`.** The offset surface lies between the horizon's equator at `M`
+  and the disk at `a`: `M/2` at `a = 1/2` and `0.3 M` at `a = 7/10`, against
+  `M` less the core at `a = 0`. A spherical layer lies between the disk and
+  the pole `√(M² − a²)`: `0.37 M` at `a = 1/2` and `0.014 M` at `7/10`.
+  Measured (step H3, [a spinning harmonic hole](SINGULARITY_HANDLING.md#a-spinning-harmonic-hole-step-h3-2026-11-12-to-2026-11-13)): at `a = 1/2`
+  `:damped` converges from `1/48` and `:fitted` from `1/64`, twice and `1.6×`
+  as fine as at `a = 0`, with `J`'s drift at the Kerr-Schild rows' level from
+  `1/64`. `a = 7/10` runs only as `:fitted`, from `1/128` on two H200s, and
+  its error outside the horizon grows from `10 M`: `1.7` levels finer than
+  `:fitted` at `a = 0`, against the one predicted. A spinning hole moving across its spin
+  is `276 M` points at `1/96` on the bitant, four H200s at `529 s/M`; at
+  `a = 7/10` and `1/128` it would be `654 M`, more than one node of eight
+  H200s **(estimated)**.
 - **Outside the horizon the spacing buys accuracy too (measured; it was
   predicted to buy nothing).** The prediction was that the chart's fields
   vary there on the scale `M`, as Kerr-Schild's do, and that only the room
@@ -7831,6 +7860,9 @@ is less:
   one from `5/4 M` out, with `:fitted`'s `ℋ` just outside the horizon
   `12–18×` the resting hole's on the trailing side; at `v = 1/2` `:fitted`
   does not hold ([a moving harmonic hole](SINGULARITY_HANDLING.md#a-moving-harmonic-hole-step-h2-2026-11-12)).
+  With spin (step H3, [a spinning harmonic hole](SINGULARITY_HANDLING.md#a-spinning-harmonic-hole-step-h3-2026-11-12-to-2026-11-13)) `:damped` at `1/96` is the resting hole within
+  `2×` in the error at `a = 1/2` and `v = 1/5`, along the spin and across it,
+  and `:fitted` at `1/64` is not (`1.6–350×`).
 - **On the comoving grid** each hole is the resting `:fitted` hole, and the
   fine level is static but for the creep. `(FRAME)`'s terms are kinematics
   for any gauge.
@@ -7869,6 +7901,16 @@ grid throughout, or the inertial grid with `:fitted` measured first between
    `:fitted`. At `v = 1/2` `:damped` holds at `3–46×` and `:fitted` does not.
 3. **Spin up to `a = 7/10`**, at rest, along the motion and across it, and
    whether the early rows' drift of `J` is still there at fourth order.
+   *Measured (step H3):* at `a = 1/2` the hole at rest is stationary with
+   order four from `1/48` and `J` at the Kerr-Schild rows' level, and
+   `:fitted` equals `:damped` with its margin fixed in `M`. Moving at
+   `v = 1/5`, `:damped` at `1/96` is within `2×` in the error along the spin
+   and across it, with `ℋ` `4.3×` just outside the horizon across it and an
+   outgoing pulse; every excess converges at order `7–11`. `:fitted` moving
+   is `1.6–350×` at `1/64`. The drift of `J` is resolution: `6000×` below the
+   early rows' at `1/64` and converging at order nine. `a = 7/10` runs at
+   rest at `1/128` on two H200s, not stationary by `24 M`; its moving rows
+   were priced, not run.
 4. **Two holes with no source**: the head-on pair in pure harmonic gauge to
    wherever it ends, then with the roll-on through the merger.
 5. **The orbit**, on the grid chosen from step H2's ratio.
@@ -7880,8 +7922,13 @@ All **(open)**, except where answered.
 - *Answered (step H1):* a harmonic hole at rest is stationary for `128 M`
   where the hole is, as the Kerr-Schild hole is; its mass drifts at a falling
   rate, as truncation error at order four.
-- Whether the moving spinning hole's drift of `J` and its uniform growth
-  are the chart's, the layer's or the early rows' order and resolution.
+- *Answered for `a = 1/2` with `:damped` (step H3):* the moving spinning
+  hole's drift of `J` is resolution — across the spin at `v = 3/10` it is
+  `2.1·10⁻⁶/M` at `1/64` and `5·10⁻⁸` at `1/96`, order nine. Open: whether
+  `:fitted` holds a moving spinning hole at a finer spacing or another
+  margin (at `1/64` it does not); the pulse that leaves the moving hole at
+  about `4 M`, converging at order `7–10`; the error's ratio across the spin
+  rising over `20 M`; and whether `a = 7/10`'s growth at rest saturates.
 - *Answered for `a = 0` at `v = 1/5` (step H2):* a moving harmonic hole has
   no lag in this gauge and is the resting hole outside `5/4 M`. Open:
   `:fitted`'s trailing excess just outside the horizon, which does not
@@ -7907,7 +7954,9 @@ All **(open)**, except where answered.
 2. **The merger**: the roll-on at `d_g` **(proposed)**, decided again from
    step H4's pure harmonic run.
 3. **The spin**: `a ≤ 7/10` for G7 and G8 on this route **(proposed)**,
-   with higher spins left to a chart that has a source.
+   with higher spins left to a chart that has a source. Step H3 measured
+   `a = 1/2` holding with `:damped` and `a = 7/10` running at rest only at
+   `1/128`, where it is not stationary by `24 M`.
 4. **The grid**: step H2 has reported ([On which grid](#on-which-grid)):
    the inertial grid with a following fine level holds the inspiral to
    `v = 1/5`, and `:fitted` on it fails at `v = 1/2`.
