@@ -52,7 +52,7 @@ function dirichlet(case::GHCase{T}, t) where {T}
     tt = case.interior isa HolesSpec ? zero(T) : T(t)
     if case.interior isa HolesSpec && case.interior.gauge_momentum
         # The initial data's own rule, under the source at `t = 0` (step B3).
-        src = holes_source(T, case.holes)
+        src = holes_data_source(T, case)
         return CellBoundary(AllVariables((x, δ) -> gauge_state_tuple(bg, src, int, tt, x)))
     end
     return CellBoundary(AllVariables((x, δ) -> case_state_tuple(bg, int, tt, x)))

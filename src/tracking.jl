@@ -648,7 +648,8 @@ The **tracked analytic target** at time `t` (added in step B2): step 5's
 ([`track_center`](@ref)`(tr, t)`), relaxing toward the boosted, translated
 Kerr-Schild hole of mass `mass · spec.mass_factor` and spin `spin` along `z` on
 that line — the hole the track says is there, as an `isbits` target metric
-([`layer_target`](@ref)). The perturbations of step B2's sensitivity study move
+([`layer_target`](@ref)); with `harmonic = true` the same hole in harmonic
+coordinates (added in step H4). The perturbations of step B2's sensitivity study move
 the target and its sphere together: `center_offset` is added to the line's
 center and `velocity_offset` to its velocity, the line then passing through
 the offset center at `t`.
@@ -663,12 +664,21 @@ seed's time and unperturbed, gives the case's own sphere and background, value
 for value.
 """
 function tracked_interior(spec::TrackedSpec{T}, tr::HorizonTrack, t; mass, spin,
-                          ρ_max=zero(T)) where {T}
+                          ρ_max=zero(T), harmonic::Bool=false) where {T}
     tt = T(t)
     line = track_center(tr, tt)
     c = center_at(line, tt) + spec.center_offset
     v = line.v + spec.velocity_offset
     center = HoleCenter{T}(c - v * tt, v)
+    # The harmonic chart's target (step H4): the same boost and translation of
+    # harmonic Kerr.
+    if harmonic
+        target = hole_on_line(T, T(mass) * spec.mass_factor, T(spin), center;
+                              harmonic=true)
+        return Interior(T; center=center, r_0=spec.r_0, r_1=spec.r_1, ρ_max=ρ_max,
+                        variant=:damped, w_ramp=spec.w_ramp, ρ_ramp=spec.ρ_ramp,
+                        margin=spec.margin, target=target)
+    end
     ks = KerrSchild(T(mass) * spec.mass_factor, T(spin))
     # `0 − v`, not `−v`: a zero component stays `+0`, as the case's own
     # `boost(…, (−v, 0, 0))` has it, so that the seed's target is the
@@ -950,7 +960,7 @@ The composite interior of a case of several holes at time `t` (added in step B3)
 each hole's step-B2 tracked target ([`tracked_interior`](@ref)) about its own
 track's line at `t`, with its own mass and spin, relaxing toward the
 superposition of every hole on its track's line — the data's own form, with the
-data's two attenuations — or, with the case's `hole_target = :own`, toward its own
+data's two attenuations and its momentum (`C`, step H4) — or, with the case's `hole_target = :own`, toward its own
 hole alone ([`HolesSpec`](@ref)). `own` holds each hole's own target, which the
 checks read. `ρ_max` is a placeholder, as in every interior a case builds; the
 driver sets the chunk's.
@@ -967,13 +977,13 @@ function holes_interior(case::GHCase{T}, tracks, t; ρ_max=zero(T)) where {T}
     tt = T(t)
     own = ntuple(A -> tracked_interior(holes[A].interior, tracks[A], tt;
                                        mass=holes[A].mass, spin=holes[A].spin[3],
-                                       ρ_max=ρ_max), Val(K))
+                                       ρ_max=ρ_max, harmonic=holes[A].harmonic), Val(K))
     targets = ntuple(A -> own[A].target, Val(K))
     spec.superposed || return HoleInteriors(own, targets)
     bg = case.background
     ℓ = bg isa SuperposedMetric ? bg.ℓ : ntuple(_ -> T(Inf), Val(K))
     λ = bg isa SuperposedMetric ? bg.λ : ntuple(_ -> zero(T), Val(K))
-    sup = SuperposedMetric{T,K,eltype(targets)}(targets,
+    sup = SuperposedMetric{T,K,eltype(targets),has_gauge_momentum(bg)}(targets,
                                                 ntuple(A -> own[A].center, Val(K)), ℓ,
                                                 λ)
     ints = ntuple(Val(K)) do A
@@ -1034,17 +1044,23 @@ end
 
 The case of several holes as the piece about `t` runs it (added in step B3): its
 gauge source fed by the tracks ([`holes_source_at`](@ref)) — or by the seeds'
-quadratics, `source_feed = :seed` ([`holes_seed_source_at`](@ref)) — and the holes'
+quadratics, `source_feed = :seed` ([`holes_seed_source_at`](@ref)); harmonic
+holes keep the case's own, which follows no hole, its roll-on starting at `t_0`
+when given (step H4) — and the holes'
 Gaussians of `γ0` and their `ε_KO` profiles moved onto the tracks' lines at `t`
 ([`track_center`](@ref)`(tr, t)`) — the remnant's Gaussian stays on the center of
 mass. Everything else is the case's; the type is the case's, so the kernels it is
 handed to are the ones already compiled ([`with_case`](@ref)).
 """
-function holes_case_at(case::GHCase{T}, tracks, t) where {T}
+function holes_case_at(case::GHCase{T}, tracks, t; t_0=nothing) where {T}
     K = length(case.holes)
     lines = ntuple(A -> track_center(tracks[A], T(t)), Val(K))
     feed = case.interior.feed
-    src = feed == FEED_TRACKS ? holes_source_at(case, tracks, t) :
+    # Harmonic holes (step H4) have no source of the holes to feed: the case's
+    # own, none or its roll-on, which knows no trajectory.
+    src = case.holes[1].harmonic ?
+          (t_0 === nothing ? case.gauge : with_rollon_time(case.gauge, t_0)) :
+          feed == FEED_TRACKS ? holes_source_at(case, tracks, t) :
           holes_seed_source_at(case, t)
     return GHCase{T,typeof(case.background),typeof(case.γ0),typeof(case.interior),
                   typeof(case.refinement),typeof(case.horizon),typeof(case.bounds),

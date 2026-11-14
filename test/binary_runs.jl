@@ -19,6 +19,14 @@
 #
 #     julia --project=<env with CUDA> test/binary_runs.jl backend=cuda d=8 L=32 N=24 roots=8 radii=16,8,4,2 t_end=2 chunk=1/4 out=out/b3h48
 #
+# Step H4 (`chart=harmonic`): two harmonic Kerr holes with no gauge source,
+# `H ≡ 0`, or with the damped harmonic gauge rolled on from zero at `t0` or at the
+# separation `d_g`; the layer's defaults are then the harmonic chart's, `r_0 =
+# 2/5`, `r_1 = 3/4`, and the momentum from `C_a = 0`. A local smoke run at `q = 2`
+# (a unit harmonic hole needs `h = 1/16` there):
+#
+#     julia --project=. --threads=4 test/binary_runs.jl chart=harmonic d=8 L=8 N=8 roots=2 radii=4,3,2,6/5 q=2 masses=1,1 r_0=7/20 r_1=37/50 margin=4 t_end=1/10 chunk=1/20 finder_N=12 spin=0 adm=0 out=out/hpair
+#
 # Options (`key=value`; the defaults are step B3's head-on row at `1/48`):
 #
 #   d=8 L=32 N=24 roots=8          the separation, the box [−L, L]³, the blocks
@@ -30,6 +38,12 @@
 #                                  production :damped sphere
 #   find_interval=0                the longest interval between two finds for a
 #                                  hole of mass one, in M (0: the chunk)
+#   chart=kerr_schild|harmonic     the holes' chart (step H4: harmonic runs with no
+#                                  source, its layer defaults r_0=2/5 r_1=3/4)
+#   masses=1/2,1/2                 the holes' masses
+#   t0= d_g= sigma_g=10 sigma_r=32 (harmonic) roll the damped harmonic gauge on from
+#                                  zero at t0, or when the tracks are d_g apart,
+#                                  over σ_g; σ_r its far-field Gaussian (none: H ≡ 0)
 #   target=superposed|own          each layer relaxes toward the superposition of
 #                                  the holes on their tracks, or toward its own hole
 #   feed=tracks|seed               the gauge source's holes follow the tracks
@@ -122,10 +136,26 @@ function device_gb()
 end
 
 # The pair: each hole's layer stated for a hole of mass one and scaled by its own.
-unit = TrackedSpec(T; r_0=T(rat(opt("r_0", "5/8"))), r_1=T(rat(opt("r_1", "23/16"))),
+chart = Symbol(opt("chart", "kerr_schild"))
+harmonic = chart === :harmonic
+unit = TrackedSpec(T; r_0=T(rat(opt("r_0", harmonic ? "2/5" : "5/8"))),
+                   r_1=T(rat(opt("r_1", harmonic ? "3/4" : "23/16"))),
                    margin=parse(Int, opt("margin", "8")),
                    max_interval=T(rat(opt("find_interval", "0"))))
-holes = head_on_holes(T; d=d_sep, interior=unit)
+masses = Tuple(rat(m) for m in split(opt("masses", "1/2,1/2"), ','))
+holes = head_on_holes(T; d=d_sep, masses=masses, interior=unit, chart=chart)
+# The roll-on from zero (step H4): at `t0`, or at the separation `d_g`, which
+# leaves `t_0 = Inf` to the event.
+rolling = harmonic && (haskey(OPTIONS, "t0") || haskey(OPTIONS, "d_g"))
+(haskey(OPTIONS, "t0") || haskey(OPTIONS, "d_g")) && !harmonic &&
+    error("t0 and d_g roll the damped harmonic gauge on from zero: chart=harmonic only.")
+rollon_separation = haskey(OPTIONS, "d_g") ? T(rat(OPTIONS["d_g"])) : nothing
+gauge_source = !rolling ? :holes :
+               RolledGaugeSource(ZeroGaugeSource(T),
+                                 DampedHarmonicSource(T; σ_r=T(rat(opt("sigma_r", "32"))));
+                                 σ_g=T(rat(opt("sigma_g", "10"))),
+                                 t_0=rollon_separation === nothing ?
+                                     T(rat(OPTIONS["t0"])) : T(Inf))
 companion = rat(opt("companion", "4"))
 attenuation = haskey(OPTIONS, "attenuation") ? T(rat(OPTIONS["attenuation"])) : nothing
 horizon = Horizon(T; every=1, N=parse(Int, opt("finder_N", "16")),
@@ -134,7 +164,9 @@ case = binary_case(T; holes=holes, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ
                    horizon=horizon, companion=companion, attenuation=attenuation,
                    hole_target=Symbol(opt("target", "superposed")),
                    source_feed=Symbol(opt("feed", "tracks")),
-                   momentum=Symbol(opt("momentum", "superposition")))
+                   momentum=haskey(OPTIONS, "momentum") ? Symbol(OPTIONS["momentum"]) :
+                            nothing,
+                   gauge_source=gauge_source)
 M = sum(h -> h.mass, holes)
 
 # The mesh, or the checkpoint's.
@@ -196,6 +228,33 @@ function bandnorms(b)
             ham_linf=b.mx[5].value)
 end
 
+# The lapse outside the horizons (step H4; `PLAN.md`'s step H4, "in pure harmonic
+# gauge"): the smallest `α` and the largest `√γ/α` over the evolved points outside
+# both horizons' coordinate spheres, and over the slab between the holes — `x`
+# between the horizons' facing sides, `|y|, |z| ≤ d/2`.
+struct LapseFold{T}
+    c1::SVector{3,T}
+    c2::SVector{3,T}
+    r1::T
+    r2::T
+    w::T
+end
+const NOLAPSE = (out_α=Min(floatmax(T)), out_a=Max(zero(T)), btw_α=Min(floatmax(T)),
+                 btw_a=Max(zero(T)))
+@inline function (f::LapseFold{T})(acc, p) where {T}
+    x = SVector{3,T}(p.x[1], p.x[2], p.x[3])
+    out = (sqrt(sum(abs2, x - f.c1)) > f.r1) & (sqrt(sum(abs2, x - f.c2)) > f.r2)
+    btw = out & (f.c1[1] + f.r1 < x[1] < f.c2[1] - f.r2) & (abs(x[2]) ≤ f.w) &
+          (abs(x[3]) ≤ f.w)
+    hv = SVector{10,T}(ntuple(v -> p.u[v], Val(10)))
+    _, _, α, _, _, sg = TreeGeneralizedHarmonic.metric_quantities(
+        TreeGeneralizedHarmonic._sym4(hv))
+    a = sg / α
+    q = (out_α=Min(out ? α : floatmax(T)), out_a=Max(out ? a : zero(T)),
+         btw_α=Min(btw ? α : floatmax(T)), btw_a=Max(btw ? a : zero(T)))
+    return TreeAMR.combine(acc, q)
+end
+
 # Newtonian free fall from rest at `d₀`: `d̈ = −M/d²`, RK4 at `M/1000`.
 function newton_separation(d0, M, t)
     y = (T(d0), zero(T))
@@ -220,7 +279,9 @@ bcols = [("h$(A)_" * b * "_" * f) for A in 1:2 for b in ("r$(BANDS[k])" for k in
 header = vcat(["t", "wall", "steps", "dt", "nblocks", "points", "gauge_l2", "gauge_linf",
                "ham_l2", "ham_linf", "residual", "finite"],
               ["h$(A)_$c" for A in 1:2 for c in hcols],
-              ["sep_track", "sep_found", "sep_newton", "gpu_gb", "maxrss_gb"], bcols)
+              ["sep_track", "sep_found", "sep_newton", "gpu_gb", "maxrss_gb"], bcols,
+              ["rollon_t0", "min_alpha_out", "max_sqrtg_alpha_out", "min_alpha_between",
+               "max_sqrtg_alpha_between"])
 if isrank0 && !(restarting && isfile(csv))
     open(io -> println(io, join(header, ',')), csv, "w")
 end
@@ -234,6 +295,12 @@ function observe(p, t, u, rec)
     rf = mesh_fold(BandFold{T}(c1, c2), TreeAMR.combine, init, p.diag;
                    vars=DIAG_CGH:DIAG_MASK)
     all = bandnorms(rf.all)
+    # The lapse rows, from the state itself (`scatter!` writes `u` into the
+    # working array; the next right-hand side scatters again).
+    rA(A) = max(num(rec.holes[A].track_r_max), unit.r_1 * holes[A].mass)
+    lf = mesh_fold(LapseFold{T}(c1, c2, T(rA(1)), T(rA(2)), T(rec.separation / 2)),
+                   TreeAMR.combine, NOLAPSE, p.U, u)
+    lapse = map(b -> b.value, lf)
     isrank0 || return nothing
     o = [r.origin === nothing ? SVector(NaN, NaN, NaN) : SVector{3,Float64}(r.origin)
          for r in rec.holes]
@@ -246,8 +313,9 @@ function observe(p, t, u, rec)
                       h.origin === nothing ? NaN : h.origin[1], num(h.track_r_min),
                       num(h.track_r_max), num(h.area), num(h.M_irr), num(h.J), num(h.M_ch),
                       num(h.track_prediction_max), h.track_finds, h.horizon_offset[1],
-                      h.source_center[1], h.source_velocity[1],
-                      h.source_acceleration[1]))
+                      get(h, :source_center, (NaN,))[1],
+                      get(h, :source_velocity, (NaN,))[1],
+                      get(h, :source_acceleration, (NaN,))[1]))
     end
     append!(row, (rec.separation, sep_found, newton_separation(d_sep, M, rec.t),
                   device_gb(), Sys.maxrss() / 1e9))
@@ -255,6 +323,8 @@ function observe(p, t, u, rec)
         b = bandnorms(rf.band[k])
         append!(row, (b.ham_l2, b.gauge_l2))
     end
+    append!(row, (num(get(rec, :rollon_t0, nothing)), lapse.out_α, lapse.out_a,
+                  lapse.btw_α, lapse.btw_a))
     open(io -> println(io, join(row, ',')), csv, "a")
     @printf("t = %7.4f  wall %8.1f s  C_a %.3e/%.3e  ℋ %.3e  res %.3e  sep %.6f (found %.6f, newton %.6f)  areas %.5f %.5f  pred %.2e %.2e  gpu %.1f GB\n",
             rec.t, time() - t_wall0, rec.gauge_l2, rec.gauge_linf, num(rec.ham_l2),
@@ -262,6 +332,9 @@ function observe(p, t, u, rec)
             num(rec.holes[1].area), num(rec.holes[2].area),
             num(rec.holes[1].track_prediction_max), num(rec.holes[2].track_prediction_max),
             device_gb())
+    @printf("          α_min %.5f (between %.5f)  √γ/α_max %.4f (between %.4f)  t_0 %s\n",
+            lapse.out_α, lapse.btw_α, lapse.out_a, lapse.btw_a,
+            string(get(rec, :rollon_t0, "none")))
     flush(stdout)
     return nothing
 end
@@ -270,7 +343,7 @@ out = try
     evolve!(T, case; forest=forest0, q=q, ops=Operators(prolongation=q + 2,
                                                          restriction=q + 2),
             t_end=t_end, chunk=chunk, cfl=cfl, backend=backend, observer=observe,
-            adm_every=adm_every, comm=comm, ckw...)
+            adm_every=adm_every, comm=comm, rollon_separation=rollon_separation, ckw...)
 catch err
     abort_all(err)
     rethrow()

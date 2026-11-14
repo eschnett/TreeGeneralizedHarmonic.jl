@@ -254,8 +254,8 @@ function GHCase(::Type{T}, background; box, periodic,
     elseif interior isa TrackedSpec
         # The tracked analytic target (step B2): the case holds the rule, and
         # the sphere and its target are built from the track once per piece.
-        # The target is a Kerr-Schild hole with this background's mass and
-        # spin, so the background must be one.
+        # The target is a hole with this background's mass and spin, so the
+        # background must be a Kerr-Schild hole or (step H4) a harmonic one.
         interior isa TrackedSpec{T} || throw(ArgumentError(
             "a case's TrackedSpec is stated in the case's own type $T, got a " *
             "$(typeof(interior))."))
@@ -263,7 +263,7 @@ function GHCase(::Type{T}, background; box, periodic,
             "a tracked analytic target is the Kerr-Schild hole on the track's " *
             "line, built every piece (tracked_interior); the case's `target` " *
             "keyword is for step 5's sphere."))
-        _kerr_schild_parameters(background)
+        _hole_parameters(background)
         interior
     elseif interior isa HolesSpec
         # A case of several holes (step B3): the rule the composite is built by
@@ -341,18 +341,22 @@ function case_holes(::Type{T}, background, holes; interior, r_0, r_1, target, ce
         "momentum is :superposition (the data's own ∂_t g) or :gauge (∂_t g_tb from " *
         "C_a = 0 at t = 0), got :$momentum."))
     K = length(holes)
+    allequal(map(h -> h.harmonic, holes)) || throw(ArgumentError(
+        "every hole of a case is in one chart, got $(map(hole_chart, holes)): the " *
+        "data are one superposition, and the gauge is the chart's."))
     if K == 1
         (source_feed === :tracks && momentum === :superposition) || throw(ArgumentError(
             "source_feed and momentum are several holes' switches; a case of one hole " *
             "is the case it was built from, and takes neither: its source is its " *
             "own."))
         h = holes[1]
-        M, a, v = _kerr_schild_parameters(background)
-        (T(M) == h.mass && T(a) == h.spin[3] &&
+        M, a, v, harm = _hole_parameters(background)
+        (T(M) == h.mass && T(a) == h.spin[3] && harm == h.harmonic &&
          SVector{3,T}(T(v[1]), T(v[2]), T(v[3])) == h.velocity) || throw(ArgumentError(
             "a case of one hole is built from its own background, and the hole's " *
-            "HoleSpec must be that background's: mass $(h.mass), spin $(h.spin[3]) " *
-            "and velocity $(Tuple(h.velocity)) against the background's $M, $a and $v."))
+            "HoleSpec must be that background's: chart :$(hole_chart(h)), mass " *
+            "$(h.mass), spin $(h.spin[3]) and velocity $(Tuple(h.velocity)) against " *
+            "the background's $(harm ? ":harmonic" : ":kerr_schild"), $M, $a and $v."))
         hole_target === :superposed || throw(ArgumentError(
             "hole_target chooses between the superposition and a hole's own target, " *
             "which for one hole are one metric; leave it unset."))
@@ -406,6 +410,16 @@ leaves, `H + Γ ≠ 0` where the fields overlap, is the data's constraint violat
 and the record's first `C_a`.
 """
 function check_holes_source(holes::NTuple{K}, src, ::Type{T}) where {K,T}
+    # Harmonic holes (step H4) run with no source, or with a roll-on from none.
+    if holes[1].harmonic
+        (src === nothing || (src isa RolledGaugeSource{T} && src.from isa ZeroGaugeSource)) ||
+            throw(ArgumentError(
+            "a case of $K harmonic holes runs in harmonic gauge, H ≡ 0 — gauge_source " *
+            "= nothing — or rolls a source on from zero, RolledGaugeSource(" *
+            "ZeroGaugeSource(T), to; σ_g, t_0) (CODE.md, \"Harmonic gauge for the " *
+            "inspiral\"); got a $(typeof(src))."))
+        return nothing
+    end
     src isa CompositeKerrSchildSource{T,K} || throw(ArgumentError(
         "a case of $K holes runs on the composite tracked Kerr-Schild source of its " *
         "holes (pairing (α), decided by Erik 2026-10-26), a " *
@@ -435,6 +449,8 @@ center, velocity and acceleration, `t_p = 0` — the source the first piece runs
 on before the tracks feed it.
 """
 holes_source(::Type{T}, holes::NTuple{K,HoleSpec{T}}) where {T,K} =
+    holes[1].harmonic ? throw(ArgumentError(
+        "harmonic holes have no source of their own: they run at H ≡ 0 (step H4).")) :
     CompositeKerrSchildSource(ntuple(A -> TrackedHole(T; M=holes[A].mass,
                                                       spin=holes[A].spin,
                                                       center=holes[A].center,
@@ -461,6 +477,15 @@ and a [`Horizon`](@ref) to track the holes with, which has no default.
 
 `hole_target`, `source_feed` and `momentum` are [`HolesSpec`](@ref)'s switches.
 
+**Harmonic holes (added in step H4).** Holes of chart `:harmonic` are
+superposed in that chart ([`superposed_holes`](@ref)) and run in harmonic gauge
+with no source — `gauge_source = nothing`, the default for them — or with a
+roll-on from zero, `gauge_source = RolledGaugeSource(ZeroGaugeSource(T), to;
+σ_g, t_0)`, whose `t_0 = Inf` leaves the start to `evolve!`'s
+`rollon_separation`. Their `momentum` defaults to `:gauge`: `Π` from `C_a = 0`
+at `H = 0` ([`gauge_consistent_state`](@ref)), so that the data satisfy the
+gauge constraint ([`holes_data_source`](@ref)). `source_feed` does not apply.
+
 The Dirichlet hook writes the data at `t = 0` — frozen — whatever the time
 ([`dirichlet`](@ref); `CODE.md`, "The outer boundary", option 1): a superposition
 has no solution to write at a later time. For holes at rest that is the data at
@@ -470,18 +495,25 @@ function binary_case(::Type{T}=Float64; holes, halfwidth, chunk, horizon,
                      ε_KO=T(1 // 2), γ0=nothing, γ2=zero(T), refinement=nothing,
                      bounds=nothing, attenuation=nothing, companion=4,
                      hole_target::Symbol=:superposed, source_feed::Symbol=:tracks,
-                     momentum::Symbol=:superposition) where {T}
+                     momentum=nothing, gauge_source=:holes) where {T}
     holes isa Tuple && length(holes) ≥ 2 || throw(ArgumentError(
         "binary_case takes at least two HoleSpecs; a single hole is " *
         "kerr_schild_case's (or GHCase(…; holes = (spec,)))."))
     hs = ntuple(A -> holes[A], Val(length(holes)))
-    data = superposed_kerr_schild(T, hs; attenuation=attenuation, companion=companion)
+    harmonic = hs[1].harmonic
+    src = gauge_source === :holes ? (harmonic ? nothing : holes_source(T, hs)) :
+          gauge_source
+    mom = momentum === nothing ? (harmonic ? :gauge : :superposition) : Symbol(momentum)
+    # Harmonic holes' data carry the gauge's momentum in the metric itself, so
+    # that every layer target built from it does too (step H4).
+    data = superposed_holes(T, hs; attenuation=attenuation, companion=companion,
+                            gauge_momentum=harmonic && mom === :gauge)
     L = T(halfwidth)
     return GHCase(T, data; box=ntuple(_ -> (-L, L), Val(3)), periodic=(false, false, false),
                   ε_KO=ε_KO, γ0=γ0 === nothing ? holes_damping(T, hs) : γ0, γ2=γ2,
                   refinement=refinement, horizon=horizon, bounds=bounds, chunk=chunk,
-                  gauge_source=holes_source(T, hs), holes=hs, hole_target=hole_target,
-                  source_feed=source_feed, momentum=momentum)
+                  gauge_source=src, holes=hs, hole_target=hole_target,
+                  source_feed=source_feed, momentum=mom)
 end
 
 """
@@ -494,10 +526,11 @@ Newtonian acceleration toward the other, `M_B/d²`, as its seed knows it (step B
 hand-over), and each spinning `spins[A]` (a length) about `z` (added in step B3).
 `interior` is a [`TrackedSpec`](@ref) stated for a hole of mass one, which each
 hole takes times its own mass ([`scaled_spec`](@ref); `CODE.md`'s units: every
-single-hole setting scales by `M_A`).
+single-hole setting scales by `M_A`). `chart = :harmonic` makes them harmonic Kerr
+holes (step H4), whose radii are about half Kerr-Schild's.
 """
 function head_on_holes(::Type{T}=Float64; d, masses=(1 // 2, 1 // 2), axis::Integer=1,
-                       interior, spins=(0, 0)) where {T}
+                       interior, spins=(0, 0), chart::Symbol=:kerr_schild) where {T}
     axis in 1:3 || throw(ArgumentError("axis is 1, 2 or 3, got $axis."))
     M1, M2 = T(masses[1]), T(masses[2])
     M = M1 + M2
@@ -507,9 +540,9 @@ function head_on_holes(::Type{T}=Float64; d, masses=(1 // 2, 1 // 2), axis::Inte
     c1, c2 = (-D * M2 / M) * e, (D * M1 / M) * e
     a1, a2 = (M2 / (D * D)) * e, (-M1 / (D * D)) * e
     return (HoleSpec(T; mass=M1, spin=(0, 0, spins[1]), center=c1, acceleration=a1,
-                     interior=scaled_spec(interior, M1)),
+                     interior=scaled_spec(interior, M1), chart=chart),
             HoleSpec(T; mass=M2, spin=(0, 0, spins[2]), center=c2, acceleration=a2,
-                     interior=scaled_spec(interior, M2)))
+                     interior=scaled_spec(interior, M2), chart=chart))
 end
 
 # The `rotating` keyword as the case stores it (added 2026-10-04): `(0, 0)` for
@@ -1141,6 +1174,18 @@ function algebraic_source(::Type{T}, background) where {T}
     return KerrSchildSource(T; M=M, spin=(0, 0, a), velocity=v)
 end
 
+# The bare hole's mass and spin under `translate`s and `boost`s, the hole's lab
+# velocity, and whether it is harmonic Kerr (added in step H4) or Kerr-Schild.
+function _hole_parameters(background)
+    bare = background
+    while bare isa Union{SpacetimeMetrics.TranslatedMetric,SpacetimeMetrics.BoostedMetric}
+        bare = bare.metric
+    end
+    bare isa Harmonic || return (_kerr_schild_parameters(background)..., false)
+    v = hole_velocity(background)
+    return bare.mass, bare.spin, (v[1], v[2], v[3]), true
+end
+
 # The bare `KerrSchild`'s mass and spin under `translate`s and `boost`s, and the
 # hole's lab velocity.
 function _kerr_schild_parameters(background)
@@ -1742,11 +1787,23 @@ function state_callback(case::GHCase{T}, t; interior=case.interior) where {T}
     # Several holes with the gauge-consistent momentum (step B3): `Π` from
     # `C_a = 0` under the holes' source at `t = 0`, at the core rule's point.
     if case.interior isa HolesSpec && case.interior.gauge_momentum
-        src = holes_source(T, case.holes)
+        src = holes_data_source(T, case)
         return AllVariables(x -> gauge_state_tuple(bg, src, int, tt, x))
     end
     return AllVariables(x -> case_state_tuple(bg, int, tt, x))
 end
+
+"""
+    holes_data_source(T, case) -> source
+
+The source a case of several holes' gauge-consistent data are made under at
+`t = 0` (`momentum = :gauge`): the holes' composite Kerr-Schild source, or for
+harmonic holes `H = 0` — the zero `SVector{4}` [`gauge_consistent_state`](@ref)
+takes as the lowered source itself — whatever the case's roll-on later does
+(added in step H4). A roll-on from zero at `t_0 = 0` is zero at `t = 0` too.
+"""
+holes_data_source(::Type{T}, case::GHCase) where {T} =
+    case.holes[1].harmonic ? zero(SVector{4,T}) : holes_source(T, case.holes)
 
 """
     gauge_consistent_state(src, background, t, x) -> (h, Π)
@@ -1760,6 +1817,14 @@ gradients and its `∂_t g_ij`, and `∂_t g_tt`, `∂_t g_ti` from `C_a = H_a +
 starts from and writes at its boundary.
 """
 @inline function gauge_consistent_state(src, bg, t, x)
+    h, Π, _, _ = _gauge_consistent_background(src, bg, t, x)
+    return h, Π
+end
+
+# `gauge_consistent_state` with the spatial gradients and `∂_t g` beside it, in
+# `_background_state`'s shape: the state of a superposition whose momentum is
+# the gauge's (step H4).
+@inline function _gauge_consistent_background(src, bg, t, x)
     D = typeof(x[1])
     p = SVector{4,D}(D(t), x[1], x[2], x[3])
     g, dg = dmetric(bg, p)
@@ -1779,8 +1844,9 @@ starts from and writes at its boundary.
         pack_sym(SMatrix{4,4,D}(dg[a, b, i + 1] for a in 1:4, b in 1:4))
     end
     _, _, α, β, _, sqrtγ = metric_quantities(_sym4(h))
-    Π = (sqrtγ / α) * (pack_sym(∂ₜg) - β[1] * ∂h[1] - β[2] * ∂h[2] - β[3] * ∂h[3])
-    return h, Π
+    ∂ₜh = pack_sym(∂ₜg)
+    Π = (sqrtγ / α) * (∂ₜh - β[1] * ∂h[1] - β[2] * ∂h[2] - β[3] * ∂h[3])
+    return h, Π, ∂h, ∂ₜh
 end
 
 # The 20 values of the gauge-consistent state at `x`, with the core rule.

@@ -98,6 +98,7 @@ export KerrSchildSource, algebraic_gauge_source, gauge_source, check_gauge_sourc
 # Step B1: more algebraic sources, and the momentum that satisfies C_a = 0.
 export AlgebraicGaugeSource, TrackedHole, CompositeKerrSchildSource, composite_weights
 export DampedHarmonicSource, RolledGaugeSource, rollon_weight, effective_source
+export ZeroGaugeSource, with_rollon_time
 export gauge_consistent_momentum, convert_source, gauge_scale, tracked_hole
 
 # Cases, backgrounds and initial data
@@ -139,6 +140,7 @@ export axis_dispersion, margin_efolds
 # composite interior and its masks, the per-hole profiles, and the builders that
 # feed them from the tracks
 export HoleSpec, scaled_spec, initial_line, hole_metric, kerr_schild_on_line
+export hole_chart, hole_on_line, superposed_holes, holes_data_source
 export SuperposedMetric, superposed_kerr_schild, HolesSpec, HoleInteriors
 export layer_coordinate, acting_interior, outside_all, HolesMask, AnyMask
 export HolesDamping, holes_damping, holes_center, HolesDissipation

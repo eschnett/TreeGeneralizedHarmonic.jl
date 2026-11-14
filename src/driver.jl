@@ -469,7 +469,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  checkpoint_interval_seconds=nothing, max_walltime_seconds=nothing,
                  num_checkpoints_keep=2, checkpoint_hdf5_filters=(),
                  checkpoint_sync_to_disk::Bool=true, checkpoint_io=:node,
-                 restart_file=nothing, simd_width=nothing, comm=nothing) where {T}
+                 restart_file=nothing, simd_width=nothing, comm=nothing,
+                 rollon_separation=nothing) where {T}
     # The job's wall clock starts here: whatever ran before the call —
     # startup, compilation, the queue — is the caller's margin to leave
     # (TreeHydro's rule for `max_walltime_seconds`).
@@ -669,17 +670,38 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
           layer_cells(G, ρ_max_fixed === nothing ? default_relaxation_rate(case) :
                          ρ_max_fixed, hole_mass(case.background))
     # The tracked analytic target's hole (step B2): the background's mass and
-    # spin, which `GHCase` checked is a Kerr-Schild hole's.
-    ks_mass, ks_spin = targeted ? _kerr_schild_parameters(case.background)[1:2] :
-                       (zero(T), zero(T))
+    # spin, which `GHCase` checked is a Kerr-Schild hole's — or (step H4) a
+    # harmonic one's, whose target is then harmonic Kerr.
+    ks_mass, ks_spin, _, ks_harmonic = targeted ? _hole_parameters(case.background) :
+                                       (zero(T), zero(T), nothing, false)
+    # The roll-on's start (step H4): the case's own `t_0`, or — with
+    # `rollon_separation = d_g` — the first record row whose tracks are at most
+    # `d_g` apart, an event of the run carried in its state and checkpoint
+    # (`PLAN.md`, "Sharp edges for steps H1–H5": `t_0` is run state). Until
+    # then the case's roll-on from zero is no source at all.
+    rollon = Ref(case.gauge isa RolledGaugeSource ? T(case.gauge.t_0) : T(Inf))
+    if rollon_separation !== nothing
+        (binary && case.gauge isa RolledGaugeSource && case.gauge.from isa ZeroGaugeSource &&
+         isinf(case.gauge.t_0)) || throw(ArgumentError(
+            "rollon_separation = $rollon_separation starts a case's roll-on when its " *
+            "holes' tracks are that far apart; it takes a case of several holes whose " *
+            "source is RolledGaugeSource(ZeroGaugeSource(T), to; σ_g, t_0 = Inf), the " *
+            "start left to the event (step H4). This case's source is a " *
+            "$(typeof(case.gauge))."))
+        T(rollon_separation) > 0 || throw(ArgumentError(
+            "rollon_separation is a separation and must be positive, got " *
+            "$rollon_separation."))
+    end
+    saved === nothing || !haskey(saved, :rollon_t0) ||
+        (rollon[] = from_plain(T, saved.rollon_t0))
     # The case a piece about `t` runs (step B3): a case of several holes has
     # its source and its holes' profiles on the tracks.
-    case_at(t, track) = holes_case_at(case, track, T(t))
+    case_at(t, track) = holes_case_at(case, track, T(t); t_0=rollon[])
     geometry(f, t, track) = fitted ?
                             fitted_interior(spec, track, f, G; t=T(t), n_L=n_L) :
                             binary ? holes_interior(case, track, T(t)) :
                             tracked_interior(spec, track, T(t); mass=ks_mass,
-                                             spin=ks_spin)
+                                             spin=ks_spin, harmonic=ks_harmonic)
     # On a restart, the geometry the next chunk runs on: `record!`'s
     # `track!` built it from the updated track at the checkpoint's time, on
     # the mesh the checkpoint holds, which is the one the file has.
@@ -1318,7 +1340,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  note=f.note, an.tk.rows[A]..., track_finds=nf,
                  track_prediction_max=nf == 0 ? nothing : pm,
                  track_acceleration=R(sqrt(sum(abs2, trA.pred.a))),
-                 track_interval=R(trA.blend), source_rows(p.case.gauge.holes[A])...)
+                 track_interval=R(trA.blend),
+                 (p.case.gauge isa CompositeKerrSchildSource ?
+                  source_rows(p.case.gauge.holes[A]) : (;))...)
             end
             fill!(hole_finds, 0)
             fill!(hole_prediction, 0.0)
@@ -1407,6 +1431,14 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             Δ = c2 - c1
             rec = (; rec..., holes=hole_rows, separation=sqrt(sum(abs2, Δ)),
                    phase=atan(Δ[2], Δ[1]))
+            # The roll-on's start as the row sees it, and its event (step H4):
+            # the first row whose tracks are `d_g` apart starts it at its own
+            # time, so that the next chunk is the first to carry the source.
+            if rollon_separation !== nothing && isinf(rollon[]) &&
+               rec.separation ≤ Float64(rollon_separation)
+                rollon[] = T(t)
+            end
+            case.gauge isa RolledGaugeSource && (rec = (; rec..., rollon_t0=R(rollon[])))
         end
         push!(records, rec)
         observer === nothing || call_observer(observer, p, t, u, rec)
@@ -1803,7 +1835,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                          target_bounds=to_plain(tbounds; path="run.target_bounds"),
                          fit_initial=to_plain(fit_initial; path="run.fit_initial"),
                          hlm_seed=binary ? Tuple(hlm_seed) : hlm_seed, trigger_pending,
-                         (binary ? (; hole_offsets=Tuple(to_plain(δ) for δ in hole_offsets)) :
+                         (binary ? (; hole_offsets=Tuple(to_plain(δ) for δ in hole_offsets),
+                                    rollon_t0=plain_reals(rollon[])) :
                           (;))...,
                          bounds=to_plain(acc; path="run.bounds"),
                          fit_cost=agreed_fit_cost(), records=Tuple(records))

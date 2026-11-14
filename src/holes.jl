@@ -48,7 +48,7 @@
 
 """
     HoleSpec(T = Float64; mass, spin = (0, 0, 0), center, velocity = (0, 0, 0),
-             acceleration = (0, 0, 0), interior)
+             acceleration = (0, 0, 0), interior, chart = :kerr_schild)
 
 One hole of a [`GHCase`](@ref)'s `holes` (added in step B3; `CODE.md`, "A case
 without a background"): its mass `M_A`, its spin `a⃗ = J⃗/M` (a length, as
@@ -69,6 +69,11 @@ units (a hole of mass `M_A` takes the single hole's numbers times `M_A`,
 - **The interior is a `TrackedSpec` (decided by Erik 2026-10-26, pairing (α)).**
   A `FittedSpec` per hole is the alternative the composition is written to admit
   ([`HoleInteriors`](@ref)) and is refused here: it is not built.
+- **The chart** (added in step H4) is `:kerr_schild`, steps B1–B3's, or
+  `:harmonic`: the hole is then Kerr in harmonic coordinates, its horizon at
+  `r = M_A` and not `2 M_A`, and a case of such holes runs with no gauge source,
+  `H ≡ 0` (`CODE.md`, "Harmonic gauge for the inspiral"). Every hole of a case is
+  in one chart. Stored as a `Bool`, since a `Symbol` is not `isbits`.
 
 `isbits`, as everything a case holds is.
 """
@@ -79,10 +84,14 @@ struct HoleSpec{T,I}
     velocity::SVector{3,T}
     acceleration::SVector{3,T}
     interior::I
+    harmonic::Bool               # the chart: harmonic Kerr, or Kerr-Schild (step H4)
 end
 
 function HoleSpec(::Type{T}=Float64; mass, spin=(0, 0, 0), center, velocity=(0, 0, 0),
-                  acceleration=(0, 0, 0), interior) where {T}
+                  acceleration=(0, 0, 0), interior, chart::Symbol=:kerr_schild) where {T}
+    chart in (:kerr_schild, :harmonic) || throw(ArgumentError(
+        "a hole's chart is :kerr_schild (steps B1–B3) or :harmonic (step H4: Kerr in " *
+        "harmonic coordinates, run with no gauge source), got :$chart."))
     vec3(x, what) = (length(x) == 3 || throw(ArgumentError(
         "a hole's $what is a 3-vector, got $(repr(x)).")); SVector{3,T}(T(x[1]), T(x[2]),
                                                                          T(x[3])))
@@ -91,7 +100,7 @@ function HoleSpec(::Type{T}=Float64; mass, spin=(0, 0, 0), center, velocity=(0, 
     s = vec3(spin, "spin")
     (iszero(s[1]) && iszero(s[2])) || throw(ArgumentError(
         "a hole's spin is along z in step B3, got $(Tuple(s)): the tracked target is " *
-        "an unrotated Kerr-Schild hole boosted along the track, which spins about z, " *
+        "an unrotated hole boosted along the track, which spins about z, " *
         "and the binaries of steps B3–B9 are non-spinning or aligned with z."))
     abs(s[3]) < M || throw(ArgumentError(
         "a hole's spin a = J/M must satisfy |a| < M, got a = $(s[3]) at M = $M."))
@@ -103,8 +112,16 @@ function HoleSpec(::Type{T}=Float64; mass, spin=(0, 0, 0), center, velocity=(0, 
         "pairing (α) (decided by Erik 2026-10-26) — got a $(typeof(interior)). A " *
         ":fitted hole is what the composition is written to admit, and is not built."))
     return HoleSpec{T,typeof(interior)}(M, s, vec3(center, "center"), v,
-                                        vec3(acceleration, "acceleration"), interior)
+                                        vec3(acceleration, "acceleration"), interior,
+                                        chart === :harmonic)
 end
+
+"""
+    hole_chart(spec::HoleSpec) -> Symbol
+
+The hole's chart, `:kerr_schild` or `:harmonic` (added in step H4).
+"""
+hole_chart(h::HoleSpec) = h.harmonic ? :harmonic : :kerr_schild
 
 """
     scaled_spec(spec::TrackedSpec, M) -> TrackedSpec
@@ -136,6 +153,22 @@ exists (added in step B3).
 initial_line(h::HoleSpec{T}) where {T} = HoleCenter{T}(h.center, h.velocity)
 
 """
+    hole_on_line(T, M, a, line::HoleCenter; harmonic = false) -> metric
+
+The boosted, translated hole of mass `M` and spin `a` about `z` that moves along
+`line` in its chart: [`kerr_schild_on_line`](@ref)'s Kerr-Schild hole, or with
+`harmonic = true` the same boost and translation of `Harmonic(M, a)` (added in
+step H4). A boost preserves `□x^a = 0`, so the moving harmonic hole is harmonic.
+"""
+function hole_on_line(::Type{T}, M, a, line::HoleCenter{T}; harmonic::Bool=false) where {T}
+    harmonic || return kerr_schild_on_line(T, M, a, line)
+    v = line.v
+    return SpacetimeMetrics.translate(SpacetimeMetrics.boost(Harmonic(T(M), T(a)),
+                                                             zero(v) - v),
+                                      SVector{4,T}(zero(T), line.c0...))
+end
+
+"""
     kerr_schild_on_line(T, M, a, line::HoleCenter) -> metric
 
 The boosted, translated Kerr-Schild hole of mass `M` and spin `a` about `z` that
@@ -154,17 +187,17 @@ end
 """
     hole_metric(spec::HoleSpec) -> metric
 
-The hole's own boosted, translated Kerr-Schild metric on its initial line
-([`kerr_schild_on_line`](@ref)): what its radius checks, its seed and its
-single-hole gauge-source check read (added in step B3).
+The hole's own boosted, translated metric in its chart on its initial line
+([`hole_on_line`](@ref)): what its radius checks, its seed and its single-hole
+gauge-source check read (added in step B3; the chart in step H4).
 """
 hole_metric(h::HoleSpec{T}) where {T} =
-    kerr_schild_on_line(T, h.mass, h.spin[3], initial_line(h))
+    hole_on_line(T, h.mass, h.spin[3], initial_line(h); harmonic=h.harmonic)
 
 # --- the data -------------------------------------------------------------------
 
 """
-    SuperposedMetric{T,K,M}(holes, lines, ℓ, λ)
+    SuperposedMetric{T,K,M,C}(holes, lines, ℓ, λ)
     superposed_kerr_schild(T, holes; attenuation = nothing, companion = nothing)
         -> SuperposedMetric
 
@@ -208,8 +241,18 @@ head-on collision and every development test, not for a waveform (`CODE.md`,
 `superposed_kerr_schild` builds it from a case's [`HoleSpec`](@ref)s, each hole on
 its initial line; `attenuation` is `nothing`, one length for every hole or one per
 hole, and `companion` is `nothing` or `λ_B / M_B`, one number or one per hole.
+
+**`C`, the momentum (added in step H4).** `C = false` is the superposition's own
+state, `Π` from its `∂_t g`. `C = true` keeps the metric and takes `Π` from
+`C_a = 0` at `H = 0` — `∂_t g_tb` solved for, as [`gauge_consistent_state`](@ref)
+does — wherever the state is evaluated ([`background_state`](@ref)): the initial
+data, the boundary and every layer target built from it. A superposition of
+harmonic holes is run that way, so that the layers relax toward data that satisfy
+the gauge constraint, as the initial data do; with the superposition's own `Π`
+in the targets the layer residual started at `2.9` on the suite's pair and pulled
+`Π` back toward a state that violates `C_a`.
 """
-struct SuperposedMetric{T,K,M} <: AbstractMetric
+struct SuperposedMetric{T,K,M,C} <: AbstractMetric
     holes::NTuple{K,M}
     lines::NTuple{K,HoleCenter{T}}
     ℓ::NTuple{K,T}
@@ -271,6 +314,25 @@ end
 
 function superposed_kerr_schild(::Type{T}, holes::NTuple{K,HoleSpec{T}};
                                 attenuation=nothing, companion=nothing) where {T,K}
+    all(h -> !h.harmonic, holes) || throw(ArgumentError(
+        "superposed_kerr_schild superposes Kerr-Schild holes; these are in the " *
+        "charts $(map(hole_chart, holes)). superposed_holes takes either chart."))
+    return superposed_holes(T, holes; attenuation=attenuation, companion=companion)
+end
+
+"""
+    superposed_holes(T, holes; attenuation = nothing, companion = nothing)
+        -> SuperposedMetric
+
+[`superposed_kerr_schild`](@ref) in the holes' own chart (added in step H4): the
+same superposition of each hole's [`hole_metric`](@ref), every hole in one chart.
+`gauge_momentum = true` is its `C`: the state's `Π` from `C_a = 0` at `H = 0`.
+"""
+function superposed_holes(::Type{T}, holes::NTuple{K,HoleSpec{T}};
+                          attenuation=nothing, companion=nothing,
+                          gauge_momentum::Bool=false) where {T,K}
+    allequal(map(h -> h.harmonic, holes)) || throw(ArgumentError(
+        "every hole of a superposition is in one chart, got $(map(hole_chart, holes))."))
     ℓ = _per_hole(T, attenuation, K, T(Inf), "attenuation")
     all(x -> x > 0, ℓ) || throw(ArgumentError(
         "an attenuation length is positive (Inf: none), got $ℓ."))
@@ -280,12 +342,26 @@ function superposed_kerr_schild(::Type{T}, holes::NTuple{K,HoleSpec{T}};
     λ = ntuple(A -> c[A] * holes[A].mass, K)
     lines = ntuple(A -> initial_line(holes[A]), K)
     ms = ntuple(A -> hole_metric(holes[A]), K)
-    return SuperposedMetric{T,K,eltype(ms)}(ms, lines, ℓ, λ)
+    return SuperposedMetric{T,K,eltype(ms),gauge_momentum}(ms, lines, ℓ, λ)
 end
 
+# The state of a superposition whose momentum is the harmonic gauge's (step H4):
+# the metric's `h` and gradients, and `Π` from `C_a = 0` at `H = 0`.
+@inline _background_state(bg::SuperposedMetric{T,K,M,true}, t, x) where {T,K,M} =
+    _gauge_consistent_background(zero(SVector{4,typeof(x[1])}), bg, t, x)
+
+has_gauge_momentum(::SuperposedMetric{T,K,M,C}) where {T,K,M,C} = C
+has_gauge_momentum(_) = false
+
 # What the single-hole code asks of a background, answered for a superposition:
-# no hole of its own (each hole's numbers are its `HoleSpec`'s), not harmonic.
-isharmonic(::SuperposedMetric) = false
+# no hole of its own (each hole's numbers are its `HoleSpec`'s). **A superposition
+# of harmonic holes runs in harmonic gauge (step H4)**: `isharmonic` is what decides
+# that a case has no gauge source, `H ≡ 0`, and the case of harmonic holes has none.
+# The superposition is not itself harmonic where the fields overlap — `□x^a ≠ 0`
+# there, as `H + Γ ≠ 0` is for Kerr-Schild holes under their composite source —
+# and `momentum = :gauge` makes `C_a` vanish at `t = 0` by its `∂_t g_tb` instead
+# (`CODE.md`, "Harmonic gauge for the inspiral").
+isharmonic(m::SuperposedMetric) = all(isharmonic, m.holes)
 has_hole_velocity(::SuperposedMetric) = false
 horizon_min_radius(m::SuperposedMetric) = throw(ArgumentError(
     "a superposition of holes has no horizon of its own: each hole's radii are " *

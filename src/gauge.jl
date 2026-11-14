@@ -346,6 +346,11 @@ the sources that need neither.
     algebraic_gauge_source(src, x, t, h, ∂ₜh, ∂h)
 @inline gauge_source(::Type{T}, Hwork, idx, b, kind::Union{Val{true},Val{false}},
                      h, ∂ₜh, ∂h) where {T} = gauge_at(T, Hwork, idx, b, kind)
+# An algebraic problem's launch handed no source — a roll-on from zero before its
+# `t_0` (step H4) — takes the harmonic kind's zeros, the same constants the kernel
+# without a source folds away.
+@inline gauge_source(::Type{T}, ::Nothing, idx, b, ::Val{:algebraic}, x, t, h, ∂ₜh,
+                     ∂h) where {T} = (zero(SVector{4,T}), zero(SMatrix{4,4,T}))
 @inline gauge_source(::Type{T}, src::KerrSchildSource, idx, b, ::Val{:algebraic},
                      h, ∂ₜh, ∂h) where {T} = algebraic_gauge_source(src, h, ∂ₜh, ∂h)
 
@@ -393,9 +398,14 @@ function check_gauge_source(bg, src::AlgebraicGaugeSource, ::Type{T}; center,
         ∂ₜh = pack_sym(SMatrix{4,4,Float64}(dg[a, b, 1] for a in 1:4, b in 1:4))
         ∂h = ntuple(i -> pack_sym(SMatrix{4,4,Float64}(dg[a, b, i + 1]
                                                        for a in 1:4, b in 1:4)), Val(3))
-        Ha, dHa = algebraic_gauge_source(effective_source(s64, t64), (x[1], x[2], x[3]),
-                                         t64, h, ∂ₜh, ∂h)
-        mag = max(maximum(abs, Hs), maximum(abs, dHs), eps())
+        # A roll-on from zero before its `t_0` is no source at all (step H4).
+        es = effective_source(s64, t64)
+        Ha, dHa = es === nothing ? (zero(SVector{4,Float64}), zero(SMatrix{4,4,Float64})) :
+                  algebraic_gauge_source(es, (x[1], x[2], x[3]), t64, h, ∂ₜh, ∂h)
+        # No source has `H = 0` to compare with, so its scale is the metric's
+        # own gradient, which a non-harmonic background's `Γ` is of the order of.
+        mag = max(maximum(abs, Hs), maximum(abs, dHs),
+                  es === nothing ? maximum(abs, dg) : 0.0, eps())
         err = max(maximum(abs, Ha - Hs), maximum(abs, dHa - dHs)) / mag
         err > worst && (worst = err; where_ = x)
     end
@@ -866,6 +876,38 @@ function RolledGaugeSource(from::AlgebraicGaugeSource{T}, to::AlgebraicGaugeSour
 end
 
 """
+    ZeroGaugeSource(T = Float64)
+
+The source `H ≡ 0` as an algebraic source (added in step H4): the `from` end of
+the harmonic route's roll-on, `H = (1 − f) H_DH` ([`RolledGaugeSource`](@ref)),
+whose holes start in harmonic gauge. **A kernel never evaluates it**: up to the
+roll-on's `t_0` [`effective_source`](@ref) gives a launch `nothing`, and a launch
+handed `nothing` takes the harmonic kind's pair of zeros — the kernel without a
+source, bit for bit (`PLAN.md`, "Sharp edges for steps H1–H5"); during the
+roll-on its value and gradient are zeros of the blend. `isbits`.
+"""
+struct ZeroGaugeSource{T} <: AlgebraicGaugeSource{T} end
+ZeroGaugeSource(::Type{T}=Float64) where {T} = ZeroGaugeSource{T}()
+
+@inline algebraic_gauge_source(::ZeroGaugeSource, x, t, h::SVector{NC,T}, ∂ₜh,
+                               ∂h) where {NC,T} =
+    (zero(SVector{4,T}), zero(SMatrix{4,4,T}))
+
+convert_source(::Type{S}, ::ZeroGaugeSource) where {S} = ZeroGaugeSource{S}()
+
+"""
+    with_rollon_time(src, t_0) -> source
+
+`src` with its roll-on starting at `t_0` (added in step H4): a
+[`RolledGaugeSource`](@ref)'s `t_0` replaced, of the same type, so that a case
+whose `t_0` is an event of the run is the same kernel before and after it; any
+other source is itself.
+"""
+with_rollon_time(src, t_0) = src
+with_rollon_time(src::RolledGaugeSource{T,F,G}, t_0) where {T,F,G} =
+    RolledGaugeSource{T,F,G}(src.from, src.to, T(t_0), src.σ_g)
+
+"""
     rollon_weight(src::RolledGaugeSource, t) -> (f, ∂_t f)
 
 The weight of `from` at `t`: `1` up to `t_0`, `e^{−s⁴}` with
@@ -896,7 +938,9 @@ end
 `src` itself, except (added in step B1):
 
   * a [`RolledGaugeSource`](@ref) is its `from` up to `t_0`, its `to` once the
-    weight has underflowed to zero, and the blend between;
+    weight has underflowed to zero, and the blend between — and `nothing` up to
+    `t_0` when `from` is the [`ZeroGaugeSource`](@ref) (step H4), which a kernel
+    takes as no source at all;
   * a [`CompositeKerrSchildSource`](@ref) of one hole without acceleration is
     that hole's [`KerrSchildSource`](@ref).
 
@@ -915,7 +959,7 @@ effective_source(src::CompositeKerrSchildSource{T,1}, t) where {T} =
     iszero(src.holes[1].acc) ? src.holes[1].ks : src
 function effective_source(src::RolledGaugeSource, t)
     f, _ = rollon_weight(src, t)
-    f == 1 && return effective_source(src.from, t)
+    f == 1 && return src.from isa ZeroGaugeSource ? nothing : effective_source(src.from, t)
     iszero(f) && return effective_source(src.to, t)
     return src
 end
@@ -937,6 +981,8 @@ end
 gauge_scale(src::CompositeKerrSchildSource) = minimum(h -> h.ks.M, src.holes)
 gauge_scale(src::DampedHarmonicSource{T}) where {T} = one(T)
 gauge_scale(src::RolledGaugeSource) = gauge_scale(src.from)
+# A roll-on from zero is measured on the scale of where it rolls to (step H4).
+gauge_scale(src::RolledGaugeSource{T,<:ZeroGaugeSource}) where {T} = gauge_scale(src.to)
 
 """
     gauge_consistent_momentum(src, x, t, γ, K, α, β, ∂γ, ∂α, ∂β)
@@ -1016,6 +1062,7 @@ function _source_value(src::AlgebraicGaugeSource, x, t, h::SVector{NC,T}) where 
     return first(algebraic_gauge_source(src, x, t, h, z, (z, z, z)))
 end
 _source_value(Hl::SVector{4}, x, t, h) = Hl
+_source_value(::Nothing, x, t, h::SVector{NC,T}) where {NC,T} = zero(SVector{4,T})
 
 # --- the constraint-damping rate, as a function of position -----------------
 #
