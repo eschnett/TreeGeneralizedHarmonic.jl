@@ -147,7 +147,20 @@ function composite_closed(g, x, t, lines)
     w = P ./ sum(P)
     return sum(w[A] * Hs[A] for A in 1:K)
 end
-function dh_closed(g, x, p)
+# The damped harmonic closed form is compiled at optimization level 1, in a
+# module of its own. At `-O2`, Julia 1.13 on aarch64 miscompiles ForwardDiff
+# 1.4.7's Jacobian of it: it is off from central differences by up to 8 %, while
+# the package's source agrees with them to 1e-10, and at `-O1` the Jacobian
+# agrees to 2e-10 (measured 2026-11-14; on 2026-11-06 ForwardDiff 1.4.6 did not
+# show it). The
+# reference is what is wrong there, not the kernel. `@noinline` keeps its body
+# out of the `-O2` callers.
+module DampedHarmonicReference
+Base.Experimental.@optlevel 1
+using LinearAlgebra: det
+using StaticArrays: SVector
+using TreeGeneralizedHarmonic: adm_from_metric
+@noinline function dh_closed(g, x, p)
     α, β, γ = adm_from_metric(g)
     L = log(sqrt(det(γ)) / α)
     ℓ = log(1 / α)
@@ -159,6 +172,8 @@ function dh_closed(g, x, p)
     gβ = SVector(ntuple(a -> sum(g[a, i + 1] * β[i] for i in 1:3), 4))
     return (μ1 * L + μ2 * ℓ) * n - μS * gβ / α
 end
+end
+const dh_closed = DampedHarmonicReference.dh_closed
 rollon_closed(t, t_0, σ_g) = t ≤ t_0 ? one(t) : exp(-((t - t_0) / σ_g)^4)
 
 TrackedHoleB1(T, h) = TrackedHole(T; M=h.M, spin=h.s, center=h.c, velocity=h.v,
