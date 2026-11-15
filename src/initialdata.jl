@@ -1493,7 +1493,7 @@ hole_forest(case::GHCase; kwargs...) = hole_forest(Float64, case; kwargs...)
 
 """
     holes_forest(T = Float64, case::GHCase; N, roots, radii, levels = length(radii),
-                 shape = :ball, comm = nothing)
+                 shape = :ball, path = 0, comm = nothing)
 
 [`hole_forest`](@ref)'s fixed nested hierarchy about **every** hole of a case of
 several holes (added in step B3): at level `ℓ` every leaf of level `ℓ − 1` that
@@ -1501,10 +1501,15 @@ meets the shell of radius `radii[ℓ]` about any hole's initial center is refine
 and the forest balanced — the union of the holes' hierarchies, which is what a
 frozen-hierarchy run of a pair is stated on: doubling `N` leaves the layout alone
 and halves every spacing. `shape` and `comm` are `hole_forest`'s.
+
+`path > 0` (added in step H4) sweeps each shell along the hole's way to the
+holes' center of mass, a length `path` from its initial center (never past the
+center of mass): the capsule a head-on pair falls through, so that a run to the
+merger needs no regrid and is stated on one frozen hierarchy.
 """
 function holes_forest(::Type{T}, case::GHCase; N, roots, radii,
                       levels::Integer=length(radii), shape::Symbol=:ball,
-                      comm=nothing) where {T}
+                      path=0, comm=nothing) where {T}
     case.holes === nothing && throw(ArgumentError(
         "holes_forest refines about a case's holes, and this case has none: " *
         "hole_forest is one hole's."))
@@ -1516,15 +1521,29 @@ function holes_forest(::Type{T}, case::GHCase; N, roots, radii,
     all(ℓ -> radii[ℓ] ≤ radii[ℓ - 1], 2:levels) || throw(ArgumentError(
         "the shells must nest, so the radii must not increase with the level, but " *
         "radii = $radii."))
+    T(path) ≥ 0 || throw(ArgumentError("path is a length, got $path."))
     forest = gh_forest(T, case; N=N, roots=roots, comm=comm)
     cs = [ntuple(d -> T(h.center[d]), Val(3)) for h in case.holes]
+    # Each hole's sweep toward the center of mass, `path` long at most (step H4).
+    com = center_at(holes_center(ntuple(A -> case.holes[A], length(case.holes))),
+                    zero(T))
+    Δcs = map(case.holes) do h
+        δ = com - SVector{3,T}(h.center)
+        n = sqrt(sum(abs2, δ))
+        ℓ = min(T(path), n)
+        ntuple(d -> n > 0 ? ℓ * δ[d] / n : zero(T), Val(3))
+    end
+    meets(ext, A, R) = iszero(T(path)) ?
+                       (shape === :ball ? _box_meets_ball(ext, cs[A], R) :
+                        _box_meets_cube(ext, cs[A], R)) :
+                       (shape === :ball ? _box_meets_capsule(ext, cs[A], Δcs[A], R) :
+                        _box_meets_swept_cube(ext, cs[A], Δcs[A], R))
     for ℓ in 1:levels
         R = T(radii[ℓ])
         targets = filter(forest.leaves) do k
             level(k) == ℓ - 1 || return false
             ext = block_extent(T, forest, k)
-            return any(c -> shape === :ball ? _box_meets_ball(ext, c, R) :
-                            _box_meets_cube(ext, c, R), cs)
+            return any(A -> meets(ext, A, R), eachindex(cs))
         end
         isempty(targets) && throw(ArgumentError(
             "no leaf of level $(ℓ - 1) comes within radii[$ℓ] = $R of a hole, so " *

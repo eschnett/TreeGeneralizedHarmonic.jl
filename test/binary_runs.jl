@@ -31,6 +31,13 @@
 #
 #   d=8 L=32 N=24 roots=8          the separation, the box [−L, L]³, the blocks
 #   radii=16,8,4,2                 the balls about each hole, one per level (in M)
+#   path=0                         sweep each ball this far toward the center of
+#                                  mass: the capsule a head-on pair falls through
+#   mesh=fixed|follow              the nested balls frozen, or (step H4) the mesh
+#                                  that follows the holes: the indicator's,
+#                                  regridded every chunk, each hole's floor on its
+#                                  tracked horizon out to floor_margin (in M), with
+#                                  refine_tol=2/5 coarsen_tol=1/10
 #   t_end=2 chunk=1/4 cfl=1/2 q=4  the run
 #   eps=1/2 gamma2=0               ε_KO and γ2 (γ0: holes_damping's three Gaussians)
 #   r_0=5/8 r_1=23/16 margin=8     each hole's layer, stated for a hole of mass one
@@ -60,6 +67,8 @@
 #   finder_N=16 spin=1             the finder's resolution, and the Korzyński J
 #   backend=cpu|cuda mpi=false     as test/octant_runs.jl's
 #   out=<dir>                      where `binary.csv`, `records.txt` and the log go
+#   name=<label> group=<label>     the run's SimWatch name and group (step H4): every
+#                                  run keeps `simwatch.toml` in `out`
 #   checkpoint=<dir> walltime=<s>  a chain of jobs; checkpoint_every=4 keep=2
 #
 # A run that stops at `walltime` exits with status 3, so a job script can resubmit;
@@ -171,7 +180,20 @@ companion = rat(opt("companion", "4"))
 attenuation = haskey(OPTIONS, "attenuation") ? T(rat(OPTIONS["attenuation"])) : nothing
 horizon = Horizon(T; every=1, N=parse(Int, opt("finder_N", "16")),
                   spin=opt("spin", "1") in ("1", "true"))
+# The following mesh (step H4): `test/octant_runs.jl`'s `mesh=follow`, one floor
+# per hole (`CODE.md`, "Refinement for two holes").
+meshname = opt("mesh", "fixed")
+meshname in ("fixed", "follow") || error("mesh is fixed or follow, got $meshname")
+follow = meshname == "follow"
+follow && haskey(OPTIONS, "path") && error("path = is the fixed mesh's capsule")
+refinement = follow ?
+             Refinement(T; refine_tol=T(rat(opt("refine_tol", "2/5"))),
+                        coarsen_tol=T(rat(opt("coarsen_tol", "1/10"))),
+                        maxlevel_cap=length(radii),
+                        floor_margin=T(rat(opt("floor_margin", "0"))), ceiling_cells=1) :
+             nothing
 case = binary_case(T; holes=holes, halfwidth=L, chunk=chunk, ε_KO=ε_KO, γ2=γ2,
+                   refinement=refinement,
                    horizon=horizon, companion=companion, attenuation=attenuation,
                    hole_target=Symbol(opt("target", "superposed")),
                    source_feed=Symbol(opt("feed", "tracks")),
@@ -192,7 +214,8 @@ else
 end
 restarting = get(ckw, :restart_file, nothing) !== nothing
 forest0 = restarting ? nothing :
-          holes_forest(T, case; N=N, roots=roots, radii=radii, comm=comm)
+          holes_forest(T, case; N=N, roots=roots, radii=radii, comm=comm,
+                       path=T(rat(opt("path", "0"))))
 if forest0 !== nothing && isrank0
     lv = forest_levels(forest0)
     npts = nleaves(forest0) * N^3
@@ -282,6 +305,18 @@ function newton_separation(d0, M, t)
     return y[1]
 end
 
+# The SimWatch status file (added in step H4): progress, the constraints and the
+# pair's separation as sparklines, each hole's horizon.
+sw = SimWatchWriter(outdir; name=opt("name", basename(outdir)),
+                    code="TreeGeneralizedHarmonic", group=opt("group", nothing),
+                    comm=comm,
+                    summary=[(key="constraints.gauge_l2", label="C_a"),
+                             (key="pair.separation", label="sep"),
+                             (key="lapse.min_between", label="α between")])
+simwatch_update!(sw; force=true, status="starting", time_end=Float64(t_end),
+                 time_unit="M", walltime_limit=walltime,
+                 message="compiling and building the initial data")
+
 csv = joinpath(outdir, "binary.csv")
 hcols = ["succ", "cx", "cy", "cz", "vx", "ox", "rmin", "rmax", "area", "Mirr", "J", "Mch",
          "pred", "finds", "offx", "srcx", "srcvx", "srcax", "fit_valid", "fit_residual"]
@@ -339,6 +374,24 @@ function observe(p, t, u, rec)
     append!(row, (num(get(rec, :rollon_t0, nothing)), lapse.out_α, lapse.out_a,
                   lapse.btw_α, lapse.btw_a))
     open(io -> println(io, join(row, ',')), csv, "a")
+    hist = Dict("constraints.gauge_l2" => rec.gauge_l2, "pair.separation" => rec.separation,
+                "lapse.min_between" => lapse.btw_α, "layer.residual" => rec.residual)
+    bhs = [(name="BH$A", irreducible_mass=h.M_irr, mass=h.M_ch, spin=h.J,
+            position=collect(h.track_center), found=h.success)
+           for (A, h) in enumerate(rec.holes)]
+    extra = Dict("constraints" => Dict("gauge_l2" => rec.gauge_l2,
+                                       "ham_l2" => num(rec.ham_l2)),
+                 "pair" => Dict("separation" => rec.separation,
+                                "newton" => newton_separation(d_sep, M, rec.t)),
+                 "lapse" => Dict("min_between" => lapse.btw_α,
+                                 "min_outside" => lapse.out_α,
+                                 "max_sqrtg_alpha_between" => lapse.btw_a),
+                 "layer" => Dict("residual" => rec.residual),
+                 "rollon_t0" => num(get(rec, :rollon_t0, nothing)))
+    simwatch_update!(sw; force=true, history=hist, iteration=rec.steps, time=rec.t,
+                     time_end=Float64(t_end), time_unit="M", walltime_limit=walltime,
+                     black_holes=bhs, extra=extra,
+                     message=@sprintf("t = %.3f M, separation %.4f", rec.t, rec.separation))
     @printf("t = %7.4f  wall %8.1f s  C_a %.3e/%.3e  ℋ %.3e  res %.3e  sep %.6f (found %.6f, newton %.6f)  areas %.5f %.5f  pred %.2e %.2e  gpu %.1f GB\n",
             rec.t, time() - t_wall0, rec.gauge_l2, rec.gauge_linf, num(rec.ham_l2),
             rec.residual, rec.separation, sep_found, newton_separation(d_sep, M, rec.t),
@@ -357,11 +410,18 @@ out = try
                                                          restriction=q + 2),
             t_end=t_end, chunk=chunk, cfl=cfl, backend=backend, observer=observe,
             adm_every=adm_every, comm=comm, rollon_separation=rollon_separation,
+            regrid=follow,
             fit_initial_depth=fitted_holes ? T(rat(opt("fit_depth", "0"))) : 0, ckw...)
 catch err
+    use_mpi || simwatch_finish!(sw; status="failed", message=sprint(showerror, err),
+                                time_end=Float64(t_end), time_unit="M")
     abort_all(err)
     rethrow()
 end
+simwatch_finish!(sw; status=out.finished ? "finished" : "stopped", time=Float64(out.t),
+                 time_end=Float64(t_end), time_unit="M",
+                 message=out.finished ? "finished" :
+                         "stopped at the wall-time limit, to be continued")
 if isrank0
     open(joinpath(outdir, "records.txt"), "w") do io
         for r in out.records
