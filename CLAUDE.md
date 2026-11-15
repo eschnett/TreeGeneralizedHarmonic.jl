@@ -616,6 +616,7 @@ holes. A unit harmonic hole needs `h = 1/16` at `q = 2`, so the smoke run is
 
 ```bash
 julia --project=. --threads=4 test/binary_runs.jl chart=harmonic d=8 L=8 N=8 roots=2 radii=4,3,2,6/5 q=2 masses=1,1 r_0=7/20 r_1=37/50 margin=4 t_end=1/10 chunk=1/20 finder_N=12 spin=0 adm=0 d_g=7.99999 sigma_g=1 out=out/hpair
+julia --project=. --threads=4 test/binary_runs.jl chart=harmonic interior=fitted d=8 L=8 N=8 roots=2 radii=4,3,2,6/5 q=2 masses=1,1 margin=4 t_end=1/10 chunk=1/20 finder_N=12 spin=0 adm=0 out=out/hfpair
 ```
 
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
@@ -1143,6 +1144,11 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   superposition's type (`SuperposedMetric{…,C}`, `CODE.md`, "What step H4 has
   built"). A target built from that superposition by hand must keep its `C`, or
   the layers relax toward data that violate the gauge constraint.
+- **Fitted holes' cache is filled hole by hole, each inside its own sphere**
+  (`fill_target!` on a `HoleInteriors`), and refilled after every piece's
+  geometry; a change to when a piece's geometry is built has to refill after it.
+  Step 8f's and 8′'s levers are refused for several holes (`CODE.md`, "What step
+  H4 has built").
 - **A roll-on from zero is no source until `t_0`, by `nothing`**: `effective_source`
   hands the launch `nothing`, and every kernel path that evaluates a source must
   take `nothing` as the harmonic kind's zeros (`gauge_source`, `_source_value`,

@@ -8502,16 +8502,16 @@ grid throughout, or the inertial grid with `:fitted` measured first between
 4. **Two holes with no source**: the head-on pair in pure harmonic gauge to
    wherever it ends, then with the roll-on through the merger. *Started
    (step H4):* the case, the roll-on from zero and the runs' options are
-   built ([What step H4 has built](#what-step-h4-has-built)); `:fitted` per
-   hole is not, and nothing has run at the step's spacings.
+   built, with `:fitted` per hole ([What step H4 has built](#what-step-h4-has-built));
+   nothing has run at the step's spacings.
 5. **The orbit**, on the grid chosen from step H2's ratio.
 
 ### What step H4 has built
 
 The pair's code, on steps B1–B3's composition (`test/harmonic_holes_tests.jl`;
-`test/binary_runs.jl chart=harmonic`). Not yet built: `:fitted` per hole — a
-`HoleSpec` still refuses a `FittedSpec`, so every layer of a pair is B2's tracked
-`:damped` target — and nothing has run at `1/96` or `1/128`.
+`test/binary_runs.jl chart=harmonic`), with each hole's interior B2's tracked
+`:damped` target or step 8e's `:fitted` target. Nothing has run at `1/96` or
+`1/128`.
 
 - **A hole's chart.** `HoleSpec(…; chart = :harmonic)` is harmonic Kerr on its
   line (`hole_on_line`); its seed, its radius checks and its tracked target read
@@ -8546,6 +8546,23 @@ The pair's code, on steps B1–B3's composition (`test/harmonic_holes_tests.jl`;
   `t0=`, `d_g=`, `sigma_g=` and `sigma_r=`, and writes the smallest lapse and
   the largest `√γ/α` outside both horizons and in the slab between the holes,
   the pure harmonic run's measurement.
+- **`:fitted` per hole.** A hole takes a `:fitted` `FittedSpec` (`scaled_spec`
+  divides a stated rate by its mass); every hole of a case takes the same kind.
+  Each hole has step 8d's geometry about its own track, built on the mesh once
+  per piece (`holes_interior(…; forest, G, n_L)`), its own ramp `n_L` at its own
+  mass, its own fits and ranges, refit at every row from one ghost fill, and its
+  own part of the target cache: the cache is zeroed and each hole's fits written
+  inside that hole's fill sphere, which before merger are disjoint, so a point
+  holds the target of the hole the composite runs there — the single hole's
+  fill, bit for bit. The cache is refilled after every piece's geometry. The
+  initial data are the analytic `:damped` layer's first, so that the holes'
+  horizons are found and their tracks reseeded on them, then each hole's fit of
+  the superposition in its reseeded geometry inside its offset surface. The
+  tracks predict along the seed's quadratic, as a tracked target's do: a
+  binary's first finds need the acceleration. Step 8f's hand-over and snapshot,
+  step 8′'s exact target and trailing ramp, and the `:fitted` initial-data
+  cycle are one hole's and refused for several. The checkpoint holds each hole's
+  fits, ranges and initial fit, and the record each hole's fit and layer rows.
 - **A harmonic hole costs `h = 1/16 M_A` at `q = 2`.** Its horizon is at
   `r = M_A`, so `r_1` four cells inside it and a ramp of six cells need that
   spacing; the suite's pair of unit holes at `d = 8` is 1296 blocks. The

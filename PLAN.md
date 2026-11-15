@@ -46,8 +46,8 @@ harmonic gauge with no source for the inspiral, the damped harmonic gauge
 rolled on before the merger, and the `:fitted` interior. The design is
 `CODE.md`, "Harmonic gauge for the inspiral". **Steps H1–H3 are done**
 (they ran 2026-11-11 to 2026-11-13); step H4 is started (2026-11-14, on the
-inertial grid, Erik's choice): the harmonic pair with no source and the roll-on
-from zero are built, `:fitted` per hole and the runs are not. Step H5 is not
+inertial grid, Erik's choice): the harmonic pair with no source, the roll-on
+from zero and `:fitted` per hole are built, and the runs are not. Step H5 is not
 started. Steps H1–H3 were single holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
@@ -1322,9 +1322,9 @@ at `1/128` on two H200s, and is not stationary by `24 M`.
 **Started 2026-11-14 on the inertial grid** (Erik's choice), on branch
 `claude/step-H4-prep`: built are the harmonic chart for a hole, the pair with no
 source and `Π` from `C_a = 0` in its data and its targets, the roll-on from zero
-with `t_0` a time or the separation's event, and `test/binary_runs.jl`'s options
-(`CODE.md`, "What step H4 has built"). **Left:** a `FittedSpec` in a `HoleSpec`,
-and the runs below.
+with `t_0` a time or the separation's event, a `:fitted` `FittedSpec` in a
+`HoleSpec`, and `test/binary_runs.jl`'s options (`CODE.md`, "What step H4 has
+built"). **Left:** the runs below.
 
 `CODE.md`: "The data", "The merger"; "One interior per hole"; "The common
 horizon and the handover". **Starts from steps B1–B3's code on its own

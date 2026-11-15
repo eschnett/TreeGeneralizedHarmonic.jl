@@ -216,4 +216,79 @@ end
         @test isequal(a.records, b.records)
         @test a.nsteps == b.nsteps
     end
+
+    # Guards a fitted hole's rule, host-side: a hole takes a `:fitted` spec and
+    # refuses a `:damped` one (that is `TrackedSpec`'s), scaled by its mass as a
+    # tracked target is; and its composite is built on the mesh, which a
+    # composite of tracked targets does not need.
+    @testset "a fitted hole's rule" begin
+        fs = FittedSpec(T; variant=:fitted, margin=4, fit_cont=2, ρ_max=8)
+        @test_throws "variant :damped" HoleSpec(T; mass=1, center=(0, 0, 0),
+                                                 interior=FittedSpec(T))
+        hs = head_on_holes(T; d=8, masses=(1 // 2, 1 // 2), interior=fs, chart=:harmonic)
+        @test hs[1].interior.ρ_max == 16 && hs[1].interior.margin == 4
+        pair = binary_case(T; holes=hs, halfwidth=8, chunk=T(1 // 20),
+                           horizon=Horizon(T; every=1, N=12, spin=false))
+        @test pair.interior isa HolesSpec{2,<:FittedSpec}
+        @test_throws "forest, G and n_L" holes_interior(pair, seed_tracks(pair, 0), 0.0)
+        @test all(tr -> tr.quadratic, seed_tracks(pair, 0))
+    end
+
+    # Guards the fitted pair's composition and run state (step H4): the cache of
+    # two fitted holes is each hole's own cache — the single hole's fill, bit for
+    # bit — inside that hole's fill sphere and zero elsewhere; the pair evolves
+    # with both holes found and both fits valid at every row; and a chain of
+    # restarts, one chunk a job, is the uninterrupted run bit for bit, each
+    # hole's fits, ranges and initial fit included.
+    @full_tier @testset "a fitted harmonic pair: its cache, its rows and its restarts" begin
+        fs = FittedSpec(T; variant=:fitted, margin=4, fit_cont=2)
+        hs = head_on_holes(T; d=8, masses=(1, 1), interior=fs, chart=:harmonic)
+        pair = binary_case(T; holes=hs, halfwidth=8, chunk=T(1 // 20),
+                           horizon=Horizon(T; every=1, N=12, spin=false))
+        f = holes_forest(T, pair; N=8, roots=2, radii=(T(4), T(3), T(2), T(6 // 5)))
+        common = (q=q, ops=ops, t_end=T(1 // 10), checkpoint_sync_to_disk=false)
+        a = evolve!(T, pair; forest=deepcopy(f), common...)
+        @test length(a.records) == 3
+        @test all(r -> r.finite && all(h -> h.success === true && h.fit_valid, r.holes),
+                  a.records)
+        @test a.interior isa HoleInteriors{2} && interior_variant(a.interior) === :fitted
+        @test a.fits isa Tuple && length(a.fits) == 2 && all(f -> f[2] !== nothing, a.fits)
+        @test all(r -> all(h -> h.layer_offset == 4 // 16, r.holes), a.records)
+        @info "the suite's fitted harmonic pair (step H4)" separation = [r.separation for r in a.records] gauge_l2 = [r.gauge_l2 for r in a.records] fit_residual = [map(h -> h.fit_residual, r.holes) for r in a.records] areas = [map(h -> h.area, r.holes) for r in a.records] fit_cost = a.fit_cost
+
+        # The composite cache against each hole's own, on the run's last mesh.
+        U = FieldSet{T}(a.forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3))
+        origins = block_origins(U.forest, T)
+        spacings = block_spacings(U.forest, T)
+        tf = T(1 // 10)
+        both = TGHH.fill_target!(TGHH.target_cache(U), origins, spacings, a.interior, a.fits, tf)
+        same = true
+        nin = 0
+        for A in 1:2
+            own = TGHH.fill_target!(TGHH.target_cache(U), origins, spacings,
+                               a.interior.holes[A], a.fits[A], tf)
+            g = a.interior.holes[A]
+            r_fill = (g.r_out - g.offset) + g.h
+            for b in 1:nblocks(U), I in CartesianIndices(interiorview(U, b, 1))
+                x = coordinates(U, b, Tuple(I) .+ U.G)
+                TGHH.interior_radius(g, tf, x) < r_fill || continue
+                nin += 1
+                same &= isequal(own.work[I, :, b], both.work[I, :, b])
+            end
+        end
+        @test same && nin > 0
+
+        pre = joinpath(mktempdir(), "fpair")
+        b = evolve!(T, pair; forest=deepcopy(f), common..., checkpoint_path_prefix=pre,
+                    max_walltime_seconds=1e-9)
+        jobs = 1
+        while !b.finished
+            b = evolve!(T, pair; common..., checkpoint_path_prefix=pre,
+                        max_walltime_seconds=1e-9, restart_file=latest_checkpoint(pre))
+            jobs += 1
+        end
+        @test jobs == 2
+        @test isequal(a.u, b.u)
+        @test isequal(a.records, b.records)
+    end
 end

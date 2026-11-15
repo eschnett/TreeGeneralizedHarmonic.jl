@@ -944,14 +944,23 @@ function seed_hole_track(h::HoleSpec{T}, t) where {T}
     bg = hole_metric(h)
     tt = T(t)
     c = h.center + tt * h.velocity + (tt * tt / 2) * h.acceleration
-    v = h.velocity + tt * h.acceleration + spec.seed_velocity_offset
+    v = h.velocity + tt * h.acceleration + _seed_dv(spec)
     tr = HorizonTrack{T}(tt, c, v, T(_seed_r_min(bg, lmax)), T(horizon_max_radius(bg)),
                          analytic_shape(bg, lmax), Int(lmax), nothing, nothing,
                          :analytic, 0, 0)
-    spec.quadratic || return tr
+    _hole_quadratic(spec) || return tr
     l = TrackLine{T}(tt, c, v, h.acceleration)
     return _with_prediction(tr; quadratic=true, pred=l, prev=l, t_blend=tt, blend=zero(T))
 end
+
+# A hole's seed perturbation and the kind of its track: step B2's for a tracked
+# target, and for a fitted hole (step H4) no perturbation and the quadratic,
+# which a binary's first finds need whatever the interior (`CLAUDE.md`, "A
+# binary's seed must know its acceleration").
+_seed_dv(spec::TrackedSpec) = spec.seed_velocity_offset
+_seed_dv(spec::FittedSpec{T}) where {T} = zero(SVector{3,T})
+_hole_quadratic(spec::TrackedSpec) = spec.quadratic
+_hole_quadratic(::FittedSpec) = true
 
 """
     holes_interior(case::GHCase, tracks, t; ρ_max = 0) -> HoleInteriors
@@ -965,7 +974,8 @@ hole alone ([`HolesSpec`](@ref)). `own` holds each hole's own target, which the
 checks read. `ρ_max` is a placeholder, as in every interior a case builds; the
 driver sets the chunk's.
 """
-function holes_interior(case::GHCase{T}, tracks, t; ρ_max=zero(T)) where {T}
+function holes_interior(case::GHCase{T}, tracks, t; ρ_max=zero(T), forest=nothing,
+                        G=nothing, n_L=nothing) where {T}
     spec = case.interior
     spec isa HolesSpec || throw(ArgumentError(
         "holes_interior builds the composite of a case of several holes; this case's " *
@@ -975,6 +985,20 @@ function holes_interior(case::GHCase{T}, tracks, t; ρ_max=zero(T)) where {T}
     length(tracks) == K || throw(ArgumentError(
         "a case of $K holes takes $K tracks, got $(length(tracks))."))
     tt = T(t)
+    # Fitted holes (step H4): each hole's step-8d geometry about its own track,
+    # on the mesh — its offset and ramp are in the spacings of the blocks it
+    # lives in — and its own metric on the track's line for the checks.
+    if first(spec.specs) isa FittedSpec
+        (forest === nothing || G === nothing || n_L === nothing) && throw(ArgumentError(
+            "fitted holes' geometries are built on the mesh: holes_interior needs " *
+            "forest, G and n_L (one ramp per hole), which evolve! passes."))
+        own = ntuple(A -> hole_on_line(T, holes[A].mass, holes[A].spin[3],
+                                       track_center(tracks[A], tt);
+                                       harmonic=holes[A].harmonic), Val(K))
+        ints = ntuple(A -> fitted_interior(spec.specs[A], tracks[A], forest, G; t=tt,
+                                           n_L=n_L[A], ρ_max=ρ_max), Val(K))
+        return HoleInteriors(ints, own)
+    end
     own = ntuple(A -> tracked_interior(holes[A].interior, tracks[A], tt;
                                        mass=holes[A].mass, spin=holes[A].spin[3],
                                        ρ_max=ρ_max, harmonic=holes[A].harmonic), Val(K))

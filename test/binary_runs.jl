@@ -41,6 +41,11 @@
 #   chart=kerr_schild|harmonic     the holes' chart (step H4: harmonic runs with no
 #                                  source, its layer defaults r_0=2/5 r_1=3/4)
 #   masses=1/2,1/2                 the holes' masses
+#   interior=damped|fitted         each hole's layer: step B2's tracked :damped
+#                                  target (r_0, r_1), or step 8e's :fitted target
+#                                  about its own track (step H4: margin, n_L=0
+#                                  for step 8c's rule, fit_cont=2, lmax_fit=8,
+#                                  fit_depth=0 the initial data's switch depth)
 #   t0= d_g= sigma_g=10 sigma_r=32 (harmonic) roll the damped harmonic gauge on from
 #                                  zero at t0, or when the tracks are d_g apart,
 #                                  over σ_g; σ_r its far-field Gaussian (none: H ≡ 0)
@@ -138,7 +143,13 @@ end
 # The pair: each hole's layer stated for a hole of mass one and scaled by its own.
 chart = Symbol(opt("chart", "kerr_schild"))
 harmonic = chart === :harmonic
-unit = TrackedSpec(T; r_0=T(rat(opt("r_0", harmonic ? "2/5" : "5/8"))),
+fitted_holes = opt("interior", "damped") == "fitted"
+unit = fitted_holes ?
+       FittedSpec(T; variant=:fitted, margin=parse(Int, opt("margin", "8")),
+                  n_L=parse(Int, opt("n_L", "0")),
+                  fit_cont=parse(Int, opt("fit_cont", "2")),
+                  lmax_fit=parse(Int, opt("lmax_fit", "8"))) :
+       TrackedSpec(T; r_0=T(rat(opt("r_0", harmonic ? "2/5" : "5/8"))),
                    r_1=T(rat(opt("r_1", harmonic ? "3/4" : "23/16"))),
                    margin=parse(Int, opt("margin", "8")),
                    max_interval=T(rat(opt("find_interval", "0"))))
@@ -273,7 +284,7 @@ end
 
 csv = joinpath(outdir, "binary.csv")
 hcols = ["succ", "cx", "cy", "cz", "vx", "ox", "rmin", "rmax", "area", "Mirr", "J", "Mch",
-         "pred", "finds", "offx", "srcx", "srcvx", "srcax"]
+         "pred", "finds", "offx", "srcx", "srcvx", "srcax", "fit_valid", "fit_residual"]
 bcols = [("h$(A)_" * b * "_" * f) for A in 1:2 for b in ("r$(BANDS[k])" for k in 1:NBAND)
          for f in ("ham_l2", "gauge_l2")]
 header = vcat(["t", "wall", "steps", "dt", "nblocks", "points", "gauge_l2", "gauge_linf",
@@ -297,7 +308,7 @@ function observe(p, t, u, rec)
     all = bandnorms(rf.all)
     # The lapse rows, from the state itself (`scatter!` writes `u` into the
     # working array; the next right-hand side scatters again).
-    rA(A) = max(num(rec.holes[A].track_r_max), unit.r_1 * holes[A].mass)
+    rA(A) = max(num(rec.holes[A].track_r_max), (fitted_holes ? 1 : unit.r_1) * holes[A].mass)
     lf = mesh_fold(LapseFold{T}(c1, c2, T(rA(1)), T(rA(2)), T(rec.separation / 2)),
                    TreeAMR.combine, NOLAPSE, p.U, u)
     lapse = map(b -> b.value, lf)
@@ -315,7 +326,9 @@ function observe(p, t, u, rec)
                       num(h.track_prediction_max), h.track_finds, h.horizon_offset[1],
                       get(h, :source_center, (NaN,))[1],
                       get(h, :source_velocity, (NaN,))[1],
-                      get(h, :source_acceleration, (NaN,))[1]))
+                      get(h, :source_acceleration, (NaN,))[1],
+                      get(h, :fit_valid, nothing) === nothing ? NaN : Int(h.fit_valid),
+                      num(get(h, :fit_residual, nothing))))
     end
     append!(row, (rec.separation, sep_found, newton_separation(d_sep, M, rec.t),
                   device_gb(), Sys.maxrss() / 1e9))
@@ -343,7 +356,8 @@ out = try
     evolve!(T, case; forest=forest0, q=q, ops=Operators(prolongation=q + 2,
                                                          restriction=q + 2),
             t_end=t_end, chunk=chunk, cfl=cfl, backend=backend, observer=observe,
-            adm_every=adm_every, comm=comm, rollon_separation=rollon_separation, ckw...)
+            adm_every=adm_every, comm=comm, rollon_separation=rollon_separation,
+            fit_initial_depth=fitted_holes ? T(rat(opt("fit_depth", "0"))) : 0, ckw...)
 catch err
     abort_all(err)
     rethrow()

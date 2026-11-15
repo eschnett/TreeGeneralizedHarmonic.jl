@@ -66,9 +66,12 @@ units (a hole of mass `M_A` takes the single hole's numbers times `M_A`,
   unrotated Kerr-Schild hole boosted along the track, which spins about `z`, and
   the gauge source holds the spin fixed in the rest frame; a tilted spin is
   refused by name. The binaries of steps B3–B9 are non-spinning or aligned.
-- **The interior is a `TrackedSpec` (decided by Erik 2026-10-26, pairing (α)).**
-  A `FittedSpec` per hole is the alternative the composition is written to admit
-  ([`HoleInteriors`](@ref)) and is refused here: it is not built.
+- **The interior is a `TrackedSpec` (decided by Erik 2026-10-26, pairing (α))
+  or a `:fitted` `FittedSpec` (added in step H4).** The first is step B2's
+  tracked analytic target; the second is step 8e's fitted target about the
+  hole's own track, each hole with its own fits ([`HoleInteriors`](@ref)) — the
+  harmonic route's interior, since a binary has no analytic target. Every hole
+  of a case takes the same kind.
 - **The chart** (added in step H4) is `:kerr_schild`, steps B1–B3's, or
   `:harmonic`: the hole is then Kerr in harmonic coordinates, its horizon at
   `r = M_A` and not `2 M_A`, and a case of such holes runs with no gauge source,
@@ -107,10 +110,14 @@ function HoleSpec(::Type{T}=Float64; mass, spin=(0, 0, 0), center, velocity=(0, 
     v = vec3(velocity, "velocity")
     sum(abs2, v) < 1 || throw(ArgumentError(
         "a hole moves slower than light, got |v| = $(sqrt(sum(abs2, v)))."))
-    interior isa TrackedSpec{T} || throw(ArgumentError(
+    (interior isa TrackedSpec{T} ||
+     (interior isa FittedSpec{T} && interior_variant(interior) === :fitted)) ||
+        throw(ArgumentError(
         "a hole's interior is a TrackedSpec{$T} — step B2's tracked :damped target, " *
-        "pairing (α) (decided by Erik 2026-10-26) — got a $(typeof(interior)). A " *
-        ":fitted hole is what the composition is written to admit, and is not built."))
+        "pairing (α) (decided by Erik 2026-10-26) — or a :fitted FittedSpec{$T}, " *
+        "step 8e's fitted target about the hole's own track (step H4); got a " *
+        "$(typeof(interior))$(interior isa FittedSpec ? " of variant :" *
+                              string(interior_variant(interior)) : "")."))
     return HoleSpec{T,typeof(interior)}(M, s, vec3(center, "center"), v,
                                         vec3(acceleration, "acceleration"), interior,
                                         chart === :harmonic)
@@ -141,6 +148,20 @@ function scaled_spec(spec::TrackedSpec{T}, M) where {T}
                        velocity_offset=spec.velocity_offset,
                        center_offset=spec.center_offset * m,
                        seed_velocity_offset=spec.seed_velocity_offset)
+end
+
+"""
+    scaled_spec(spec::FittedSpec, M) -> FittedSpec
+
+The fitted target's rule for a hole of mass `M` (added in step H4): a stated
+rate over `M`; everything else is in spacings or a degree, and unchanged.
+"""
+function scaled_spec(spec::FittedSpec{T,V,X,B}, M) where {T,V,X,B}
+    return FittedSpec{T,V,X,B}(spec.margin, spec.n_L, spec.core_min, spec.lmax_shape,
+                               spec.lmax_fit, spec.ρ_max / T(M), spec.w_ramp,
+                               spec.ρ_ramp, spec.max_misses, spec.α_trigger,
+                               spec.valvariant, spec.target, spec.target_bounds,
+                               spec.fit_tilde, spec.fit_cont)
 end
 
 """
@@ -529,6 +550,12 @@ end
 end
 
 @inline in_layer(c::HoleInteriors, t, x) = in_layer(acting_interior(c, t, x), t, x)
+# The acting hole's view of the point (step H4): what the fitted initial data's
+# kernel reads.
+@inline interior_point(c::HoleInteriors, t, x) =
+    interior_point(acting_interior(c, t, x), t, x)
+with_variant(c::HoleInteriors{K}, variant::Symbol) where {K} =
+    HoleInteriors(ntuple(A -> with_variant(c.holes[A], variant), Val(K)), c.own)
 @inline core_position(c::HoleInteriors, t, x) =
     core_position(acting_interior(c, t, x), t, x)
 

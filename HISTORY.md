@@ -2394,8 +2394,9 @@ must be gauge-invariant.
 
 Erik asked to start step H4 on the inertial grid. Built on 2026-11-14: a hole's
 chart, the harmonic pair with no source and `Π` from `C_a = 0`, the roll-on from
-zero, and `test/binary_runs.jl`'s options (`CODE.md`, "What step H4 has built").
-Two choices departed from the plan as written:
+zero, `test/binary_runs.jl`'s options and, on his go-ahead the same day, `:fitted`
+per hole (`CODE.md`, "What step H4 has built"). Three choices departed from the
+plan as written:
 
 - **The targets carry the gauge's momentum, not only the data.** The first
   build gave the data `Π` from `C_a = 0` and the layer targets the
@@ -2412,6 +2413,10 @@ Two choices departed from the plan as written:
   `RolledGaugeSource(ZeroGaugeSource(T), to)` throughout, and a launch before
   `t_0` is handed no source, which the kernel takes as the harmonic kind's
   zeros: the run without a source bit for bit, measured on one harmonic hole.
+- **A fitted hole's track is a quadratic.** A single `:fitted` hole's track is
+  step 8d's line, and stays so; a fitted hole of several predicts along its
+  seed's quadratic, as a tracked target's does, since step B2 found that a
+  binary's first find needs the acceleration.
 
 ## Possible extensions
 
