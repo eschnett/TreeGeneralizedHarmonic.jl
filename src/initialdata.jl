@@ -528,9 +528,17 @@ hand-over), and each spinning `spins[A]` (a length) about `z` (added in step B3)
 hole takes times its own mass ([`scaled_spec`](@ref); `CODE.md`'s units: every
 single-hole setting scales by `M_A`). `chart = :harmonic` makes them harmonic Kerr
 holes (step H4), whose radii are about half Kerr-Schild's.
+
+`newtonian = false` (added in step H4) seeds them at rest without the Newtonian
+acceleration, for a pair whose coordinates do not fall at first: on the harmonic
+pair with no source at `1/96` the found holes moved `0.0003 M` each in `2 M`
+where free fall moves them `0.016 M`, and a track that predicted the free fall
+was `0.75` cells off its finds at `2 M`, half the center-jump check's bound. The
+tracks then learn the acceleration from their own finds.
 """
 function head_on_holes(::Type{T}=Float64; d, masses=(1 // 2, 1 // 2), axis::Integer=1,
-                       interior, spins=(0, 0), chart::Symbol=:kerr_schild) where {T}
+                       interior, spins=(0, 0), chart::Symbol=:kerr_schild,
+                       newtonian::Bool=true) where {T}
     axis in 1:3 || throw(ArgumentError("axis is 1, 2 or 3, got $axis."))
     M1, M2 = T(masses[1]), T(masses[2])
     M = M1 + M2
@@ -538,7 +546,8 @@ function head_on_holes(::Type{T}=Float64; d, masses=(1 // 2, 1 // 2), axis::Inte
     D > 0 || throw(ArgumentError("the separation must be positive, got $d."))
     e = SVector{3,T}(ntuple(k -> k == axis ? one(T) : zero(T), Val(3)))
     c1, c2 = (-D * M2 / M) * e, (D * M1 / M) * e
-    a1, a2 = (M2 / (D * D)) * e, (-M1 / (D * D)) * e
+    a1, a2 = newtonian ? ((M2 / (D * D)) * e, (-M1 / (D * D)) * e) :
+             (zero(e), zero(e))
     return (HoleSpec(T; mass=M1, spin=(0, 0, spins[1]), center=c1, acceleration=a1,
                      interior=scaled_spec(interior, M1), chart=chart),
             HoleSpec(T; mass=M2, spin=(0, 0, spins[2]), center=c2, acceleration=a2,

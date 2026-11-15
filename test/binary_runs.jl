@@ -48,6 +48,9 @@
 #   chart=kerr_schild|harmonic     the holes' chart (step H4: harmonic runs with no
 #                                  source, its layer defaults r_0=2/5 r_1=3/4)
 #   masses=1/2,1/2                 the holes' masses
+#   seed=newton|rest               the tracks' seeds fall freely, or start at rest
+#                                  and learn the acceleration from the finds (the
+#                                  harmonic pair's coordinates do not fall at first)
 #   interior=damped|fitted         each hole's layer: step B2's tracked :damped
 #                                  target (r_0, r_1), or step 8e's :fitted target
 #                                  about its own track (step H4: margin, n_L=0
@@ -163,7 +166,8 @@ unit = fitted_holes ?
                    margin=parse(Int, opt("margin", "8")),
                    max_interval=T(rat(opt("find_interval", "0"))))
 masses = Tuple(rat(m) for m in split(opt("masses", "1/2,1/2"), ','))
-holes = head_on_holes(T; d=d_sep, masses=masses, interior=unit, chart=chart)
+holes = head_on_holes(T; d=d_sep, masses=masses, interior=unit, chart=chart,
+                      newtonian=opt("seed", "newton") == "newton")
 # The roll-on from zero (step H4): at `t0`, or at the separation `d_g`, which
 # leaves `t_0 = Inf` to the event.
 rolling = harmonic && (haskey(OPTIONS, "t0") || haskey(OPTIONS, "d_g"))
