@@ -132,6 +132,7 @@ The briefs of the finished steps are under
   - [Step H3 measured on 2026-11-12 and 2026-11-13](#step-h3-measured-on-2026-11-12-and-2026-11-13)
   - [Steps B1–B3's code taken for step H4 (2026-11-14)](#steps-b1b3s-code-taken-for-step-h4-2026-11-14)
   - [Step H4 started: two harmonic holes with no source (2026-11-14)](#step-h4-started-two-harmonic-holes-with-no-source-2026-11-14)
+  - [Step H4 shelved: the data are to be solved (2026-11-15)](#step-h4-shelved-the-data-are-to-be-solved-2026-11-15)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2442,6 +2443,61 @@ digits shown in `CODE.md`, "What step H4 has built":
   and `0.081` in the first `M`, which the track's radius check refused;
 - step B3's Kerr-Schild pair with its source on the seeds (`ctl48ks`): `M_irr`
   `0.5174`, `0.5205` at `1 M`, `0.5117` at `8 M`.
+
+### Step H4 shelved: the data are to be solved (2026-11-15)
+
+**The `1/96` row's end.** `h4p96` (job 598651) ran to `28 M` in `3 h 25 min`
+and stopped there: each horizon's smallest radius had fallen to `0.395`, and
+the margin `16`, the ramp `20` and the core `2` need `0.396` at `h = 1/96`.
+Its last rows: areas `9.786` at `26 M`, `9.766` at `27 M`, `9.750` at `28 M`
+(`M_irr` `0.4413`, `0.4408`, `0.4404`), the tracks `5.58`, `5.34` and `5.08`
+apart, `C_a` `1.2–1.3·10⁻⁴` and `ℋ` `1.0–1.2·10⁻⁴` over the evolved region.
+
+**Erik's three causes of a shrinking horizon** — an under-resolved setup, a
+common horizon outside it, or violated constraints (negative energy) — were
+checked in turn. Resolution is excluded: `1/48` and `1/96` agree to four or
+five digits, and step H1's single harmonic hole kept its area for `128 M` at
+these spacings. A common horizon is excluded: the holes were still `5.1 M`
+apart when the row ended, and the area falls from the first `M`. The
+constraints are violated.
+
+**The data's constraints at `t = 0`**, evaluated pointwise from each data
+set's `α`, `β^i` and `γ_ij` by nested forward-mode differentiation (a scratch
+script, not kept; the single hole gives `10⁻¹⁵`), with `∂_t γ_ij = 0` for
+holes at rest, so that `K_ij = (L_β γ)_ij / 2α`. `E` is `∫ℋ dV/16π` over
+`0.5 ≤ r < 3` about hole 1, the energy of the violation outside its horizon,
+in units of the total mass; `d = 8`, `M_A = 1/2`:
+
+| data | `E` | rms `ℋ` in `[0.5, 0.75)` | rms `ℋ` in `[1, 1.5)` | rms `ℳ` in `[1, 1.5)` |
+|---|---|---|---|---|
+| `g_ab` summed, companion `4 M_B` (the runs') | `−0.048` | `0.074` | `0.076` | `0.014` |
+| `g_ab` summed, no attenuation | `−0.030` | `0.43` | `0.039` | `0.021` |
+| deviations of `α`, `β^i`, `γ_ij` summed | `−0.023` | `0.18` | `0.033` | `0.009` |
+| the same with `β_i` summed | `−0.020` | `0.18` | `0.028` | `0.006` |
+| `γ = (Π φ_A)(δ + Σ (γ_A/φ_A − δ))`, `α = Π α_A` | `−0.013` | `0.12` | `0.019` | `0.006` |
+| the same with `α` summed | `−0.017` | `0.19` | `0.025` | `0.008` |
+| `ψ = 1 + Σ (φ_A^{1/4} − 1)`, `α` summed | `−0.017` | `0.17` | `0.025` | `0.009` |
+
+(`φ_A = det(γ_A)^{1/3}`.) The grid's `ℋ` in `[1, 3/2) M` at `t = 0` was
+`0.079` against the first row's `0.076`. Today's data's negative energy,
+`−0.048`, is the size of the `0.06` each hole lost; the companion's
+attenuation puts most of it in its ramp, `[1, 2) M`. Without attenuation the
+violation moves inward, toward the horizon. On the Kerr-Schild pair (`E` over
+`1 ≤ r < 3`) the runs' data hold `−0.032`, the summed deviations `−0.016` and
+the scaled ones `−0.010` — two thirds of the harmonic pair's energy for a
+sixth of its loss, so `E` does not predict the loss alone. Every variant
+falls as `1/d` from `d = 8` to `32` (the runs' data `−0.048`, `−0.039`,
+`−0.025`, `−0.017`, `−0.013` at `d = 8, 10, 16, 24, 32`; the scaled data
+`−0.013` to `−0.0032`): the violation follows the companion's potential, not
+its gradient, and separation does not make superposed holes isolated.
+
+**Decision (Erik, 2026-11-15).** Step H4's state is parked in a draft pull
+request, and the pair's data are solved first: steps S1 and S2, on step B8's
+design with harmonic free data. Erik had first asked whether superposing the
+3+1 variables rather than `g_ab` would do — it removes the attenuation, which
+the lapse no longer needs (`α ≥ 0.23` at `d = 8`), and halves the negative
+energy, and XCTS's free data already superpose that way; the solve is what
+removes the rest.
 
 ## Possible extensions
 

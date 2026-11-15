@@ -46,9 +46,14 @@ harmonic gauge with no source for the inspiral, the damped harmonic gauge
 rolled on before the merger, and the `:fitted` interior. The design is
 `CODE.md`, "Harmonic gauge for the inspiral". **Steps H1–H3 are done**
 (they ran 2026-11-11 to 2026-11-13); step H4 is started (2026-11-14, on the
-inertial grid, Erik's choice): the harmonic pair with no source, the roll-on
-from zero and `:fitted` per hole are built, and the runs are not. Step H5 is not
-started. Steps H1–H3 were single holes and needed only `main`.
+inertial grid, Erik's choice) and **shelved** (2026-11-15): the harmonic pair
+with no source, the roll-on from zero and `:fitted` per hole are built, and
+its first runs found that the superposed data's holes lose `13 %` of their
+irreducible mass, from the data's constraint violation. Its state is parked in
+a draft pull request. **Steps S1 and S2 are proposed** (2026-11-15) to come
+first: the pair's data solved by XCTS, then two holes far apart on those data;
+step H4 then resumes on them. Step H5 is not started. Steps H1–H3 were single
+holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
 [eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
@@ -114,6 +119,10 @@ the dependency order.
 - [Step H1 — A harmonic hole at rest](#step-h1--a-harmonic-hole-at-rest)
 - [Step H2 — A moving harmonic hole](#step-h2--a-moving-harmonic-hole)
 - [Step H3 — Spin in the harmonic chart](#step-h3--spin-in-the-harmonic-chart)
+- [Steps S1–S2 — Solved data for the pair](#steps-s1s2--solved-data-for-the-pair)
+  - [Sharp edges for steps S1–S2](#sharp-edges-for-steps-s1s2)
+- [Step S1 — Solved data for two harmonic holes](#step-s1--solved-data-for-two-harmonic-holes)
+- [Step S2 — Two holes far apart](#step-s2--two-holes-far-apart)
 - [Step H4 — Two holes with no source](#step-h4--two-holes-with-no-source)
 - [Step H5 — The orbit in harmonic gauge](#step-h5--the-orbit-in-harmonic-gauge)
 
@@ -1317,7 +1326,107 @@ Kerr-Schild rows' level; moving at `v = 1/5`, `:damped` at `1/96` is within
 not. The early rows' drift of `J` is resolution. `a = 7/10` runs at rest only
 at `1/128` on two H200s, and is not stationary by `24 M`.
 
+## Steps S1–S2 — Solved data for the pair
+
+Proposed 2026-11-15, when step H4's first runs showed that superposed harmonic
+holes lose `13 %` of their irreducible mass to the data's negative energy, and
+that no rearrangement of the superposition and no separation removes it
+(`CODE.md`, "Solved data for the pair"; `HISTORY.md`, "Step H4 shelved").
+They take step B8's design with harmonic free data, and they build on step
+H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
+`C_a = 0` and `:fitted` per hole — so they start from step H4's branch.
+
+### Sharp edges for steps S1–S2
+
+- **XCTS is a package with local-path `[sources]`** (`~/src/jl/XCTS`, on
+  HexCGSEM, HexMeshes and the local SpacetimeMetrics). The host tool runs in
+  an environment of its own that has both packages, never from this
+  package's `Project.toml`. A change to XCTS is made in its repository, on a
+  branch of its own; its checkout may hold Erik's uncommitted work, which
+  stays as it is.
+- **A binary solve is big**: a 64-core node (XCTS's `copy-to-symmetry.sh`,
+  `launch.sh`), not the laptop.
+- **A solved hole's mass is not its `M_A`.** `M_A` is the free data's bare
+  mass; the hole's `M_irr` is what the finder measures on the solved data.
+  Say which a number is.
+- **The interior is `:fitted`.** The tracked `:damped` target is each hole's
+  analytic metric, which the solved data are not; refuse it for data from a
+  file rather than relax toward the wrong state.
+- **The inner spheres lie inside the cores**, at `r_E ≤ r_0 − G h`, so that
+  the jump of the derivatives at `r_E` is where no stencil of `F` reaches.
+
+## Step S1 — Solved data for two harmonic holes
+
+`CODE.md`: "Solved data for the pair"; "Initial data" (item 2).
+
+**Changes:**
+
+- **XCTS alone, first.** Superposed harmonic Kerr free data — XCTS's
+  direct-K superposition of translated `Harmonic(M_A, 0)` components, with
+  its attenuation `ℓ ≈ d` — and Dirichlet to the free data on a sphere
+  inside each core (`horizon_bc = false`). A single harmonic hole first,
+  then the head-on pair at `d = 8` and `d = 10`, `M_A = 1/2`, each solved to
+  `10⁻¹⁰`. XCTS's diagnostics give the constraints, the ADM mass and each
+  hole's `M_irr`. If XCTS does not converge with spheres that deep, describe
+  exactly what fails and stop there: the fallback, isolated-horizon data
+  extended inward by a fit, is Erik's decision.
+- **A host tool** (`bench/`, its own environment): the mesh from the
+  initial-data cycle on the superposed data of the same holes, the solution
+  evaluated at TreeAMR's points, `g_ab` and `Π` (`∂_t γ_ij` from the
+  solution's `K_ij`, `∂_t α` and `∂_t β^i` from `C_a = 0`), the spatial
+  derivatives from XCTS's spectral basis, and the forest and the state
+  written through TreeIOHDF5.
+- **`evolve!` starts from such a file**: the holes reseeded on the horizons
+  found there, each hole's fit made, the run's state started. A case with a
+  `:damped` hole is refused.
+- **`test/binary_runs.jl data=<file>`**.
+
+**Accept:**
+
+- **A single harmonic hole through XCTS**: the solution is harmonic Kerr to
+  XCTS's accuracy, and its run from the file is step H1's `:fitted` row at
+  `1/48` to `10 M`, to that accuracy.
+- **The pair at `d = 8` and `d = 10`**: `ℋ` and `ℳ` on the grid at `t = 0`
+  at truncation level and converging between `1/48` and `1/96`, against the
+  superposed data's `0.08`; each hole's `M_irr` and the ADM mass; the outer
+  faces' mismatch between the solved and the superposed data; what the
+  solve and the transfer cost.
+
+## Step S2 — Two holes far apart
+
+`CODE.md`: "Solved data for the pair"; "What step H4 has built".
+
+Two holes that are each, nearly, the isolated harmonic hole: the pair's code
+— two tracks, two fits, the composite — tested where the holes barely
+interact, on solved data. Head-on from rest at `d = 10` (Erik's suggestion,
+2026-11-15): Newtonian free fall takes about `35 M`, and each hole moves
+about `1 M` by `20 M`.
+
+**Changes:** none expected beyond step S1's; the run is
+`test/binary_runs.jl` on S1's `d = 10` file, `:fitted`, no source, the
+inertial grid, `1/48` and `1/96` to `20 M`.
+
+**Accept:**
+
+- each hole's `M_irr` constant, once the junk has gone in, to step H1's
+  single hole's drift at the same spacing — against the superposed data's
+  loss of `13 %`;
+- each layer's residual and error and the constraints in shells about each
+  hole: the single hole's at the same spacing;
+- every find of both holes; the tracks' acceleration beside the Newtonian
+  `M_B/d²`;
+- `C_a` and `ℋ` over the evolved region converging between the spacings;
+- the cost per `M` beside twice step H1's.
+
+Step H4 then resumes on step S1's `d = 8` data, with its acceptance as it
+stands.
+
 ## Step H4 — Two holes with no source
+
+**Shelved 2026-11-15** (Erik): its first runs, on superposed data, found the
+holes losing `13 %` of their irreducible mass by `28 M`, from the data's
+constraint violation (`CODE.md`, "What step H4 has built"). Its state is
+parked in a draft pull request, and it resumes on steps S1–S2's solved data.
 
 **Started 2026-11-14 on the inertial grid** (Erik's choice), on branch
 `claude/step-H4-prep`: built are the harmonic chart for a hole, the pair with no

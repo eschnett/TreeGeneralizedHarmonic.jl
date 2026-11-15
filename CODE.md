@@ -125,6 +125,7 @@ research project; the inherited documents live in `notes/`.
   - [What the package has measured in this chart](#what-the-package-has-measured-in-this-chart)
   - [What harmonic gauge costs](#what-harmonic-gauge-costs)
   - [The data](#the-data)
+  - [Solved data for the pair (proposed)](#solved-data-for-the-pair-proposed)
   - [The merger](#the-merger)
   - [On which grid](#on-which-grid)
   - [The ladder of this route](#the-ladder-of-this-route)
@@ -7574,7 +7575,9 @@ Three sources, in the order the steps use them.
 
 **2. XCTS** (step B8, for the inspiral). It solves the five XCTS fields on
 superposed Kerr-Schild free data (SpEC's direct-K variant), compactified to
-`i⁰`, to `10⁻¹⁰`. Three things stand between its solution and this
+`i⁰`, to `10⁻¹⁰`. The harmonic route takes the same design with
+harmonic free data ([Solved data for the
+pair](#solved-data-for-the-pair-proposed)). Three things stand between its solution and this
 package's grid:
 
 - **XCTS's production data stop at the horizon.** Its isolated-horizon
@@ -8379,15 +8382,75 @@ built](#what-step-h4-has-built)).
 - **`Π` comes from `C_a = 0`.** Each `g_A` has `Γ_a = 0` and the sum does
   not, at second order in the fields. `gauge_consistent_momentum` with
   `H = 0` chooses `∂_t α` and `∂_t β^i` so that `Γ_a = 0` at `t = 0`.
-- **The Einstein constraints** are violated where the fields overlap, as
-  the superposed Kerr-Schild data's are, and the constraint damping removes
-  that as junk. SpEC reports less junk from harmonic free data than from
-  Kerr-Schild's, on solved data.
-- **Solved data (open).** XCTS's free data are superposed Kerr-Schild.
-  Harmonic free data are a change there. Any solved lapse and shift can
-  start a harmonic evolution, since `Γ_a = 0` fixes only their time
-  derivatives; whether the result is as quiet as the superposed chart's is
-  not known.
+- **The Einstein constraints** are violated where the fields overlap, and
+  in the harmonic chart that is not junk the evolution can shed: the holes
+  absorb a negative energy and lose `13 %` of their irreducible mass by
+  `28 M` at `d = 8` (measured, step H4; [What step H4 has
+  built](#what-step-h4-has-built)). These data are what the pair's code is
+  tested with, not what the route evolves; the route's data are solved
+  ([Solved data for the pair](#solved-data-for-the-pair-proposed)).
+- Any solved lapse and shift can start a harmonic evolution, since
+  `Γ_a = 0` fixes only their time derivatives. SpEC reports less junk from
+  harmonic free data than from Kerr-Schild's, on solved data.
+
+### Solved data for the pair (proposed)
+
+**Why (measured, step H4).** The superposed harmonic pair violates the
+Hamiltonian constraint by `ℋ ≈ 0.08` in the shells about each hole, a
+negative energy `∫ℋ dV/16π = −0.048` (in units of the total mass) between
+each horizon and `3 M` at `d = 8`. The holes absorb it and lose `13 %` of
+their irreducible mass by `28 M`; the loss is neither resolution nor a
+common horizon. Rearranging the superposition reduces the violation and does
+not remove it: summing the deviations of the lapse, the shift and the
+3-metric from flat space, with no attenuation, leaves `−0.020`, and scaling
+each hole by its companion's conformal factor, with the lapses multiplied,
+`−0.013`. Every variant falls as `1/d` — the companion's potential, not its
+gradient — so separation alone does not make two superposed holes isolated:
+at `d = 32` today's data still hold `−0.013`. **The pair's data are solved
+(decided by Erik 2026-11-15)**: step B8's design ([Initial
+data](#initial-data), item 2) with harmonic free data, `PLAN.md`'s steps S1
+and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
+
+**XCTS with harmonic free data.**
+
+- XCTS's free data superpose the holes' 3+1 variables — the deviations of
+  `α`, `β^i` and `γ_ij` from flat space, each attenuated by
+  `exp(−r_A²/ℓ²)` with `ℓ ≈ d` — and the mean curvature directly (SpEC's
+  direct-K variant). Its components are any `SpacetimeMetrics` metric, so
+  harmonic Kerr goes in as it is. The lapse of that sum stays positive for
+  the harmonic pair: `α ≥ 0.23` at `d = 8` with no attenuation, `0.17` at
+  `d = 4`.
+- **The inner boundary is Dirichlet to the free data on a sphere inside each
+  core** (`horizon_bc = false`), as step B8 proposes, at `r_E ≤ r_0 − G h`,
+  so that the jump of the derivatives at the sphere lies where no stencil of
+  `F` reaches. In the harmonic chart `r_0 = 2/5 M_A`, half Kerr-Schild's, so
+  the spheres are deeper than B8's. Whether XCTS converges with them is the
+  first question **(open)**.
+- The horizons are where the solution puts them, found afterwards: each
+  hole's irreducible mass is measured, not set. Choosing the bare masses so
+  that `M_irr` meets a target is later **(open)**.
+
+**From XCTS to the grid.**
+
+- **A host tool**, run in an environment that has both packages (XCTS has
+  local-path sources, so never in this package's `Project.toml`), evaluates
+  the solution at TreeAMR's points on the mesh the initial-data cycle
+  chooses for the superposed data of the same holes, and writes the forest
+  and the state through TreeIOHDF5. `evolve!` starts from that file.
+- **`g_ab`** from `ψ`, `β^i`, `Q = αψ` and the conformal metric; **`Π`**
+  from `∂_t γ_ij = −2αK_ij + L_β γ_ij` with the solution's `K_ij`, and
+  `∂_t α`, `∂_t β^i` from `C_a = 0` at `H = 0`
+  (`gauge_consistent_momentum`), as for the superposed data. The spatial
+  derivatives come from XCTS's spectral basis **(proposed)**, so that the
+  transfer adds interpolation error and no truncation error of its own.
+- **The interior is `:fitted`.** Its target is a fit of the evolved state,
+  which follows the solved data. The tracked `:damped` target is each hole's
+  analytic metric, which the solved data are not, so its layer would relax
+  toward another state.
+- **The outer faces** keep the superposition's Dirichlet data. The solved
+  data differ there by XCTS's correction, of order `(M_ADM − Σ M_A)/L`, and
+  by the attenuation; the difference is measured at `t = 0`, and step B5's
+  frozen data are the fix if it matters **(open)**.
 
 ### The merger
 
@@ -8502,8 +8565,11 @@ grid throughout, or the inertial grid with `:fitted` measured first between
 4. **Two holes with no source**: the head-on pair in pure harmonic gauge to
    wherever it ends, then with the roll-on through the merger. *Started
    (step H4):* the case, the roll-on from zero and the runs' options are
-   built, with `:fitted` per hole ([What step H4 has built](#what-step-h4-has-built));
-   nothing has run at the step's spacings.
+   built, with `:fitted` per hole ([What step H4 has built](#what-step-h4-has-built)).
+   *Shelved (Erik, 2026-11-15):* its first runs found that the superposed
+   data's holes lose `13 %` of their irreducible mass, so the pair's runs
+   wait for solved data ([Solved data for the
+   pair](#solved-data-for-the-pair-proposed); `PLAN.md`'s steps S1 and S2).
 5. **The orbit**, on the grid chosen from step H2's ratio.
 
 ### What step H4 has built
@@ -8511,7 +8577,9 @@ grid throughout, or the inertial grid with `:fitted` measured first between
 The pair's code, on steps B1–B3's composition (`test/harmonic_holes_tests.jl`;
 `test/binary_runs.jl chart=harmonic`), with each hole's interior B2's tracked
 `:damped` target or step 8e's `:fitted` target. The first runs, at `1/48` and `1/96`, found that the
-superposed data's holes lose mass (the last item below).
+superposed data's holes lose mass (the last item below), and the step is
+shelved until the data are solved (Erik, 2026-11-15; [Solved data for the
+pair](#solved-data-for-the-pair-proposed)).
 
 - **A hole's chart.** `HoleSpec(…; chart = :harmonic)` is harmonic Kerr on its
   line (`hole_on_line`); its seed, its radius checks and its tracked target read
@@ -8585,7 +8653,15 @@ superposed data's holes lose mass (the last item below).
   multiplying it, starts each horizon `25–35 %` larger in area, which shrinks
   faster than a track allows within `1 M`. Step B3's Kerr-Schild pair on the same
   mesh loses six times less (`M_irr` `0.5174`, up to `0.5205` at `1 M`, down to
-  `0.5117` by `8 M`, slowing). The runs are in `HISTORY.md`, "Step H4 started".
+  `0.5117` by `8 M`, slowing). The `1/96` row ended at `28 M`, where each
+  horizon (`M_irr = 0.440`, `r_min = 0.395`) could no longer hold the margin,
+  the ramp and the core at that spacing. **The cause is the data's
+  constraint violation**: evaluated pointwise from the data, `ℋ` at `t = 0`
+  is `0.076` rms in `[1, 3/2) M` (the grid's `0.079`), and between the horizon
+  and `3 M` it holds a negative energy `∫ℋ dV/16π = −0.048`, the size of the
+  `0.06` each hole loses. Resolution and a common horizon are excluded (the
+  holes are still `5.1 M` apart at `28 M`). The runs are in `HISTORY.md`,
+  "Step H4 started", and the analysis in "Step H4 shelved".
 
 ### What is not known on this route
 
@@ -8614,10 +8690,13 @@ All **(open)**, except where answered.
 - How pure harmonic gauge fails at a merger in this code, and whether the
   roll-on's `d_g` and `σ_g` leave it time.
 - *Answered for the head-on pair at `d = 8` (step H4):* superposed harmonic
-  data without a solve do not settle in the harmonic gauge in `16 M`; each
-  hole loses `10 %` of its irreducible mass ("What step H4 has built"). Open:
-  whether rescaling each hole by its companions' potential, or a constraint
-  solve, is what the route needs.
+  data without a solve do not settle in the harmonic gauge; each hole loses
+  `13 %` of its irreducible mass by `28 M` ("What step H4 has built").
+  Rescaling each hole by its companion's potential cuts the violation by
+  `3.7×`, not to zero, and every superposition's falls only as `1/d`; the
+  route solves the data (Erik, 2026-11-15). Open: whether XCTS converges with
+  its inner spheres inside the harmonic cores, and how quiet the solved
+  pair is.
 - Reflections of the gauge's own waves from frozen Dirichlet faces, which
   is [The outer boundary and the wave
   zone](#the-outer-boundary-and-the-wave-zone)'s question on every route.
