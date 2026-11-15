@@ -351,7 +351,8 @@ function observe(p, t, u, rec)
     lf = mesh_fold(LapseFold{T}(c1, c2, T(rA(1)), T(rA(2)), T(rec.separation / 2)),
                    TreeAMR.combine, NOLAPSE, p.U, u)
     lapse = map(b -> b.value, lf)
-    isrank0 || return nothing
+    # Everything below is the same on every rank; the CSV and the log are rank
+    # 0's, and the SimWatch update is collective, so every rank makes it.
     o = [r.origin === nothing ? SVector(NaN, NaN, NaN) : SVector{3,Float64}(r.origin)
          for r in rec.holes]
     sep_found = sqrt(sum(abs2, o[2] - o[1]))
@@ -377,7 +378,7 @@ function observe(p, t, u, rec)
     end
     append!(row, (num(get(rec, :rollon_t0, nothing)), lapse.out_α, lapse.out_a,
                   lapse.btw_α, lapse.btw_a))
-    open(io -> println(io, join(row, ',')), csv, "a")
+    isrank0 && open(io -> println(io, join(row, ',')), csv, "a")
     hist = Dict("constraints.gauge_l2" => rec.gauge_l2, "pair.separation" => rec.separation,
                 "lapse.min_between" => lapse.btw_α, "layer.residual" => rec.residual)
     bhs = [(name="BH$A", irreducible_mass=h.M_irr, mass=h.M_ch, spin=h.J,
@@ -396,6 +397,7 @@ function observe(p, t, u, rec)
                      time_end=Float64(t_end), time_unit="M", walltime_limit=walltime,
                      black_holes=bhs, extra=extra,
                      message=@sprintf("t = %.3f M, separation %.4f", rec.t, rec.separation))
+    isrank0 || return nothing
     @printf("t = %7.4f  wall %8.1f s  C_a %.3e/%.3e  ℋ %.3e  res %.3e  sep %.6f (found %.6f, newton %.6f)  areas %.5f %.5f  pred %.2e %.2e  gpu %.1f GB\n",
             rec.t, time() - t_wall0, rec.gauge_l2, rec.gauge_linf, num(rec.ham_l2),
             rec.residual, rec.separation, sep_found, newton_separation(d_sep, M, rec.t),
