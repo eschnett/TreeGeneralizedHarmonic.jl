@@ -44,7 +44,8 @@
 #                                  (each hole takes it times M_A): step B2's
 #                                  production :damped sphere
 #   find_interval=0                the longest interval between two finds for a
-#                                  hole of mass one, in M (0: the chunk)
+#                                  hole of mass one, in M (0: the chunk); for
+#                                  fitted holes the pair's, in M (step H4)
 #   chart=kerr_schild|harmonic     the holes' chart (step H4: harmonic runs with no
 #                                  source, its layer defaults r_0=2/5 r_1=3/4)
 #   masses=1/2,1/2                 the holes' masses
@@ -417,6 +418,8 @@ out = try
             t_end=t_end, chunk=chunk, cfl=cfl, backend=backend, observer=observe,
             adm_every=adm_every, comm=comm, rollon_separation=rollon_separation,
             regrid=follow,
+            hole_find_interval=fitted_holes && haskey(OPTIONS, "find_interval") ?
+                               T(rat(OPTIONS["find_interval"])) : nothing,
             fit_initial_depth=fitted_holes ? T(rat(opt("fit_depth", "0"))) : 0, ckw...)
 catch err
     use_mpi || simwatch_finish!(sw; status="failed", message=sprint(showerror, err),

@@ -470,7 +470,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  num_checkpoints_keep=2, checkpoint_hdf5_filters=(),
                  checkpoint_sync_to_disk::Bool=true, checkpoint_io=:node,
                  restart_file=nothing, simd_width=nothing, comm=nothing,
-                 rollon_separation=nothing) where {T}
+                 rollon_separation=nothing, hole_find_interval=nothing) where {T}
     # The job's wall clock starts here: whatever ran before the call —
     # startup, compilation, the queue — is the caller's margin to leave
     # (TreeHydro's rule for `max_walltime_seconds`).
@@ -726,10 +726,21 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # `|a| Δt² ≤ G h/4` asks and at least once a chunk, capped by the spec's
     # `max_interval` — `chunk_finds(track, h, span)` finds over a span, at the
     # pieces' boundaries, the last of them the record's.
+    # Several holes may cap it for every hole (`hole_find_interval`, added in
+    # step H4): a fitted hole states none of its own, and under a gauge that
+    # grows the horizon's coordinate radius the track's radius check needs finds
+    # closer than a chunk (the roll-on grew it by `0.05 M` per `M` at `σ_g = 5 M`).
+    hole_find_interval === nothing || (binary && T(hole_find_interval) > 0) ||
+        throw(ArgumentError(
+            "hole_find_interval caps the interval between several holes' finds and " *
+            "is a positive time; this case is $(binary ? "" : "not ")a case of " *
+            "several holes, and the cap is $hole_find_interval."))
     interval_cap = targeted && spec.max_interval > 0 ? min(spec.max_interval, chunk) :
-                   binary ? minimum(s -> _max_interval(s) > 0 ?
-                                         min(_max_interval(s), chunk) : chunk,
-                                    spec.specs) :
+                   binary ? min(minimum(s -> _max_interval(s) > 0 ?
+                                             min(_max_interval(s), chunk) : chunk,
+                                        spec.specs),
+                                hole_find_interval === nothing ? chunk :
+                                T(hole_find_interval)) :
                    chunk
     chunk_finds(track, h, span) =
         max(find_count(track.pred.a, G, h, span),
