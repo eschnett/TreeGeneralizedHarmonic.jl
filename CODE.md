@@ -8510,8 +8510,8 @@ grid throughout, or the inertial grid with `:fitted` measured first between
 
 The pair's code, on steps B1–B3's composition (`test/harmonic_holes_tests.jl`;
 `test/binary_runs.jl chart=harmonic`), with each hole's interior B2's tracked
-`:damped` target or step 8e's `:fitted` target. Nothing has run at `1/96` or
-`1/128`.
+`:damped` target or step 8e's `:fitted` target. The first runs, at `1/48` and `1/96`, found that the
+superposed data's holes lose mass (the last item below).
 
 - **A hole's chart.** `HoleSpec(…; chart = :harmonic)` is harmonic Kerr on its
   line (`hole_on_line`); its seed, its radius checks and its tracked target read
@@ -8569,6 +8569,23 @@ The pair's code, on steps B1–B3's composition (`test/harmonic_holes_tests.jl`;
   tracked `:damped` layer's residual on one such hole grows to `24` by
   `t = M/10` at this spacing, and the pair's to `21` — the single hole's, not
   the pair's.
+- **The superposed data's holes lose mass (measured; what to do is
+  (open)).** Head-on from rest at `d = 8` (`M_A = 1/2`, the following mesh,
+  companion attenuation `λ_B = 4 M_B`), each hole's `M_irr` falls from `0.5042`
+  to `0.4925` by `4 M`, `0.4676` by `10 M` and `0.4523` by `16 M`, below the
+  isolated `0.5` and still falling. It is the continuum's: the same to four or
+  five digits at `1/48` and `1/96`, and to six with `:fitted` and with the
+  tracked `:damped` layer, so the interior has no part in it. It scales as the
+  companion's potential `M_B/d`: at `d = 16` `0.5021` to `0.4790` by `12 M`.
+  `ℋ` in the shell `[1, 3/2) M` about each hole starts at `0.08` (`0.04` at
+  `d = 16`), `10⁵` times one harmonic hole's, and is absorbed over about
+  `10 M`. No attenuation removes it: without one the superposition's `α²` is
+  negative inside `r ≈ 0.2` and the data throw, and with `λ_B = M_B/2` or `M_B`
+  the companion's potential, added to the hole's harmonic metric rather than
+  multiplying it, starts each horizon `25–35 %` larger in area, which shrinks
+  faster than a track allows within `1 M`. Step B3's Kerr-Schild pair on the same
+  mesh loses six times less (`M_irr` `0.5174`, up to `0.5205` at `1 M`, down to
+  `0.5117` by `8 M`, slowing). The runs are in `HISTORY.md`, "Step H4 started".
 
 ### What is not known on this route
 
@@ -8596,8 +8613,11 @@ All **(open)**, except where answered.
   for a moving hole.
 - How pure harmonic gauge fails at a merger in this code, and whether the
   roll-on's `d_g` and `σ_g` leave it time.
-- Whether superposed data without a solve settle in a gauge that has no
-  damping of its own.
+- *Answered for the head-on pair at `d = 8` (step H4):* superposed harmonic
+  data without a solve do not settle in the harmonic gauge in `16 M`; each
+  hole loses `10 %` of its irreducible mass ("What step H4 has built"). Open:
+  whether rescaling each hole by its companions' potential, or a constraint
+  solve, is what the route needs.
 - Reflections of the gauge's own waves from frozen Dirichlet faces, which
   is [The outer boundary and the wave
   zone](#the-outer-boundary-and-the-wave-zone)'s question on every route.

@@ -2418,6 +2418,31 @@ plan as written:
   seed's quadratic, as a tracked target's does, since step B2 found that a
   binary's first find needs the acceleration.
 
+The first runs (2026-11-14, `harm-h4` on Symmetry, one H200 a row; `test/binary_runs.jl
+chart=harmonic seed=rest mesh=follow`, `L = 32`, cubes `8, 4, 2, 1, 3/4` about
+each hole, `d = 8`) found the holes' horizons shrinking: the `:fitted` row at
+`1/96` (`h4p96`, `54 M` points, `115 GB`, `460 s/M`) had areas `12.779` at `t = 0`,
+`12.194` at `4 M` and `10.281` at `16 M`. The roll-on rows at `σ_g = 5` and `10 M`
+stopped on the track's radius-jump check, the roll-on growing the coordinate
+horizon faster than one find a chunk allows (`evolve!`'s `hole_find_interval`
+was added for them). The `1/128` smoke run, two H200s over MPI with HPC-X,
+`129 M` points, ran `1 M` with the same areas. Controls, all to the areas'
+digits shown in `CODE.md`, "What step H4 has built":
+
+- the tracked `:damped` layer at `1/96` (`ctl96d`): `:fitted`'s areas to six
+  digits through `4 M`;
+- `:damped` at `1/48` (`ctl48d8`): `1/96`'s to four or five digits through
+  `10 M`;
+- `d = 16` at `1/48` (`ctl48d16`): half the loss;
+- the plain superposition, `companion = 0` (`ctl48d8c0`): a `DomainError`
+  filling the initial data, `α²` being negative inside `r ≈ 0.2` of each hole
+  (`−0.021` at `0.15`), positive from `0.25`;
+- `companion = 1` and `1/2` (`ctl48d8c1`, `ctl48d8ch`): areas `15.61` and
+  `16.80` at `t = 0`, horizon radii `0.598` and `0.633`, shrinking by `0.054`
+  and `0.081` in the first `M`, which the track's radius check refused;
+- step B3's Kerr-Schild pair with its source on the seeds (`ctl48ks`): `M_irr`
+  `0.5174`, `0.5205` at `1 M`, `0.5117` at `8 M`.
+
 ## Possible extensions
 
 ### Extensions since built
