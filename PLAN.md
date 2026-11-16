@@ -1406,9 +1406,13 @@ H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
   the densitized lapse fixed to the superposition's (`lapse = :fixed`, added
   for this), converges at `R1 = 1/8` in seven iterations (`CODE.md`, "Solved
   data for the pair", the table).
-- **Next:** the pair at `R1 = 1/8` with the fixed lapse at `p = 4, 6, 8` on
-  a cluster, with the independent constraints in shells, which at `p = 2`
-  are dominated by the discretization; then its transfer and the
+- **Done, the pair's constraints converge in `p`:** at `p = 4, 6, 8` on
+  Trillium (job 2872117), `ℋ` and `ℳ` away from the holes fall spectrally
+  to `40–6000×` below the superposition's (`CODE.md`, "Solved data for the
+  pair"). The `p = 6` and `p = 8` solutions are saved in
+  `/scratch/eschnett/claude/xcts-s1/pairfix2/f8q{6,8}/sol.jls`.
+- **Next:** the constraints in shells about each hole, to place the
+  remaining `ℋ` of the shell that holds the holes; then the transfer and the
   acceptance's runs at `1/48` and `1/96`.
 
 **Accept:**

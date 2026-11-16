@@ -8487,12 +8487,37 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   and York 2005), which comes from its lapse equation. Both solutions at
   `R1 = 1/4` move the shift by about the same amount (`1.27` and `1.22`
   relative to the superposition's, in the mass-weighted `L²` norm the far
-  field dominates) and ψ by `1.5·10⁻⁴`; the lapse differs. Whether the solved
-  data satisfy the constraints is not shown at `p = 2`: the independent
-  check (`XCTS.constraint_norms`, the ADM constraints from the reconstructed
-  `γ_ij` and `K_ij`) is dominated there by the discretization near the
-  spheres (`ℋ = 1.9` against the superposition's `2.2` in `3 ≤ r < 5`). Its
-  convergence in `p` is the next measurement **(open)**.
+  field dominates) and ψ by `1.5·10⁻⁴`; the lapse differs.
+- **The solved pair converges spectrally in the constraints (measured, step
+  S1).** The fixed-lapse pair at `R1 = 1/8` on the two-hole mesh with
+  `M = 2`, `M_h = 16`, `M_f = 2`, solved at `p = 2, 4, 6, 8` in turn (each
+  degree from the last one's solution), with the independent check
+  (`XCTS.constraint_norms`: the ADM constraints from the reconstructed `γ_ij`
+  and `K_ij`, `L²` in shells about the origin; the superposition's on the
+  same mesh in the last column):
+
+  | shell | `ℋ` at `p = 4` | `p = 6` | `p = 8` | superposition, `p = 8` |
+  |---|---|---|---|---|
+  | `r < 3` | `9.5·10⁻³` | `2.6·10⁻⁴` | `6.8·10⁻⁵` | `2.7·10⁻³` |
+  | `3 ≤ r < 5` (both holes) | `0.99` | `0.29` | `0.066` | `0.083` |
+  | `5 ≤ r < 16` | `1.3·10⁻³` | `3.7·10⁻⁵` | `9.0·10⁻⁶` | `3.1·10⁻³` |
+  | `r ≥ 16` | `1.3·10⁻⁶` | `7.1·10⁻⁸` | `3.5·10⁻⁹` | `2.1·10⁻⁵` |
+
+  `ℳ` at `p = 8` is `2.6·10⁻⁵`, `2.1·10⁻³`, `3.4·10⁻⁶`, `2.8·10⁻¹⁰` against
+  the superposition's `7.8·10⁻⁴`, `5.6·10⁻³`, `9.5·10⁻⁵`, `2.4·10⁻⁹`. Away
+  from the holes the solved data are `40×` to `6000×` below the
+  superposition, whose own level does not change with `p`. The shell that
+  holds the holes is still set by the resolution at the spheres, where both
+  fall with `p`; where in it the remaining `ℋ` sits — in the core, which the
+  evolution never reads, or outside `r_0` — is not yet measured **(open)**.
+  `M_ADM = 0.981765`, `0.981662`, `0.981661` and each hole's `M_irr =
+  0.50574`, `0.50598`, `0.50593` at `p = 4, 6, 8`. A solve costs `1 h 42 min`
+  at `p = 8` on one Trillium node (`217 GB`), `17 min` at `p = 6`. It needs
+  the preconditioner scaled to unit diagonal with `ilu_tau = 1e-3`, inexact
+  Newton (`gmres_eta = 0.1`), the continuation in `p` (`pseq`) and `M_h =
+  16`: on `M_h = 64` the cells near the spheres are `60` times longer than
+  thick and the ILU preconditioner fails (`HISTORY.md`, "The pair converges
+  with the lapse fixed").
 - The horizons are where the solution puts them, found afterwards: each
   hole's irreducible mass is measured, not set. Choosing the bare masses so
   that `M_irr` meets a target is later **(open)**.

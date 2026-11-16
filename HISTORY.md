@@ -2568,6 +2568,23 @@ solve. Unweighted, the pair converges at `R1 = 1/8` and `1/4` in seven
 iterations, where the extended system stalls at `0.19` and converges in
 four.
 
+The first runs at `p ≥ 4` (Trillium, `M_h = 64`) did not finish a Newton step
+in an hour: XCTS's low-order preconditioner is factorized by IncompleteLU,
+whose drop rule is absolute (`|value| ≥ τ` is kept). The low-order entries
+scale with the cell, so the compactified far field kept everything — a
+near-complete LU, serial — and the fine shells dropped nearly everything. The
+extended system's runs sat in the same factorization; that is what stopped
+the earlier `pair1` job. Scaled to unit diagonal, the factorization took `6 s`
+at `p = 4`, but at `τ = 10⁻²` it was too weak (400 GMRES iterations reached
+`0.76`); `τ = 10⁻³` worked at `p = 2` (20–80 iterations to `0.1`) and took
+over 20 minutes at `p = 4` on `M_h = 64`, whose cells near the spheres are
+`60` times longer than thick. The full low-order operator (reaction and field
+couplings) did not help. On `M_h = 16`, `τ = 10⁻³` costs `21 s` at `p = 4`
+with 100 iterations to `0.1`, but Newton from the free data crawled (`1.5 %`
+a step); started from the converged lower degree (`pseq`), each degree
+converged in 4–16 steps. XCTS commit `ed17c58` (local) has the options, all
+off by default.
+
 ## Possible extensions
 
 ### Extensions since built
