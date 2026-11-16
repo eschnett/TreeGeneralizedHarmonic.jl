@@ -420,6 +420,16 @@ finished run can be continued.
   a checkpoint is one file whatever it says.
 - `restart_file` — continue from this checkpoint rather than from the
   initial data, with no `forest`.
+- `t_end = 0` (added in step S1) — integrate nothing and write the run's start
+  as a checkpoint (chunk 0): the state after the initial-data row, with its
+  finds and fits. A restart from it does not regrid first, and is the
+  uninterrupted run.
+- `initial_data` (added in step S1) — a metric that replaces the case's
+  background at `t = 0` alone: the initial-data cycle, the fills, the holes'
+  finds and their fits are made from it, and the boundary and every later
+  target stay the case's. For a `:fitted` interior without a hand-over, on a
+  fresh run; with `t_end = 0` it is how data solved by another code
+  (`bench/xcts_metric.jl`) become a checkpoint any host can continue.
 
 `simd_width` is the right-hand-side kernel's (added 2026-10-05): `nothing` lets
 [`GHProblem`](@ref) choose the host's ([`default_simd_width`](@ref)), and `1` asks
@@ -470,7 +480,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  num_checkpoints_keep=2, checkpoint_hdf5_filters=(),
                  checkpoint_sync_to_disk::Bool=true, checkpoint_io=:node,
                  restart_file=nothing, simd_width=nothing, comm=nothing,
-                 rollon_separation=nothing, hole_find_interval=nothing) where {T}
+                 rollon_separation=nothing, hole_find_interval=nothing,
+                 initial_data=nothing) where {T}
     # The job's wall clock starts here: whatever ran before the call —
     # startup, compilation, the queue — is the caller's margin to leave
     # (TreeHydro's rule for `max_walltime_seconds`).
@@ -527,7 +538,16 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         "regridded on some other criterion would be a second refinement " *
         "mechanism to delete later."))
     t_end, chunk, cfl = T(t_end), T(chunk), T(cfl)
-    t_end > 0 || throw(ArgumentError("t_end must be positive, got $t_end."))
+    t_end ≥ 0 || throw(ArgumentError("t_end must be positive, got $t_end."))
+    # `t_end = 0` integrates nothing: it writes the run's start — the initial
+    # data, the finds and the fits at `t = 0` — as a checkpoint that a later call
+    # continues by `restart_file` (added in step S1, for data solved elsewhere).
+    t_end == 0 && (checkpoint_path_prefix === nothing || restart_file !== nothing) &&
+        throw(ArgumentError(
+            "t_end = 0 integrates nothing: it writes the run's start — the initial " *
+            "data, the finds and the fits at t = 0 — as a checkpoint, which a later " *
+            "call continues with restart_file (step S1). Pass checkpoint_path_prefix " *
+            "and no restart_file, or a positive t_end."))
     chunk > 0 || throw(ArgumentError(
         "chunk must be positive, got $chunk: it is the cadence the analysis " *
         "record is written at and the regrid cadence from step 6, and the " *
@@ -767,6 +787,20 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     handover_t = T(handover)
     handover_t ≥ 0 || throw(ArgumentError(
         "handover is the time the :fitted target takes over, got $handover."))
+    # **Initial data from elsewhere are `:fitted` only (step S1)**: a `:damped`
+    # layer relaxes toward the case's analytic metric, which data solved by
+    # another code are not, and a hand-over starts from that layer. The metric
+    # replaces the case's background at `t = 0` alone — the cycle, the fills, the
+    # finds and the fits — and the boundary and every later target stay the
+    # case's (`PLAN.md`, "Sharp edges for steps S1–S2").
+    initial_data === nothing || (fitmode && handover_t == 0 && restart_file === nothing) ||
+        throw(ArgumentError(
+            "initial_data replaces the case's background at t = 0 for a :fitted " *
+            "interior without a hand-over, and on a fresh run: a :damped layer (or " *
+            "a hand-over's) relaxes toward the case's analytic metric, which data " *
+            "solved elsewhere are not, and a restart's data are the checkpoint's. " *
+            "Got interior $(nameof(typeof(case.interior))), handover = $handover, " *
+            "restart_file = $(repr(restart_file))."))
     handover_t > 0 && !fitmode && throw(ArgumentError(
         "handover = $handover asks a :fitted case to start on the analytic " *
         ":damped layer and hand over to its fit; this case's interior is " *
@@ -839,6 +873,11 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # itself — that is what it is for: it re-evaluates it on each new mesh
         # rather than interpolating, since interpolating would bake the coarse
         # mesh's resolution into the blocks the refinement just bought.
+        #
+        # `dcase` is the case whose background the data are evaluated from: the
+        # case itself, or with `initial_data` in its place (step S1) — for the
+        # cycle, the fills and the fits, and nothing after `t = 0`.
+        dcase = initial_data === nothing ? case : with_background(case, initial_data)
         passes = 0
         converged = true
         schedule = GhostSchedule(U, ops)
@@ -849,7 +888,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             # mesh — so that a chart whose analytic interior is singular, G5's,
             # has a cycle at all. See `adapt_fitted_initial_data!`.
             schedule, passes, converged, geom = adapt_fitted_initial_data!(
-                U, ops, case, g -> geometry(g, zero(T), tr); G=G,
+                U, ops, dcase, g -> geometry(g, zero(T), tr); G=G,
                 buffer=bufferwidth, travel=travel, maxpasses=maxpasses,
                 cont=fit_initial_cont, depth=d_init, backend=backend,
                 blend=fit_initial_blend)
@@ -888,9 +927,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                                                                        zero(T), tr)) :
                                                        case.interior).flags
             schedule, passes, converged = adapt_to_initial_data!(
-                U, ops; initial=state_callback(case, zero(T); interior=acycle(geom)),
+                U, ops; initial=state_callback(dcase, zero(T); interior=acycle(geom)),
                 flags=cycle_flags, buffer=0, maxpasses=maxpasses,
-                boundary=dirichlet(case, zero(T)))
+                boundary=dirichlet(dcase, zero(T)))
             converged || throw(ErrorException(
                 "the initial-data cycle had not converged after $passes passes: " *
                 "the hierarchy was still changing when maxpasses ran out. The " *
@@ -907,16 +946,16 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             if tracked
                 geom = geometry(forest, zero(T), tr)
                 (fitmode && handover_t == 0) ||
-                    fill_exact!(U, case, zero(T); interior=kgeom(geom, zero(T)))
+                    fill_exact!(U, dcase, zero(T); interior=kgeom(geom, zero(T)))
             end
         elseif !fitmode || handover_t > 0
-            fill_exact!(U, case, zero(T); interior=kgeom(geom, zero(T)))
+            fill_exact!(U, dcase, zero(T); interior=kgeom(geom, zero(T)))
         elseif hfit
             # Fitted holes (step H4): the analytic `:damped` layer's data on the
             # same geometry first, so that the holes' horizons can be found on it
             # (`reseed_holes!`, below); the fitted data are made on the geometry
             # the finds give, after it.
-            fill_exact!(U, case, zero(T); interior=with_variant(geom, :damped))
+            fill_exact!(U, dcase, zero(T); interior=with_variant(geom, :damped))
         end
         # **Several holes' horizons are found once on the initial data, and
         # their offsets from the holes kept (proposed in step B3).** The
@@ -951,13 +990,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             # Each hole's fit of the analytic data in its own geometry, the cache
             # filled hole by hole, and the data the analytic solution outside
             # every offset surface and the acting hole's fit inside (step H4).
-            ff = fill_holes_fitted_initial!(U, case, geom; cont=fit_initial_cont,
+            ff = fill_holes_fitted_initial!(U, dcase, geom; cont=fit_initial_cont,
                                             depth=d_init, backend=backend,
                                             rate=rate_on, blend=fit_initial_blend)
             tbounds, fit_initial, target0 = ff.bounds, ff.fit, ff.target
             fits = ntuple(A -> (fit_initial[A], nothing), nhole)
         elseif fitmode && handover_t == 0
-            ff = fill_fitted_initial!(U, case, geom; cont=fit_initial_cont,
+            ff = fill_fitted_initial!(U, dcase, geom; cont=fit_initial_cont,
                                       depth=d_init, backend=backend, rate=rate_on,
                                       blend=fit_initial_blend)
             tbounds, fit_initial, target0 = ff.bounds, ff.fit, ff.target
@@ -965,10 +1004,10 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         elseif fitmode
             tbounds = spec.target_bounds !== nothing ?
                       _bounds_in(T, spec.target_bounds) :
-                      derive_target_bounds(T, case.background, geom; t=0,
+                      derive_target_bounds(T, dcase.background, geom; t=0,
                                            L=spec.lmax_fit)
             fit_initial = shared_fit(U; backend=backend) do
-                build_fit(analytic_sampler(case.background, 0.0;
+                build_fit(analytic_sampler(dcase.background, 0.0;
                                            δ=tofloat64(geom.h) / 8),
                           geom, spec; cont=fit_initial_cont,
                           bounds=tbounds, backend=backend)
@@ -1573,7 +1612,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # The chunk the checkpoint ended, and the refusals of a restart with
     # nothing left to run or with chunks that would not line up (TreeHydro's).
     c_done = saved === nothing ? 0 : saved.chunk
-    nchunks > c_done || throw(ArgumentError(
+    nchunks > c_done || (nchunks == 0 && ck === nothing) || throw(ArgumentError(
         "t_end = $t_end lies at or before the checkpoint's t = $t_saved, the " *
         "end of its chunk $c_done: there is nothing left to run. A restart may " *
         "move t_end, but only beyond the time the checkpoint reached."))
@@ -1661,7 +1700,10 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # unless the criterion was changed, which is what a restart may do — and
     # the mesh is regridded before the next step, exactly where the
     # uninterrupted run regridded.
-    if ck !== nothing && regrid && c_done < nchunks && case.refinement !== nothing
+    # Not from the run's start (step S1), where the uninterrupted run did not
+    # regrid: its mesh is the initial-data cycle's.
+    if ck !== nothing && c_done > 0 && regrid && c_done < nchunks &&
+       case.refinement !== nothing
         ind0 = gh_indicator!(p, u, t_saved; buffer=bufferwidth, travel=travel)
         if regrid_forest(schedule, t_saved, ind0.flags)
             nregrids += 1
@@ -1681,6 +1723,28 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     written = String[]
     finished = true
     t_done = t_saved
+    # **The run's start as a checkpoint (added in step S1)**: `t_end = 0` writes
+    # chunk 0 — the state after the initial-data row, with the finds, the fits and
+    # the track it made — and runs nothing, so that data solved elsewhere are put
+    # onto the mesh by a host that has their solver (`initial_data`) and continued
+    # by `restart_file` on one that has not. The track the row's geometry was
+    # built from is the one before its find, as `track_chunk` is after a chunk.
+    if nchunks == 0
+        path = checkpoint_filename(checkpoint_path_prefix, nsteps)
+        state = run_state(T; chunk=0, t=zero(T), t_chunk=zero(T), nsteps, nregrids,
+                          nresamples, passes, converged, λ_initial, growth,
+                          ρ_chunk=interior_ρ_max(p.interior), tr,
+                          tr_chunk=sample_track, sample_t, sample_track, fits, tbounds,
+                          fit_initial, hfit, binary, hlm_seed, trigger_pending,
+                          hole_offsets, rollon_t0=rollon[], acc,
+                          fit_cost=agreed_fit_cost(), records)
+        save_run(path, U.forest, U, u; recipe=recipe, criterion=criterion, run=state,
+                 filters=checkpoint_hdf5_filters, sync=checkpoint_sync_to_disk,
+                 io=checkpoint_io)
+        push!(written, path)
+        isroot(comm) &&
+            rotate_checkpoints!(checkpoint_path_prefix, num_checkpoints_keep; keep=path)
+    end
     for c in (c_done + 1):nchunks
         chunk_start = time()
         tstart, stop = chunk_bounds(c, nchunks, t_end, chunk)
@@ -1933,35 +1997,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             due, stopping = agree_any(comm, (due, stopping))
             if due || stopping
                 path = checkpoint_filename(checkpoint_path_prefix, nsteps)
-                state = (; chunk=c, t=plain_reals(stop), t_chunk=plain_reals(tstart),
-                         nsteps, nregrids, nresamples, passes, converged,
-                         lambda_initial=plain_reals(λ_initial),
-                         growth=plain_reals(growth),
-                         rho_chunk=plain_reals(T(interior_ρ_max(p.interior))),
-                         track=to_plain(tr; path="run.track"),
-                         track_chunk=to_plain(tr_chunk; path="run.track_chunk"),
-                         sample_t=plain_reals(sample_t),
-                         sample_track=to_plain(sample_track; path="run.sample_track"),
-                         fits=fits === nothing ? nothing :
-                              hfit ? Tuple((to_plain(f[1]; path="run.fits[A][1]"),
-                                            to_plain(f[2]; path="run.fits[A][2]"))
-                                           for f in fits) :
-                              (to_plain(fits[1]; path="run.fits[1]"),
-                               to_plain(fits[2]; path="run.fits[2]")),
-                         target_bounds=hfit ?
-                                       Tuple(to_plain(b; path="run.target_bounds")
-                                             for b in tbounds) :
-                                       to_plain(tbounds; path="run.target_bounds"),
-                         fit_initial=hfit ?
-                                     Tuple(to_plain(f; path="run.fit_initial")
-                                           for f in fit_initial) :
-                                     to_plain(fit_initial; path="run.fit_initial"),
-                         hlm_seed=binary ? Tuple(hlm_seed) : hlm_seed, trigger_pending,
-                         (binary ? (; hole_offsets=Tuple(to_plain(δ) for δ in hole_offsets),
-                                    rollon_t0=plain_reals(rollon[])) :
-                          (;))...,
-                         bounds=to_plain(acc; path="run.bounds"),
-                         fit_cost=agreed_fit_cost(), records=Tuple(records))
+                state = run_state(T; chunk=c, t=stop, t_chunk=tstart, nsteps, nregrids,
+                                  nresamples, passes, converged, λ_initial, growth,
+                                  ρ_chunk=interior_ρ_max(p.interior), tr, tr_chunk,
+                                  sample_t, sample_track, fits, tbounds, fit_initial,
+                                  hfit, binary, hlm_seed, trigger_pending, hole_offsets,
+                                  rollon_t0=rollon[], acc, fit_cost=agreed_fit_cost(),
+                                  records)
                 save_run(path, U.forest, U, u; recipe=recipe, criterion=criterion,
                          run=state, filters=checkpoint_hdf5_filters,
                          sync=checkpoint_sync_to_disk, io=checkpoint_io)
@@ -2472,4 +2514,51 @@ end
         work[var + (NC + v - 1) * sv] = Π[v]
         nothing
     end
+end
+
+"""
+    run_state(T; chunk, t, t_chunk, …) -> NamedTuple
+
+The run state a checkpoint carries beside the forest and the state: everything
+the loop carries from one chunk to the next, as TreeIOHDF5's plain data
+(`CODE.md`, "Checkpoint and restart"). One function for the two places a
+checkpoint is written — after a chunk's row, and at the run's start when
+`t_end = 0` (step S1) — so that what goes into the file is written once.
+**Anything added to the loop's carried state goes in here**, and into the
+restore branch of [`evolve!`](@ref), or restarts silently stop being the run.
+"""
+function run_state(::Type{T}; chunk, t, t_chunk, nsteps, nregrids, nresamples, passes,
+                   converged, λ_initial, growth, ρ_chunk, tr, tr_chunk, sample_t,
+                   sample_track, fits, tbounds, fit_initial, hfit, binary, hlm_seed,
+                   trigger_pending, hole_offsets, rollon_t0, acc, fit_cost,
+                   records) where {T}
+    return (; chunk, t=plain_reals(T(t)), t_chunk=plain_reals(T(t_chunk)),
+            nsteps, nregrids, nresamples, passes, converged,
+            lambda_initial=plain_reals(T(λ_initial)),
+            growth=plain_reals(T(growth)),
+            rho_chunk=plain_reals(T(ρ_chunk)),
+            track=to_plain(tr; path="run.track"),
+            track_chunk=to_plain(tr_chunk; path="run.track_chunk"),
+            sample_t=plain_reals(T(sample_t)),
+            sample_track=to_plain(sample_track; path="run.sample_track"),
+            fits=fits === nothing ? nothing :
+                 hfit ? Tuple((to_plain(f[1]; path="run.fits[A][1]"),
+                               to_plain(f[2]; path="run.fits[A][2]"))
+                              for f in fits) :
+                 (to_plain(fits[1]; path="run.fits[1]"),
+                  to_plain(fits[2]; path="run.fits[2]")),
+            target_bounds=hfit ?
+                          Tuple(to_plain(b; path="run.target_bounds")
+                                for b in tbounds) :
+                          to_plain(tbounds; path="run.target_bounds"),
+            fit_initial=hfit ?
+                        Tuple(to_plain(f; path="run.fit_initial")
+                              for f in fit_initial) :
+                        to_plain(fit_initial; path="run.fit_initial"),
+            hlm_seed=binary ? Tuple(hlm_seed) : hlm_seed, trigger_pending,
+            (binary ? (; hole_offsets=Tuple(to_plain(δ) for δ in hole_offsets),
+                       rollon_t0=plain_reals(T(rollon_t0))) :
+             (;))...,
+            bounds=to_plain(acc; path="run.bounds"),
+            fit_cost, records=Tuple(records))
 end

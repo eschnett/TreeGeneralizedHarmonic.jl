@@ -108,7 +108,7 @@ export gh_forest, hole_forest
 export minkowski_case, minkowski_octant_case, gauge_wave_case, shifted_minkowski_case
 export hole_case, kerr_schild_case, harmonic_kerr_case
 export background_state, state_tuple, case_state_tuple, state_callback
-export fill_exact!, add_noise!
+export fill_exact!, add_noise!, with_background
 
 # Gauge and constraint damping, as a function of position
 export ConstantDamping, GaussianDamping, damping_rate, damping_bounds

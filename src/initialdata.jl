@@ -174,6 +174,22 @@ struct GHCase{T,B,D,I,R,H,X,E,S,Q}
     holes::Q                     # an `NTuple` of `HoleSpec`s, or `nothing` (step B3)
 end
 
+"""
+    with_background(case, background) -> GHCase
+
+The case with `background` in place of its own and nothing else changed (added
+in step S1): what [`evolve!`](@ref)'s `initial_data` evaluates the data of
+`t = 0` from — the cycle, the fills and the fits — while the case keeps its own
+background for the boundary and for every target after `t = 0`. No check is
+repeated: the case's were made on its own background, and `initial_data` is data,
+not a gauge or a boundary the case's numbers were chosen for.
+"""
+with_background(c::GHCase{T,B,D,I,R,H,X,E,S,Q}, bg) where {T,B,D,I,R,H,X,E,S,Q} =
+    GHCase{T,typeof(bg),D,I,R,H,X,E,S,Q}(bg, c.box, c.periodic, c.reflecting, c.rotating,
+                                         c.ε_KO, c.γ0, c.γ2, c.center, c.interior,
+                                         c.refinement, c.horizon, c.bounds, c.chunk,
+                                         c.gauge, c.holes)
+
 function GHCase(::Type{T}, background; box, periodic,
                 reflecting=ntuple(_ -> (false, false), Val(3)), rotating=nothing,
                 ε_KO, γ0, γ2, center=(zero(T), zero(T), zero(T)), velocity=nothing,

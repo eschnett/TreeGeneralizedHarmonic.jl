@@ -227,6 +227,9 @@
 #   name=<label>                    the run's name in SimWatch (default: out's name)
 #   group=<label>                   its SimWatch group, e.g. a study's (2026-10-21)
 #   checkpoint=<dir> walltime=<s>   a chain of jobs (as hole_runs.jl's rows)
+#   xcts=<file>                     (step S1) the initial data solved by XCTS, a
+#                                   :fitted hole's start written to checkpoint=<dir>
+#                                   with t_end = 0 (as binary_runs.jl's xcts=)
 #   checkpoint_every=8 keep=2       chunks between checkpoints, and how many to keep
 #                                   (keep them all to difference two runs later)
 #
@@ -284,6 +287,12 @@ amplitude = parse(Float64, opt("amplitude", "1e-8"))
 seed = parse(Int, opt("seed", "20261002"))
 outdir = mkpath(abspath(opt("out", "out/octant")))
 ckdir = haskey(OPTIONS, "checkpoint") ? mkpath(abspath(OPTIONS["checkpoint"])) : nothing
+# Data solved by XCTS (step S1): the run's start from them, written as a checkpoint
+# that the same command without `xcts=` continues. The file needs XCTS loaded, which
+# this package's environment does not have (`bench/xcts_metric.jl`).
+const XCTS_FILE = get(OPTIONS, "xcts", nothing)
+XCTS_FILE === nothing || include(joinpath(@__DIR__, "..", "bench", "xcts_metric.jl"))
+XCTS_FILE === nothing || (t_end = 0)
 walltime = haskey(OPTIONS, "walltime") ? parse(Float64, OPTIONS["walltime"]) : nothing
 ckevery = parse(Int, opt("checkpoint_every", "8"))
 ckkeep = parse(Int, opt("keep", "2"))
@@ -1158,6 +1167,15 @@ else
      max_walltime_seconds=walltime, num_checkpoints_keep=ckkeep)
 end
 restarting = get(ckw, :restart_file, nothing) !== nothing
+initial_data = nothing
+if XCTS_FILE !== nothing
+    (ckdir === nothing || restarting || use_mpi || opt("backend", "cpu") != "cpu") && error(
+        "xcts=<file> writes a run's start from data solved by XCTS as a checkpoint, on " *
+        "one CPU process: it needs checkpoint=<dir> with no checkpoint in it yet, and " *
+        "neither mpi=true nor backend=cuda. The same command without xcts= continues it.")
+    initial_data = load_xcts_metric(XCTS_FILE)
+    isrank0 && println("initial data: ", nameof(initial_data))
+end
 
 # A hole's frozen core is left alone: it is never evolved, and its stale data
 # at the corner is not of definite parity (see `add_noise!`). The default
@@ -1204,7 +1222,8 @@ out = try
             ops=Operators(prolongation=q + 2, restriction=q + 2), t_end=t_end,
             chunk=chunk, cfl=cfl, backend=backend, observer=observe,
             adapt=follow, regrid=follow,
-            perturb=perturb, comm=comm, fitkw..., findkw..., ckw...)
+            perturb=perturb, comm=comm, initial_data=initial_data, fitkw..., findkw...,
+            ckw...)
 catch err
     # Over MPI the status file's write is collective, and a failure may be
     # one rank's: write it serially from this rank, and take the job down.

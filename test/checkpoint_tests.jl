@@ -24,6 +24,14 @@ const TGHc = TreeGeneralizedHarmonic
 
 isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
 
+# A metric that is the fixture's background under another type (step S1): what
+# `initial_data` is handed when the data are solved elsewhere, here with the
+# answer known — the same numbers through another method table.
+struct RewrappedMetric{B} <: SM.AbstractMetric
+    b::B
+end
+SM.metric(m::RewrappedMetric, p::AbstractVector) = SM.metric(m.b, p)
+
 @testset verbose = true "Checkpoint and restart" begin
     T = Float64
     q = 2
@@ -265,6 +273,51 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         out, jobs, _ = chain(case, forest, T(1 // 10); regrid=true)
         @test jobs == 2
         test_same(out, ref)
+    end
+
+    # Guards step S1's start checkpoint and `initial_data`. Data solved by
+    # another code are put onto the mesh by a host that has the solver — the
+    # cycle, the finds and the fits at `t = 0`, written by `t_end = 0` — and the
+    # run continues from that file elsewhere; a restart from it that is not the
+    # run that never stopped (the track before the row as `track_chunk`, no
+    # regrid first) would start a different run from the same data. And the
+    # data metric must reach every fill and fit of `t = 0`: the fixture's own
+    # background under another type starts the same run.
+    @full_tier @testset "a run continued from its t = 0 checkpoint is the run" begin
+        case = adaptive_hole_fixture(T; interior=FittedSpec(T; variant=:fitted,
+                                                            margin=4, n_L=6),
+                                     r_0=nothing, r_1=nothing,
+                                     horizon=Horizon(T; every=1, N=12, spin=false))
+        forest = hole_forest(T, case; N=8, roots=4, radii=(T(5 // 2),))
+        corner = filter(k -> all(d -> block_extent(T, forest, k)[d][1] ≥ T(5 // 2),
+                                 1:3), forest.leaves)
+        refine!(forest, corner)
+        balance!(forest)
+        ref = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                      t_end=T(1 // 10), regrid=true)
+        pre = joinpath(mktempdir(), "run")
+        ckw = (checkpoint_path_prefix=pre, checkpoint_every_chunks=1,
+               checkpoint_sync_to_disk=false)
+        start = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                        t_end=zero(T), regrid=true, ckw...)
+        @test start.nsteps == 0 && start.nchunks == 0 && start.finished
+        @test length(start.checkpoints_written) == 1
+        @test length(start.records) == 1 && start.records[1].t == 0
+        out = evolve!(T, case; q=q, ops=ops, t_end=T(1 // 10), regrid=true, ckw...,
+                      restart_file=only(start.checkpoints_written))
+        test_same(out, ref)
+        # The data metric at t = 0, the case's background after it.
+        wrapped = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                          t_end=T(1 // 10), regrid=true,
+                          initial_data=RewrappedMetric(case.background))
+        test_same(wrapped, ref)
+        # t = 0 needs a file to write; data from elsewhere need a :fitted layer.
+        @test_throws "t_end = 0 integrates nothing" evolve!(
+            T, case; forest=deepcopy(forest), q=q, ops=ops, t_end=zero(T))
+        damped = adaptive_hole_fixture(T)
+        @test_throws "initial_data replaces the case's background" evolve!(
+            T, damped; forest=hole_forest(T, damped; N=8, roots=4, radii=(T(5 // 2),)),
+            q=q, ops=ops, t_end=T(1 // 10), initial_data=damped.background)
     end
 
     # A boosted hole whose layer follows it: the speed growth that sizes the

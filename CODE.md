@@ -4747,6 +4747,16 @@ a restart point too**, where `t_end` is a whole number of chunks in `T`
 have regridded there; elsewhere it is not written, because a continued run
 would move the chunk boundaries.
 
+**The run's start is a restart point as well (added in step S1).** `t_end = 0`
+writes chunk 0 — the state after the initial-data row, with the finds, the
+fits and the track it made, the track before the row's find as `track_chunk`
+— and integrates nothing. A restart from it does **not** regrid first, since
+the uninterrupted run does not regrid at `t = 0`: its mesh is the initial-data
+cycle's. This is how data solved by another code reach a run that cannot load
+that code (`evolve!`'s `initial_data`; [Solved data for the
+pair](#solved-data-for-the-pair-proposed)). The run state is built by one
+function, `run_state`, for both places a checkpoint is written.
+
 **Would TreeHydro's work the same way?** Yes, and nothing in TreeAMR is in
 the way: its regrid flags read the primitives, which `update_primitives!`
 rebuilds from `u`, its buffer is derived from `λ_end` (in its history), and
@@ -8424,25 +8434,71 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   core** (`horizon_bc = false`), as step B8 proposes, at `r_E ≤ r_0 − G h`,
   so that the jump of the derivatives at the sphere lies where no stencil of
   `F` reaches. In the harmonic chart `r_0 = 2/5 M_A`, half Kerr-Schild's, so
-  the spheres are deeper than B8's. Whether XCTS converges with them is the
-  first question **(open)**.
+  the spheres are deeper than B8's. **It converges for one hole (step
+  S1)**: harmonic Kerr at `M = 1/2` with the sphere at `R1 = 1/8` comes back
+  spectrally, the largest error at the nodes inside `r = 0.2` falling from
+  `4·10⁻⁶` at `p = 6` to `4·10⁻⁹` at `p = 10`, and `M_irr` within `10⁻¹⁰` of
+  `1/2` on the finest mesh. Newton stops on a residual floor of `1.5·10⁻⁸`
+  (XCTS reports `converged = false` there; it is roundoff of the residual, not
+  a failure). Whether the pair does is open **(open)**: XCTS's two-hole mesh
+  makes each hole's cube `d/2` wide, so the cells between the sphere and the
+  cube are evenly spaced over a radius ratio of `32` at `d = 8`.
 - The horizons are where the solution puts them, found afterwards: each
   hole's irreducible mass is measured, not set. Choosing the bare masses so
   that `M_irr` meets a target is later **(open)**.
 
 **From XCTS to the grid.**
 
-- **A host tool**, run in an environment that has both packages (XCTS has
-  local-path sources, so never in this package's `Project.toml`), evaluates
-  the solution at TreeAMR's points on the mesh the initial-data cycle
-  chooses for the superposed data of the same holes, and writes the forest
-  and the state through TreeIOHDF5. `evolve!` starts from that file.
-- **`g_ab`** from `ψ`, `β^i`, `Q = αψ` and the conformal metric; **`Π`**
-  from `∂_t γ_ij = −2αK_ij + L_β γ_ij` with the solution's `K_ij`, and
-  `∂_t α`, `∂_t β^i` from `C_a = 0` at `H = 0`
-  (`gauge_consistent_momentum`), as for the superposed data. The spatial
-  derivatives come from XCTS's spectral basis **(proposed)**, so that the
-  transfer adds interpolation error and no truncation error of its own.
+- **The solution is a metric, and the file is the run's start (step S1).**
+  `bench/xcts_metric.jl` wraps the saved solution as a SpacetimeMetrics
+  metric whose `dmetric` is XCTS's own: `g_ab` from `ψ`, `β^i`, `Q = αψ` and
+  the conformal metric, the spatial derivatives from the spectral basis
+  (`XCTS.solved_spacetime`), `∂_t γ_ij = −2αK_ij + D_iβ_j + D_jβ_i` from the
+  solution's `K_ij`, and `∂_t g_tb` from `C_a = 0` at `H = 0` — so every path
+  that evaluates a background (`background_state`, `gauge_consistent_state`,
+  the fit's sampler) reads the solved data unchanged. `evolve!`'s
+  `initial_data` puts it in place of the case's background at `t = 0` alone
+  (`with_background`): the initial-data cycle, the fills, the holes' finds and
+  their fits are made on the solved data, and the boundary and every later
+  target stay the case's. With `t_end = 0` the run writes that start as a
+  checkpoint (chunk 0) and integrates nothing; the same command without the
+  data continues it as a restart, on a host with no XCTS — the GPU run. The
+  host runs in an environment that has both packages (XCTS has local-path
+  sources, so never in this package's `Project.toml`), serially on the CPU,
+  since the metric holds the solution's host arrays. `test/binary_runs.jl`
+  and `test/octant_runs.jl` take it as `xcts=<file>`. A restart from chunk 0
+  does not regrid first — the uninterrupted run does not regrid at `t = 0` —
+  and is that run bit for bit (`checkpoint_tests.jl`). The assembly
+  reproduces harmonic Kerr's `g`, `∂_i g` and `∂_t g = 0` to `10⁻¹⁴` from exact
+  3+1 fields.
+- **What the transfer costs in accuracy (measured, step S1).** The solution
+  is continuous across XCTS's elements and its derivatives are not; a
+  finite-difference second derivative across such a seam grows like `1/h`,
+  so the constraints the grid computes from the sampled data carry a part
+  that does not converge with `h`, while the grid's own falls as `h⁴`. On one
+  hole at `M = 1/2`, sampled onto uniform grids and differenced at `q = 4`,
+  the root-mean-square `ℋ` that XCTS's error adds, beside the exact data's
+  own, outside `r_1` (XCTS's `examples/harmonic_fd_constraints.jl`):
+
+  | `h` | data | `[0.375, 0.5)` | `[0.5, 0.75)` | `[0.75, 1)` | `[1, 1.5)` |
+  |---|---|---|---|---|---|
+  | `1/96` | exact (the grid's own) | `2.3·10⁻⁵` | `2.2·10⁻⁶` | `1.0·10⁻⁷` | `4.8·10⁻⁹` |
+  | | `p = 10` | `2.7·10⁻⁶` | `4.7·10⁻⁷` | `3.4·10⁻⁷` | `2.8·10⁻⁹` |
+  | | `p = 8`, refined mesh | `4.3·10⁻⁷` | `2.7·10⁻⁷` | `3.4·10⁻⁸` | `2.2·10⁻⁹` |
+  | `1/192` | exact | `1.4·10⁻⁶` | `1.4·10⁻⁷` | `6.2·10⁻⁹` | `3.1·10⁻¹⁰` |
+  | | `p = 8`, refined mesh | `9.8·10⁻⁷` | `4.3·10⁻⁷` | `5.6·10⁻⁸` | `3.4·10⁻⁹` |
+
+  At `1/96` the two finest solutions are below the grid's own error at
+  `t = 0` (`p = 10` in all but one shell) and far below what the evolution
+  makes of it within a few `M`; at `1/192` the refined `p = 8` is not, from
+  `r = 0.5` out, and coarser solutions are above it at `1/96`. A run from
+  `p = 5` data on the octant at `1/32` started with `ℋ` `500×` the analytic
+  data's in `[1, 5/4)` and a state error of `2.5·10⁻³` there, mostly in `Π`
+  (from the solution's derivatives), which the evolution does not remove.
+  Erik judged XCTS as it is good enough to continue (2026-11-15). If finer
+  grids need cleaner data, a few relaxation sweeps of the finite-difference
+  equations on the grid, from the sampled data, would damp exactly this seam
+  error **(proposed)**.
 - **The interior is `:fitted`.** Its target is a fit of the evolved state,
   which follows the solved data. The tracked `:damped` target is each hole's
   analytic metric, which the solved data are not, so its layer would relax

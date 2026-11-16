@@ -133,6 +133,7 @@ The briefs of the finished steps are under
   - [Steps B1–B3's code taken for step H4 (2026-11-14)](#steps-b1b3s-code-taken-for-step-h4-2026-11-14)
   - [Step H4 started: two harmonic holes with no source (2026-11-14)](#step-h4-started-two-harmonic-holes-with-no-source-2026-11-14)
   - [Step H4 shelved: the data are to be solved (2026-11-15)](#step-h4-shelved-the-data-are-to-be-solved-2026-11-15)
+  - [Step S1 started: XCTS's data on the grid (2026-11-15)](#step-s1-started-xctss-data-on-the-grid-2026-11-15)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2498,6 +2499,49 @@ design with harmonic free data. Erik had first asked whether superposing the
 the lapse no longer needs (`α ≥ 0.23` at `d = 8`), and halves the negative
 energy, and XCTS's free data already superpose that way; the solve is what
 removes the rest.
+
+### Step S1 started: XCTS's data on the grid (2026-11-15)
+
+**XCTS as it is, decided by Erik on 2026-11-15**, after the single harmonic
+hole converged with its sphere at `R1 = 1/8` deep in the core. The deciding
+measurement is `CODE.md`'s table "What the transfer costs in accuracy":
+sampled onto the grid, the solution's element seams add a constraint error
+that grows like `1/h`. At `1/96` the finest solutions are below the grid's own
+error and at `1/192` they are not. The alternatives were:
+
+- **rewriting the solver on TreeAMR's octree.** Rejected: the inner spheres
+  would cut through Cartesian blocks, and the solver would need a nonlinear
+  elliptic multigrid across coarse-fine faces. That is months of work, for
+  the seam effect alone.
+- **relaxation sweeps on the grid.** Kept as the remedy if a finer grid
+  needs it.
+
+**Changes to XCTS** (local branches in `~/src/jl/XCTS`; there is no remote,
+and Erik said to keep it local):
+
+- the horizon finder and the spin get batched, threaded field providers, so
+  that they run with ApparentHorizonFinder 2.1 and KorzynskiSpin 1.1, which
+  pass a whole surface to an untyped callback. The finds take no less time:
+  the spin's cost is its uniformization;
+- `solved_spacetime`;
+- the examples `harmonic_single.jl`, `harmonic_fd_constraints.jl` and
+  `harmonic_holes.jl`.
+
+**The transfer, a start checkpoint instead of a format of its own.** The plan
+had the host tool write the forest and the state, and `evolve!` start from
+that file with the reseed and the fits done there. That would have duplicated
+the start of a run: the cycle, the reseed, the fits from analytic samples and
+the fitted fill. What was built instead:
+
+- the solution is a metric, so all of that runs unchanged on it at `t = 0`;
+- `t_end = 0` writes the result as chunk 0 of the run's own checkpoints;
+- the restart path, already bit-exact, continues it on any host.
+
+The cost was:
+
+- a restart from chunk 0 that does not regrid first;
+- the run state built by one function (`run_state`) for both places a
+  checkpoint is written.
 
 ## Possible extensions
 

@@ -74,6 +74,13 @@
 #   name=<label> group=<label>     the run's SimWatch name and group (step H4): every
 #                                  run keeps `simwatch.toml` in `out`
 #   checkpoint=<dir> walltime=<s>  a chain of jobs; checkpoint_every=4 keep=2
+#   xcts=<file>                    (step S1) the initial data solved by XCTS
+#                                  (`examples/harmonic_holes.jl save=<file>`): the
+#                                  run's start — the cycle, the finds and the fits
+#                                  on those data — written to checkpoint=<dir> with
+#                                  t_end = 0, on one CPU process, from an environment
+#                                  that has XCTS (bench/xcts_metric.jl); the same
+#                                  command without xcts= then continues the run
 #
 # A run that stops at `walltime` exits with status 3, so a job script can resubmit;
 # the same command continues from the newest checkpoint and appends to the CSV.
@@ -108,6 +115,12 @@ q = parse(Int, opt("q", "4"))
 adm_every = parse(Int, opt("adm", "1"))
 outdir = mkpath(abspath(opt("out", "out/binary")))
 ckdir = haskey(OPTIONS, "checkpoint") ? mkpath(abspath(OPTIONS["checkpoint"])) : nothing
+# Data solved by XCTS (step S1): the run's start from them, written as a checkpoint
+# that the same command without `xcts=` continues. The file needs XCTS loaded, which
+# this package's environment does not have (`bench/xcts_metric.jl`).
+const XCTS_FILE = get(OPTIONS, "xcts", nothing)
+XCTS_FILE === nothing || include(joinpath(@__DIR__, "..", "bench", "xcts_metric.jl"))
+XCTS_FILE === nothing || (t_end = 0)
 walltime = haskey(OPTIONS, "walltime") ? parse(Float64, OPTIONS["walltime"]) : nothing
 ckevery = parse(Int, opt("checkpoint_every", "4"))
 ckkeep = parse(Int, opt("keep", "2"))
@@ -218,6 +231,15 @@ else
      max_walltime_seconds=walltime, num_checkpoints_keep=ckkeep)
 end
 restarting = get(ckw, :restart_file, nothing) !== nothing
+initial_data = nothing
+if XCTS_FILE !== nothing
+    (ckdir === nothing || restarting || use_mpi || opt("backend", "cpu") != "cpu") && error(
+        "xcts=<file> writes a run's start from data solved by XCTS as a checkpoint, on " *
+        "one CPU process: it needs checkpoint=<dir> with no checkpoint in it yet, and " *
+        "neither mpi=true nor backend=cuda. The same command without xcts= continues it.")
+    initial_data = load_xcts_metric(XCTS_FILE)
+    isrank0 && println("initial data: ", nameof(initial_data))
+end
 forest0 = restarting ? nothing :
           holes_forest(T, case; N=N, roots=roots, radii=radii, comm=comm,
                        path=T(rat(opt("path", "0"))))
@@ -420,7 +442,8 @@ out = try
             regrid=follow,
             hole_find_interval=fitted_holes && haskey(OPTIONS, "find_interval") ?
                                T(rat(OPTIONS["find_interval"])) : nothing,
-            fit_initial_depth=fitted_holes ? T(rat(opt("fit_depth", "0"))) : 0, ckw...)
+            fit_initial_depth=fitted_holes ? T(rat(opt("fit_depth", "0"))) : 0,
+            initial_data=initial_data, ckw...)
 catch err
     use_mpi || simwatch_finish!(sw; status="failed", message=sprint(showerror, err),
                                 time_end=Float64(t_end), time_unit="M")

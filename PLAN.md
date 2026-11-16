@@ -1381,6 +1381,26 @@ H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
   `:damped` hole is refused.
 - **`test/binary_runs.jl data=<file>`**.
 
+**Status (2026-11-15).**
+
+- **Done:** the single hole converges in XCTS. Its error on the grid is
+  `CODE.md`'s table: below the grid's own at `1/96` from `p = 10`. Erik
+  judged XCTS as it is good enough.
+- **Done, the transfer, built as a metric and a start checkpoint rather than
+  a file format of its own:**
+  - `bench/xcts_metric.jl`;
+  - `evolve!(…; initial_data, t_end = 0)`, which writes chunk 0;
+  - the restart path continues it;
+  - the scripts take it as `xcts=<file>`.
+
+  `checkpoint_tests.jl` passes. A local octant run from `p = 5` data
+  (`1/32`, to `M/2`) went through end to end.
+- **Next:**
+  - the pair's solves on Trillium, `d = 8` and `10`, `M_h = 64`, `M_f = 2`,
+    `p = 6, 8, 10`;
+  - the single hole's acceptance run from `p = 10` data at `1/48`;
+  - the pair's `t = 0` constraints at `1/48` and `1/96`.
+
 **Accept:**
 
 - **A single harmonic hole through XCTS**: the solution is harmonic Kerr to
