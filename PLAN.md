@@ -1399,14 +1399,17 @@ H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
   from `p = 10` and refined `p = 8` data, on Trillium to `10 M`, is that row
   from `1 M` on, to three or four digits in every shell, and `M_irr` to
   `3·10⁻¹¹` (`CODE.md`, "Solved data for the pair").
-- **Stopped, the pair:** XCTS does not converge for the pair at `d = 8`
-  with the spheres inside `r_0 = 2/5 M_A`, whatever the mesh, the order, the
-  linear solver, the globalization, the separation or the attenuation; it
-  converges with them at `M_A/2` and beyond, and one hole converges at
-  `M_A/4` on the same mesh. A continuation in the companion's mass stalls
-  between `1/4` and `1/2` of it, as at a fold (`CODE.md`, "Solved data for
-  the pair", the table). As this step says, the work stops here: the sphere
-  in the layer, the fallback, or another inner condition is Erik's decision.
+- **Done, the pair's solve at `p = 2`, with the lapse fixed:** XCTS's
+  extended system does not converge for the pair at `d = 8` with the spheres
+  inside `r_0 = 2/5 M_A`, whatever the mesh, the order, the linear solver,
+  the globalization, the separation or the attenuation. Standard XCTS, with
+  the densitized lapse fixed to the superposition's (`lapse = :fixed`, added
+  for this), converges at `R1 = 1/8` in seven iterations (`CODE.md`, "Solved
+  data for the pair", the table).
+- **Next:** the pair at `R1 = 1/8` with the fixed lapse at `p = 4, 6, 8` on
+  a cluster, with the independent constraints in shells, which at `p = 2`
+  are dominated by the discretization; then its transfer and the
+  acceptance's runs at `1/48` and `1/96`.
 
 **Accept:**
 

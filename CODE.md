@@ -8441,11 +8441,23 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   `1/2` on the finest mesh. Newton stops on a residual floor of `1.5·10⁻⁸`
   (XCTS reports `converged = false` there; it is roundoff of the residual, not
   a failure).
-- **The pair does not converge with spheres inside `r_0` (measured, step
-  S1).** The head-on pair at `d = 8`, `M_A = 1/2`, `ℓ = 8`, on XCTS's
-  two-hole mesh (`M = 2`, `M_h = 16`, `M_f = 2`) at `p = 2`, Newton with the
-  dogleg, from the superposed data. Each row is the residual after the last
-  of 8 to 10 iterations, or the iteration at which it reached the floor:
+- **The pair is solved with the lapse fixed (standard XCTS), not solved for
+  (extended XCTS) (measured, step S1).** XCTS's default is the extended
+  system: five equations, the fifth fixing `Q = αψ` from `∂_t K = 0`. That
+  fifth equation is a slicing condition, not a constraint, and not the
+  harmonic one; only the Hamiltonian and momentum constraints are owed. With
+  `solve_xcts(…; lapse = :fixed)` the densitized lapse `α̃ = αψ⁻⁶` is free
+  data, the superposition's, and only the four constraints are solved. Their
+  `ψ⁻⁷` term then has the sign that makes the solution unique (with `α`
+  or `Q` held instead it has the other sign, which is why it is `α̃`). Q stays
+  a field, tied to ψ by `Q = α̃ψ⁷` at every independent node, so the transfer
+  (`bench/xcts_metric.jl`) reads the solution as before. With the extended
+  system the pair does not converge with spheres inside `r_0`; with the fixed
+  lapse it does, at `R1 = 1/8` as at `1/4`. The head-on pair at `d = 8`,
+  `M_A = 1/2`, `ℓ = 8`, on XCTS's two-hole mesh (`M = 2`, `M_h = 16`,
+  `M_f = 2`) at `p = 2`, Newton with the dogleg, from the superposed data.
+  Each row is the residual after the last of 8 to 10 iterations, or the
+  iteration at which it reached the floor:
 
   | sphere `R1` (`R1/M_A`) | what else | residual |
   |---|---|---|
@@ -8462,22 +8474,25 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   | `1/8` | one hole on the same mesh, the other sphere flat | `10⁻⁸` in 4 |
   | `1/8` | one hole on the one-hole mesh, `p = 2, 3, 4`, and at `p = 2` on one shaped like the pair's (`L = 4`, `M_h = 16`) | `1.5·10⁻⁸` in 2–4 |
   | `1/8` | the companion's mass `ε M_A`, each `ε` from the last solution | `ε = 1/4`: `10⁻⁸` in 7; `ε = 1/2`: stalls at `0.073` |
+  | `1/8` | **fixed lapse** | `9.8·10⁻⁹` in 7 |
+  | `1/4` | **fixed lapse** | `1.1·10⁻⁸` in 7 |
 
-  So neither the mesh, the order, the linear solver nor the globalization is
-  the cause, and the companion's strength is not either (`ℓ = 4` leaves it
-  `e⁻⁴` of its weight at the other hole, and `d = 16` halves it): what fails
-  is a sphere deeper than about `M_A/2` with a second hole present. The
-  continuation stalls on a plateau rather than wandering, which is how a
-  fold of XCTS's equations shows — the non-uniqueness of the extended
-  conformal thin-sandwich system for strong data (Pfeiffer and York 2005),
-  where past a turning point the solution stops existing **(predicted** as
-  the reason; not shown**)**. The deepest sphere that converges, `1/4`, is
-  inside the horizon (`M_A`) and inside `r_1 = 3/4 M_A`, but outside
-  `r_0 = 2/5 M_A`: in the layer, where `F` is evaluated, not in the core.
-  What to do is Erik's decision **(open)**: the sphere in the layer, with
-  the derivatives' jump where the layer relaxes toward the fit; the plan's
-  fallback, isolated-horizon data extended inward by a fit; or another inner
-  condition in XCTS.
+  With the extended system neither the mesh, the order, the linear solver
+  nor the globalization is the cause, and the companion's strength is not
+  either (`ℓ = 4` leaves it `e⁻⁴` of its weight at the other hole, and
+  `d = 16` halves it): what fails is a sphere deeper than about `M_A/2` with
+  a second hole present, and the continuation stalls on a plateau, as at a
+  fold. That the fixed lapse converges where the extended system does not
+  fits the extended system's known non-uniqueness for strong data (Pfeiffer
+  and York 2005), which comes from its lapse equation. Both solutions at
+  `R1 = 1/4` move the shift by about the same amount (`1.27` and `1.22`
+  relative to the superposition's, in the mass-weighted `L²` norm the far
+  field dominates) and ψ by `1.5·10⁻⁴`; the lapse differs. Whether the solved
+  data satisfy the constraints is not shown at `p = 2`: the independent
+  check (`XCTS.constraint_norms`, the ADM constraints from the reconstructed
+  `γ_ij` and `K_ij`) is dominated there by the discretization near the
+  spheres (`ℋ = 1.9` against the superposition's `2.2` in `3 ≤ r < 5`). Its
+  convergence in `p` is the next measurement **(open)**.
 - The horizons are where the solution puts them, found afterwards: each
   hole's irreducible mass is measured, not set. Choosing the bare masses so
   that `M_irr` meets a target is later **(open)**.

@@ -2554,6 +2554,20 @@ separation and the attenuation, and they put the deepest sphere that
 converges at `M_A/2`, outside `r_0`. Following the plan, the work stops there
 for Erik's decision.
 
+**The pair converges with the lapse fixed (2026-11-16).** Erik asked whether
+XCTS solves the right equations. Reading it, it solves the extended system
+correctly. That system's fifth equation fixes the lapse from `∂_t K = 0`,
+which the pair does not need, and the extended system is the one known to
+lose its solution at a turning point. At Erik's request XCTS gained
+`lapse = :fixed` (standard XCTS, the densitized lapse from the free data),
+locally on its branch `claude/harmonic-free-data`. The nodal rows that tie
+`Q` to `ψ` were first weighted by `∫φ_g`, to match the weak-form rows; the
+compactified far field's large weights then made Newton reject every full
+step from the pair's data, at every sphere radius and with an exact linear
+solve. Unweighted, the pair converges at `R1 = 1/8` and `1/4` in seven
+iterations, where the extended system stalls at `0.19` and converges in
+four.
+
 ## Possible extensions
 
 ### Extensions since built
