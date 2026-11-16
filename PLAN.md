@@ -1395,11 +1395,18 @@ H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
 
   `checkpoint_tests.jl` passes. A local octant run from `p = 5` data
   (`1/32`, to `M/2`) went through end to end.
-- **Next:**
-  - the pair's solves on Trillium, `d = 8` and `10`, `M_h = 64`, `M_f = 2`,
-    `p = 6, 8, 10`;
-  - the single hole's acceptance run from `p = 10` data at `1/48`;
-  - the pair's `t = 0` constraints at `1/48` and `1/96`.
+- **Done, the single hole's acceptance:** step H1's `:fitted` row at `1/48`
+  from `p = 10` and refined `p = 8` data, on Trillium to `10 M`, is that row
+  from `1 M` on, to three or four digits in every shell, and `M_irr` to
+  `3·10⁻¹¹` (`CODE.md`, "Solved data for the pair").
+- **Stopped, the pair:** XCTS does not converge for the pair at `d = 8`
+  with the spheres inside `r_0 = 2/5 M_A`, whatever the mesh, the order, the
+  linear solver, the globalization, the separation or the attenuation; it
+  converges with them at `M_A/2` and beyond, and one hole converges at
+  `M_A/4` on the same mesh. A continuation in the companion's mass stalls
+  between `1/4` and `1/2` of it, as at a fold (`CODE.md`, "Solved data for
+  the pair", the table). As this step says, the work stops here: the sphere
+  in the layer, the fallback, or another inner condition is Erik's decision.
 
 **Accept:**
 

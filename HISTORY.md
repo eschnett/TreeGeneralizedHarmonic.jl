@@ -2543,6 +2543,17 @@ The cost was:
 - the run state built by one function (`run_state`) for both places a
   checkpoint is written.
 
+**The single hole passed its acceptance; the pair stopped (2026-11-16).**
+Step H1's `:fitted` row at `1/48` was started from XCTS's unit-mass
+solutions. These ran on Trillium, the new SciNet cluster: Nibi's nodes were
+down. To `10 M` it is the analytic row from `1 M` on. The pair's first solve
+on Trillium (`d = 8`, job `pair1`) did not converge and was cancelled after
+`30 min`. The local probes at `p = 2` that followed are `CODE.md`'s table.
+They rule out the mesh, the order, the linear solver, the globalization, the
+separation and the attenuation, and they put the deepest sphere that
+converges at `M_A/2`, outside `r_0`. Following the plan, the work stops there
+for Erik's decision.
+
 ## Possible extensions
 
 ### Extensions since built

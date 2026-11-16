@@ -8440,9 +8440,44 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   `4·10⁻⁶` at `p = 6` to `4·10⁻⁹` at `p = 10`, and `M_irr` within `10⁻¹⁰` of
   `1/2` on the finest mesh. Newton stops on a residual floor of `1.5·10⁻⁸`
   (XCTS reports `converged = false` there; it is roundoff of the residual, not
-  a failure). Whether the pair does is open **(open)**: XCTS's two-hole mesh
-  makes each hole's cube `d/2` wide, so the cells between the sphere and the
-  cube are evenly spaced over a radius ratio of `32` at `d = 8`.
+  a failure).
+- **The pair does not converge with spheres inside `r_0` (measured, step
+  S1).** The head-on pair at `d = 8`, `M_A = 1/2`, `ℓ = 8`, on XCTS's
+  two-hole mesh (`M = 2`, `M_h = 16`, `M_f = 2`) at `p = 2`, Newton with the
+  dogleg, from the superposed data. Each row is the residual after the last
+  of 8 to 10 iterations, or the iteration at which it reached the floor:
+
+  | sphere `R1` (`R1/M_A`) | what else | residual |
+  |---|---|---|
+  | `1/8` (`1/4`) | — | stalls at `0.19` |
+  | | ILU-GMRES instead of matrix-free | the same history |
+  | | `M = 4` | stalls at `0.11` |
+  | | line search instead of the dogleg | stalls at `0.15` |
+  | | `d = 16`, `ℓ = 16` | stalls at `0.21` |
+  | | `ℓ = 4` | stalls at `0.093` |
+  | `0.2` (`2/5`) | — | stalls at `1.2·10⁻²` |
+  | `1/4` (`1/2`) | — | `7·10⁻⁹` in 4 |
+  | `0.3` | — | `10⁻⁸` in 4 |
+  | `1/2` (`1`) | — | `7·10⁻⁹` in 3 |
+  | `1/8` | one hole on the same mesh, the other sphere flat | `10⁻⁸` in 4 |
+  | `1/8` | one hole on the one-hole mesh, `p = 2, 3, 4`, and at `p = 2` on one shaped like the pair's (`L = 4`, `M_h = 16`) | `1.5·10⁻⁸` in 2–4 |
+  | `1/8` | the companion's mass `ε M_A`, each `ε` from the last solution | `ε = 1/4`: `10⁻⁸` in 7; `ε = 1/2`: stalls at `0.073` |
+
+  So neither the mesh, the order, the linear solver nor the globalization is
+  the cause, and the companion's strength is not either (`ℓ = 4` leaves it
+  `e⁻⁴` of its weight at the other hole, and `d = 16` halves it): what fails
+  is a sphere deeper than about `M_A/2` with a second hole present. The
+  continuation stalls on a plateau rather than wandering, which is how a
+  fold of XCTS's equations shows — the non-uniqueness of the extended
+  conformal thin-sandwich system for strong data (Pfeiffer and York 2005),
+  where past a turning point the solution stops existing **(predicted** as
+  the reason; not shown**)**. The deepest sphere that converges, `1/4`, is
+  inside the horizon (`M_A`) and inside `r_1 = 3/4 M_A`, but outside
+  `r_0 = 2/5 M_A`: in the layer, where `F` is evaluated, not in the core.
+  What to do is Erik's decision **(open)**: the sphere in the layer, with
+  the derivatives' jump where the layer relaxes toward the fit; the plan's
+  fallback, isolated-horizon data extended inward by a fit; or another inner
+  condition in XCTS.
 - The horizons are where the solution puts them, found afterwards: each
   hole's irreducible mass is measured, not set. Choosing the bare masses so
   that `M_irr` meets a target is later **(open)**.
@@ -8495,6 +8530,16 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   `p = 5` data on the octant at `1/32` started with `ℋ` `500×` the analytic
   data's in `[1, 5/4)` and a state error of `2.5·10⁻³` there, mostly in `Π`
   (from the solution's derivatives), which the evolution does not remove.
+  **At `1/48` the solved hole is the analytic hole (measured, step S1).**
+  Step H1's `:fitted` row at `1/48` (`hf48`), started from the unit-mass
+  solutions at `p = 10` and at `p = 8` on the refined mesh and run to `10 M`,
+  is that row from `t = 1 M` on: in every shell from `[1, 5/4)` out, `ℋ`, `ℳ`,
+  `C_a` and the error agree with it to three or four digits (`p = 8`
+  refined), or to `15 %` in `ℋ` beyond `r = 4` (`p = 10`), and `M_irr` at
+  `10 M` to `3·10⁻¹¹`. At `t = 0` the data's error in `[1, 5/4)` is
+  `3·10⁻⁷` (`p = 10`) and `1.4·10⁻⁸` (`p = 8` refined), against the
+  `4·10⁻⁵` the evolution makes there by `1 M`. On one Trillium CPU node the
+  start checkpoint took `180–280 s` and the evolution `520 s/M`.
   Erik judged XCTS as it is good enough to continue (2026-11-15). If finer
   grids need cleaner data, a few relaxation sweeps of the finite-difference
   equations on the grid, from the sampled data, would damp exactly this seam
