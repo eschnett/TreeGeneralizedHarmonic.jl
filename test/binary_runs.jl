@@ -81,6 +81,9 @@
 #                                  t_end = 0, on one CPU process, from an environment
 #                                  that has XCTS (bench/xcts_metric.jl); the same
 #                                  command without xcts= then continues the run
+#   xcts_gauge=case|solved         the lapse and shift of the XCTS start: the case's
+#                                  background's (XCTS's fixed lapse grows outward,
+#                                  bench/xcts_metric.jl), or the solution's own
 #
 # A run that stops at `walltime` exits with status 3, so a job script can resubmit;
 # the same command continues from the newest checkpoint and appends to the CSV.
@@ -119,6 +122,28 @@ ckdir = haskey(OPTIONS, "checkpoint") ? mkpath(abspath(OPTIONS["checkpoint"])) :
 # that the same command without `xcts=` continues. The file needs XCTS loaded, which
 # this package's environment does not have (`bench/xcts_metric.jl`).
 const XCTS_FILE = get(OPTIONS, "xcts", nothing)
+# The outer faces' mismatch (step S1's acceptance): the run starts from the solved data,
+# and its Dirichlet data are the case's own background. On a 17 × 17 grid of each face
+# of [−L, L]³, the largest |g_ab| and |∂_c g_ab| of their difference, and the
+# background's own largest |g_ab − η_ab| for scale.
+function face_mismatch(background, data, L)
+    η = SVector{4,Float64}(-1, 1, 1, 1)
+    dg_max = 0.0; ddg_max = 0.0; dev_max = 0.0
+    s = range(-L, L; length=17)
+    for ax in 1:3, side in (-1, 1), a in s, b in s
+        xs = ax == 1 ? (side * L, a, b) : ax == 2 ? (a, side * L, b) : (a, b, side * L)
+        x = SVector{4,Float64}(0, xs...)
+        g1, dg1 = TreeGeneralizedHarmonic.SpacetimeMetrics.dmetric(background, x)
+        g2, dg2 = TreeGeneralizedHarmonic.SpacetimeMetrics.dmetric(data, x)
+        dg_max = max(dg_max, maximum(abs, g2 - g1))
+        ddg_max = max(ddg_max, maximum(abs, dg2 - dg1))
+        dev_max = max(dev_max, maximum(abs(g1[i, j] - (i == j ? η[i] : 0)) for i in 1:4, j in 1:4))
+    end
+    @printf("outer faces (|x_i| = %g): max |Δg_ab| %.3e, max |Δ∂_c g_ab| %.3e (background's max |g_ab − η_ab| %.3e)\n",
+            L, dg_max, ddg_max, dev_max)
+    flush(stdout)
+    return nothing
+end
 XCTS_FILE === nothing || include(joinpath(@__DIR__, "..", "bench", "xcts_metric.jl"))
 XCTS_FILE === nothing || (t_end = 0)
 walltime = haskey(OPTIONS, "walltime") ? parse(Float64, OPTIONS["walltime"]) : nothing
@@ -237,8 +262,14 @@ if XCTS_FILE !== nothing
         "xcts=<file> writes a run's start from data solved by XCTS as a checkpoint, on " *
         "one CPU process: it needs checkpoint=<dir> with no checkpoint in it yet, and " *
         "neither mpi=true nor backend=cuda. The same command without xcts= continues it.")
-    initial_data = load_xcts_metric(XCTS_FILE)
+    initial_data = load_xcts_metric(XCTS_FILE;
+                                    gauge=opt("xcts_gauge", "case") == "case" ? case.background : nothing)
     isrank0 && println("initial data: ", nameof(initial_data))
+    # The outer faces' mismatch (step S1's acceptance): the run starts from the solved
+    # data, and its Dirichlet data are the case's own background. On a 17 × 17 grid of
+    # each face of [−L, L]³, the largest |g_ab| and |∂_c g_ab| of their difference, and
+    # the background's own largest |g_ab − η_ab| for scale.
+    isrank0 && face_mismatch(case.background, initial_data, T(L))
 end
 forest0 = restarting ? nothing :
           holes_forest(T, case; N=N, roots=roots, radii=radii, comm=comm,
@@ -256,7 +287,7 @@ end
 # One fold over `diag`'s `C_a`, `ℋ`, `ℳ_i` and the mask that the row's monitors
 # left, binned by the nearer hole's track center and the distance from it:
 # `bands` edges in M.
-const BANDS = (1.0, 1.5, 2.0, 3.0, 4.0, Inf)
+const BANDS = (0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, Inf)   # 0.5 and 0.75 added in step S1
 const NBAND = length(BANDS) - 1
 const NV = DIAG_MASK - DIAG_CGH + 1
 const VM = NV                       # the mask is the last of the slots
@@ -286,7 +317,8 @@ function bandnorms(b)
     l2(i) = n > 0 ? sqrt(b.s2[i].value / n) : NaN
     return (points=n, gauge_l2=maximum(l2(a) for a in 1:4),
             gauge_linf=maximum(b.mx[a].value for a in 1:4), ham_l2=l2(5),
-            ham_linf=b.mx[5].value)
+            ham_linf=b.mx[5].value,
+            mom_l2=n > 0 ? sqrt((b.s2[6].value + b.s2[7].value + b.s2[8].value) / n) : NaN)
 end
 
 # The lapse outside the horizons (step H4; `PLAN.md`'s step H4, "in pure harmonic
@@ -354,7 +386,10 @@ header = vcat(["t", "wall", "steps", "dt", "nblocks", "points", "gauge_l2", "gau
               ["h$(A)_$c" for A in 1:2 for c in hcols],
               ["sep_track", "sep_found", "sep_newton", "gpu_gb", "maxrss_gb"], bcols,
               ["rollon_t0", "min_alpha_out", "max_sqrtg_alpha_out", "min_alpha_between",
-               "max_sqrtg_alpha_between"])
+               "max_sqrtg_alpha_between"],
+              # ℳ (added in step S1), last so that earlier columns keep their places:
+              # overall, then per hole and band as `bcols`
+              ["mom_l2"; ["h$(A)_r$(BANDS[k])_mom_l2" for A in 1:2 for k in 1:NBAND]])
 if isrank0 && !(restarting && isfile(csv))
     open(io -> println(io, join(header, ',')), csv, "w")
 end
@@ -401,6 +436,10 @@ function observe(p, t, u, rec)
     end
     append!(row, (num(get(rec, :rollon_t0, nothing)), lapse.out_α, lapse.out_a,
                   lapse.btw_α, lapse.btw_a))
+    push!(row, all.mom_l2)
+    for k in 1:(2 * NBAND)
+        push!(row, bandnorms(rf.band[k]).mom_l2)
+    end
     isrank0 && open(io -> println(io, join(row, ',')), csv, "a")
     hist = Dict("constraints.gauge_l2" => rec.gauge_l2, "pair.separation" => rec.separation,
                 "lapse.min_between" => lapse.btw_α, "layer.residual" => rec.residual)
