@@ -8588,10 +8588,57 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   which follows the solved data. The tracked `:damped` target is each hole's
   analytic metric, which the solved data are not, so its layer would relax
   toward another state.
-- **The outer faces** keep the superposition's Dirichlet data. The solved
-  data differ there by XCTS's correction, of order `(M_ADM − Σ M_A)/L`, and
-  by the attenuation; the difference is measured at `t = 0`, and step B5's
-  frozen data are the fix if it matters **(open)**.
+- **The lapse and the shift are the case's (decided by Erik 2026-11-16).**
+  The constraints are `γ_ij` and `K_ij`; the lapse and the shift are a free
+  choice on the slice. XCTS's fixed lapse takes `α̃ = αψ⁻⁶` from free data that
+  its attenuation makes flat far from the holes, so its own lapse grows as
+  `ψ⁶ ≈ 1 + 3M/r` (`1.097` at `|x| = 32` for the `d = 8` pair) and the start
+  jumped by `0.27` in `g_ab` against the outer faces' Dirichlet data, with
+  `C_a ≈ 6·10⁻³` beyond `4 M`. `load_xcts_metric(…; gauge)` takes `α`, `β^i`
+  and their gradients from the case's background (`gauge_3p1`) and keeps
+  `γ_ij`, `∂_k γ_ij` and `K_ij` from XCTS; `∂_t γ_ij` follows from `K_ij` and
+  that lapse and shift, `∂_t g_tb` from `C_a = 0`. On exact harmonic holes
+  (at rest, spinning, boosted) this rebuilds `g_ab` and every `∂_c g_ab` to
+  roundoff. `test/binary_runs.jl` passes the case's background
+  (`xcts_gauge=case`, the default).
+- **The outer faces** keep the superposition's Dirichlet data. With the
+  case's gauge the start differs from them by `7.3·10⁻⁴` in `g_ab` and
+  `6.3·10⁻⁵` in `∂_c g_ab` at `d = 8` (`4.5·10⁻⁴` and `6.1·10⁻⁵` at `d = 10`),
+  against the background's own `6.5·10⁻²` from flat space (measured, step
+  S1): XCTS's correction to the far field, which the boundary's frozen data
+  carry or not (step B5) **(open)**.
+- **The pair on the grid at `t = 0` (measured, step S1).** The `p = 8`
+  solutions through `test/binary_runs.jl xcts=` (step H4's `:fitted` rows:
+  `L = 32`, cubes `8, 4, 2, 1, 3/4` about each hole, `q = 4`; `margin = 8`,
+  `n_L = 12` at `1/48`, `16` and `20` at `1/96`), against the superposition
+  on the same mesh, in bands about each hole (in `M`):
+
+  | band | `ℋ` superposed | `ℋ` solved, `1/48` → `1/96` | `ℳ` superposed | `ℳ` solved, `1/48` → `1/96` |
+  |---|---|---|---|---|
+  | `d = 8`: `[0.5, 0.75)` | `0.074` | `3.6` → `6.4·10⁻³` | `0.053` | `5.7` → `7.4·10⁻⁴` |
+  | `[0.75, 1)` | `0.083` | `1.9` → `3.6·10⁻⁴` | `0.037` | `2.9` → `3.5·10⁻⁴` |
+  | `[1, 1.5)` | `0.079` | `1.8` → `3.2·10⁻⁴` | `0.023` | `1.9` → `2.2·10⁻⁴` |
+  | `[2, 3)` | `0.018` | `5.6` → `10·10⁻⁵` | `2.2·10⁻³` | `3.8` → `4.4·10⁻⁵` |
+  | `[4, ∞)` | `1.6·10⁻³` | `2.6` → `7.2·10⁻⁴` | `1.2·10⁻⁴` | `2.7` → `3.3·10⁻⁶` |
+  | `d = 10`: `[0.5, 0.75)` | `0.059` | `3.7` → `6.7·10⁻³` | `0.042` | `5.8` → `7.6·10⁻⁴` |
+  | `[1, 1.5)` | `0.063` | `1.8` → `3.2·10⁻⁴` | `0.018` | `1.9` → `2.2·10⁻⁴` |
+  | `[2, 3)` | `0.015` | `5.7` → `10·10⁻⁵` | `1.5·10⁻³` | `3.8` → `4.5·10⁻⁵` |
+
+  From the horizon out the solved data are `12–800×` below the
+  superposition in `ℋ` and `16–110×` in `ℳ`, whose own violation does not
+  change with `h`. They do not converge: `ℋ` doubles from `1/48` to `1/96`,
+  the seam error above, and `p = 6` data give `5–10×` more than `p = 8` at
+  `1/96`. `C_a` is `2.6–3.3·10⁻⁵` overall against the superposition's
+  `0.4–1.3·10⁻⁵`, from the same seams. Each hole's `M_irr` on the grid is
+  XCTS's (`0.5059` at `d = 8`, `0.5052` at `d = 10`; superposed `0.5042` and
+  `0.5034`), and `M_ADM` is `0.98166` and `0.98607`. XCTS's own check, in
+  shells about each hole, puts the solved data's `ℋ` above the
+  superposition's exact violation just inside and outside the horizon
+  (`1.4` and `0.27` against `0.11` and `0.033` at `p = 8`), its elements there
+  being `0.24` thick; on the grid that region is still `12–20×` below the
+  superposition. The start costs `8 min` at `1/48` and `27 min` at `1/96`
+  (`54 M` points) on 48 threads of a Trillium node, after the solve's
+  `1 h 42 min` (`d = 8`) and `1 h 18 min` (`d = 10`).
 
 ### The merger
 

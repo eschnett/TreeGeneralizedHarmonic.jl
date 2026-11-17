@@ -1411,9 +1411,23 @@ H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
   to `40–6000×` below the superposition's (`CODE.md`, "Solved data for the
   pair"). The `p = 6` and `p = 8` solutions are saved in
   `/scratch/eschnett/claude/xcts-s1/pairfix2/f8q{6,8}/sol.jls`.
-- **Next:** the constraints in shells about each hole, to place the
-  remaining `ℋ` of the shell that holds the holes; then the transfer and the
-  acceptance's runs at `1/48` and `1/96`.
+- **Done, `d = 10`:** solved the same way (`M_h = 20`, Trillium job
+  2873191), `p = 8` in `1 h 18 min`; saved in
+  `/scratch/eschnett/claude/xcts-s1/pairfix3/d10q8/sol.jls`.
+- **Done, the pair's acceptance on the grid, all but one criterion**
+  (`CODE.md`, "From XCTS to the grid"): at `d = 8` and `d = 10`, at `1/48`
+  and `1/96`, `ℋ` and `ℳ` at `t = 0` are `12–800×` and `16–110×` below the
+  superposition's from the horizon out; each hole's `M_irr` and `M_ADM` are
+  XCTS's; the outer faces' mismatch is `4–7·10⁻⁴` in `g_ab` once the start
+  takes the case's lapse and shift (Erik, 2026-11-16); the solve and the
+  transfer's cost are recorded.
+- **Not met: "at truncation level and converging between `1/48` and
+  `1/96`".** The solved data's `ℋ` doubles from `1/48` to `1/96`: the seams
+  between XCTS's elements, whose derivative jumps a finite difference turns
+  into `1/h`, at `p = 8` with elements `0.24` thick near each hole. Higher `p`
+  (`p = 6` → `8` cut it `5–10×`), radial grading of XCTS's mesh near the
+  holes (HexMeshes), or the relaxation sweeps on the grid proposed in
+  `CODE.md` would lower it; which, if any, is Erik's decision **(open)**.
 
 **Accept:**
 

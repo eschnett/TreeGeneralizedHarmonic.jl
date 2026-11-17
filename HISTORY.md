@@ -2585,6 +2585,18 @@ a step); started from the converged lower degree (`pseq`), each degree
 converged in 4–16 steps. XCTS commit `ed17c58` (local) has the options, all
 off by default.
 
+**The pair on the grid, and its lapse (2026-11-16).** The first transfer of the
+`d = 8` pair (Trillium job 2873210) started from XCTS's own lapse, which the
+fixed lapse makes grow outward (`1.097` at `|x| = 32`): the outer faces
+differed from the superposition's Dirichlet data by `0.27` in `g_ab`, and
+`C_a` beyond `4 M` was `6–8·10⁻³` against `10⁻⁶` near the holes. Since the
+lapse and the shift are gauge, Erik chose to take them from the case's
+background in the transfer rather than re-solve; the faces' mismatch fell to
+`7.3·10⁻⁴` and `C_a` to the superposition's order (`d63e849`). The `ℋ` and `ℳ`
+of the first transfer did not change, as they should not. A first face check
+failed on a top-level loop's soft scope in `binary_runs.jl`, and the
+superposition's rows on a missing `checkpoint=`; both were rerun.
+
 ## Possible extensions
 
 ### Extensions since built
