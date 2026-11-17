@@ -8655,7 +8655,45 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   same at `p = 8` and `p = 10` to three digits: the outer faces' mismatch
   with the Dirichlet data, not the data. The start costs `8 min` at `1/48` and `27 min` at `1/96`
   (`54 M` points) on 48 threads of a Trillium node, after the solve's
-  `1 h 42 min` (`d = 8`) and `1 h 18 min` (`d = 10`).
+  `1 h 42 min` (`d = 8`) and `1 h 18 min` (`d = 10`). **At `d = 10`** `p = 10`
+  took `1 h` from the `p = 8` solution (`451 GB`; half of it at the residual's
+  `2·10⁻⁸` floor), moved `M_ADM` by `4·10⁻⁹` and `M_irr` by `10⁻⁶`, and gives on
+  the grid what `d = 8` does: `ℋ` in `[1, 1.5)` `1.1` → `2.0·10⁻⁵`, from `1.8` →
+  `3.2·10⁻⁴` at `p = 8`.
+- **The pair evolved from the solved data (measured, step S1).** The `d = 8`
+  starts at `p = 8` and `p = 10` run to `4 M` with the settings above, but
+  finds every `M/4` and, at `1/48`, `margin = 6`: the horizon's coordinate
+  radius shrinks from `0.481` to `0.452` by `2 M` and returns to `0.463` by
+  `4 M` (the superposition's from `0.507` to `0.479`, monotonically), which is
+  a jump of `0.019` between finds a chunk apart — more than `G h/2` at `1/96`
+  — and leaves too little room for `margin = 8` at `1/48` after `1.2 M`;
+  `margin = 4` is too close for the finder at `t = 0`. `ℋ` in bands about
+  hole 1 at `4 M`:
+
+  | band | `1/48`, `p = 8` | `1/48`, `p = 10` | `1/96`, `p = 8` | `1/96`, `p = 10` | superposed, `1/48` |
+  |---|---|---|---|---|---|
+  | `[0.75, 1)` | `1.0·10⁻⁴` | `1.0·10⁻⁴` | `8.3·10⁻⁶` | `2.3·10⁻⁶` | `0.063` |
+  | `[1, 1.5)` | `1.0·10⁻⁵` | `9.4·10⁻⁶` | `4.6·10⁻⁶` | `6.0·10⁻⁷` | `0.042` |
+  | `[1.5, 2)` | `3.3·10⁻⁶` | `2.1·10⁻⁶` | `4.2·10⁻⁶` | `1.9·10⁻⁷` | `0.018` |
+  | `[2, 3)` | `2.3·10⁻⁶` | `8.7·10⁻⁷` | `3.4·10⁻⁶` | `1.1·10⁻⁷` | `6.6·10⁻³` |
+  | `[3, 4)` | `2.0·10⁻⁶` | `2.0·10⁻⁷` | `3.1·10⁻⁶` | `8.0·10⁻⁸` | `1.2·10⁻³` |
+  | `[4, ∞)` | `9.7·10⁻⁵` | `9.6·10⁻⁵` | `2.3·10⁻⁴` | `2.3·10⁻⁴` | `8.4·10⁻⁴` |
+
+  From `p = 10` data the evolved constraints converge: `ℋ` falls `16–43×`
+  from `1/48` to `1/96` within `1.5 M` of the hole (the layers differ there:
+  `margin = 6` at `1/48`, `16` at `1/96`), `8–11×` out to `3 M` and `2.5×` in
+  `[3, 4)`, and `ℳ` and `C_a` alike. From `p = 8` data they do not: at `1/96`
+  they are `8–40×` above `p = 10`'s from `1 M` out, and from `1.5 M` out no
+  lower than at `1/48`. So the data's order must rise with the grid: `p = 8` serves
+  `1/48`, and `p = 10` serves `1/96` to about `3 M` from each hole. What the
+  holes do does not depend on it: `M_irr` at `4 M` differs between `p = 8`
+  and `p = 10` by `4·10⁻⁸` (`1/48`) and `5·10⁻⁸` (`1/96`), against `10⁻⁵`
+  between the two resolutions, and holds to `5·10⁻⁷` over the `4 M` at
+  `1/96`, where the superposition's loses `2.3 %`; the tracks' separation
+  agrees to `10⁻⁶` (`8 → 7.9719`). Beyond `4 M` the outer faces' mismatch
+  dominates, the same for both orders and larger at `1/96`. A run costs
+  `20 min` at `1/48` (64 threads) and `82 min` at `1/96` (96 threads) on a
+  Trillium node.
 
 ### The merger
 

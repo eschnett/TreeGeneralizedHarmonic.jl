@@ -1428,8 +1428,19 @@ H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
   `p = 10` (Erik, 2026-11-16; `d = 8`, Trillium jobs 2874056 and 2874265) it
   falls `10–20×` — `ℋ` `2500–8000×` below the superposition from `0.75 M` out,
   `ℳ` level, `C_a` converging as the superposition's — and still doubles from
-  `1/48` to `1/96`. Whether that is enough, and `d = 10` at `p = 10`, are Erik's
-  decision **(open)**.
+  `1/48` to `1/96`. `d = 10` at `p = 10` (Erik, 2026-11-17; Trillium jobs
+  2878216 and 2878217) gives the same.
+- **Done, the evolution decides it** (Erik, 2026-11-17; Trillium jobs
+  2878542, 2878573): the `d = 8` pair from `p = 8` and `p = 10` data at `1/48`
+  and `1/96` to `4 M` (`CODE.md`, "The pair evolved from the solved data").
+  From `p = 10` the evolved `ℋ`, `ℳ` and `C_a` converge between `1/48` and
+  `1/96` out to about `3 M` from each hole; from `p = 8` they do not beyond
+  `1 M`. `M_irr` and the tracks do not depend on the order (`5·10⁻⁸` against
+  `10⁻⁵` between resolutions). So the data's order rises with the grid —
+  `p = 10` for `1/96` — and the criterion holds in the evolution near the holes,
+  not at `t = 0`; whether that accepts step S1 is Erik's decision **(open)**.
+  Beyond `4 M` the outer faces' mismatch dominates and grows with resolution
+  (step B5's frozen data, or boundary data from the solved slice).
 
 **Accept:**
 

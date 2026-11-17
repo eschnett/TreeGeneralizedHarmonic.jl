@@ -2597,6 +2597,25 @@ of the first transfer did not change, as they should not. A first face check
 failed on a top-level loop's soft scope in `binary_runs.jl`, and the
 superposition's rows on a missing `checkpoint=`; both were rerun.
 
+**Higher order, and the evolution as the judge (2026-11-16 to 17).** `p = 10`
+(Erik's request) lowered the data's part of the grid's constraints `10–20×`
+at `d = 8` and `d = 10`, and `ℋ` at `t = 0` still doubled from `1/48` to
+`1/96`. Erik asked whether XCTS could do what the pair needs, or whether
+another solver should be considered, `ThreePunctures.jl` among them. It was
+not: its free data are maximal slices of Kerr in quasi-isotropic coordinates
+with puncture topology, where this route needs harmonic Kerr in the harmonic
+chart, and its convergence with spin is algebraic. And no external solution
+converges with `h` at `t = 0` — the grid's truncation falls, the data's error
+does not — so the question became whether the data's error shows in an
+evolution against the resolution's. Erik approved evolving the pair from
+`p = 8` and `p = 10` data. The first runs restarted the `t = 0` checkpoints with
+another `chunk` and were refused; then the horizon's coordinate radius,
+shrinking `0.019` in the first `M`, was refused as a jump between finds at
+`1/96` and left too little room for `margin = 8` at `1/48` after `1.2 M`;
+`margin = 4` failed the finder at `t = 0`. Finds every `M/4` and `margin = 6`
+at `1/48` ran to `4 M`: `CODE.md`'s table "The pair evolved from the solved
+data".
+
 ## Possible extensions
 
 ### Extensions since built
