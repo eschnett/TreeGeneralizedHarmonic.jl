@@ -125,7 +125,7 @@ research project; the inherited documents live in `notes/`.
   - [What the package has measured in this chart](#what-the-package-has-measured-in-this-chart)
   - [What harmonic gauge costs](#what-harmonic-gauge-costs)
   - [The data](#the-data)
-  - [Solved data for the pair (proposed)](#solved-data-for-the-pair-proposed)
+  - [Solved data for the pair](#solved-data-for-the-pair)
   - [The merger](#the-merger)
   - [On which grid](#on-which-grid)
   - [The ladder of this route](#the-ladder-of-this-route)
@@ -4754,7 +4754,7 @@ fits and the track it made, the track before the row's find as `track_chunk`
 the uninterrupted run does not regrid at `t = 0`: its mesh is the initial-data
 cycle's. This is how data solved by another code reach a run that cannot load
 that code (`evolve!`'s `initial_data`; [Solved data for the
-pair](#solved-data-for-the-pair-proposed)). The run state is built by one
+pair](#solved-data-for-the-pair)). The run state is built by one
 function, `run_state`, for both places a checkpoint is written.
 
 **Would TreeHydro's work the same way?** Yes, and nothing in TreeAMR is in
@@ -7587,7 +7587,7 @@ Three sources, in the order the steps use them.
 superposed Kerr-Schild free data (SpEC's direct-K variant), compactified to
 `i⁰`, to `10⁻¹⁰`. The harmonic route takes the same design with
 harmonic free data ([Solved data for the
-pair](#solved-data-for-the-pair-proposed)). Three things stand between its solution and this
+pair](#solved-data-for-the-pair)). Three things stand between its solution and this
 package's grid:
 
 - **XCTS's production data stop at the horizon.** Its isolated-horizon
@@ -8398,12 +8398,12 @@ built](#what-step-h4-has-built)).
   `28 M` at `d = 8` (measured, step H4; [What step H4 has
   built](#what-step-h4-has-built)). These data are what the pair's code is
   tested with, not what the route evolves; the route's data are solved
-  ([Solved data for the pair](#solved-data-for-the-pair-proposed)).
+  ([Solved data for the pair](#solved-data-for-the-pair)).
 - Any solved lapse and shift can start a harmonic evolution, since
   `Γ_a = 0` fixes only their time derivatives. SpEC reports less junk from
   harmonic free data than from Kerr-Schild's, on solved data.
 
-### Solved data for the pair (proposed)
+### Solved data for the pair
 
 **Why (measured, step H4).** The superposed harmonic pair violates the
 Hamiltonian constraint by `ℋ ≈ 0.08` in the shells about each hole, a
@@ -8685,7 +8685,8 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   `[3, 4)`, and `ℳ` and `C_a` alike. From `p = 8` data they do not: at `1/96`
   they are `8–40×` above `p = 10`'s from `1 M` out, and from `1.5 M` out no
   lower than at `1/48`. So the data's order must rise with the grid: `p = 8` serves
-  `1/48`, and `p = 10` serves `1/96` to about `3 M` from each hole. What the
+  `1/48`, and `p = 10` serves `1/96` to about `3 M` from each hole (step S1
+  accepted on this by Erik, 2026-11-17). What the
   holes do does not depend on it: `M_irr` at `4 M` differs between `p = 8`
   and `p = 10` by `4·10⁻⁸` (`1/48`) and `5·10⁻⁸` (`1/96`), against `10⁻⁵`
   between the two resolutions, and holds to `5·10⁻⁷` over the `4 M` at
@@ -8812,7 +8813,7 @@ grid throughout, or the inertial grid with `:fitted` measured first between
    *Shelved (Erik, 2026-11-15):* its first runs found that the superposed
    data's holes lose `13 %` of their irreducible mass, so the pair's runs
    wait for solved data ([Solved data for the
-   pair](#solved-data-for-the-pair-proposed); `PLAN.md`'s steps S1 and S2).
+   pair](#solved-data-for-the-pair); `PLAN.md`'s steps S1 and S2).
 5. **The orbit**, on the grid chosen from step H2's ratio.
 
 ### What step H4 has built
@@ -8822,7 +8823,7 @@ The pair's code, on steps B1–B3's composition (`test/harmonic_holes_tests.jl`;
 `:damped` target or step 8e's `:fitted` target. The first runs, at `1/48` and `1/96`, found that the
 superposed data's holes lose mass (the last item below), and the step is
 shelved until the data are solved (Erik, 2026-11-15; [Solved data for the
-pair](#solved-data-for-the-pair-proposed)).
+pair](#solved-data-for-the-pair)).
 
 - **A hole's chart.** `HoleSpec(…; chart = :harmonic)` is harmonic Kerr on its
   line (`hole_on_line`); its seed, its radius checks and its tracked target read

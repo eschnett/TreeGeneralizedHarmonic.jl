@@ -50,9 +50,9 @@ inertial grid, Erik's choice) and **shelved** (2026-11-15): the harmonic pair
 with no source, the roll-on from zero and `:fitted` per hole are built, and
 its first runs found that the superposed data's holes lose `13 %` of their
 irreducible mass, from the data's constraint violation. Its state is parked in
-a draft pull request. **Steps S1 and S2 are proposed** (2026-11-15) to come
-first: the pair's data solved by XCTS, then two holes far apart on those data;
-step H4 then resumes on them. Step H5 is not started. Steps H1–H3 were single
+a draft pull request. **Step S1 is done** (2026-11-15 to 2026-11-17): the
+pair's data solved by XCTS. **Step S2 is next**: two holes far apart on those
+data; step H4 then resumes on them. Step H5 is not started. Steps H1–H3 were single
 holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
@@ -1357,101 +1357,19 @@ H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
 
 ## Step S1 — Solved data for two harmonic holes
 
-`CODE.md`: "Solved data for the pair"; "Initial data" (item 2).
-
-**Changes:**
-
-- **XCTS alone, first.** Superposed harmonic Kerr free data — XCTS's
-  direct-K superposition of translated `Harmonic(M_A, 0)` components, with
-  its attenuation `ℓ ≈ d` — and Dirichlet to the free data on a sphere
-  inside each core (`horizon_bc = false`). A single harmonic hole first,
-  then the head-on pair at `d = 8` and `d = 10`, `M_A = 1/2`, each solved to
-  `10⁻¹⁰`. XCTS's diagnostics give the constraints, the ADM mass and each
-  hole's `M_irr`. If XCTS does not converge with spheres that deep, describe
-  exactly what fails and stop there: the fallback, isolated-horizon data
-  extended inward by a fit, is Erik's decision.
-- **A host tool** (`bench/`, its own environment): the mesh from the
-  initial-data cycle on the superposed data of the same holes, the solution
-  evaluated at TreeAMR's points, `g_ab` and `Π` (`∂_t γ_ij` from the
-  solution's `K_ij`, `∂_t α` and `∂_t β^i` from `C_a = 0`), the spatial
-  derivatives from XCTS's spectral basis, and the forest and the state
-  written through TreeIOHDF5.
-- **`evolve!` starts from such a file**: the holes reseeded on the horizons
-  found there, each hole's fit made, the run's state started. A case with a
-  `:damped` hole is refused.
-- **`test/binary_runs.jl data=<file>`**.
-
-**Status (2026-11-15).**
-
-- **Done:** the single hole converges in XCTS. Its error on the grid is
-  `CODE.md`'s table: below the grid's own at `1/96` from `p = 10`. Erik
-  judged XCTS as it is good enough.
-- **Done, the transfer, built as a metric and a start checkpoint rather than
-  a file format of its own:**
-  - `bench/xcts_metric.jl`;
-  - `evolve!(…; initial_data, t_end = 0)`, which writes chunk 0;
-  - the restart path continues it;
-  - the scripts take it as `xcts=<file>`.
-
-  `checkpoint_tests.jl` passes. A local octant run from `p = 5` data
-  (`1/32`, to `M/2`) went through end to end.
-- **Done, the single hole's acceptance:** step H1's `:fitted` row at `1/48`
-  from `p = 10` and refined `p = 8` data, on Trillium to `10 M`, is that row
-  from `1 M` on, to three or four digits in every shell, and `M_irr` to
-  `3·10⁻¹¹` (`CODE.md`, "Solved data for the pair").
-- **Done, the pair's solve at `p = 2`, with the lapse fixed:** XCTS's
-  extended system does not converge for the pair at `d = 8` with the spheres
-  inside `r_0 = 2/5 M_A`, whatever the mesh, the order, the linear solver,
-  the globalization, the separation or the attenuation. Standard XCTS, with
-  the densitized lapse fixed to the superposition's (`lapse = :fixed`, added
-  for this), converges at `R1 = 1/8` in seven iterations (`CODE.md`, "Solved
-  data for the pair", the table).
-- **Done, the pair's constraints converge in `p`:** at `p = 4, 6, 8` on
-  Trillium (job 2872117), `ℋ` and `ℳ` away from the holes fall spectrally
-  to `40–6000×` below the superposition's (`CODE.md`, "Solved data for the
-  pair"). The `p = 6` and `p = 8` solutions are saved in
-  `/scratch/eschnett/claude/xcts-s1/pairfix2/f8q{6,8}/sol.jls`.
-- **Done, `d = 10`:** solved the same way (`M_h = 20`, Trillium job
-  2873191), `p = 8` in `1 h 18 min`; saved in
-  `/scratch/eschnett/claude/xcts-s1/pairfix3/d10q8/sol.jls`.
-- **Done, the pair's acceptance on the grid, all but one criterion**
-  (`CODE.md`, "From XCTS to the grid"): at `d = 8` and `d = 10`, at `1/48`
-  and `1/96`, `ℋ` and `ℳ` at `t = 0` are `12–800×` and `16–110×` below the
-  superposition's from the horizon out; each hole's `M_irr` and `M_ADM` are
-  XCTS's; the outer faces' mismatch is `4–7·10⁻⁴` in `g_ab` once the start
-  takes the case's lapse and shift (Erik, 2026-11-16); the solve and the
-  transfer's cost are recorded.
-- **Not met: "at truncation level and converging between `1/48` and
-  `1/96`".** The solved data's `ℋ` doubles from `1/48` to `1/96`: the seams
-  between XCTS's elements, whose derivative jumps a finite difference turns
-  into `1/h`, at `p = 8` with elements `0.24` thick near each hole. At
-  `p = 10` (Erik, 2026-11-16; `d = 8`, Trillium jobs 2874056 and 2874265) it
-  falls `10–20×` — `ℋ` `2500–8000×` below the superposition from `0.75 M` out,
-  `ℳ` level, `C_a` converging as the superposition's — and still doubles from
-  `1/48` to `1/96`. `d = 10` at `p = 10` (Erik, 2026-11-17; Trillium jobs
-  2878216 and 2878217) gives the same.
-- **Done, the evolution decides it** (Erik, 2026-11-17; Trillium jobs
-  2878542, 2878573): the `d = 8` pair from `p = 8` and `p = 10` data at `1/48`
-  and `1/96` to `4 M` (`CODE.md`, "The pair evolved from the solved data").
-  From `p = 10` the evolved `ℋ`, `ℳ` and `C_a` converge between `1/48` and
-  `1/96` out to about `3 M` from each hole; from `p = 8` they do not beyond
-  `1 M`. `M_irr` and the tracks do not depend on the order (`5·10⁻⁸` against
-  `10⁻⁵` between resolutions). So the data's order rises with the grid —
-  `p = 10` for `1/96` — and the criterion holds in the evolution near the holes,
-  not at `t = 0`; whether that accepts step S1 is Erik's decision **(open)**.
-  Beyond `4 M` the outer faces' mismatch dominates and grows with resolution
-  (step B5's frozen data, or boundary data from the solved slice).
-
-**Accept:**
-
-- **A single harmonic hole through XCTS**: the solution is harmonic Kerr to
-  XCTS's accuracy, and its run from the file is step H1's `:fitted` row at
-  `1/48` to `10 M`, to that accuracy.
-- **The pair at `d = 8` and `d = 10`**: `ℋ` and `ℳ` on the grid at `t = 0`
-  at truncation level and converging between `1/48` and `1/96`, against the
-  superposed data's `0.08`; each hole's `M_irr` and the ADM mass; the outer
-  faces' mismatch between the solved and the superposed data; what the
-  solve and the transfer cost.
+Done (it ran 2026-11-15 to 2026-11-17; accepted by Erik on 2026-11-17). Its
+design and measurements are in `CODE.md`, "Solved data for the pair" and
+"From XCTS to the grid"; the brief and its status are in `HISTORY.md`, "Step
+S1 — Solved data for two harmonic holes", and the story in "Step S1 started:
+XCTS's data on the grid (2026-11-15)". XCTS solves the pair with the
+densitized lapse fixed (`lapse = :fixed`, on XCTS's local branch
+`claude/harmonic-free-data`); the start takes the case's lapse and shift. The
+`d = 8` and `d = 10` solutions at `p = 8` and `p = 10` are on Trillium in
+`/scratch/eschnett/claude/xcts-s1/pairfix{2,3,4,5}/`. Evolved from `p = 10`
+data, the pair's constraints converge between `1/48` and `1/96` out to about
+`3 M` from each hole; the data's order rises with the grid (`p = 10` for
+`1/96`). Runs from solved data take finds every `M/4` and, at `1/48`,
+`margin = 6`. The outer faces still carry the superposition's Dirichlet data.
 
 ## Step S2 — Two holes far apart
 
@@ -1464,8 +1382,9 @@ interact, on solved data. Head-on from rest at `d = 10` (Erik's suggestion,
 about `1 M` by `20 M`.
 
 **Changes:** none expected beyond step S1's; the run is
-`test/binary_runs.jl` on S1's `d = 10` file, `:fitted`, no source, the
-inertial grid, `1/48` and `1/96` to `20 M`.
+`test/binary_runs.jl` on S1's `d = 10` file at `p = 10`, `:fitted`, no source,
+the inertial grid, `1/48` and `1/96` to `20 M`, with finds every `M/4` and
+`margin = 6` at `1/48` (step S1).
 
 **Accept:**
 
