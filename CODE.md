@@ -8636,7 +8636,24 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   superposition's exact violation just inside and outside the horizon
   (`1.4` and `0.27` against `0.11` and `0.033` at `p = 8`), its elements there
   being `0.24` thick; on the grid that region is still `12–20×` below the
-  superposition. The start costs `8 min` at `1/48` and `27 min` at `1/96`
+  superposition.
+
+  **At `p = 10` (`d = 8`)** the solve took `29 min` from the `p = 8` solution
+  (`363 GB`; `M_ADM` unchanged to `10⁻⁹`, `M_irr` by `3·10⁻⁶`), and on the
+  grid the data's part falls `10–20×`:
+
+  | band | `ℋ` superposed | `ℋ` `p = 10`, `1/48` → `1/96` | `ℳ` `p = 10` | `C_a` `p = 10` | `C_a` superposed |
+  |---|---|---|---|---|---|
+  | `[0.5, 0.75)` | `0.074` | `3.6` → `7.4·10⁻⁴` | `2.3·10⁻⁴` → `4.1·10⁻⁵` | `7.4` → `3.7·10⁻⁶` | `6.6·10⁻⁶` → `4.1·10⁻⁷` |
+  | `[1, 1.5)` | `0.079` | `1.0` → `2.0·10⁻⁵` | `1.2` → `1.0·10⁻⁵` | `6.4·10⁻⁷` → `4.8·10⁻⁸` | `6.4·10⁻⁷` → `4.0·10⁻⁸` |
+  | `[2, 3)` | `0.018` | `3.1` → `6.0·10⁻⁶` | `1.8` → `2.2·10⁻⁶` | `1.4·10⁻⁷` → `1.6·10⁻⁸` | `1.3·10⁻⁷` → `8.1·10⁻⁹` |
+
+  `ℋ` is `2500–8000×` below the superposition's from `0.75 M` out and still
+  doubles with `1/h` (the seams, smaller); `ℳ` no longer grows, and `C_a`
+  converges near the holes as the superposition's truncation error does.
+  Beyond `4 M`, `ℋ` (`2.6` → `7.2·10⁻⁴`) and `C_a` (`1.2` → `1.7·10⁻⁵`) are the
+  same at `p = 8` and `p = 10` to three digits: the outer faces' mismatch
+  with the Dirichlet data, not the data. The start costs `8 min` at `1/48` and `27 min` at `1/96`
   (`54 M` points) on 48 threads of a Trillium node, after the solve's
   `1 h 42 min` (`d = 8`) and `1 h 18 min` (`d = 10`).
 

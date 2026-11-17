@@ -1424,10 +1424,12 @@ H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
 - **Not met: "at truncation level and converging between `1/48` and
   `1/96`".** The solved data's `ℋ` doubles from `1/48` to `1/96`: the seams
   between XCTS's elements, whose derivative jumps a finite difference turns
-  into `1/h`, at `p = 8` with elements `0.24` thick near each hole. Higher `p`
-  (`p = 6` → `8` cut it `5–10×`), radial grading of XCTS's mesh near the
-  holes (HexMeshes), or the relaxation sweeps on the grid proposed in
-  `CODE.md` would lower it; which, if any, is Erik's decision **(open)**.
+  into `1/h`, at `p = 8` with elements `0.24` thick near each hole. At
+  `p = 10` (Erik, 2026-11-16; `d = 8`, Trillium jobs 2874056 and 2874265) it
+  falls `10–20×` — `ℋ` `2500–8000×` below the superposition from `0.75 M` out,
+  `ℳ` level, `C_a` converging as the superposition's — and still doubles from
+  `1/48` to `1/96`. Whether that is enough, and `d = 10` at `p = 10`, are Erik's
+  decision **(open)**.
 
 **Accept:**
 
