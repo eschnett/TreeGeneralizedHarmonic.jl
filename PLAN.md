@@ -51,8 +51,8 @@ with no source, the roll-on from zero and `:fitted` per hole are built, and
 its first runs found that the superposed data's holes lose `13 %` of their
 irreducible mass, from the data's constraint violation. Its state is parked in
 a draft pull request. **Step S1 is done** (2026-11-15 to 2026-11-17): the
-pair's data solved by XCTS. **Step S2 is next**: two holes far apart on those
-data; step H4 then resumes on them. Step H5 is not started. Steps H1–H3 were single
+pair's data solved by XCTS. **Step S2 has run** (2026-11-17), two holes far
+apart on those data, and waits for Erik's review; step H4 then resumes on them. Step H5 is not started. Steps H1–H3 were single
 holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
@@ -1400,6 +1400,25 @@ the inertial grid, `1/48` and `1/96` to `20 M`, with finds every `M/4` and
 
 Step H4 then resumes on step S1's `d = 8` data, with its acceptance as it
 stands.
+
+**Status (2026-11-17, waiting for Erik's review).** Run on Trillium (jobs
+2879644 and 2879645, script `~/claude/xcts-s1/src/s2evo.sh`, output in
+`/scratch/eschnett/claude/xcts-s1/s2h48` and `s2h96`); the numbers are in
+`CODE.md`, "Two holes far apart". Against the acceptance:
+
+- `M_irr`: met — drift `7.0·10⁻⁷` and `4.1·10⁻⁸` per `M_A` against step H1's
+  `8.1·10⁻⁷` and `5.1·10⁻⁸` at the same spacing in `M_A`.
+- The shells about each hole: met for the constraints (the single hole's to a
+  factor of two, order four). The layer's error has no exact solution to
+  compare with; its residual is against the superposition, not the data.
+- Every find: met. The tracks' acceleration is `0.65–0.8×` the Newtonian
+  `M_B/d²`, in harmonic coordinates.
+- `C_a` and `ℋ` over the evolved region: **not met.** They converge within
+  `4 M` of each hole; beyond that the outer faces' mismatch dominates and
+  grows with resolution (step S1's open item).
+- The cost: `1.6×` step S1's single hole on the octant at the same spacing,
+  in core-seconds per `M_A`, on Trillium's CPUs (step H1's own rows ran on an
+  H200).
 
 ## Step H4 — Two holes with no source
 

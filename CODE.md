@@ -8695,6 +8695,57 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   dominates, the same for both orders and larger at `1/96`. A run costs
   `20 min` at `1/48` (64 threads) and `82 min` at `1/96` (96 threads) on a
   Trillium node.
+- **Two holes far apart (measured, step S2).** The `d = 10` start at `p = 10`
+  run to `20 M` with the settings above (`margin = 6` at `1/48`, `16` at
+  `1/96`; finds every `M/4`). In each hole's own units the spacings are
+  `M_A/24` and `M_A/48`, so step H1's rows at the same spacing are `hd24` (no
+  `:fitted` row fits there; `:fitted` is `:damped` outside the horizon) and
+  `hf48`, and `ℋ` scales as `1/M_A²`.
+  - Every find of both holes succeeds (four per `M`) and every fit is valid.
+    The two holes agree in `M_irr` to `6·10⁻⁷` (`1/48`) and `10⁻⁸` (`1/96`),
+    and in every band to two digits.
+  - `M_irr` is constant to truncation error: from `8` to `24 M_A` it drifts by
+    `+7.0·10⁻⁷` (`1/48`) and `+4.1·10⁻⁸` (`1/96`) of `M_A` per `M_A`, against
+    `hd24`'s `8.1·10⁻⁷` and `hf48`'s `5.1·10⁻⁸` (order `4.1`). At `1/96` it
+    is `0.505207` at `20 M`, XCTS's `0.505205` to `2·10⁻⁶`; at `1/48` the junk
+    takes `10⁻⁵` in the first `M` and the drift returns it. The superposed
+    data lost `13 %`.
+  - `ℋ` in bands about hole 1 at `20 M`, and its fall from `1/48` to `1/96`:
+
+    | band | `1/48` | `1/96` | ratio |
+    |---|---|---|---|
+    | `[0.5, 0.75)` | `1.1·10⁻³` | `1.2·10⁻⁵` | `92` |
+    | `[0.75, 1)` | `3.3·10⁻⁵` | `2.1·10⁻⁶` | `16` |
+    | `[1, 1.5)` | `1.1·10⁻⁵` | `6.5·10⁻⁷` | `17` |
+    | `[1.5, 2)` | `3.2·10⁻⁶` | `1.8·10⁻⁷` | `18` |
+    | `[2, 3)` | `1.4·10⁻⁶` | `7.5·10⁻⁸` | `19` |
+    | `[3, 4)` | `3.9·10⁻⁷` | `2.0·10⁻⁸` | `20` |
+    | `[4, ∞)` | `1.1·10⁻⁵` | `2.4·10⁻⁵` | `0.46` |
+
+    Within `4 M` of each hole `ℋ`, `ℳ` and `C_a` converge at order four and
+    stay flat from `4 M` to `20 M`; scaled to a unit hole they are the single
+    hole's at the same spacing to a factor of two either way (`hf48` at
+    `24 M`: `5.1·10⁻⁶`, `1.0·10⁻⁶`, `8.6·10⁻⁸`, `8.4·10⁻⁹` in `[1, 5/4)`,
+    `[5/4, 2)`, `[2, 4)`, `[4, 7)`; the pair at `1/96` and `12 M`, in the same
+    units, `2.8·10⁻⁶` in `[1, 3/2) M_A`, `5·10⁻⁷`, `1.4·10⁻⁷` and `3.5·10⁻⁸` to
+    `4 M_A`, `1.5·10⁻⁸` and `4·10⁻⁹` to `8 M_A`).
+  - **Over the evolved region they do not converge (open).** The band beyond
+    `4 M` doubles from `1/48` to `1/96`, and it holds most of the norm: `ℋ`
+    falls only `2×` (`6.5` to `3.2·10⁻⁵`), and `C_a` not at all
+    (`5.0·10⁻⁵` and `5.2·10⁻⁵`; its maximum `1.4·10⁻²` and `1.4·10⁻³`). It is
+    step S1's outer-face mismatch: the faces keep the superposition's
+    Dirichlet data. Frozen boundary data (step B5) or boundary data from the
+    solved slice would remove it.
+  - The tracks fall in from rest: the separation is `8.7663` at `20 M` at
+    both spacings (to `2·10⁻⁵`), against Newtonian free fall's `7.84`. Each
+    track's coordinate acceleration is `0.0040–0.0044` from `8 M` on, flat,
+    while the Newtonian `M_B/d²` rises from `0.0052` to `0.0065`: `0.65–0.8×`,
+    in coordinates whose gauge is harmonic with no source.
+  - A run costs `56 min` at `1/48` (96 threads) and `4.6 h` at `1/96` (192
+    threads, `50 M` points) on a Trillium node: `823 s/M`, or `412 s` per
+    `M_A`, against step S1's single hole on the octant at `1/48`, `520 s/M` on
+    half a node (96 threads) — `1.6×` in core-seconds for the whole box about
+    two holes.
 
 ### The merger
 
