@@ -8695,7 +8695,8 @@ and S2. The numbers are in `HISTORY.md`, "Step H4 shelved".
   dominates, the same for both orders and larger at `1/96`. A run costs
   `20 min` at `1/48` (64 threads) and `82 min` at `1/96` (96 threads) on a
   Trillium node.
-- **Two holes far apart (measured, step S2).** The `d = 10` start at `p = 10`
+- **Two holes far apart (measured, step S2; accepted by Erik with the outer
+  faces open, 2026-11-18).** The `d = 10` start at `p = 10`
   run to `20 M` with the settings above (`margin = 6` at `1/48`, `16` at
   `1/96`; finds every `M/4`). In each hole's own units the spacings are
   `M_A/24` and `M_A/48`, so step H1's rows at the same spacing are `hd24` (no
@@ -8863,8 +8864,9 @@ grid throughout, or the inertial grid with `:fitted` measured first between
    built, with `:fitted` per hole ([What step H4 has built](#what-step-h4-has-built)).
    *Shelved (Erik, 2026-11-15):* its first runs found that the superposed
    data's holes lose `13 %` of their irreducible mass, so the pair's runs
-   wait for solved data ([Solved data for the
-   pair](#solved-data-for-the-pair); `PLAN.md`'s steps S1 and S2).
+   waited for solved data ([Solved data for the
+   pair](#solved-data-for-the-pair); `PLAN.md`'s steps S1 and S2, both done).
+   It resumes on step S1's `d = 8` data.
 5. **The orbit**, on the grid chosen from step H2's ratio.
 
 ### What step H4 has built

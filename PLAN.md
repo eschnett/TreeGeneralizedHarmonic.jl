@@ -51,8 +51,8 @@ with no source, the roll-on from zero and `:fitted` per hole are built, and
 its first runs found that the superposed data's holes lose `13 %` of their
 irreducible mass, from the data's constraint violation. Its state is parked in
 a draft pull request. **Step S1 is done** (2026-11-15 to 2026-11-17): the
-pair's data solved by XCTS. **Step S2 has run** (2026-11-17), two holes far
-apart on those data, and waits for Erik's review; step H4 then resumes on them. Step H5 is not started. Steps H1–H3 were single
+pair's data solved by XCTS. **Step S2 is done** (2026-11-17 to 2026-11-18):
+two holes far apart on those data. **Step H4 is next**, resumed on them. Step H5 is not started. Steps H1–H3 were single
 holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
@@ -1373,52 +1373,14 @@ data, the pair's constraints converge between `1/48` and `1/96` out to about
 
 ## Step S2 — Two holes far apart
 
-`CODE.md`: "Solved data for the pair"; "What step H4 has built".
-
-Two holes that are each, nearly, the isolated harmonic hole: the pair's code
-— two tracks, two fits, the composite — tested where the holes barely
-interact, on solved data. Head-on from rest at `d = 10` (Erik's suggestion,
-2026-11-15): Newtonian free fall takes about `35 M`, and each hole moves
-about `1 M` by `20 M`.
-
-**Changes:** none expected beyond step S1's; the run is
-`test/binary_runs.jl` on S1's `d = 10` file at `p = 10`, `:fitted`, no source,
-the inertial grid, `1/48` and `1/96` to `20 M`, with finds every `M/4` and
-`margin = 6` at `1/48` (step S1).
-
-**Accept:**
-
-- each hole's `M_irr` constant, once the junk has gone in, to step H1's
-  single hole's drift at the same spacing — against the superposed data's
-  loss of `13 %`;
-- each layer's residual and error and the constraints in shells about each
-  hole: the single hole's at the same spacing;
-- every find of both holes; the tracks' acceleration beside the Newtonian
-  `M_B/d²`;
-- `C_a` and `ℋ` over the evolved region converging between the spacings;
-- the cost per `M` beside twice step H1's.
-
-Step H4 then resumes on step S1's `d = 8` data, with its acceptance as it
-stands.
-
-**Status (2026-11-17, waiting for Erik's review).** Run on Trillium (jobs
-2879644 and 2879645, script `~/claude/xcts-s1/src/s2evo.sh`, output in
-`/scratch/eschnett/claude/xcts-s1/s2h48` and `s2h96`); the numbers are in
-`CODE.md`, "Two holes far apart". Against the acceptance:
-
-- `M_irr`: met — drift `7.0·10⁻⁷` and `4.1·10⁻⁸` per `M_A` against step H1's
-  `8.1·10⁻⁷` and `5.1·10⁻⁸` at the same spacing in `M_A`.
-- The shells about each hole: met for the constraints (the single hole's to a
-  factor of two, order four). The layer's error has no exact solution to
-  compare with; its residual is against the superposition, not the data.
-- Every find: met. The tracks' acceleration is `0.65–0.8×` the Newtonian
-  `M_B/d²`, in harmonic coordinates.
-- `C_a` and `ℋ` over the evolved region: **not met.** They converge within
-  `4 M` of each hole; beyond that the outer faces' mismatch dominates and
-  grows with resolution (step S1's open item).
-- The cost: `1.6×` step S1's single hole on the octant at the same spacing,
-  in core-seconds per `M_A`, on Trillium's CPUs (step H1's own rows ran on an
-  H200).
+Done (it ran 2026-11-17 on Trillium; accepted by Erik on 2026-11-18, with the
+outer faces open). The `d = 10` pair from `p = 10` data at `1/48` and `1/96`
+to `20 M`: every find of both holes, `M_irr` drifting as step H1's single hole
+at the same spacing, and the constraints within `4 M` of each hole converging
+at order four; beyond `4 M` the outer faces' superposed Dirichlet data
+dominate `C_a` and `ℋ` and grow with resolution. Its measurements are in
+`CODE.md`, "Solved data for the pair" ("Two holes far apart"); the brief and
+its status are in `HISTORY.md`, "Step S2 — Two holes far apart".
 
 ## Step H4 — Two holes with no source
 
