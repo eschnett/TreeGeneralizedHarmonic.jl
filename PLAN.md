@@ -52,7 +52,7 @@ its first runs found that the superposed data's holes lose `13 %` of their
 irreducible mass, from the data's constraint violation. Its state is parked in
 a draft pull request. **Step S1 is done** (2026-11-15 to 2026-11-17): the
 pair's data solved by XCTS. **Step S2 is done** (2026-11-17 to 2026-11-18):
-two holes far apart on those data. **Step H4 is next**, resumed on them. Step H5 is not started. Steps H1–H3 were single
+two holes far apart on those data. **Step H4 is resumed** (2026-11-18) on them. Step H5 is not started. Steps H1–H3 were single
 holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
@@ -1387,7 +1387,16 @@ its status are in `HISTORY.md`, "Step S2 — Two holes far apart".
 **Shelved 2026-11-15** (Erik): its first runs, on superposed data, found the
 holes losing `13 %` of their irreducible mass by `28 M`, from the data's
 constraint violation (`CODE.md`, "What step H4 has built"). Its state is
-parked in a draft pull request, and it resumes on steps S1–S2's solved data.
+parked in a draft pull request.
+
+**Resumed 2026-11-18** on step S1's `d = 8` data at `p = 10`, after step S2
+(Erik). The spacings are `1/48` and `1/96` at the holes, not `1/96` and
+`1/128` (Erik, 2026-11-18): the `p = 10` data serve `1/96` and no finer
+(step S1), and a `p = 12` solve may not fit a Trillium node. The runs are
+step S2's settings (`margin = 6` at `1/48`, finds every `M/4`) on Trillium,
+script `~/claude/xcts-s1/src/h4evo.sh`: the pure harmonic rows continue step
+S1's `4 M` checkpoints, and the roll-on rows start from the data with
+`t0=0 sigma_g=5` and `10`.
 
 **Started 2026-11-14 on the inertial grid** (Erik's choice), on branch
 `claude/step-H4-prep`: built are the harmonic chart for a hole, the pair with no
@@ -1411,8 +1420,8 @@ adds the harmonic chart's version beside it.
   tracks' separation, in the run state and the checkpoint.
 - **`test/binary_runs.jl` options** for the chart, `d_g` and `σ_g`.
 
-**Accept**, on the head-on pair from rest at `d = 8 M`, at `1/96` and
-`1/128` at the holes:
+**Accept**, on the head-on pair from rest at `d = 8 M`, at `1/48` and
+`1/96` at the holes (Erik, 2026-11-18; first `1/96` and `1/128`):
 
 - one hole in this path is step H1's hole bit for bit;
 - `C_a` at `t = 0` at roundoff, and the data's `ℋ` beside the superposed
