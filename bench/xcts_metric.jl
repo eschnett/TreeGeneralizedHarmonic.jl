@@ -28,8 +28,8 @@
 using XCTS: XCTS
 using HexCGSEM: ReferenceElement
 using Serialization: deserialize
-using StaticArrays: SVector, SMatrix, SArray
-using LinearAlgebra: inv
+using StaticArrays: SVector
+using TreeGeneralizedHarmonic: TreeGeneralizedHarmonic, center_at
 import SpacetimeMetrics as SM
 
 struct XCTSMetric{M,U,D,H,R,G} <: SM.AbstractMetric
@@ -39,6 +39,8 @@ struct XCTSMetric{M,U,D,H,R,G} <: SM.AbstractMetric
     mesh::H
     refel::R
     gauge::G      # the metric the lapse and shift come from, or `nothing` (the solution's)
+    R1::Float64   # the radius of the inner spheres, inside which the data are the free data
+    centers::Vector{SVector{3,Float64}}  # the spheres' centers
     info::String  # what was solved, for `nameof` and the log
 end
 
@@ -65,86 +67,48 @@ function load_xcts_metric(path::AbstractString; gauge = nothing)
     info = "$(length(d.centers)) hole(s), d = $(d.d), mass $(d.Mass) each, R1 = $(d.R1), " *
            "p = $(d.p), $(d.dof.ndofs) DOFs/field, from $(basename(path))" *
            (gauge === nothing ? "" : "; lapse and shift from $(nameof(gauge))")
-    return XCTSMetric(d.m, d.U, d.dof, d.mesh, ReferenceElement(Float64, d.p), gauge, info)
+    return XCTSMetric(d.m, d.U, d.dof, d.mesh, ReferenceElement(Float64, d.p), gauge,
+                      Float64(d.R1), [SVector{3,Float64}(c) for c in d.centers], info)
+end
+
+"""
+    check_xcts_reach(x::XCTSMetric, geometry, depth)
+
+Refuse a start whose layer reads the data inside XCTS's inner spheres. Inside a sphere
+`|x − c| < R1` the solution is Dirichlet to the free data, so the data there are the
+unsolved superposition, joined to the solution with a jump in their derivatives at
+`R1`. A `:fitted` start reads the data from the offset surface `r_1(n̂)` down to the
+switch depth (`fit_initial_depth`), and the fit's extrapolation below it: the least
+radius read about a hole is `r_in − offset − depth`, about the layer's center, which a
+companion displaces from the sphere's. So every hole needs
+
+    r_in − offset − depth − |c_layer − c_sphere| ≥ R1,
+
+which `fit_depth = 0` (the decision) meets by the margin, and `fit_depth = n_L h` meets
+only with the sphere inside the core surface (`PLAN.md`, "Sharp edges for steps
+S1–S2"). `geometry` is the run's (`evolve!`'s result's `geometry`): a
+`FittedInterior`, or a `HoleInteriors` of them.
+"""
+function check_xcts_reach(x::XCTSMetric, geometry, depth)
+    geoms = hasproperty(geometry, :holes) ? geometry.holes : (geometry,)
+    for g in geoms
+        c = SVector{3,Float64}(Tuple(center_at(g.center, zero(g.offset))))
+        cX = x.centers[argmin([sum(abs2, c - cx) for cx in x.centers])]
+        reach = Float64(g.r_in - g.offset - depth) - sqrt(sum(abs2, c - cX))
+        reach ≥ x.R1 || throw(ArgumentError(
+            "the :fitted start reads the data down to $reach from XCTS's sphere at " *
+            "$(Tuple(cX)), inside its R1 = $(x.R1), where the data are the free data: " *
+            "use fit_depth = 0, or a solution with a smaller R1 (r_in = $(g.r_in), " *
+            "offset = $(g.offset), depth = $depth)."))
+    end
+    return nothing
 end
 
 function SM.dmetric(x::XCTSMetric, p::AbstractVector)
     f = XCTS.solved_spacetime(x.m, x.U, x.dof, x.mesh, x.refel, SVector{3,Float64}(p[2], p[3], p[4]))
-    x.gauge === nothing && return metric_from_3p1(f)
-    g = gauge_3p1(x.gauge, p)
-    return metric_from_3p1((; f.γ, f.∂γ, f.K, g.α, g.dα, g.β, g.dβ))
-end
-
-"""
-    gauge_3p1(gauge, p) -> (; α, dα, β, dβ)
-
-The lapse `α`, its gradient `dα[k] = ∂_kα`, the contravariant shift `β^i` and
-`dβ[i, k] = ∂_kβ^i` of the metric `gauge` at the event `p`, from its `g_ab` and
-`∂_c g_ab`: `β_i = g_ti`, `β^i = γ^{ij}β_j`, `α² = −g_tt + β^iβ_i`, with
-`∂_kγ^{ij} = −γ^{ia}γ^{jb}∂_kγ_ab`.
-"""
-function gauge_3p1(gauge, p::AbstractVector)
-    g, dg = SM.dmetric(gauge, SVector{4,Float64}(p[1], p[2], p[3], p[4]))
-    γ = SMatrix{3,3,Float64}(g[i + 1, j + 1] for i in 1:3, j in 1:3)
-    γu = inv(γ)
-    βl = SVector{3,Float64}(g[1, i + 1] for i in 1:3)
-    β = γu * βl
-    α = sqrt(-g[1, 1] + sum(β[i] * βl[i] for i in 1:3))
-    ∂γ(a, b, k) = dg[a + 1, b + 1, k + 1]
-    ∂γu(i, j, k) = -sum(γu[i, a] * γu[j, b] * ∂γ(a, b, k) for a in 1:3, b in 1:3)
-    ∂βl(i, k) = dg[1, i + 1, k + 1]
-    dβ = SMatrix{3,3,Float64}(sum(∂γu(i, j, k) * βl[j] + γu[i, j] * ∂βl(j, k) for j in 1:3)
-                              for i in 1:3, k in 1:3)
-    dα = SVector{3,Float64}((-dg[1, 1, k + 1] +
-                             sum(dβ[i, k] * βl[i] + β[i] * ∂βl(i, k) for i in 1:3)) / (2α)
-                            for k in 1:3)
-    return (; α, dα, β, dβ)
-end
-
-"""
-    metric_from_3p1(f) -> (g, dg)
-
-`g_ab` and `dg[a, b, c] = ∂_c g_ab` from the 3+1 fields `f` — `α`, `dα`, `β`, `dβ`,
-`γ`, `∂γ`, `K` as `XCTS.solved_spacetime` returns them — with `∂_t g_ij` from `K_ij` and
-`∂_t g_tb` from `C_a = 0` at `H = 0`. Separate from the solution so that it can be
-checked on exact data.
-"""
-function metric_from_3p1(f)
-    α, β, γ, ∂γ, dβ, dα, K = f.α, f.β, f.γ, f.∂γ, f.dβ, f.dα, f.K
-    βl = γ * β                                                  # β_i
-    # ∂_k β_i = ∂_k γ_ij β^j + γ_ij ∂_k β^j
-    dβl = SMatrix{3,3,Float64}(sum(∂γ[i, j, k] * β[j] + γ[i, j] * dβ[j, k] for j in 1:3)
-                               for i in 1:3, k in 1:3)          # dβl[i,k] = ∂_k β_i
-    gtt = -α^2 + sum(βl[i] * β[i] for i in 1:3)
-    g = SMatrix{4,4,Float64}(a == 1 && b == 1 ? gtt :
-                             a == 1 ? βl[b - 1] : b == 1 ? βl[a - 1] : γ[a - 1, b - 1]
-                             for a in 1:4, b in 1:4)
-    # The spatial derivatives, `ds[a, b, k] = ∂_k g_ab`.
-    dgtt(k) = -2α * dα[k] + sum(dβ[i, k] * βl[i] + β[i] * dβl[i, k] for i in 1:3)
-    ds = SArray{Tuple{4,4,3},Float64}(a == 1 && b == 1 ? dgtt(k) :
-                                      a == 1 ? dβl[b - 1, k] : b == 1 ? dβl[a - 1, k] :
-                                      ∂γ[a - 1, b - 1, k]
-                                      for a in 1:4, b in 1:4, k in 1:3)
-    # ∂_t γ_ij = −2αK_ij + D_iβ_j + D_jβ_i, D_iβ_j = ∂_iβ_j − Γ^l_ij β_l.
-    γu = inv(γ)
-    Γl(l, i, j) = (∂γ[l, j, i] + ∂γ[l, i, j] - ∂γ[i, j, l]) / 2  # Γ_lij
-    Dβ(i, j) = dβl[j, i] - sum(γu[l, m] * Γl(m, i, j) * βl[l] for l in 1:3, m in 1:3)
-    dtγ = SMatrix{3,3,Float64}(-2α * K[i, j] + Dβ(i, j) + Dβ(j, i) for i in 1:3, j in 1:3)
-    # ∂_t g_tb from C_a = Γ_a = 0 (H = 0): Γ_a = g^{bc} ∂_b g_ac − ½ g^{bc} ∂_a g_bc,
-    # with X_b = ∂_t g_tb entering as Γ_t = Γ⁰_t + ½ g^{tt} X_t and
-    # Γ_i = Γ⁰_i + g^{tt} X_i (`gauge_consistent_state`'s four decoupled equations).
-    gu = inv(g)
-    dz(a, b, c) = c == 1 ? ((a == 1 || b == 1) ? 0.0 : dtγ[a - 1, b - 1]) : ds[a, b, c - 1]
-    Γ0 = SVector{4,Float64}(sum(gu[b, c] * dz(a, c, b) for b in 1:4, c in 1:4) -
-                            sum(gu[b, c] * dz(b, c, a) for b in 1:4, c in 1:4) / 2
-                            for a in 1:4)
-    Xt = -2 * Γ0[1] / gu[1, 1]
-    Xi = SVector{3,Float64}(-Γ0[i + 1] / gu[1, 1] for i in 1:3)
-    dt(a, b) = a == 1 && b == 1 ? Xt : a == 1 ? Xi[b - 1] : b == 1 ? Xi[a - 1] :
-               dtγ[a - 1, b - 1]
-    dg = SArray{Tuple{4,4,4},Float64}(c == 1 ? dt(a, b) : ds[a, b, c - 1]
-                                      for a in 1:4, b in 1:4, c in 1:4)
-    return g, dg
+    x.gauge === nothing && return TreeGeneralizedHarmonic.metric_from_3p1(f)
+    g = TreeGeneralizedHarmonic.gauge_3p1(x.gauge, p)
+    return TreeGeneralizedHarmonic.metric_from_3p1((; f.γ, f.∂γ, f.K, g.α, g.dα, g.β, g.dβ))
 end
 
 SM.metric(x::XCTSMetric, p::AbstractVector) = SM.dmetric(x, p)[1]

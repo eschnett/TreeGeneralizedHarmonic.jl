@@ -538,7 +538,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         "regridded on some other criterion would be a second refinement " *
         "mechanism to delete later."))
     t_end, chunk, cfl = T(t_end), T(chunk), T(cfl)
-    t_end ≥ 0 || throw(ArgumentError("t_end must be positive, got $t_end."))
+    t_end ≥ 0 || throw(ArgumentError("t_end must not be negative, got $t_end."))
     # `t_end = 0` integrates nothing: it writes the run's start — the initial
     # data, the finds and the fits at `t = 0` — as a checkpoint that a later call
     # continues by `restart_file` (added in step S1, for data solved elsewhere).

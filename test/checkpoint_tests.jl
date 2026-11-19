@@ -306,11 +306,26 @@ SM.metric(m::RewrappedMetric, p::AbstractVector) = SM.metric(m.b, p)
         out = evolve!(T, case; q=q, ops=ops, t_end=T(1 // 10), regrid=true, ckw...,
                       restart_file=only(start.checkpoints_written))
         test_same(out, ref)
-        # The data metric at t = 0, the case's background after it.
+        # The data metric at t = 0, the case's background after it: the same
+        # numbers under another type are the same run, bit for bit.
         wrapped = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
                           t_end=T(1 // 10), regrid=true,
                           initial_data=RewrappedMetric(case.background))
         test_same(wrapped, ref)
+        # And other numbers are another start: a hole 2 % heavier must reach the
+        # fill, the find and the fit at t = 0, or a path that ignored
+        # `initial_data` would pass the check above as well.
+        heavier = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                          t_end=zero(T), regrid=true,
+                          checkpoint_path_prefix=joinpath(mktempdir(), "run"),
+                          checkpoint_every_chunks=1, checkpoint_sync_to_disk=false,
+                          initial_data=SM.KerrSchild(T(51 // 50), zero(T)))
+        @test !isequal(heavier.u, start.u)
+        @test heavier.records[1].horizon_success && start.records[1].horizon_success
+        @test isapprox(heavier.records[1].M_irr - start.records[1].M_irr, 1 // 50;
+                       atol=1 // 250)
+        @test any(((a, b),) -> a !== nothing && b !== nothing && !isequal(a.c, b.c),
+                  zip(heavier.fits, start.fits))
         # t = 0 needs a file to write; data from elsewhere need a :fitted layer.
         @test_throws "t_end = 0 integrates nothing" evolve!(
             T, case; forest=deepcopy(forest), q=q, ops=ops, t_end=zero(T))

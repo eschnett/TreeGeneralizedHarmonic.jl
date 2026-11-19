@@ -1344,16 +1344,21 @@ H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
   package's `Project.toml`. A change to XCTS is made in its repository, on a
   branch of its own; its checkout may hold Erik's uncommitted work, which
   stays as it is.
-- **A binary solve is big**: a 64-core node (XCTS's `copy-to-symmetry.sh`,
-  `launch.sh`), not the laptop.
+- **A binary solve is big**: a Trillium CPU node (`~/claude/xcts-s1/src/` there;
+  up to `451 GB` at `p = 10`), not the laptop.
 - **A solved hole's mass is not its `M_A`.** `M_A` is the free data's bare
   mass; the hole's `M_irr` is what the finder measures on the solved data.
   Say which a number is.
 - **The interior is `:fitted`.** The tracked `:damped` target is each hole's
   analytic metric, which the solved data are not; refuse it for data from a
   file rather than relax toward the wrong state.
-- **The inner spheres lie inside the cores**, at `r_E ≤ r_0 − G h`, so that
-  the jump of the derivatives at `r_E` is where no stencil of `F` reaches.
+- **The start must not read the data inside the inner spheres**, where they
+  are the free data with a jump in their derivatives at `R1`: a `:fitted`
+  start reads them down to `r_1 − fit_initial_depth`, so `R1` must lie inside
+  that about each hole. `test/binary_runs.jl` and `test/octant_runs.jl` check
+  it after the start (`check_xcts_reach`); `fit_depth = 0` meets it by the
+  margin, `n_L h` does not for the pair (`CODE.md`, "Solved data for the
+  pair").
 
 ## Step S1 — Solved data for two harmonic holes
 
@@ -1368,7 +1373,9 @@ densitized lapse fixed (`lapse = :fixed`, on XCTS's local branch
 `/scratch/eschnett/claude/xcts-s1/pairfix{2,3,4,5}/`. Evolved from `p = 10`
 data, the pair's constraints converge between `1/48` and `1/96` out to about
 `3 M` from each hole; the data's order rises with the grid (`p = 10` for
-`1/96`). Runs from solved data take finds every `M/4` and, at `1/48`,
+`1/96`). The brief's criterion at `t = 0` — converging between the spacings —
+was not met and was waived for this one, and Newton stops at `1–2·10⁻⁸`, not
+the brief's `10⁻¹⁰`. Runs from solved data take finds every `M/4` and, at `1/48`,
 `margin = 6`. The outer faces still carry the superposition's Dirichlet data.
 
 ## Step S2 — Two holes far apart
@@ -1377,8 +1384,9 @@ Done (it ran 2026-11-17 on Trillium; accepted by Erik on 2026-11-18, with the
 outer faces open). The `d = 10` pair from `p = 10` data at `1/48` and `1/96`
 to `20 M`: every find of both holes, `M_irr` drifting as step H1's single hole
 at the same spacing, and the constraints within `4 M` of each hole converging
-at order four; beyond `4 M` the outer faces' superposed Dirichlet data
-dominate `C_a` and `ℋ` and grow with resolution. Its measurements are in
+at order four; beyond `4 M`, `C_a` and `ℋ` grow with resolution, attributed to
+the outer faces' superposed Dirichlet data but not isolated. The layers'
+residual and error were not assessed (no reference). Its measurements are in
 `CODE.md`, "Solved data for the pair" ("Two holes far apart"); the brief and
 its status are in `HISTORY.md`, "Step S2 — Two holes far apart".
 
@@ -1396,7 +1404,11 @@ parked in a draft pull request.
 step S2's settings (`margin = 6` at `1/48`, finds every `M/4`) on Trillium,
 script `~/claude/xcts-s1/src/h4evo.sh`: the pure harmonic rows continue step
 S1's `4 M` checkpoints, and the roll-on rows start from the data with
-`t0=0 sigma_g=5` and `10`.
+`t0=0 sigma_g=5` and `10`. Read the constraints in bands about the holes, not
+over the evolved region, which the outer faces dominate; between the holes
+(`[3, 4)` about each) the data improve only `2.5×` from `1/48` to `1/96`, and
+the layers differ between the spacings (`r_1 = 0.36` against `0.31`), so the
+band nearest the horizon is not an order. Keep `fit_depth = 0`.
 
 **Started 2026-11-14 on the inertial grid** (Erik's choice), on branch
 `claude/step-H4-prep`: built are the harmonic chart for a hole, the pair with no

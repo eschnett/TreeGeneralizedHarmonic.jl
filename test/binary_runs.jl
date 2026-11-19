@@ -80,7 +80,9 @@
 #                                  on those data — written to checkpoint=<dir> with
 #                                  t_end = 0, on one CPU process, from an environment
 #                                  that has XCTS (bench/xcts_metric.jl); the same
-#                                  command without xcts= then continues the run
+#                                  command without xcts= then continues the run; a
+#                                  start that read the data inside XCTS's inner
+#                                  spheres (fit_depth too deep) is refused
 #   xcts_gauge=case|solved         the lapse and shift of the XCTS start: the case's
 #                                  background's (XCTS's fixed lapse grows outward,
 #                                  bench/xcts_metric.jl), or the solution's own
@@ -488,6 +490,17 @@ catch err
                                 time_end=Float64(t_end), time_unit="M")
     abort_all(err)
     rethrow()
+end
+# The start must not have read the data inside XCTS's inner spheres
+# (`check_xcts_reach`): a refused start's checkpoint is renamed, so that the
+# continuation cannot take it up.
+if XCTS_FILE !== nothing
+    try
+        check_xcts_reach(initial_data, out.geometry, T(rat(opt("fit_depth", "0"))))
+    catch err
+        foreach(f -> mv(f, f * ".refused"; force=true), out.checkpoints_written)
+        rethrow()
+    end
 end
 simwatch_finish!(sw; status=out.finished ? "finished" : "stopped", time=Float64(out.t),
                  time_end=Float64(t_end), time_unit="M",

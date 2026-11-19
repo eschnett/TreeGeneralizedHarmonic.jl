@@ -206,6 +206,7 @@ The briefs of the finished steps are under
   - [Step H3 — Spin in the harmonic chart](#step-h3--spin-in-the-harmonic-chart)
   - [Step S1 — Solved data for two harmonic holes](#step-s1--solved-data-for-two-harmonic-holes)
   - [Step S2 — Two holes far apart](#step-s2--two-holes-far-apart)
+  - [Review of steps S1 and S2 (2026-11-18)](#review-of-steps-s1-and-s2-2026-11-18)
 
 ## Goals
 
@@ -2550,7 +2551,45 @@ Step H1's `:fitted` row at `1/48` was started from XCTS's unit-mass
 solutions. These ran on Trillium, the new SciNet cluster: Nibi's nodes were
 down. To `10 M` it is the analytic row from `1 M` on. The pair's first solve
 on Trillium (`d = 8`, job `pair1`) did not converge and was cancelled after
-`30 min`. The local probes at `p = 2` that followed are `CODE.md`'s table.
+`30 min`. The local probes at `p = 2` that followed, with XCTS's extended
+system and, in the last two rows, with the lapse fixed (below):
+
+The head-on pair at `d = 8`,
+`M_A = 1/2`, `ℓ = 8`, on XCTS's two-hole mesh (`M = 2`, `M_h = 16`,
+`M_f = 2`) at `p = 2`, Newton with the dogleg, from the superposed data.
+Each row is the residual after the last of 8 to 10 iterations, or the
+iteration at which it reached the floor:
+
+| sphere `R1` (`R1/M_A`) | what else | residual |
+|---|---|---|
+| `1/8` (`1/4`) | — | stalls at `0.19` |
+| | ILU-GMRES instead of matrix-free | the same history |
+| | `M = 4` | stalls at `0.11` |
+| | line search instead of the dogleg | stalls at `0.15` |
+| | `d = 16`, `ℓ = 16` | stalls at `0.21` |
+| | `ℓ = 4` | stalls at `0.093` |
+| `0.2` (`2/5`) | — | stalls at `1.2·10⁻²` |
+| `1/4` (`1/2`) | — | `7·10⁻⁹` in 4 |
+| `0.3` | — | `10⁻⁸` in 4 |
+| `1/2` (`1`) | — | `7·10⁻⁹` in 3 |
+| `1/8` | one hole on the same mesh, the other sphere flat | `10⁻⁸` in 4 |
+| `1/8` | one hole on the one-hole mesh, `p = 2, 3, 4`, and at `p = 2` on one shaped like the pair's (`L = 4`, `M_h = 16`) | `1.5·10⁻⁸` in 2–4 |
+| `1/8` | the companion's mass `ε M_A`, each `ε` from the last solution | `ε = 1/4`: `10⁻⁸` in 7; `ε = 1/2`: stalls at `0.073` |
+| `1/8` | **fixed lapse** | `9.8·10⁻⁹` in 7 |
+| `1/4` | **fixed lapse** | `1.1·10⁻⁸` in 7 |
+
+With the extended system neither the mesh, the order, the linear solver
+nor the globalization is the cause, and the companion's strength is not
+either (`ℓ = 4` leaves it `e⁻⁴` of its weight at the other hole, and
+`d = 16` halves it): what fails is a sphere deeper than about `M_A/2` with
+a second hole present, and the continuation stalls on a plateau, as at a
+fold. That the fixed lapse converges where the extended system does not
+fits the extended system's known non-uniqueness for strong data (Pfeiffer
+and York 2005), which comes from its lapse equation. Both solutions at
+`R1 = 1/4` move the shift by about the same amount (`1.27` and `1.22`
+relative to the superposition's, in the mass-weighted `L²` norm the far
+field dominates) and ψ by `1.5·10⁻⁴`; the lapse differs.
+
 They rule out the mesh, the order, the linear solver, the globalization, the
 separation and the attenuation, and they put the deepest sphere that
 converges at `M_A/2`, outside `r_0`. Following the plan, the work stops there
@@ -5156,8 +5195,10 @@ Added to the plan on 2026-11-15 with step S2; ran 2026-11-15 to
   `/scratch/eschnett/claude/xcts-s1/pairfix3/d10q8/sol.jls`.
 - **Done, the pair's acceptance on the grid, all but one criterion**
   (`CODE.md`, "From XCTS to the grid"): at `d = 8` and `d = 10`, at `1/48`
-  and `1/96`, `ℋ` and `ℳ` at `t = 0` are `12–800×` and `16–110×` below the
-  superposition's from the horizon out; each hole's `M_irr` and `M_ADM` are
+  and `1/96`, `ℋ` and `ℳ` at `t = 0` are `9–440×` and `7–130×` below the
+  superposition's from the horizon to `3 M` (first recorded as `12–800×` and
+  `16–110×` from the horizon out, corrected in the review below), and only
+  `2–6×` in `ℋ` beyond `4 M`; each hole's `M_irr` and `M_ADM` are
   XCTS's; the outer faces' mismatch is `4–7·10⁻⁴` in `g_ab` once the start
   takes the case's lapse and shift (Erik, 2026-11-16); the solve and the
   transfer's cost are recorded.
@@ -5166,8 +5207,10 @@ Added to the plan on 2026-11-15 with step S2; ran 2026-11-15 to
   between XCTS's elements, whose derivative jumps a finite difference turns
   into `1/h`, at `p = 8` with elements `0.24` thick near each hole. At
   `p = 10` (Erik, 2026-11-16; `d = 8`, Trillium jobs 2874056 and 2874265) it
-  falls `10–20×` — `ℋ` `2500–8000×` below the superposition from `0.75 M` out,
-  `ℳ` level, `C_a` converging as the superposition's — and still doubles from
+  falls `10–20×` — `ℋ` `3000–8000×` below the superposition from `1 M` to
+  `3 M` (first recorded as `2500–8000×` from `0.75 M` out), `ℳ` level, `C_a`
+  falling `9–13×` from `1 M` out (first recorded as converging as the
+  superposition's, which falls `16×`) — and still doubles from
   `1/48` to `1/96`. `d = 10` at `p = 10` (Erik, 2026-11-17; Trillium jobs
   2878216 and 2878217) gives the same.
 - **Done, the evolution decides it** (Erik, 2026-11-17; Trillium jobs
@@ -5178,9 +5221,13 @@ Added to the plan on 2026-11-15 with step S2; ran 2026-11-15 to
   `1 M`. `M_irr` and the tracks do not depend on the order (`5·10⁻⁸` against
   `10⁻⁵` between resolutions). So the data's order rises with the grid —
   `p = 10` for `1/96` — and the criterion holds in the evolution near the holes,
-  not at `t = 0`. Erik accepted step S1 on it (2026-11-17).
-  Beyond `4 M` the outer faces' mismatch dominates and grows with resolution
+  not at `t = 0`: the criterion at `t = 0` was waived for this one. Erik
+  accepted step S1 on it (2026-11-17). Beyond `4 M` the band grows with
+  resolution and is attributed to the outer faces' mismatch, not isolated
   (step B5's frozen data, or boundary data from the solved slice).
+- **Not met: "each solved to `10⁻¹⁰`".** Newton stops at a residual floor of
+  `1–2·10⁻⁸` (roundoff of the residual; XCTS reports `converged = false`),
+  which the status above did not say.
 
 **Accept:**
 
@@ -5218,14 +5265,15 @@ and `1/96` to `20 M`, with finds every `M/4` and `margin = 6` at `1/48`
 
 - `M_irr`: met — drift `7.0·10⁻⁷` and `4.1·10⁻⁸` per `M_A` against step H1's
   `8.1·10⁻⁷` and `5.1·10⁻⁸` at the same spacing in `M_A`.
-- The shells about each hole: met for the constraints (the single hole's to a
-  factor of two, order four). The layer's error has no exact solution to
-  compare with; its residual is against the superposition, not the data.
+- The shells about each hole: partly met — met for the constraints (the
+  single hole's to a factor of two, order four); the layer's residual and
+  error not assessed, since there is no exact solution to compare with and
+  the residual is against the superposition, not the data.
 - Every find: met. The tracks' acceleration is `0.65–0.8×` the Newtonian
   `M_B/d²`, in harmonic coordinates.
 - `C_a` and `ℋ` over the evolved region: **not met.** They converge within
-  `4 M` of each hole; beyond that the outer faces' mismatch dominates and
-  grows with resolution (step S1's open item). Erik accepted the step with
+  `4 M` of each hole; beyond that the band grows with resolution, attributed
+  to the outer faces' mismatch (step S1's open item) but not isolated. Erik accepted the step with
   it open and step H4 next (2026-11-18).
 - The cost: `1.6×` step S1's single hole on the octant at the same spacing,
   in core-seconds per `M_A`, on Trillium's CPUs (step H1's own rows ran on an
@@ -5242,3 +5290,50 @@ and `1/96` to `20 M`, with finds every `M/4` and `margin = 6` at `1/48`
   `M_B/d²`;
 - `C_a` and `ℋ` over the evolved region converging between the spacings;
 - the cost per `M` beside twice step H1's.
+
+### Review of steps S1 and S2 (2026-11-18)
+
+Erik asked for an independent review of the two accepted steps while step
+H4's runs waited in Trillium's queue. A subagent read the commits from
+`457fea1` to `0f1caac`, XCTS's branch and the runs' CSVs on Trillium. It found
+no error in the transfer's physics (the index conventions, the momentum from
+`C_a = 0`, the Christoffel terms, the gauge's `dα` and `dβ`) and every band
+number it checked against the CSVs as recorded. What it found, and what
+changed:
+
+- **A test that could not fail.** The `initial_data` check started the run
+  from the case's own background under another type, which a path that
+  ignored `initial_data` passes too. `checkpoint_tests.jl` now also starts
+  from a hole `2 %` heavier and asserts another state, the heavier horizon
+  and other fits.
+- **The inner sphere's rule was stated against `r_0 = 2/5 M_A`**, the
+  `:damped` layer's, while the `:fitted` layers that ran put `r_0` at about
+  `0.11` (`0.064` at `margin = 8`), inside `R1 = 1/8`. It was harmless
+  because the start reads the data only down to `r_1 − fit_initial_depth`
+  and the pair's runs had depth `0`; `test/octant_runs.jl`'s default depth is
+  `n_L h`, at which step S1's single hole read down to `r_0 = 1/4 = R1`
+  exactly. The rule is now `R1 ≤ r_1 − fit_initial_depth`, checked after the
+  start (`check_xcts_reach`).
+- **Overstated ranges**: the `t = 0` ratios against the superposition beyond
+  `4 M`, `p = 8` serving `1/48`, `C_a` converging as the superposition's, the
+  single hole's agreement beyond `r = 4`, `M_irr`'s first `M` at `1/48`, and
+  the claim that the band beyond `4 M` holds most of S2's overall norm (the
+  bands are point means, the norm a volume-weighted one). Corrected in
+  `CODE.md`; the outer faces' part of that band is now marked attributed, not
+  isolated.
+- **`CODE.md`'s "Initial data", item 2** still described step B8's proposal
+  (XCTS's lapse and shift, a TreeIOHDF5 file, the mesh from the
+  superposition, `10⁻¹⁰`); rewritten as built. Dated decisions in step S1's
+  part of `CODE.md` and the extended system's failed solves moved here.
+- **`test/octant_runs.jl xcts=`** set `t_end = 0` before the swept path was
+  computed from it, so a moving hole's start had no sweep; it now reads the
+  requested `t_end`. It also gained `xcts_gauge=`.
+- **The second conversion of a metric's derivatives** (`metric_from_3p1`,
+  `gauge_3p1`) was tested only by hand; it moved from `bench/xcts_metric.jl`
+  to `initialdata.jl` and is tested on harmonic Kerr at rest, spinning and
+  boosted and on Kerr-Schild (`initialdata_tests.jl`). The pair's restart
+  chains in `harmonic_holes_tests.jl` now start from a `t = 0` checkpoint.
+- **S2's layer criterion** was filed under "met"; it is "partly met". Step
+  S1's "solved to `10⁻¹⁰`" was not met and not said.
+- XCTS's branch `claude/harmonic-free-data` was fast-forwarded into XCTS's
+  `main` (Erik, 2026-11-18; XCTS has no remote).

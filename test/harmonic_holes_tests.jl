@@ -181,8 +181,9 @@ end
     # row with no source, the roll-on started by the tracks' separation at the
     # first row that has fallen to `d_g` — not at `t = 0`, where the tracks are
     # the seeds, exactly `d` apart — and recorded from that row on; and a chain of
-    # restarts, one chunk a job, that is the uninterrupted run bit for bit, the
-    # roll-on's start included (`PLAN.md`: `t_0` is run state).
+    # restarts from the run's `t = 0` checkpoint, one chunk a job, that is the
+    # uninterrupted run bit for bit, the roll-on's start included (`PLAN.md`:
+    # `t_0` is run state).
     @full_tier @testset "a harmonic pair rolls on at its separation and restarts bit for bit" begin
         hs = head_on_holes(T; d=8, masses=(1, 1), interior=unit, chart=:harmonic)
         pair = binary_case(T; holes=hs, halfwidth=8, chunk=T(1 // 20),
@@ -202,10 +203,16 @@ end
         @test a.records[1].gauge_l2 < 1e-3
         @info "the suite's harmonic pair (step H4)" separation = [r.separation for r in a.records] gauge_l2 = [r.gauge_l2 for r in a.records] residual = [r.residual for r in a.records] areas = [map(h -> h.area, r.holes) for r in a.records]
 
+        # The chain starts from the run's `t = 0` checkpoint (step S1's start,
+        # chunk 0), which is how a pair from solved data is run: what the start
+        # saves of the pair — each hole's track and offset, and the roll-on's
+        # `t_0`, `Inf` until it starts — must come back as the run.
         pre = joinpath(mktempdir(), "hpair")
-        b = evolve!(T, pair; forest=deepcopy(f), common..., checkpoint_path_prefix=pre,
-                    max_walltime_seconds=1e-9)
-        jobs = 1
+        b = evolve!(T, pair; forest=deepcopy(f), common..., t_end=zero(T),
+                    checkpoint_path_prefix=pre, checkpoint_every_chunks=1)
+        @test b.finished && b.nchunks == 0 && length(b.checkpoints_written) == 1
+        jobs = 0
+        b = (; finished=false)
         while !b.finished
             b = evolve!(T, pair; common..., checkpoint_path_prefix=pre,
                         max_walltime_seconds=1e-9, restart_file=latest_checkpoint(pre))
@@ -238,8 +245,9 @@ end
     # two fitted holes is each hole's own cache — the single hole's fill, bit for
     # bit — inside that hole's fill sphere and zero elsewhere; the pair evolves
     # with both holes found and both fits valid at every row; and a chain of
-    # restarts, one chunk a job, is the uninterrupted run bit for bit, each
-    # hole's fits, ranges and initial fit included.
+    # restarts from the run's `t = 0` checkpoint, one chunk a job, is the
+    # uninterrupted run bit for bit, each hole's fits, ranges and initial fit
+    # included.
     @full_tier @testset "a fitted harmonic pair: its cache, its rows and its restarts" begin
         fs = FittedSpec(T; variant=:fitted, margin=4, fit_cont=2)
         hs = head_on_holes(T; d=8, masses=(1, 1), interior=fs, chart=:harmonic)
@@ -278,10 +286,16 @@ end
         end
         @test same && nin > 0
 
+        # The chain starts from the run's `t = 0` checkpoint (step S1's start,
+        # chunk 0), which is how a pair from solved data is run: what the start
+        # saves of the pair — each hole's track, offset, fits and initial fit —
+        # must come back as the run.
         pre = joinpath(mktempdir(), "fpair")
-        b = evolve!(T, pair; forest=deepcopy(f), common..., checkpoint_path_prefix=pre,
-                    max_walltime_seconds=1e-9)
-        jobs = 1
+        b = evolve!(T, pair; forest=deepcopy(f), common..., t_end=zero(T),
+                    checkpoint_path_prefix=pre, checkpoint_every_chunks=1)
+        @test b.finished && b.nchunks == 0 && length(b.checkpoints_written) == 1
+        jobs = 0
+        b = (; finished=false)
         while !b.finished
             b = evolve!(T, pair; common..., checkpoint_path_prefix=pre,
                         max_walltime_seconds=1e-9, restart_file=latest_checkpoint(pre))

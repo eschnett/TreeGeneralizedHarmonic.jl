@@ -1998,3 +1998,90 @@ function add_noise!(U::FieldSet{T,3}, rng; amplitude, exclude=nothing) where {T}
     host === U || copyto!(U.work, host.work)
     return U
 end
+
+# --- data in 3+1 form (step S1) --------------------------------------------------
+
+"""
+    metric_from_3p1(f) -> (g, dg)
+
+`g_ab` and `dg[a, b, c] = ∂_c g_ab` (SpacetimeMetrics' convention, derivative
+axis last) from 3+1 fields `f` at one point: `α`, `dα[k] = ∂_kα`, `β^i`,
+`dβ[i, k] = ∂_kβ^i`, `γ_ij`, `∂γ[i, j, k] = ∂_kγ_ij` and `K_ij`. The time
+derivatives come from the evolution equations, `∂_tγ_ij = −2αK_ij + D_iβ_j +
+D_jβ_i`, and from `C_a = 0` at `H = 0` for `∂_t g_tb` — the harmonic gauge's
+momentum, as `_gauge_consistent_background` makes it for a superposition.
+
+This is how data solved by another code become a metric this package can start
+from (`bench/xcts_metric.jl`; `CODE.md`, "Solved data for the pair"): the
+package's second conversion of a metric's derivatives, beside
+[`background_state`](@ref)'s, and like it tested against exact data
+(`test/initialdata_tests.jl`).
+"""
+function metric_from_3p1(f)
+    α, β, γ, ∂γ, dβ, dα, K = f.α, f.β, f.γ, f.∂γ, f.dβ, f.dα, f.K
+    T = typeof(α)
+    βl = γ * β                                                  # β_i
+    # ∂_k β_i = ∂_k γ_ij β^j + γ_ij ∂_k β^j
+    dβl = SMatrix{3,3,T}(sum(∂γ[i, j, k] * β[j] + γ[i, j] * dβ[j, k] for j in 1:3)
+                         for i in 1:3, k in 1:3)                # dβl[i,k] = ∂_k β_i
+    gtt = -α^2 + sum(βl[i] * β[i] for i in 1:3)
+    g = SMatrix{4,4,T}(a == 1 && b == 1 ? gtt :
+                       a == 1 ? βl[b - 1] : b == 1 ? βl[a - 1] : γ[a - 1, b - 1]
+                       for a in 1:4, b in 1:4)
+    # The spatial derivatives, `ds[a, b, k] = ∂_k g_ab`.
+    dgtt(k) = -2α * dα[k] + sum(dβ[i, k] * βl[i] + β[i] * dβl[i, k] for i in 1:3)
+    ds = SArray{Tuple{4,4,3},T}(a == 1 && b == 1 ? dgtt(k) :
+                                a == 1 ? dβl[b - 1, k] : b == 1 ? dβl[a - 1, k] :
+                                ∂γ[a - 1, b - 1, k]
+                                for a in 1:4, b in 1:4, k in 1:3)
+    # ∂_t γ_ij = −2αK_ij + D_iβ_j + D_jβ_i, D_iβ_j = ∂_iβ_j − Γ^l_ij β_l.
+    γu = inv(γ)
+    Γl(l, i, j) = (∂γ[l, j, i] + ∂γ[l, i, j] - ∂γ[i, j, l]) / 2  # Γ_lij
+    Dβ(i, j) = dβl[j, i] - sum(γu[l, m] * Γl(m, i, j) * βl[l] for l in 1:3, m in 1:3)
+    dtγ = SMatrix{3,3,T}(-2α * K[i, j] + Dβ(i, j) + Dβ(j, i) for i in 1:3, j in 1:3)
+    # ∂_t g_tb from C_a = Γ_a = 0 (H = 0): Γ_a = g^{bc} ∂_b g_ac − ½ g^{bc} ∂_a g_bc,
+    # with X_b = ∂_t g_tb entering as Γ_t = Γ⁰_t + ½ g^{tt} X_t and
+    # Γ_i = Γ⁰_i + g^{tt} X_i (`gauge_consistent_state`'s four decoupled equations).
+    gu = inv(g)
+    dz(a, b, c) = c == 1 ? ((a == 1 || b == 1) ? zero(T) : dtγ[a - 1, b - 1]) :
+                  ds[a, b, c - 1]
+    Γ0 = SVector{4,T}(sum(gu[b, c] * dz(a, c, b) for b in 1:4, c in 1:4) -
+                      sum(gu[b, c] * dz(b, c, a) for b in 1:4, c in 1:4) / 2
+                      for a in 1:4)
+    Xt = -2 * Γ0[1] / gu[1, 1]
+    Xi = SVector{3,T}(-Γ0[i + 1] / gu[1, 1] for i in 1:3)
+    dt(a, b) = a == 1 && b == 1 ? Xt : a == 1 ? Xi[b - 1] : b == 1 ? Xi[a - 1] :
+               dtγ[a - 1, b - 1]
+    dg = SArray{Tuple{4,4,4},T}(c == 1 ? dt(a, b) : ds[a, b, c - 1]
+                                for a in 1:4, b in 1:4, c in 1:4)
+    return g, dg
+end
+
+"""
+    gauge_3p1(m, p) -> (; α, dα, β, dβ)
+
+The lapse `α`, its gradient `dα[k] = ∂_kα`, the contravariant shift `β^i` and
+`dβ[i, k] = ∂_kβ^i` of the metric `m` at the event `p`, from its `g_ab` and
+`∂_c g_ab`: `β_i = g_ti`, `β^i = γ^{ij}β_j`, `α² = −g_tt + β^iβ_i`, with
+`∂_kγ^{ij} = −γ^{ia}γ^{jb}∂_kγ_ab` — the gauge half of [`metric_from_3p1`](@ref)'s
+input, for data whose lapse and shift are taken from another metric
+(`bench/xcts_metric.jl`'s `gauge`).
+"""
+function gauge_3p1(m, p::AbstractVector)
+    T = float(eltype(p))
+    g, dg = SpacetimeMetrics.dmetric(m, SVector{4,T}(p[1], p[2], p[3], p[4]))
+    γ = SMatrix{3,3,T}(g[i + 1, j + 1] for i in 1:3, j in 1:3)
+    γu = inv(γ)
+    βl = SVector{3,T}(g[1, i + 1] for i in 1:3)
+    β = γu * βl
+    α = sqrt(-g[1, 1] + sum(β[i] * βl[i] for i in 1:3))
+    ∂γ(a, b, k) = dg[a + 1, b + 1, k + 1]
+    ∂γu(i, j, k) = -sum(γu[i, a] * γu[j, b] * ∂γ(a, b, k) for a in 1:3, b in 1:3)
+    ∂βl(i, k) = dg[1, i + 1, k + 1]
+    dβ = SMatrix{3,3,T}(sum(∂γu(i, j, k) * βl[j] + γu[i, j] * ∂βl(j, k) for j in 1:3)
+                        for i in 1:3, k in 1:3)
+    dα = SVector{3,T}((-dg[1, 1, k + 1] +
+                       sum(dβ[i, k] * βl[i] + β[i] * ∂βl(i, k) for i in 1:3)) / (2α)
+                      for k in 1:3)
+    return (; α, dα, β, dβ)
+end

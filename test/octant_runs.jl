@@ -229,7 +229,12 @@
 #   checkpoint=<dir> walltime=<s>   a chain of jobs (as hole_runs.jl's rows)
 #   xcts=<file>                     (step S1) the initial data solved by XCTS, a
 #                                   :fitted hole's start written to checkpoint=<dir>
-#                                   with t_end = 0 (as binary_runs.jl's xcts=)
+#                                   with t_end = 0 (as binary_runs.jl's xcts=); a
+#                                   start that read the data inside XCTS's inner
+#                                   sphere (fit_depth too deep) is refused
+#   xcts_gauge=case|solved          the lapse and shift of the XCTS start: the case's
+#                                   background's, or the solution's own (as
+#                                   binary_runs.jl's)
 #   checkpoint_every=8 keep=2       chunks between checkpoints, and how many to keep
 #                                   (keep them all to difference two runs later)
 #
@@ -342,7 +347,9 @@ hole || iszero(a_spin) || error("a = $a_spin is the hole's spin, and case = mink
 # moving along z is its own image on under the quarter turn.
 v_hole = rat(opt("v", "0"))
 x0_hole = rat(opt("x0", "0"))
-path_x = haskey(OPTIONS, "path") ? rat(OPTIONS["path"]) : v_hole * t_end
+# The path is the requested run's, read from the option: an `xcts=` start sets
+# `t_end = 0` above, and its continuation inherits the start's mesh.
+path_x = haskey(OPTIONS, "path") ? rat(OPTIONS["path"]) : v_hole * rat(opt("t_end", "128"))
 moving_domain && !hole &&
     error("octant = $symmetry is the moving hole's domain, and needs case = ks or harmonic")
 # The mesh of a moving hole (added 2026-11-12, step H2): the capsule, frozen
@@ -1173,7 +1180,8 @@ if XCTS_FILE !== nothing
         "xcts=<file> writes a run's start from data solved by XCTS as a checkpoint, on " *
         "one CPU process: it needs checkpoint=<dir> with no checkpoint in it yet, and " *
         "neither mpi=true nor backend=cuda. The same command without xcts= continues it.")
-    initial_data = load_xcts_metric(XCTS_FILE)
+    initial_data = load_xcts_metric(XCTS_FILE;
+                                    gauge=opt("xcts_gauge", "case") == "case" ? case.background : nothing)
     isrank0 && println("initial data: ", nameof(initial_data))
 end
 
@@ -1234,6 +1242,17 @@ catch err
                                  extra=ls.extra))
     abort_all(err)
     rethrow()
+end
+# The start must not have read the data inside XCTS's inner spheres
+# (`check_xcts_reach`): a refused start's checkpoint is renamed, so that the
+# continuation cannot take it up.
+if XCTS_FILE !== nothing
+    try
+        check_xcts_reach(initial_data, out.geometry, get(fitkw, :fit_initial_depth, zero(T)))
+    catch err
+        foreach(f -> mv(f, f * ".refused"; force=true), out.checkpoints_written)
+        rethrow()
+    end
 end
 r = out.records[end]
 let ls = last_status[]
