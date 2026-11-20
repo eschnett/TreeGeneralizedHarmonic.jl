@@ -145,6 +145,31 @@ ci/full-suite-symmetry.sh submit --post
 ci/full-suite-symmetry.sh collect --post
 ```
 
+**SimLaunch job specs** are in `jobs/`: the full suite, the MPI port on four
+H200s and step H4's pair. `simlaunch` (installed from `~/src/jl/SimLaunch`,
+whose `CONVERTING.md` and `SPEC.md` are the reference) copies a snapshot of
+the project to a site, prepares its environments there, writes the batch
+script and its SimWatch files, and submits. Give every study a note,
+`--dry-run` a spec before submitting it, and read `simlaunch list` when the
+results are in. The suite, from a commit:
+
+```bash
+simlaunch snapshot . --study <study> --rev <sha> --note "<what it is for>"
+simlaunch prepare <study> --site symmetry --spec jobs/full-suite.toml
+simlaunch submit <study> jobs/full-suite.toml --site symmetry --wait
+```
+
+The suite's spec passes no `--check-bounds=yes`: `Pkg.test` runs the tests
+with its caller's setting, and with the flag the suite is 1.7× slower (its
+header). Forced bounds checks are GitHub CI's.
+
+`jobs/mpi-*.toml` name `mpi = "hpcx"` as their scripts did, which a SimLaunch
+environment cannot yet point `OpenMPI_jll` at (`jobs/mpi-gpu.toml`'s header).
+`jobs/h4-pair.toml` takes its rows one node at a time with `--run`, and its
+start, the `t = 0` checkpoint from XCTS data, is copied into the run's `ck/`
+by hand (its header). Problems with SimLaunch are reported as files in
+`~/.local/share/simlaunch/reports/` (`CONVERTING.md`, "Reporting a problem").
+
 The MPI workload runs on its own too, from an
 environment that has MPI and the package — `test/mpi_tests.jl` starts
 exactly this from the suite's sandbox, beside the suite where the machine

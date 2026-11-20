@@ -1,0 +1,65 @@
+# Step H4's head-on pair (was `h4evo.sh` on Trillium, jobs 2884819–22,
+# 2890012–14, 2890343–44): the d = 8 pair from step S1's p = 10 data, pure
+# harmonic or with the damped harmonic gauge rolled on from t = 0, at 1/48
+# (N = 12) and 1/96 (N = 24), to the plunge. `test/binary_runs.jl` stops at
+# `walltime` with exit code 3 and continues from the newest checkpoint in
+# `checkpoint=`; it appends to its CSV, hence `mutable_restarts` until the
+# drivers take the restart contract (SimLaunch's PLAN.md, "Converting the
+# drivers"). Submit the two 1/48 rows of a gauge together (`--run s5-48 --run
+# s10-48`, 96 threads each) and a 1/96 row alone (192 threads); `--chain` queues
+# its continuations. The thread counts are written out because the default
+# divides the node by every run of the spec, not by the runs submitted.
+#
+# The run's start is not in this spec. It is the t = 0 checkpoint that
+# `binary_runs.jl … t_end=0 xcts=<sol.jls>` writes in an environment that has
+# XCTS, which a SimLaunch environment cannot add (reported to SimLaunch,
+# 2026-11-20); it took about 2500 s at 1/96. Until then, write it as before
+# and copy it into the run's `ck/` (`<scratch>/<study>/h4-pair-<label>/mutable/ck/`)
+# before the first job, or copy an earlier run's checkpoints there to continue
+# it — the way step B7 restarts H4's rows near the plunge.
+name = "h4-pair"
+site = "trillium"
+time = "12:00:00"
+resources = { nodes = 1 }
+mode = "parallel"
+checkpoints = true
+mutable_restarts = true
+
+[restart]
+to = "checkpoint"
+walltime = "walltime"
+margin = "0:35:00"                  # h4evo.sh's 12 h less walltime=41000
+continue_code = 3
+
+# Pure harmonic gauge: chunk = 1 and a find every M/4 suffice.
+[[run]]
+label = "harm-48"
+threads = 96                        # two rows to a node
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=h4 d=8 N=12 margin=6 n_L=12 chunk=1 checkpoint_every=2 t_end=60 find_interval=1/4 out=out"
+
+[[run]]
+label = "harm-96"
+threads = 192                       # a node to itself
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=h4 d=8 N=24 margin=16 n_L=20 chunk=1 checkpoint_every=2 t_end=60 find_interval=1/4 out=out"
+
+# The roll-on grows the horizons: chunk = 1/4 and a find every M/8 (1/48) or
+# M/16 (1/96), or the jump guard or the CFL detector stops the run within 10 M.
+[[run]]
+label = "s5-48"
+threads = 96                        # two rows to a node
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=h4 d=8 N=12 margin=6 n_L=12 t0=0 sigma_g=5 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/8 out=out"
+
+[[run]]
+label = "s10-48"
+threads = 96                        # two rows to a node
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=h4 d=8 N=12 margin=6 n_L=12 t0=0 sigma_g=10 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/8 out=out"
+
+[[run]]
+label = "s5-96"
+threads = 192                       # a node to itself
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=h4 d=8 N=24 margin=16 n_L=20 t0=0 sigma_g=5 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/16 out=out"
+
+[[run]]
+label = "s10-96"
+threads = 192                       # a node to itself
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=h4 d=8 N=24 margin=16 n_L=20 t0=0 sigma_g=10 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/16 out=out"
