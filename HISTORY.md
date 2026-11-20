@@ -134,6 +134,7 @@ The briefs of the finished steps are under
   - [Step H4 started: two harmonic holes with no source (2026-11-14)](#step-h4-started-two-harmonic-holes-with-no-source-2026-11-14)
   - [Step H4 shelved: the data are to be solved (2026-11-15)](#step-h4-shelved-the-data-are-to-be-solved-2026-11-15)
   - [Step S1 started: XCTS's data on the grid (2026-11-15)](#step-s1-started-xctss-data-on-the-grid-2026-11-15)
+  - [Step H4 resumed: the pair on solved data (2026-11-18 to 2026-11-20)](#step-h4-resumed-the-pair-on-solved-data-2026-11-18-to-2026-11-20)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2656,6 +2657,59 @@ shrinking `0.019` in the first `M`, was refused as a jump between finds at
 `margin = 4` failed the finder at `t = 0`. Finds every `M/4` and `margin = 6`
 at `1/48` ran to `4 M`: `CODE.md`'s table "The pair evolved from the solved
 data".
+
+### Step H4 resumed: the pair on solved data (2026-11-18 to 2026-11-20)
+
+**The first batch (2026-11-18).** The runs used Trillium, step S2's settings
+and the script `~/claude/xcts-s1/src/h4evo.sh`, with `chunk = M` and finds
+every `M/4`:
+
+- job 2884819: `1/48`, three rows on one node at 64 threads each;
+- jobs 2884820–22: `1/96`, one row each at 192 threads.
+
+The pure harmonic rows continued step S1's `4 M` checkpoints. The roll-on
+rows started from the data with `t0=0`. The `t = 0` checkpoint has to be
+written with `t0`: `rollon_t0` is restored from it, and a run without a source
+stores `Inf`.
+
+**The roll-on rows did not survive `chunk = M`.** The roll-on grows each
+horizon's coordinate radius, by `0.125/M` and more at `σ_g = 5`, and from
+`0.48` to `0.76` by `8 M` at `σ_g = 10`. Two guards stopped the rows:
+
+- **The jump guard on the smallest radius** stopped both `σ_g = 5` rows: at
+  `3 M` at `1/48` and at `2.75 M` at `1/96`. The guard allows `G h/2` between
+  two finds.
+- **The CFL detector** stopped `σ_g = 10` at `1/48` near `9 M`. The largest
+  speed rose `2.4 %` in one chunk, and the step's headroom is the square of
+  the last chunk's growth.
+
+`chunk` and `cfl` are part of the run's recipe, so a restart may not change
+them; `hole_find_interval` is not. Job 2884822 was cancelled, and the four
+roll-on rows started again from the data (2026-11-18) with `chunk = M/4` and a
+checkpoint every eight chunks:
+
+- job 2890012: both `1/48` rows, finds every `M/8`, 96 threads each;
+- jobs 2890013 and 2890014: the `1/96` rows, finds every `M/16`.
+
+**The ends (2026-11-19 and 20).**
+
+- Pure harmonic, `1/48`: stopped at `31.25 M` on the layer's room as the
+  horizons shrank.
+- Pure harmonic, `1/96`: stopped at `33 M` the same way (`r_in = 0.3951`
+  against `0.3958`).
+- The `1/48` roll-ons: lost their tracks at `30.25` and `30.5 M`. The
+  finder's footprint about hole 1, whose surface had passed the midpoint to
+  `x ≈ +0.11`, reached hole 2's layer.
+- The two `1/96` roll-on jobs hit their `12 h` limit before the run's own
+  `walltime` checkpoint. `walltime=` counts only `evolve!`'s time, and
+  writing the `t = 0` checkpoint from the XCTS data had taken about
+  `2500 s` before it started.
+
+Their follow-ons, jobs 2890343 and 2890344 (`--dependency=afterany`), carried
+on from the periodic checkpoints at `26` and `28 M`, losing at most `M/4`.
+They waited about `18 h` on priority, ran on 2026-11-20, and lost their tracks
+at the plunge at `30.25` and `30.5 M`, as at `1/48`. The measurements are
+`CODE.md`'s "What step H4 has built" ("The pair from solved data").
 
 ## Possible extensions
 

@@ -619,6 +619,21 @@ julia --project=. --threads=4 test/binary_runs.jl chart=harmonic d=8 L=8 N=8 roo
 julia --project=. --threads=4 test/binary_runs.jl chart=harmonic interior=fitted d=8 L=8 N=8 roots=2 radii=4,3,2,6/5 q=2 masses=1,1 margin=4 t_end=1/10 chunk=1/20 finder_N=12 spin=0 adm=0 out=out/hfpair
 ```
 
+Step H4's rows ran on Trillium from step S1's `p = 10` solution, through
+`~/claude/xcts-s1/src/h4evo.sh`: one node, `12 h`, two rows at `1/48` or
+one at `1/96`. Each row writes its `t = 0` checkpoint with `t_end=0 xcts=…`
+first. That write took about `2500 s` at `1/96`, and `walltime=` does not
+count it.
+
+A roll-on row grows its horizons. It takes `chunk=1/4` and finds every
+`M/8` at `1/48` or `M/16` at `1/96`; with `chunk=1` and finds every `M/4`
+the jump guard or the CFL detector stops it within `10 M`. The line below
+is the `σ_g = 10` row at `1/96`, about `27 min/M` on 192 threads:
+
+```bash
+julia -t 192 --project=<env> test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=h4 d=8 N=24 margin=16 n_L=20 t0=0 sigma_g=10 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/16 walltime=41000 checkpoint=out/h4/ck out=out/h4
+```
+
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
 and device tests behind

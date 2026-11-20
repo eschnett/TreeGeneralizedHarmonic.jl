@@ -8862,17 +8862,26 @@ grid throughout, or the inertial grid with `:fitted` measured first between
    data's holes lose `13 %` of their irreducible mass, so the pair's runs
    waited for solved data ([Solved data for the
    pair](#solved-data-for-the-pair); `PLAN.md`'s steps S1 and S2, both done).
-   It resumes on step S1's `d = 8` data.
+   *Measured (step H4), on step S1's `d = 8` data at `1/48` and `1/96`:*
+   - In pure harmonic gauge every find succeeds to `31–33 M`, where the
+     separation is `3.1–2.3`. Each row ends because its shrinking horizon
+     leaves the layer no room; the lapse has not collapsed (`α ≥ 0.43`).
+   - With the roll-on from `t = 0` (`σ_g = 5`, `10 M`) every find succeeds
+     to `30 M`, where the horizons touch.
+   - Near the holes the constraints converge at order four until the outer
+     faces' error arrives at about `27 M`.
+   - With the roll-on, the fit's relative residual is not at truncation
+     level.
 5. **The orbit**, on the grid chosen from step H2's ratio.
 
 ### What step H4 has built
 
 The pair's code, on steps B1–B3's composition (`test/harmonic_holes_tests.jl`;
 `test/binary_runs.jl chart=harmonic`), with each hole's interior B2's tracked
-`:damped` target or step 8e's `:fitted` target. The first runs, at `1/48` and `1/96`, found that the
-superposed data's holes lose mass (the last item below), and the step is
-shelved until the data are solved (Erik, 2026-11-15; [Solved data for the
-pair](#solved-data-for-the-pair)).
+`:damped` target or step 8e's `:fitted` target. The first runs, at `1/48` and
+`1/96`, found that the superposed data's holes lose mass (the next-to-last item
+below). The step therefore waited for solved data ([Solved data for the
+pair](#solved-data-for-the-pair)). The last item is the pair run from those data.
 
 - **A hole's chart.** `HoleSpec(…; chart = :harmonic)` is harmonic Kerr on its
   line (`hole_on_line`); its seed, its radius checks and its tracked target read
@@ -8955,6 +8964,121 @@ pair](#solved-data-for-the-pair)).
   `0.06` each hole loses. Resolution and a common horizon are excluded (the
   holes are still `5.1 M` apart at `28 M`). The runs are in `HISTORY.md`,
   "Step H4 started", and the analysis in "Step H4 shelved".
+- **The pair from solved data (measured, step H4).** Setup:
+  - the head-on `d = 8` pair from rest (`M_A = 1/2`), from step S1's `p = 10`
+    data, with `:fitted` per hole, `L = 32`, and cubes `8, 4, 2, 1, 3/4` about
+    each hole;
+  - `margin = 6` and `n_L = 12` at `1/48`; `16` and `20` at `1/96`;
+  - two gauges: pure harmonic (`chunk = M`, finds every `M/4`), and the
+    roll-on from `t_0 = 0` with `σ_g = 5` and `10 M` (`chunk = M/4`, finds
+    every `M/8` at `1/48` and `M/16` at `1/96`).
+
+  Every find of both holes succeeded in all six rows up to each row's end.
+  The two spacings agree on the tracks' separation to `5·10⁻⁵` and on each
+  horizon's smallest radius to `3·10⁻⁵`.
+
+  | gauge | end | separation at the end | `M_irr`, `t = 0` → end (`1/48`; `1/96`) | why it ended |
+  |---|---|---|---|---|
+  | pure harmonic | `31.25 M`; `33 M` | `3.07`; `2.32` | `0.505932` → `0.505965`; → `0.505935` | the layer's room: `r_min` `0.48` → `0.42`; `0.40` |
+  | roll-on, `σ_g = 5` | `30.25 M` | `1.82` | → `0.506398`; `0.506400` (at `30 M`) | the tracks lost at the touching horizons |
+  | roll-on, `σ_g = 10` | `30.5 M` | `1.79` | → `0.506433`; `0.506433` (at `30.25 M`) | the same |
+
+  - **Pure harmonic gauge does not reach its end here.** Each horizon's
+    coordinate radius shrinks, faster as the holes approach: `0.008/M` at
+    `31 M` and `0.014/M` at `33 M`. Each row stops when the margin, the ramp
+    and the core no longer fit inside it — `0.417` at `1/48`, `0.396` at
+    `1/96`. This is a limit of the spacing.
+
+    The lapse does not collapse before that:
+
+    | | `t = 0` | `8 M` | `16 M` | `24 M` | `30 M` | `33 M` (`1/96`) |
+    |---|---|---|---|---|---|---|
+    | smallest `α`, outside both horizons | `0.49` | `0.454` | `0.476` | `0.459` | `0.442` | `0.430` |
+    | largest `√γ/α`, outside both horizons | `18.2` | `20.4` | `19.9` | `21.6` | `24.3` | `26.8` |
+    | smallest `α`, between the holes | `0.495–0.499` | `0.472` | `0.489–0.493` | `0.493–0.497` | `0.486` | `0.474` |
+    | largest `√γ/α`, between the holes | `17.0–17.6` | `18.5` | `17.5–18.1` | `17.4–18.0` | `20.0` | `24.0` |
+
+    Outside both horizons the two spacings agree to three digits; between the
+    holes they agree to `1 %` (the slab's edges are the horizons' facing
+    sides). A merger in this gauge needs a finer spacing about the shrinking
+    horizons than `1/96`. `M_irr` drifts `3.3·10⁻⁵` at `1/48` and `3·10⁻⁶` at
+    `1/96` over the run, a ratio of about `11`.
+  - **The roll-on grows each horizon** in coordinates. Its smallest radius
+    goes from `0.48` to `0.71` by `4 M` (`σ_g = 5`; `0.125/M` at its fastest)
+    and to `0.85–0.96` from `12 M` on. That growth is why its rows find at
+    least every `G h/(2 · 0.125)`: the guard on a find's jump in radius is
+    `G h/2`. The lapse between the holes rises from `0.49` to `0.89–0.92` by
+    `4–8 M` and falls to about `0.60` at `30 M`. From `8 M` on, `√γ/α` stays
+    at `2.4–2.9`.
+
+    `M_irr` holds to `10⁻⁶` at `1/96` (`1.4·10⁻⁵` at `1/48`) from `4` to
+    `26 M`. It then rises `0.09–0.10 %` as the horizons approach, the same at
+    both spacings.
+
+    The rows end where each horizon's largest coordinate radius passes half
+    the tracks' separation (`1.015` against `1.000`, and `1.012` against
+    `0.987`). The finder's footprint then reaches the other hole's layer,
+    three finds are refused, and the track is lost (`TrackLostError`).
+    There is no common-horizon finder ([The common horizon and the
+    handover](#the-common-horizon-and-the-handover), **(proposed)**), so a
+    row cannot go further.
+  - **Within `4 M` of the holes the constraints converge at order four,
+    until the outer faces arrive.** Ratio `1/48` : `1/96` of the L2 norms in
+    bands about the nearer hole, roll-on with `σ_g = 10` (the `σ_g = 5` row
+    and pure harmonic gauge are alike):
+
+    | band | `ℋ` at `16 M` | `ℋ` at `24 M` | `ℋ` at `30 M` | `C_a` at `16 M` | `ℳ` at `16 M` |
+    |---|---|---|---|---|---|
+    | `[0.75, 1)`, inside the horizon | `18` | `5.3` | `3.4` | `33` | `18` |
+    | `[1, 1.5)` | `410` | `89` | `12` | `190` | `460` |
+    | `[1.5, 2)` | `28` | `18` | `10` | `17` | `32` |
+    | `[2, 3)` | `16` | `16` | `0.9` | `16` | `13` |
+    | `[3, 4)` | `16` | `16` | `0.7` | `16` | `15` |
+    | `[4, ∞)` | `0.6` | `0.9` | `0.9` | `0.9` | `0.5` |
+
+    From `1.5` to `4 M` the ratio's median is `16` from `8 M` to `24 M`, and
+    `80 %` of the rows lie in `13–19`. In pure harmonic gauge the same holds
+    from `0.75 M` out: a median of `18`, `80 %` of the rows in `15–21`, from
+    `12 M` to `26 M`. With the roll-on, `[0.75, 1)` lies inside the grown horizon,
+    between the layer and the surface. There `ℋ` grows to `0.35` at `1/48`
+    and `0.10` at `1/96` by `30 M`.
+
+    From `26 M` (roll-on) and `28 M` (pure harmonic) the `1/96` rows' `[3, 4)`
+    band rises `20–100×` within two `M`, and `[2, 3)` follows. The `1/48`
+    rows' bands do not rise, so by `30 M` `1/96` is the larger. `[4, ∞)` has
+    been larger at `1/96` since `t = 0`. A signal from the faces at `32 M` at
+    the speed of light reaches `3–4 M` from the holes at about `27 M`. That
+    fits the outer faces' mismatch ([Solved data for the
+    pair](#solved-data-for-the-pair)), but the cause is not isolated
+    **(open)**.
+
+    Over the evolved region, `C_a` does not converge (ratio `0.7–1.0`). With
+    the roll-on it grows from `1.4·10⁻⁴` to `1.9·10⁻³` by `30 M` at both
+    spacings; in pure harmonic gauge it stays at `0.5–1.8·10⁻⁴`.
+  - **The layers' residual.** Every fit of every row is valid.
+    - In pure harmonic gauge the layer's distance from its target is
+      `900–7000` at `1/48` and `1500–64000` at `1/96`, rising late as the
+      horizons shrink. That is step H1's single `:fitted` harmonic hole's
+      level: `4125` at `1/40`. The fit's worst relative residual is
+      `0.04–0.32` at `1/48` and `0.002–0.40` at `1/96`, row by row `2–11×`
+      lower at `1/96`; step H1's was `0.0053`.
+    - With the roll-on the layer sits in the grown hole's milder fields. From
+      `8 M` on its distance from the target is `4–37` at `1/48` and `5–12` at
+      `1/96`, after a peak of `250–330` at `4 M` with `σ_g = 10`. But the fit's relative
+      residual climbs to `0.3–1.0` from `10 M` to `26 M` **at both
+      spacings**. It is not at truncation level, and it does not fall with
+      `h`. A limit of the fit's ansatz (`lmax_fit = 8`, `fit_cont = 2`) on a
+      horizon whose shape the gauge keeps changing would fit, but that is
+      not isolated **(open)**.
+  - **Cost on a Trillium node (192 Zen 5 cores):**
+    - `1/48`: `182 s/M` for pure harmonic gauge (`6 M` points, 64 threads);
+      `363–387 s/M` for the roll-on (`9 M` points, 96 threads).
+    - `1/96`: `753 s/M` for pure harmonic gauge (`47 M` points); `1570–1630 s/M`
+      for the roll-on (`72–74 M` points), with four rows and sixteen finds of
+      each hole per `M`.
+    - Step B3's Kerr-Schild pair took `362 s/M` at `1/48` (`64 M` points) on
+      one H200, with four rows and four finds of each hole per `M`.
+    - Memory peaks at `326 GB` at `1/96` with the roll-on.
 
 ### What is not known on this route
 
@@ -8981,7 +9105,13 @@ All **(open)**, except where answered.
   while the margin gains cells, then at four. Open on any other chart and
   for a moving hole.
 - How pure harmonic gauge fails at a merger in this code, and whether the
-  roll-on's `d_g` and `σ_g` leave it time.
+  roll-on's `d_g` and `σ_g` leave it time. *Measured for the head-on pair at
+  `d = 8` (step H4):* up to a separation of `2.3` it does not fail. The lapse
+  stays above `0.43`, and the run ends on the spacing as the horizons shrink
+  in harmonic coordinates. The roll-on from `t = 0` takes both holes to
+  touching horizons at either `σ_g`. Open: the merger itself, which needs a
+  common-horizon finder; a finer spacing in pure harmonic gauge; and a
+  roll-on started later than `t = 0`.
 - *Answered for the head-on pair at `d = 8` (step H4):* superposed harmonic
   data without a solve do not settle in the harmonic gauge; each hole loses
   `13 %` of its irreducible mass by `28 M` ("What step H4 has built").
@@ -8999,7 +9129,9 @@ All **(open)**, except where answered.
 1. **The gauge of the inspiral**: harmonic **(proposed)**, the damped
    harmonic gauge from `t = 0` on the same data, or pairing (α).
 2. **The merger**: the roll-on at `d_g` **(proposed)**, decided again from
-   step H4's pure harmonic run.
+   step H4's pure harmonic run. That run ends on the spacing, not the gauge,
+   at a separation of `2.3` ([What step H4 has
+   built](#what-step-h4-has-built)), so it does not say where `d_g` must be.
 3. **The spin**: `a ≤ 7/10` for G7 and G8 on this route **(proposed)**,
    with higher spins left to a chart that has a source. Step H3 measured
    `a = 1/2` holding with `:damped` and `a = 7/10` running at rest only at

@@ -52,7 +52,8 @@ its first runs found that the superposed data's holes lose `13 %` of their
 irreducible mass, from the data's constraint violation. Its state is parked in
 a draft pull request. **Step S1 is done** (2026-11-15 to 2026-11-17): the
 pair's data solved by XCTS. **Step S2 is done** (2026-11-17 to 2026-11-18):
-two holes far apart on those data. **Step H4 is resumed** (2026-11-18) on them. Step H5 is not started. Steps H1–H3 were single
+two holes far apart on those data. **Step H4 is resumed** (2026-11-18) on them
+and run (to 2026-11-20); it awaits Erik's review. Step H5 is not started. Steps H1–H3 were single
 holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
@@ -1409,6 +1410,44 @@ over the evolved region, which the outer faces dominate; between the holes
 (`[3, 4)` about each) the data improve only `2.5×` from `1/48` to `1/96`, and
 the layers differ between the spacings (`r_1 = 0.36` against `0.31`), so the
 band nearest the horizon is not an order. Keep `fit_depth = 0`.
+
+**Status (2026-11-20): run, awaiting Erik's review.** Six rows from the
+`p = 10` data, measured in `CODE.md`, "What step H4 has built" ("The pair
+from solved data"); the runs' story is in `HISTORY.md`, "Step H4 resumed".
+Against the criteria below:
+
+- *one hole is step H1's, bit for bit*: `test/harmonic_holes_tests.jl`,
+  unchanged since step H4 started;
+- *`C_a` at `t = 0`*: zero pointwise by construction, `2.6–3.3·10⁻⁵` on the
+  grid, from the data's seams (step S1). The data's `ℋ` over the evolved
+  region is `1.6–1.8·10⁻³`, against `1.41·10⁻³` for the superposed
+  Kerr-Schild pair of step B3 on the same box;
+- *pure harmonic gauge*: every find of both holes to the end, at `31.25 M`
+  (`1/48`) and `33 M` (`1/96`), where the separation was `3.1` and `2.3`. Both
+  rows ended on the layer's room, because each horizon's coordinate radius
+  shrinks (`0.48` to `0.40`). That is the spacing, not the gauge: the lapse
+  between the holes was still `0.47`, with `√γ/α = 24`;
+- *the roll-on at `t_0 = 0`*: every find of both holes at `σ_g = 5` and `10`,
+  at both spacings, to `30.0` and `30.25 M`. Then each horizon's largest
+  coordinate radius passed half the separation, the next finds read the other
+  hole's layer, and the tracks were lost. There is no common-horizon finder
+  (step B7 has not run), so this is as far as "to the first common horizon"
+  can go. The two spacings agree on the separation to `5·10⁻⁵` and on `M_irr`
+  to `2·10⁻⁶`. From `1.5` to `4 M` about each hole, `C_a`, `ℋ` and `ℳ` fall
+  `16×` (median; `80 %` of the rows `13–19×`) from `8` to `24 M`. After that, the bands from `2 M` out stop
+  converging; the timing fits the outer faces' error arriving, but that is
+  not isolated. Over the evolved region `C_a` stays below `2·10⁻³` but does
+  not fall;
+- *the layer's residual from its own fit*: in pure harmonic gauge it is at
+  step H1's single-hole level, and the fit's relative residual falls
+  `2–11×` from `1/48` to `1/96`. **With the roll-on it is not at truncation
+  level**: the fit's relative residual reaches `0.3–1.0` from `10` to
+  `26 M` at both spacings, though every fit is valid and the layer residual
+  is `4–37` from `8 M` on;
+- *the handover*: step B7 has not run;
+- *the cost per `M`*: `1/96` (`47–74 M` points) takes `753 s/M` in pure
+  harmonic gauge and `1600 s/M` with the roll-on on a Trillium node. Step B3
+  at `1/48` (`64 M` points) took `362 s/M` on one H200.
 
 **Started 2026-11-14 on the inertial grid** (Erik's choice), on branch
 `claude/step-H4-prep`: built are the harmonic chart for a hole, the pair with no
