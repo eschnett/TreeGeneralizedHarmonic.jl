@@ -1,0 +1,48 @@
+# The full suite (the full tier) at four threads, as `ci/full-suite.sh` runs
+# it: `test/runtests.jl` in the prepared `test` environment. Take the snapshot
+# from the commit that is to be tested (`simlaunch snapshot . --rev <sha>`).
+# The suite's line ("6199 pass of 6199") is printed at the end by `[after]`;
+# posting it as a commit status stays `ci/full-suite.sh`'s, from the laptop.
+#
+# No `--check-bounds=yes`: `Pkg.test` passes on the calling session's setting,
+# and `ci/full-suite.sh` calls it from a plain `julia`, so the full suite runs
+# with Julia's default; forced bounds checks are GitHub CI's (`julia-runtest`).
+# With them the suite took 58 min instead of 35 on the same EPYC 7543 (jobs
+# 606949 and 606824: the right-hand side 1166 ns a point against 746).
+#
+# No `pin`: under `JULIA_EXCLUSIVE=1` the threading test's subprocess
+# inherits the parent's affinity mask and aborts (CLAUDE.md, "Commands").
+name = "full-suite"
+env = "test"
+threads = 4
+
+[vars]
+TREEGH_TEST_TIER = "full"
+
+[site.symmetry]                     # 35 min on an EPYC 7543 (job 606824); above
+time = "2:00:00"                    # amddebugq's hour on the slower Zen 2 nodes
+
+# `mpi_tests.jl` starts MPICH_jll's `mpiexec` from inside the job: without
+# fork, Hydra starts its ranks with `srun`, which waits for a step the suite
+# already holds; without the second, MPICH crashes in its first collective.
+[site.symmetry.vars]
+TREEGH_TEST_TIER = "full"
+HYDRA_LAUNCHER = "fork"
+MPIR_CVAR_CH4_SHM_POSIX_RELEASE_GATHER_ENABLE = "0"
+
+[site.trillium]                     # a 192-core node for a four-thread suite
+time = "2:00:00"
+
+[site.trillium.vars]
+TREEGH_TEST_TIER = "full"
+HYDRA_LAUNCHER = "fork"
+MPIR_CVAR_CH4_SHM_POSIX_RELEASE_GATHER_ENABLE = "0"
+
+[site.local]                        # the workstation, before a pull request
+
+[[run]]
+label = "t4"
+cmd = "test/runtests.jl"
+
+[after]
+cmd = "for d in $SIMLAUNCH_JOBDIRS; do echo \"suite $d: $(sed 's/\\x1b\\[[0-9;]*m//g' \"$d\"/output.log | awk -F'|' -f \"$PROJECT\"/ci/suite-summary.awk)\"; done"

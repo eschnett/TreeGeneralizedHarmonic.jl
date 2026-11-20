@@ -86,21 +86,8 @@ set -e
 elapsed=$(( $(date +%s) - start ))
 minutes="$((elapsed / 60))m$(printf %02d $((elapsed % 60)))s"
 
-# The suite's summary, from Test's table: the header names the columns
-# present (`Pass Fail Error Broken Total Time`), and the suite's own row has
-# a value in each of them — e.g. "5713 pass of 5713", "5690 pass, 23 fail of
-# 5713".
-summary=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | awk -F'|' '
-    /^Test Summary:/ { n = split($2, names, " ") }
-    /^TreeGeneralizedHarmonic\.jl +\|/ && n {
-        m = split($2, v, " "); s = ""; total = ""
-        for (i = 1; i <= m && i <= n; i++) {
-            if (names[i] == "Total") total = v[i]
-            else if (names[i] != "Time") s = s (s == "" ? "" : ", ") v[i] " " tolower(names[i])
-        }
-        line = s " of " total
-    }
-    END { print line }')
+# The suite's summary, from Test's table (`ci/suite-summary.awk`).
+summary=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | awk -F'|' -f "$(dirname "$0")/suite-summary.awk")
 if [ "$status" = 0 ]; then
     state=success
     description="$summary in $minutes, $threads threads, $cpu"

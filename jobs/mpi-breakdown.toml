@@ -1,0 +1,72 @@
+# Where a time step goes on 1, 2 and 4 H200s (was `bench/symmetry_mpi_breakdown.sh`):
+# `bench/mpi_breakdown.jl` on the octant mesh of `bench/mpi_steps.jl` (7.6 M
+# points) — no MPI, MPICH_jll at 2 and 4 ranks, HPC-X at 2 and 4 staged and
+# direct (the recipe passes `--bind-to none`, which the old script compared with
+# Open MPI's default binding; that run is gone, job 578648 settled it) — and
+# then one `test/octant_runs.jl` tracked `:fitted` run under HPC-X. `[after]`
+# prints the tables. The `hpcx` runs wait on the same SimLaunch gap as
+# `jobs/mpi-gpu.toml`'s.
+name = "mpi-breakdown"
+site = "symmetry"
+env = "cuda"
+time = "1:30:00"
+resources = { gpus = 4 }
+queue = "h200q"
+threads = 8                         # per rank, one GPU each
+
+[[run]]
+label = "serial"
+cmd = "bench/mpi_breakdown.jl L=32 N=32 roots=4 radii=16,8,4 backend=cuda reps=5"
+
+[[run]]
+label = "jll-n2"
+mpi = "jll-fork"
+ranks = 2
+cmd = "bench/mpi_breakdown.jl L=32 N=32 roots=4 radii=16,8,4 backend=cuda reps=5 mpi=true"
+
+[[run]]
+label = "jll-n4"
+mpi = "jll-fork"
+ranks = 4
+cmd = "bench/mpi_breakdown.jl L=32 N=32 roots=4 radii=16,8,4 backend=cuda reps=5 mpi=true"
+
+[[run]]
+label = "hpcx-n2-staged"
+mpi = "hpcx"
+ranks = 2
+cmd = "bench/mpi_breakdown.jl L=32 N=32 roots=4 radii=16,8,4 backend=cuda reps=5 mpi=true"
+
+[[run]]
+label = "hpcx-n2-direct"
+mpi = "hpcx"
+ranks = 2
+cmd = "bench/mpi_breakdown.jl L=32 N=32 roots=4 radii=16,8,4 backend=cuda reps=5 mpi=true deviceaware=true"
+
+[[run]]
+label = "hpcx-n4-staged"
+mpi = "hpcx"
+ranks = 4
+cmd = "bench/mpi_breakdown.jl L=32 N=32 roots=4 radii=16,8,4 backend=cuda reps=5 mpi=true"
+
+[[run]]
+label = "hpcx-n4-direct"
+mpi = "hpcx"
+ranks = 4
+cmd = "bench/mpi_breakdown.jl L=32 N=32 roots=4 radii=16,8,4 backend=cuda reps=5 mpi=true deviceaware=true"
+
+[[run]]
+label = "octant-hpcx-n2"
+mpi = "hpcx"
+ranks = 2
+cmd = "test/octant_runs.jl case=ks interior=fitted L=32 N=32 roots=4 radii=16,8,4 t_end=3/2 chunk=1/2 cfl=1/2 backend=cuda mpi=true out=out"
+
+[after]
+cmd = """
+for d in $SIMLAUNCH_JOBDIRS; do
+    echo "=== $d"
+    case $d in
+        *octant-hpcx*) grep -E '^t =|^done' "$d"/output.log | sed -E 's/^(t = +[0-9.]+ +wall +[0-9.]+ s).*/\\1/' || true ;;
+        *) grep -vE 'Warning|^ *[│└┌]|^ *$' "$d"/output.log | tail -40 ;;
+    esac
+done
+"""

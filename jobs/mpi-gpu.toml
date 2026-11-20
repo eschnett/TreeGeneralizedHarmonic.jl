@@ -1,0 +1,81 @@
+# The multi-GPU run of the MPI port (was `bench/symmetry_mpi_gpu.sh`): one
+# tracked `:fitted` Kerr-Schild hole on the octant, `test/octant_runs.jl`, on
+# one H200 serially and then one rank per GPU — MPICH_jll (host staging) and
+# HPC-X's CUDA-aware Open MPI, staged and with the device buffers handed to MPI
+# (`deviceaware=true`). `[after]` compares every run's `octant.csv` and
+# `records.csv` with the serial run's (`bench/octant_compare.jl`) and prints
+# the wall clock at each chunk. Four chunks: the first pays the compilation,
+# the other three are the cost. See "Running distributed" in CODE.md.
+#
+# `hpcx` needs OpenMPI_jll pointed at HPC-X's libraries, or HDF5_jll loads
+# OpenMPI_jll's own libopen-pal beside HPC-X's ("undefined symbol:
+# pmix_framework_names", job 578514); `bench/symmetry_mpi_gpu_env.sh` did that
+# by hand, and a SimLaunch recipe cannot yet (reported to SimLaunch,
+# 2026-11-20). Until it can, the `hpcx-*` runs are expected to fail at load.
+name = "mpi-gpu"
+site = "symmetry"
+env = "cuda"
+time = "2:00:00"
+resources = { gpus = 4 }
+queue = "h200q"
+threads = 8                         # per rank, one GPU each
+
+[[run]]                             # one GPU, no MPI: the reference
+label = "serial"
+cmd = "test/octant_runs.jl case=ks interior=fitted L=32 N=32 roots=4 radii=16,8,4 t_end=2 chunk=1/2 cfl=1/2 backend=cuda out=out"
+
+[[run]]
+label = "jll-n1"
+mpi = "jll-fork"                    # Hydra forks its ranks on the one node
+ranks = 1
+cmd = "test/octant_runs.jl case=ks interior=fitted L=32 N=32 roots=4 radii=16,8,4 t_end=2 chunk=1/2 cfl=1/2 backend=cuda mpi=true out=out"
+
+[[run]]
+label = "jll-n2"
+mpi = "jll-fork"
+ranks = 2
+cmd = "test/octant_runs.jl case=ks interior=fitted L=32 N=32 roots=4 radii=16,8,4 t_end=2 chunk=1/2 cfl=1/2 backend=cuda mpi=true out=out"
+
+[[run]]
+label = "jll-n4"
+mpi = "jll-fork"
+ranks = 4
+cmd = "test/octant_runs.jl case=ks interior=fitted L=32 N=32 roots=4 radii=16,8,4 t_end=2 chunk=1/2 cfl=1/2 backend=cuda mpi=true out=out"
+
+[[run]]                             # the recipe has `--bind-to none`: a bound rank's
+label = "hpcx-n2-staged"            # eight threads share one core (job 578648: 3.8×)
+mpi = "hpcx"
+ranks = 2
+cmd = "test/octant_runs.jl case=ks interior=fitted L=32 N=32 roots=4 radii=16,8,4 t_end=2 chunk=1/2 cfl=1/2 backend=cuda mpi=true deviceaware=false out=out"
+
+[[run]]
+label = "hpcx-n2-direct"
+mpi = "hpcx"
+ranks = 2
+cmd = "test/octant_runs.jl case=ks interior=fitted L=32 N=32 roots=4 radii=16,8,4 t_end=2 chunk=1/2 cfl=1/2 backend=cuda mpi=true deviceaware=true out=out"
+
+[[run]]
+label = "hpcx-n4-staged"
+mpi = "hpcx"
+ranks = 4
+cmd = "test/octant_runs.jl case=ks interior=fitted L=32 N=32 roots=4 radii=16,8,4 t_end=2 chunk=1/2 cfl=1/2 backend=cuda mpi=true deviceaware=false out=out"
+
+[[run]]
+label = "hpcx-n4-direct"
+mpi = "hpcx"
+ranks = 4
+cmd = "test/octant_runs.jl case=ks interior=fitted L=32 N=32 roots=4 radii=16,8,4 t_end=2 chunk=1/2 cfl=1/2 backend=cuda mpi=true deviceaware=true out=out"
+
+[after]
+cmd = """
+ref=
+for d in $SIMLAUNCH_JOBDIRS; do case $d in *mpi-gpu-serial/*) ref=$d/out ;; esac; done
+echo "=== comparison with the serial run"
+julia "$PROJECT"/bench/octant_compare.jl "$ref" \
+    $(for d in $SIMLAUNCH_JOBDIRS; do case $d in *mpi-gpu-serial/*) ;; *) [ -d "$d/out" ] && echo "$d/out" ;; esac; done) || true
+echo "=== wall clock at each chunk"
+for d in $SIMLAUNCH_JOBDIRS; do
+    echo "--- $d"
+    grep -E '^t = |^done' "$d"/output.log | sed -E 's/^(t = +[0-9.]+ +wall +[0-9.]+ s).*/\\1/' || true
+done
+"""

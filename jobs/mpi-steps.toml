@@ -1,0 +1,72 @@
+# The cost of a time step on 1, 2 and 4 H200s (was `bench/symmetry_mpi_steps.sh`):
+# `bench/mpi_steps.jl` on the octant hole with the analytic layer, no finder and
+# no fit, at two block sizes — strong scaling of the evolution alone (CODE.md,
+# "Running distributed"). MPICH_jll at every count, and HPC-X staged at 2, to
+# see whether its 2.5–3× is in the steps. `[after]` prints each run's
+# `ranks=` lines. The `hpcx` run waits on the same SimLaunch gap as
+# `jobs/mpi-gpu.toml`'s.
+name = "mpi-steps"
+site = "symmetry"
+env = "cuda"
+time = "1:30:00"
+resources = { gpus = 4 }
+queue = "h200q"
+threads = 8                         # per rank, one GPU each
+
+[[run]]
+label = "L32-serial"
+cmd = "bench/mpi_steps.jl steps_short=8 steps_long=64 backend=cuda L=32 N=32"
+
+[[run]]
+label = "L32-jll-n1"
+mpi = "jll-fork"
+ranks = 1
+cmd = "bench/mpi_steps.jl steps_short=8 steps_long=64 backend=cuda L=32 N=32 mpi=true"
+
+[[run]]
+label = "L32-jll-n2"
+mpi = "jll-fork"
+ranks = 2
+cmd = "bench/mpi_steps.jl steps_short=8 steps_long=64 backend=cuda L=32 N=32 mpi=true"
+
+[[run]]
+label = "L32-jll-n4"
+mpi = "jll-fork"
+ranks = 4
+cmd = "bench/mpi_steps.jl steps_short=8 steps_long=64 backend=cuda L=32 N=32 mpi=true"
+
+[[run]]
+label = "L48-serial"
+cmd = "bench/mpi_steps.jl steps_short=8 steps_long=64 backend=cuda L=48 N=48"
+
+[[run]]
+label = "L48-jll-n1"
+mpi = "jll-fork"
+ranks = 1
+cmd = "bench/mpi_steps.jl steps_short=8 steps_long=64 backend=cuda L=48 N=48 mpi=true"
+
+[[run]]
+label = "L48-jll-n2"
+mpi = "jll-fork"
+ranks = 2
+cmd = "bench/mpi_steps.jl steps_short=8 steps_long=64 backend=cuda L=48 N=48 mpi=true"
+
+[[run]]
+label = "L48-jll-n4"
+mpi = "jll-fork"
+ranks = 4
+cmd = "bench/mpi_steps.jl steps_short=8 steps_long=64 backend=cuda L=48 N=48 mpi=true"
+
+[[run]]
+label = "L32-hpcx-n2"
+mpi = "hpcx"
+ranks = 2
+cmd = "bench/mpi_steps.jl steps_short=8 steps_long=64 backend=cuda L=32 N=32 mpi=true"
+
+[after]
+cmd = """
+for d in $SIMLAUNCH_JOBDIRS; do
+    echo "--- $d"
+    grep -E '^ranks=|ERROR|Error' "$d"/output.log || echo "FAILED"
+done
+"""
