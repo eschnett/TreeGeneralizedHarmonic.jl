@@ -24,6 +24,14 @@ const TGHc = TreeGeneralizedHarmonic
 
 isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
 
+# A metric that is the fixture's background under another type (step S1): what
+# `initial_data` is handed when the data are solved elsewhere, here with the
+# answer known — the same numbers through another method table.
+struct RewrappedMetric{B} <: SM.AbstractMetric
+    b::B
+end
+SM.metric(m::RewrappedMetric, p::AbstractVector) = SM.metric(m.b, p)
+
 @testset verbose = true "Checkpoint and restart" begin
     T = Float64
     q = 2
@@ -267,6 +275,66 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         test_same(out, ref)
     end
 
+    # Guards step S1's start checkpoint and `initial_data`. Data solved by
+    # another code are put onto the mesh by a host that has the solver — the
+    # cycle, the finds and the fits at `t = 0`, written by `t_end = 0` — and the
+    # run continues from that file elsewhere; a restart from it that is not the
+    # run that never stopped (the track before the row as `track_chunk`, no
+    # regrid first) would start a different run from the same data. And the
+    # data metric must reach every fill and fit of `t = 0`: the fixture's own
+    # background under another type starts the same run.
+    @full_tier @testset "a run continued from its t = 0 checkpoint is the run" begin
+        case = adaptive_hole_fixture(T; interior=FittedSpec(T; variant=:fitted,
+                                                            margin=4, n_L=6),
+                                     r_0=nothing, r_1=nothing,
+                                     horizon=Horizon(T; every=1, N=12, spin=false))
+        forest = hole_forest(T, case; N=8, roots=4, radii=(T(5 // 2),))
+        corner = filter(k -> all(d -> block_extent(T, forest, k)[d][1] ≥ T(5 // 2),
+                                 1:3), forest.leaves)
+        refine!(forest, corner)
+        balance!(forest)
+        ref = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                      t_end=T(1 // 10), regrid=true)
+        pre = joinpath(mktempdir(), "run")
+        ckw = (checkpoint_path_prefix=pre, checkpoint_every_chunks=1,
+               checkpoint_sync_to_disk=false)
+        start = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                        t_end=zero(T), regrid=true, ckw...)
+        @test start.nsteps == 0 && start.nchunks == 0 && start.finished
+        @test length(start.checkpoints_written) == 1
+        @test length(start.records) == 1 && start.records[1].t == 0
+        out = evolve!(T, case; q=q, ops=ops, t_end=T(1 // 10), regrid=true, ckw...,
+                      restart_file=only(start.checkpoints_written))
+        test_same(out, ref)
+        # The data metric at t = 0, the case's background after it: the same
+        # numbers under another type are the same run, bit for bit.
+        wrapped = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                          t_end=T(1 // 10), regrid=true,
+                          initial_data=RewrappedMetric(case.background))
+        test_same(wrapped, ref)
+        # And other numbers are another start: a hole 2 % heavier must reach the
+        # fill, the find and the fit at t = 0, or a path that ignored
+        # `initial_data` would pass the check above as well.
+        heavier = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                          t_end=zero(T), regrid=true,
+                          checkpoint_path_prefix=joinpath(mktempdir(), "run"),
+                          checkpoint_every_chunks=1, checkpoint_sync_to_disk=false,
+                          initial_data=SM.KerrSchild(T(51 // 50), zero(T)))
+        @test !isequal(heavier.u, start.u)
+        @test heavier.records[1].horizon_success && start.records[1].horizon_success
+        @test isapprox(heavier.records[1].M_irr - start.records[1].M_irr, 1 // 50;
+                       atol=1 // 250)
+        @test any(((a, b),) -> a !== nothing && b !== nothing && !isequal(a.c, b.c),
+                  zip(heavier.fits, start.fits))
+        # t = 0 needs a file to write; data from elsewhere need a :fitted layer.
+        @test_throws "t_end = 0 integrates nothing" evolve!(
+            T, case; forest=deepcopy(forest), q=q, ops=ops, t_end=zero(T))
+        damped = adaptive_hole_fixture(T)
+        @test_throws "initial_data replaces the case's background" evolve!(
+            T, damped; forest=hole_forest(T, damped; N=8, roots=4, radii=(T(5 // 2),)),
+            q=q, ops=ops, t_end=T(1 // 10), initial_data=damped.background)
+    end
+
     # A boosted hole whose layer follows it: the speed growth that sizes the
     # next chunk's step, the track's velocity that splits a chunk into
     # refills, and step 8′'s trailing ramp.
@@ -281,6 +349,26 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
                       t_end=T(3 // 20), kw...)
         @test all(r -> r.horizon_success === true, ref.records)
         out, jobs, _ = chain(case, forest, T(3 // 20); kw...)
+        @test jobs == 3
+        test_same(out, ref)
+    end
+
+    # The tracked analytic target (step B2): the track with its four finds and
+    # its blend, the finds at the pieces' boundaries between two rows, and the
+    # sphere the row ran on — built at the chunk's end from the track before the
+    # row's find, which is what the restart rebuilds it from.
+    @full_tier @testset "a chain on the tracked analytic target is the run" begin
+        case = kerr_schild_case(T; halfwidth=T(5 // 2), chunk=T(1 // 20), x0=-1 // 4,
+                                v=1 // 5, gauge_source=:algebraic, octant=:quadrant,
+                                horizon=Horizon(T; every=1, N=12, spin=false),
+                                interior=TrackedSpec(T; r_0=T(2 // 5), r_1=T(11 // 10),
+                                                     max_interval=T(1 // 40)))
+        forest = gh_forest(T, case; N=12, roots=(4, 2, 2))
+        ref = evolve!(T, case; forest=deepcopy(forest), q=q, ops=ops,
+                      t_end=T(3 // 20))
+        @test [r.track_finds for r in ref.records] == [1, 2, 2, 2]
+        @test ref.track.nhist == TRACK_FIT_FINDS
+        out, jobs, _ = chain(case, forest, T(3 // 20))
         @test jobs == 3
         test_same(out, ref)
     end

@@ -25,11 +25,15 @@ first, before excision" (proposed) awaiting Erik's decision.
 Step 9 (G6), which does not depend on it, is running (started
 2026-09-25).**
 
-**Steps B1–B9 are proposed and not started**: binary
-black holes, toward the milestones G7 and G8 ("Milestones" below), which go beyond
-the proof of concept. The design is `CODE.md`, "Binary black holes", and Erik
-decides the gauge and interior pairing after B1 and B2. This file stays
-until G8 is done.
+**Steps B1–B9 are proposed; B1–B3 ran** (B1 on 2026-10-25, B2 and B3 on
+2026-10-26, B3's review to 2026-10-30; B4–B9 not started): binary black holes,
+toward the milestones G7 and G8 ("Milestones" below), which go beyond the proof
+of concept. The design is `CODE.md`, "Binary black holes". **Erik decided the
+pairing on 2026-10-26: (α)**, the composite tracked Kerr-Schild source fed by the
+per-hole tracks with B2's tracked `:damped` target per hole — and
+`GHCase(…; holes)`, and the superposed metric kept here; and, the same day, a
+slow control law for the track-fed source, the controlled source line, built in
+B3's review. This file stays until G8 is done.
 
 **Steps C1–C5 are proposed and not started**: a second route to G7 and G8
 for holes that orbit — the holes at rest on a grid that rotates with them,
@@ -41,16 +45,24 @@ B1–B3's code, and Erik decides the route of B4–B9 from step C2's report.
 harmonic gauge with no source for the inspiral, the damped harmonic gauge
 rolled on before the merger, and the `:fitted` interior. The design is
 `CODE.md`, "Harmonic gauge for the inspiral". **Steps H1–H3 are done**
-(they ran 2026-11-11 to 2026-11-13); steps H4 and H5 are proposed and not
-started, and the grid is Erik's decision from H2's and H3's reports. Steps
-H1–H3 were single holes and needed only `main`.
+(they ran 2026-11-11 to 2026-11-13); step H4 is started (2026-11-14, on the
+inertial grid, Erik's choice) and **shelved** (2026-11-15): the harmonic pair
+with no source, the roll-on from zero and `:fitted` per hole are built, and
+its first runs found that the superposed data's holes lose `13 %` of their
+irreducible mass, from the data's constraint violation. Its state is parked in
+a draft pull request. **Step S1 is done** (2026-11-15 to 2026-11-17): the
+pair's data solved by XCTS. **Step S2 is done** (2026-11-17 to 2026-11-18):
+two holes far apart on those data. **Step H4 is resumed** (2026-11-18) on them
+and run (to 2026-11-20); it awaits Erik's review. Step H5 is not started. Steps H1–H3 were single
+holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
 [eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
-stays unmerged. What the C steps and steps H4 and H5 took from it — the damped
-harmonic source and the roll-on, `gauge_consistent_momentum`, `HoleSpec` and
-the composition, the tracks of several holes — is not on `main`, and where
-they start instead is **(open)**.
+stays unmerged. What steps H4 and H5 take from it — the damped harmonic source
+and the roll-on, `gauge_consistent_momentum`, the tracked target, `HoleSpec`
+and the composition, the tracks of several holes — was taken onto step H4's
+branch on 2026-11-14 without the controlled source line (`HISTORY.md`, "Steps
+B1–B3's code taken for step H4 (2026-11-14)"), and reaches `main` with H4.
 
 The steps map onto the milestones G0–G6 ("Milestones" below), split so that every
 step ends in a green test suite and a `CODE.md` update, and so that each
@@ -108,6 +120,10 @@ the dependency order.
 - [Step H1 — A harmonic hole at rest](#step-h1--a-harmonic-hole-at-rest)
 - [Step H2 — A moving harmonic hole](#step-h2--a-moving-harmonic-hole)
 - [Step H3 — Spin in the harmonic chart](#step-h3--spin-in-the-harmonic-chart)
+- [Steps S1–S2 — Solved data for the pair](#steps-s1s2--solved-data-for-the-pair)
+  - [Sharp edges for steps S1–S2](#sharp-edges-for-steps-s1s2)
+- [Step S1 — Solved data for two harmonic holes](#step-s1--solved-data-for-two-harmonic-holes)
+- [Step S2 — Two holes far apart](#step-s2--two-holes-far-apart)
 - [Step H4 — Two holes with no source](#step-h4--two-holes-with-no-source)
 - [Step H5 — The orbit in harmonic gauge](#step-h5--the-orbit-in-harmonic-gauge)
 
@@ -777,126 +793,24 @@ findings set the steps below:
 
 ## Step B1 — Two gauge sources and the initial momentum
 
-`CODE.md`: "The gauge" (under "Binary black holes"); "Gauge and constraint
-damping" (the algebraic source); "Open questions", "Gauge sources that know
-less about the hole". **One hole only**: the binary case is B3's.
-
-**Changes**, all in `src/gauge.jl`, evaluated in the kernels as
-`KerrSchildSource` is, generic in the number type for the SIMD lanes and
-closure-free for a device:
-
-- **The composite tracked Kerr-Schild source**, `K` holes: each hole's
-  `M_A` and `S_A`, the piece's line `c_A(t)`, `u_A(t)` and `du_A/dt`, and
-  the partition of unity with `p = 4`. `∂_a H_b` includes `∂w_A` and the
-  `du_A/dt` term.
-- **The damped harmonic source** in SpECTRE's form (`A_L1`, `A_L2`, `A_S`,
-  `e`, `σ_r`).
-- **The roll-on** `f(t) H_from + (1 − f(t)) H_to`, with
-  `f = e^{−((t − t_0)/σ_g)⁴}` and its `∂_t f`.
-- **`gauge_consistent_momentum`**: `∂_t α` and `∂_t β^i` from
-  `C_a = 0`, given `(γ, K, α, β)`, their spatial derivatives and the
-  source.
-- **`test/octant_runs.jl` options** for the source and the roll-on.
-
-**Accept:**
-
-- The composite with one hole is `KerrSchildSource` bit for bit: the
-  right-hand side of the moving quadrant hole.
-- `H` and `∂H` of each new source agree with forward-mode differentiation
-  of its closed form, at random states near Kerr-Schild, to roundoff.
-- `gauge_consistent_momentum` returns a boosted Kerr-Schild hole's
-  analytic `Π` under its own source to roundoff, and gives `C_a = 0` at
-  `t = 0` for a perturbed lapse.
-- **The damped harmonic gauge rolled on**, on the boosted `a = 0` hole on
-  the quadrant (`v = 1/5`, `:fitted`, `1/24` and `1/32` in `M_A`) to
-  `40 M`, against the same hole in its own Kerr-Schild gauge. Record:
-  - `ℋ` and `C_a` just outside the horizon;
-  - the horizon's `M_irr`;
-  - the hole's coordinate trajectory;
-  - the static hole too, which Lindblom and Szilágyi saw settle.
-- The kernel's cost per point with each source.
-- The runs in `SINGULARITY_HANDLING.md` under a section of their own, and
-  summarised under `CODE.md`'s "The gauge".
+Done (it ran 2026-10-25). What it built and measured is `CODE.md`'s "What
+step B1 built and measured", its runs `SINGULARITY_HANDLING.md`'s "The damped
+harmonic gauge rolled on"; the brief is in `HISTORY.md`, "Step B1 — Two
+gauge sources and the initial momentum".
 
 ## Step B2 — The tracked analytic target
 
-`CODE.md`: "One interior per hole", "The tracks"; "The interior" (step 8c's
-rule, the moving `:damped` layer, `core_follows`). **One hole only.**
-
-**Changes:**
-
-- **`src/tracking.jl`:**
-  - the quadratic prediction, a least-squares fit in time over the last
-    four finds (today's line until there are four);
-  - its blend into the previous prediction over the next interval;
-  - the center-jump check, the found origin within `G h/2` of the
-    prediction;
-  - the find interval from the predicted acceleration, `a Δt² ≤ G h/4`;
-  - the prediction's error in the record.
-- **`src/interior.jl` and `src/driver.jl`:** a `:damped` interior whose
-  target and center come from a track. The target is the boosted,
-  translated Kerr-Schild hole with the hole's `M_A` and `S_A` on the
-  piece's line, rebuilt every piece, with the core following its target
-  and the target's rate along the line.
-- **`test/octant_runs.jl`:** the tracked target, and knobs that perturb its
-  mass, velocity and center.
-
-**Accept:**
-
-- **The prediction on synthetic finds** on a circle at `d = 10` and
-  `d = 3`, a host test: its error under `G h/4` at the proposed cadence.
-- **On the moving `a = 0` hole** on the quadrant (`v = 1/5`, `1/24` and
-  `1/32` in `M_A`) to `40 M`, the tracked target:
-  - `ℋ` just outside the horizon within `1.5×` the analytic `:damped`
-    layer's;
-  - order four between the two spacings.
-- **The sensitivity**, recorded for each perturbation: `ℋ` and the error
-  outside the horizon, and the layer residual.
-  - the target's mass off by `±1 %`;
-  - its velocity off by `±0.02`;
-  - its center off by `±1` cell.
-- **Recovery:** a track started with a velocity off by `0.05` recovers
-  within a few finds, with no refusal.
-- **The report** says, beside B1's, which pairing its numbers favour.
+Done (it ran 2026-10-26). What it built and measured is `CODE.md`'s "What
+step B2 built and measured", its runs `SINGULARITY_HANDLING.md`'s "The
+tracked analytic target"; the brief is in `HISTORY.md`, "Step B2 — The
+tracked analytic target".
 
 ## Step B3 — Several holes in one case
 
-`CODE.md`: "A case without a background", "One interior per hole",
-"Refinement for two holes", "The record", "Initial data" (item 1). **Starts
-after Erik's decision on the pairing.**
-
-**Changes:**
-
-- **The case:** `HoleSpec`, and `GHCase(…; holes)` with the background as
-  data. A `binary_case` constructor on the full box.
-- **The data:** an `isbits` superposition with the optional attenuation,
-  here, unless Erik takes it to `SpacetimeMetrics` first.
-- **The kernel:** the interior a tuple with the composition rule, built
-  from B2's tracked target or `:fitted` per hole. The composite mask, used
-  by every norm, the indicator, the projection's gate and the finder's
-  guard. `γ0` as three Gaussians, and `ε_KO` per hole.
-- **The driver:** per-hole tracks and finds in `evolve!`, and the gauge
-  source of the chosen pairing fed by the tracks. Per-hole level floors,
-  their union taken. Per-hole record rows, and the separation and phase.
-- **The run state:** the `K` tracks in the checkpoint.
-- **MPI:** the `K` finds in rank 0's analysis.
-
-**Accept:**
-
-- **One hole is the old case:** `holes = (spec,)` bit for bit, `u` after
-  two chunks and the record. Run on the suite's fixture and on the moving
-  quadrant hole, at one thread and at four.
-- **The composition is local:** the composite right-hand side equals the
-  single-hole kernel of the nearer hole at every point where only one
-  layer acts. Compared point by point on a two-hole mesh.
-- **A head-on pair** from rest at `d = 8 M` on the box, `h = 1/24` at the
-  holes, to `2 M`:
-  - every find succeeds and no assertion fires;
-  - the separation falls as free fall predicts, to the finder's accuracy;
-  - the constraints stay bounded;
-  - the cost is recorded.
-- **Restarts:** that run's checkpoint chain is the uninterrupted run, bit
-  for bit.
+Done (it ran 2026-10-26, on Erik's decisions of that day; its review, to
+2026-10-30, added the controlled source line). What it built and measured is
+`CODE.md`'s "What step B3 built and measured" and "The controlled source
+line"; the brief is in `HISTORY.md`, "Step B3 — Several holes in one case".
 
 ## Step B4 — The symmetric domains and the half turn
 
@@ -1069,8 +983,9 @@ decide" lists what is to be settled.
 the roll-on, `gauge_consistent_momentum`, the position and the time in the
 kernels, `HoleSpec` and the composition, the tracks of several holes, and
 the PID law of the source line. They are on
-[eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
-and not on `main`: **the C steps start once that pull request has landed.**
+[eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18),
+which will not land; all but the PID law reach `main` with step H4, and the C
+steps start from there.
 
 **Order:**
 
@@ -1308,11 +1223,11 @@ Erik to decide" lists what is to be settled.
   `test/octant_runs.jl`.
 - **H4 and H5** start from steps B1–B3's code —
   `gauge_consistent_momentum`, the damped harmonic source and the roll-on,
-  `HoleSpec` and the composition, the tracks of several holes,
-  `test/binary_runs.jl` — which is on
-  [eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18)
-  and not on `main`. That pull request will not land (2026-11-12), so
-  where H4 and H5 start is **(open)**.
+  B2's tracked target, `HoleSpec` and the composition, the tracks of
+  several holes, `test/binary_runs.jl` — taken from
+  [eschnett/TreeGeneralizedHarmonic.jl#18](https://github.com/eschnett/TreeGeneralizedHarmonic.jl/pull/18),
+  which will not land, onto H4's branch without the controlled source line
+  (2026-11-14).
 
 **Order:**
 
@@ -1361,8 +1276,10 @@ as an agent". Branches are named `claude/step-H<n>-<slug>`.
   it**, and the step halves. Price the mesh before submitting:
   Kerr-Schild's `1/48` capsule did not fit one H200.
 - **Before `t_0` a run with the roll-on is the run without a source, bit
-  for bit.** The source enters the problem at the chunk that begins at
-  `t_0`; until then the kernel is the one compiled without a source.
+  for bit.** The case carries the roll-on from zero throughout; until `t_0`
+  a launch is handed no source and takes the harmonic kind's zeros
+  (`CODE.md`, "What step H4 has built"; amended 2026-11-14 from a kernel
+  compiled anew at `t_0`).
 - **`t_0` is run state.** It goes into the loop's carried state and the
   checkpoint, or a restart rolls on at another time.
 - **Price every test**, as for the B steps. Runs longer than a minute go
@@ -1410,11 +1327,140 @@ Kerr-Schild rows' level; moving at `v = 1/5`, `:damped` at `1/96` is within
 not. The early rows' drift of `J` is resolution. `a = 7/10` runs at rest only
 at `1/128` on two H200s, and is not stationary by `24 M`.
 
+## Steps S1–S2 — Solved data for the pair
+
+Proposed 2026-11-15, when step H4's first runs showed that superposed harmonic
+holes lose `13 %` of their irreducible mass to the data's negative energy, and
+that no rearrangement of the superposition and no separation removes it
+(`CODE.md`, "Solved data for the pair"; `HISTORY.md`, "Step H4 shelved").
+They take step B8's design with harmonic free data, and they build on step
+H4's code — the harmonic chart for a hole, the pair with no source, `Π` from
+`C_a = 0` and `:fitted` per hole — so they start from step H4's branch.
+
+### Sharp edges for steps S1–S2
+
+- **XCTS is a package with local-path `[sources]`** (`~/src/jl/XCTS`, on
+  HexCGSEM, HexMeshes and the local SpacetimeMetrics). The host tool runs in
+  an environment of its own that has both packages, never from this
+  package's `Project.toml`. A change to XCTS is made in its repository, on a
+  branch of its own; its checkout may hold Erik's uncommitted work, which
+  stays as it is.
+- **A binary solve is big**: a Trillium CPU node (`~/claude/xcts-s1/src/` there;
+  up to `451 GB` at `p = 10`), not the laptop.
+- **A solved hole's mass is not its `M_A`.** `M_A` is the free data's bare
+  mass; the hole's `M_irr` is what the finder measures on the solved data.
+  Say which a number is.
+- **The interior is `:fitted`.** The tracked `:damped` target is each hole's
+  analytic metric, which the solved data are not; refuse it for data from a
+  file rather than relax toward the wrong state.
+- **The start must not read the data inside the inner spheres**, where they
+  are the free data with a jump in their derivatives at `R1`: a `:fitted`
+  start reads them down to `r_1 − fit_initial_depth`, so `R1` must lie inside
+  that about each hole. `test/binary_runs.jl` and `test/octant_runs.jl` check
+  it after the start (`check_xcts_reach`); `fit_depth = 0` meets it by the
+  margin, `n_L h` does not for the pair (`CODE.md`, "Solved data for the
+  pair").
+
+## Step S1 — Solved data for two harmonic holes
+
+Done (it ran 2026-11-15 to 2026-11-17; accepted by Erik on 2026-11-17). Its
+design and measurements are in `CODE.md`, "Solved data for the pair" and
+"From XCTS to the grid"; the brief and its status are in `HISTORY.md`, "Step
+S1 — Solved data for two harmonic holes", and the story in "Step S1 started:
+XCTS's data on the grid (2026-11-15)". XCTS solves the pair with the
+densitized lapse fixed (`lapse = :fixed`, on XCTS's local branch
+`claude/harmonic-free-data`); the start takes the case's lapse and shift. The
+`d = 8` and `d = 10` solutions at `p = 8` and `p = 10` are on Trillium in
+`/scratch/eschnett/claude/xcts-s1/pairfix{2,3,4,5}/`. Evolved from `p = 10`
+data, the pair's constraints converge between `1/48` and `1/96` out to about
+`3 M` from each hole; the data's order rises with the grid (`p = 10` for
+`1/96`). The brief's criterion at `t = 0` — converging between the spacings —
+was not met and was waived for this one, and Newton stops at `1–2·10⁻⁸`, not
+the brief's `10⁻¹⁰`. Runs from solved data take finds every `M/4` and, at `1/48`,
+`margin = 6`. The outer faces still carry the superposition's Dirichlet data.
+
+## Step S2 — Two holes far apart
+
+Done (it ran 2026-11-17 on Trillium; accepted by Erik on 2026-11-18, with the
+outer faces open). The `d = 10` pair from `p = 10` data at `1/48` and `1/96`
+to `20 M`: every find of both holes, `M_irr` drifting as step H1's single hole
+at the same spacing, and the constraints within `4 M` of each hole converging
+at order four; beyond `4 M`, `C_a` and `ℋ` grow with resolution, attributed to
+the outer faces' superposed Dirichlet data but not isolated. The layers'
+residual and error were not assessed (no reference). Its measurements are in
+`CODE.md`, "Solved data for the pair" ("Two holes far apart"); the brief and
+its status are in `HISTORY.md`, "Step S2 — Two holes far apart".
+
 ## Step H4 — Two holes with no source
 
+**Shelved 2026-11-15** (Erik): its first runs, on superposed data, found the
+holes losing `13 %` of their irreducible mass by `28 M`, from the data's
+constraint violation (`CODE.md`, "What step H4 has built"). Its state is
+parked in a draft pull request.
+
+**Resumed 2026-11-18** on step S1's `d = 8` data at `p = 10`, after step S2
+(Erik). The spacings are `1/48` and `1/96` at the holes, not `1/96` and
+`1/128` (Erik, 2026-11-18): the `p = 10` data serve `1/96` and no finer
+(step S1), and a `p = 12` solve may not fit a Trillium node. The runs are
+step S2's settings (`margin = 6` at `1/48`, finds every `M/4`) on Trillium,
+script `~/claude/xcts-s1/src/h4evo.sh`: the pure harmonic rows continue step
+S1's `4 M` checkpoints, and the roll-on rows start from the data with
+`t0=0 sigma_g=5` and `10`. Read the constraints in bands about the holes, not
+over the evolved region, which the outer faces dominate; between the holes
+(`[3, 4)` about each) the data improve only `2.5×` from `1/48` to `1/96`, and
+the layers differ between the spacings (`r_1 = 0.36` against `0.31`), so the
+band nearest the horizon is not an order. Keep `fit_depth = 0`.
+
+**Status (2026-11-20): run, awaiting Erik's review.** Six rows from the
+`p = 10` data, measured in `CODE.md`, "What step H4 has built" ("The pair
+from solved data"); the runs' story is in `HISTORY.md`, "Step H4 resumed".
+Against the criteria below:
+
+- *one hole is step H1's, bit for bit*: `test/harmonic_holes_tests.jl`,
+  unchanged since step H4 started;
+- *`C_a` at `t = 0`*: zero pointwise by construction, `2.6–3.3·10⁻⁵` on the
+  grid, from the data's seams (step S1). The data's `ℋ` over the evolved
+  region is `1.6–1.8·10⁻³`, against `1.41·10⁻³` for the superposed
+  Kerr-Schild pair of step B3 on the same box;
+- *pure harmonic gauge*: every find of both holes to the end, at `31.25 M`
+  (`1/48`) and `33 M` (`1/96`), where the separation was `3.1` and `2.3`. Both
+  rows ended on the layer's room, because each horizon's coordinate radius
+  shrinks (`0.48` to `0.40`). That is the spacing, not the gauge: the lapse
+  between the holes was still `0.47`, with `√γ/α = 24`;
+- *the roll-on at `t_0 = 0`*: every find of both holes at `σ_g = 5` and `10`,
+  at both spacings, to `30.0` and `30.25 M`. Then each horizon's largest
+  coordinate radius passed half the separation, the next finds read the other
+  hole's layer, and the tracks were lost. There is no common-horizon finder
+  (step B7 has not run), so this is as far as "to the first common horizon"
+  can go. The two spacings agree on the separation to `5·10⁻⁵` and on `M_irr`
+  to `2·10⁻⁶`. From `1.5` to `4 M` about each hole, `C_a`, `ℋ` and `ℳ` fall
+  `16×` (median; `80 %` of the rows `13–19×`) from `8` to `24 M`. After that, the bands from `2 M` out stop
+  converging; the timing fits the outer faces' error arriving, but that is
+  not isolated. Over the evolved region `C_a` stays below `2·10⁻³` but does
+  not fall;
+- *the layer's residual from its own fit*: in pure harmonic gauge it is at
+  step H1's single-hole level, and the fit's relative residual falls
+  `2–11×` from `1/48` to `1/96`. **With the roll-on it is not at truncation
+  level**: the fit's relative residual reaches `0.3–1.0` from `10` to
+  `26 M` at both spacings, though every fit is valid and the layer residual
+  is `4–37` from `8 M` on;
+- *the handover*: step B7 has not run;
+- *the cost per `M`*: `1/96` (`47–74 M` points) takes `753 s/M` in pure
+  harmonic gauge and `1600 s/M` with the roll-on on a Trillium node. Step B3
+  at `1/48` (`64 M` points) took `362 s/M` on one H200.
+
+**Started 2026-11-14 on the inertial grid** (Erik's choice), on branch
+`claude/step-H4-prep`: built are the harmonic chart for a hole, the pair with no
+source and `Π` from `C_a = 0` in its data and its targets, the roll-on from zero
+with `t_0` a time or the separation's event, a `:fitted` `FittedSpec` in a
+`HoleSpec`, and `test/binary_runs.jl`'s options (`CODE.md`, "What step H4 has
+built"). **Left:** the runs below.
+
 `CODE.md`: "The data", "The merger"; "One interior per hole"; "The common
-horizon and the handover". **Starts once the binary steps B1–B3 are on
-`main`.**
+horizon and the handover". **Starts from steps B1–B3's code on its own
+branch** (above). That code is Kerr-Schild throughout — the hole's metric,
+the tracked target, the seed and the composite source — so each change below
+adds the harmonic chart's version beside it.
 
 **Changes:**
 
@@ -1425,8 +1471,8 @@ horizon and the handover". **Starts once the binary steps B1–B3 are on
   tracks' separation, in the run state and the checkpoint.
 - **`test/binary_runs.jl` options** for the chart, `d_g` and `σ_g`.
 
-**Accept**, on the head-on pair from rest at `d = 8 M`, at `1/96` and
-`1/128` at the holes:
+**Accept**, on the head-on pair from rest at `d = 8 M`, at `1/48` and
+`1/96` at the holes (Erik, 2026-11-18; first `1/96` and `1/128`):
 
 - one hole in this path is step H1's hole bit for bit;
 - `C_a` at `t = 0` at roundoff, and the data's `ℋ` beside the superposed

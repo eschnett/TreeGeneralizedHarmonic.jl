@@ -13,7 +13,8 @@ using SpacetimeMetrics: GaugeWave, Harmonic, KerrSchild, Minkowski,
                         ShiftedMinkowski, adm_decompose, boost, dmetric,
                         metric
 using LinearAlgebra: det
-using StaticArrays: SMatrix, SVector
+using StaticArrays: SArray, SMatrix, SVector
+using TreeGeneralizedHarmonic: gauge_3p1, metric_from_3p1
 
 # The state of a background, spelled without `dmetric` and without
 # `metric_quantities`: the derivatives by a `ForwardDiff` jacobian of
@@ -187,4 +188,67 @@ end
                   periodic=(true, true, true), ε_KO=zero(T), γ0=zero(T),
                   γ2=zero(T))
     @test_throws "anisotropic" gh_forest(T, slab; N=8, roots=2)
+end
+
+@testset "metric_from_3p1 rebuilds a harmonic metric from its 3+1 fields" begin
+    # Guards step S1's conversion (`bench/xcts_metric.jl`): data solved by
+    # another code arrive as `α, β^i, γ_ij, K_ij` and their gradients, and
+    # `metric_from_3p1` turns them into `g_ab` and `∂_c g_ab` with `∂_t g_tb`
+    # from `C_a = 0`. A transposed index, a sign in `K` or in `D_iβ_j`, or a
+    # wrong gauge-momentum row gives data that start the run off the
+    # constraints. On a metric in harmonic coordinates (`Γ_a = 0`) the round
+    # trip through the 3+1 fields must be the metric itself, time derivatives
+    # included; on Kerr-Schild, which is not harmonic, the spatial derivatives
+    # and `∂_t γ_ij` must survive and the rebuilt `∂_t g_tb` must satisfy
+    # `Γ_a = 0`.
+    T = Float64
+    # The 3+1 fields of `bg` at `p`, written out independently of `gauge_3p1`
+    # for `α` and `β` (`adm_decompose`), with `K_ij` from `∂_tγ_ij`.
+    function fields(bg, p)
+        g, dg = dmetric(bg, p)          # dg[a, b, c] = ∂_c g_ab
+        gs = gauge_3p1(bg, p)
+        α, β, γ = adm_decompose(SMatrix{4,4,T}(g))
+        @test gs.α ≈ α rtol = 1e-14
+        @test maximum(abs, gs.β - β) ≤ 1e-14 * max(1, maximum(abs, β))
+        γ = SMatrix{3,3,T}(γ)
+        ∂γ = SArray{Tuple{3,3,3},T}(dg[i + 1, j + 1, k + 1]
+                                    for i in 1:3, j in 1:3, k in 1:3)
+        γu = inv(γ)
+        βl = γ * gs.β
+        ∂βl(i, k) = dg[1, i + 1, k + 1]
+        Γl(l, i, j) = (∂γ[l, j, i] + ∂γ[l, i, j] - ∂γ[i, j, l]) / 2
+        Dβ(i, j) = ∂βl(j, i) - sum(γu[l, m] * Γl(m, i, j) * βl[l]
+                                   for l in 1:3, m in 1:3)
+        K = SMatrix{3,3,T}((Dβ(i, j) + Dβ(j, i) - dg[i + 1, j + 1, 1]) / (2α)
+                           for i in 1:3, j in 1:3)
+        return (; α=gs.α, gs.dα, gs.β, gs.dβ, γ, ∂γ, K), g, dg
+    end
+    Γ(g, dg) = (gu = inv(SMatrix{4,4,T}(g));
+                SVector{4,T}(sum(gu[b, c] * dg[a, c, b] for b in 1:4, c in 1:4) -
+                             sum(gu[b, c] * dg[b, c, a] for b in 1:4, c in 1:4) / 2
+                             for a in 1:4))
+    harmonic = (("harmonic Kerr at rest", Harmonic{T}(1, 0)),
+                ("spinning harmonic Kerr", Harmonic{T}(1, 9 // 10)),
+                ("boosted spinning harmonic Kerr",
+                 boost(Harmonic{T}(1, 1 // 2), SVector{3,T}(3 // 10, -1 // 10, 0))))
+    points = (SVector{4,T}(1 // 4, 3 // 2, -7 // 5, 11 // 5),
+              SVector{4,T}(0, -5 // 2, 9 // 5, -3 // 5))
+    for (name, bg) in harmonic, p in points
+        f, g, dg = fields(bg, p)
+        @test maximum(abs, Γ(g, dg)) ≤ 1e-13 * maximum(abs, dg)   # the premise
+        g′, dg′ = metric_from_3p1(f)
+        @test maximum(abs, g′ - g) ≤ 1e-14 * maximum(abs, g)
+        @test maximum(abs, dg′ - dg) ≤ 1e-13 * maximum(abs, dg)
+    end
+    for p in points
+        bg = KerrSchild(T(1), T(1 // 2))
+        f, g, dg = fields(bg, p)
+        g′, dg′ = metric_from_3p1(f)
+        scale = maximum(abs, dg)
+        @test maximum(abs, g′ - g) ≤ 1e-14 * maximum(abs, g)
+        @test maximum(abs, dg′[:, :, 2:4] - dg[:, :, 2:4]) ≤ 1e-13 * scale
+        @test maximum(abs, dg′[2:4, 2:4, 1] - dg[2:4, 2:4, 1]) ≤ 1e-13 * scale
+        @test maximum(abs, Γ(g, dg)) > 1e-3 * scale               # not harmonic
+        @test maximum(abs, Γ(g′, dg′)) ≤ 1e-13 * scale
+    end
 end

@@ -1070,7 +1070,8 @@ filled point, at the refill cadence.
 @kernel function fit_target_kernel!(out, @Const(origins), @Const(spacings),
                                     interior, pa, @Const(ca), pb, @Const(cb),
                                     t_a, κ, t_f, r_fill, δt,
-                                    ::Val{HASB}, ::Val{RATE}) where {HASB,RATE}
+                                    ::Val{HASB}, ::Val{RATE},
+                                    ::Val{CLEAR}) where {HASB,RATE,CLEAR}
     I = @index(Global, NTuple)
     b = I[4]
     inner = ntuple(d -> I[d], Val(3))
@@ -1106,7 +1107,7 @@ filled point, at the refill cadence.
                 nothing
             end
         end
-    else
+    elseif CLEAR
         ntuple(Val(4NC)) do v
             out[inner..., v, b] = zero(T)
             nothing
@@ -1133,7 +1134,8 @@ Fill the cache `target` at time `t` from `fits = (latest, previous)`
 geometry `interior` ([`fit_target_kernel!`](@ref)).
 """
 function fill_target!(target::FieldSet{T,3}, origins, spacings,
-                      interior::FittedInterior, fits, t; rate::Bool=false) where {T}
+                      interior::FittedInterior, fits, t; rate::Bool=false,
+                      clear::Bool=true) where {T}
     fa, fb = fits
     hasb = fb !== nothing && fa.t > fb.t
     κ = hasb ? inv(fa.t - fb.t) : zero(T)
@@ -1146,7 +1148,28 @@ function fill_target!(target::FieldSet{T,3}, origins, spacings,
     δt = speed > 0 ? interior.h / (8 * speed) : one(T)
     map_blocks!(fit_target_kernel!, target, target.work, origins, spacings,
                 interior, fa.params, fa.coeffs, pb, cb, T(fa.t), κ, T(t),
-                T(r_fill), T(δt), Val(hasb), Val(rate))
+                T(r_fill), T(δt), Val(hasb), Val(rate), Val(clear))
+    return target
+end
+
+"""
+    fill_target!(target, origins, spacings, c::HoleInteriors, fits, t) -> target
+
+The cache of several fitted holes (added in step H4): zeroed, then each hole's
+own fits `fits[A] = (latest, previous)` written inside its own fill sphere,
+leaving every other point as it is. Before merger the holes' spheres are
+disjoint, so each point holds its own hole's target, which is the one the
+composite's kernel reads there ([`acting_interior`](@ref)).
+"""
+function fill_target!(target::FieldSet{T,3}, origins, spacings, c::HoleInteriors{K},
+                      fits::Tuple, t; rate::Bool=false) where {T,K}
+    length(fits) == K || throw(ArgumentError(
+        "a cache of $K fitted holes is filled from $K pairs of fits, got $(length(fits))."))
+    fill!(target.work, zero(T))
+    for A in 1:K
+        fill_target!(target, origins, spacings, c.holes[A], fits[A], t; rate=rate,
+                     clear=false)
+    end
     return target
 end
 
