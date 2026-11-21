@@ -8,8 +8,9 @@
 # inward by the holes' own core depth (`CODE.md`, "The common horizon and the
 # handover").
 #
-# The start is not in this spec: copy the row's 28 M checkpoint (and nothing
-# newer) from `/scratch/eschnett/claude/xcts-s1/h4r48/{s5,s10}/ck/` into the
+# The start is not in this spec: copy the row's 28 M checkpoint — the older of
+# the two, `binary.it0000005071.h5` for s5 and `binary.it0000004921.h5` for s10,
+# and nothing newer — from `/scratch/eschnett/claude/xcts-s1/h4r48/{s5,s10}/ck/` into the
 # run's `<scratch>/<study>/common-48-<label>/mutable/ck/` before the first job.
 # Copy, do not link: the run rotates the files in its `ck/`.
 name = "common-48"

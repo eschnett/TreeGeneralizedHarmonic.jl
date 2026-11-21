@@ -915,9 +915,10 @@ its record rows and formation are built (`src/common.jl`, `evolve!`'s
 `common_horizon`, `test/binary_runs.jl common=1`), after a probe of how the
 finder fails where there is no common horizon (`HISTORY.md`, "Step B7 started:
 the common horizon"). On H4's pair a common horizon forms at a track separation
-of `3.0 M`, `1.9 M` before the individual tracks are lost. The core gap is not
-yet measured in a run, and the handover, the remnant and the head-on runs are
-not built.
+of `3.0 M`, `1.9 M` before the individual tracks are lost, and the run at
+`1/48` measured the core gap positive from the first accepted find (`0.140 M`),
+so the handover need not wait. The handover, the remnant and the head-on runs
+are not built.
 
 **Changes:**
 

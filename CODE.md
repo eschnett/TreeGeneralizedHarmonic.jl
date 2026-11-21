@@ -7623,11 +7623,20 @@ Trillium node):**
 | a hole's own find, with the spin | — | `1.8–2.0 s` |
 
 One `N = 25` attempt a find is about `16 s` per `M`, under 1 % of the `1/96`
-run's `2000 s` per `M`.
+run's `2000 s` per `M`. **The spin costs twenty times the find**: in the run at
+`1/48` (two rows on one Trillium node, 96 threads each) an accepted attempt
+with the spin took `17–33 s`, against `0.8–1.4 s` for the same surface without
+it in the probe. At one attempt a row (`chunk = M/4`) that is about `90 s` per
+`M`, 18 % of the `1/48` run and about 4 % of the `1/96` one. Lowering its
+cost — the spin at a lower `N`, or not at every row — is **(open)**.
 
 **When it forms on H4's pair.** At a track separation of `3.0 M` in all four
 roll-on rows: between `28.31` and `28.37 M` at `σ_g = 5`, between `28.56` and
 `28.62 M` at `σ_g = 10`, about `1.9 M` before the individual tracks are lost.
+The run's finder, attempting once a row, first accepts a surface at `28.5` and
+`28.75 M` and records formation (three rows) dated there, at `29.0` and
+`29.25 M`; its areas are the probe's to seven digits, and `|J| < 4·10⁻⁸` on
+the head-on pair.
 Its area is `39.8` at formation, against `25.7` for the two holes together,
 and grows monotonically to `47.3` by `30.3 M` (`M_irr` from `0.890` to
 `0.970`). `1/48` and `1/96` agree to `10⁻⁵` in the area.
@@ -7654,10 +7663,13 @@ cells. Positive, a common layer as deep as the holes' would hold that hole's
 core inside its own. On H4's pair the holes' horizons lie `0.11 M` inside the
 common one at formation and `0.39 M` inside by `30.3 M`. Their cores lie the
 same `0.375 M` inside their horizons at `1/48` and at `1/96` (`m + n_L` cells
-in both), so the gap is about that depth: positive from formation, 5 cells at
-`1/48` and 11 at `1/96` **(predicted from the probe's depths; the `core_gap`
-row has not run on H4's pair)**. If it is too small, the handover waits, with
-both individual layers active inside the common horizon until it fits.
+in both), so the gap is about that depth. **Measured in the run at `1/48`**
+(`jobs/common-48.toml`, both roll-on rows): the core gap is `0.140 M` at the
+first accepted find, about 5 cells, and grows to `0.377 M` by `30 M`; it is the
+holes' depth less `0.001–0.002 M`. **A common core as deep as the holes' holds
+both of their cores from the first accepted find on**, so the handover need not
+wait. Were it too small, the handover would wait, with both individual layers
+active inside the common horizon until it fits.
 
 **The shape at `lmax = 24`** costs about `0.6 µs` per layer point, up from
 `79 ns` at `lmax = 8` as `(lmax + 1)²`, but only over the common layer's

@@ -2779,6 +2779,14 @@ the logs are in `.claude/data/b7-common-probe/`.
   restart of H4's checkpoints may switch it on, which `check_recipe` would
   refuse for a recipe key.
 
+**The finder in the run (2026-11-21).** H4's two `1/48` roll-on rows from
+their `28 M` checkpoints with `common=1` (`jobs/common-48.toml`, study
+`treegh-b7-common`, Trillium job 2901597, `23:49`, ending `FAILED` on the
+expected `TrackLostError` at `30.25` and `30.5 M`). It measured the core gap,
+positive from the first accepted find (`0.140 M`), and that the spin costs
+twenty times the find (`CODE.md`, "The common horizon and the handover"). The
+logs and CSVs are in `.claude/data/b7-common-48/`.
+
 ## Possible extensions
 
 ### Extensions since built
