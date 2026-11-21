@@ -135,6 +135,7 @@ The briefs of the finished steps are under
   - [Step H4 shelved: the data are to be solved (2026-11-15)](#step-h4-shelved-the-data-are-to-be-solved-2026-11-15)
   - [Step S1 started: XCTS's data on the grid (2026-11-15)](#step-s1-started-xctss-data-on-the-grid-2026-11-15)
   - [Step H4 resumed: the pair on solved data (2026-11-18 to 2026-11-20)](#step-h4-resumed-the-pair-on-solved-data-2026-11-18-to-2026-11-20)
+  - [Step B7 started: the common horizon (2026-11-20 and 2026-11-21)](#step-b7-started-the-common-horizon-2026-11-20-and-2026-11-21)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2729,6 +2730,54 @@ on from the periodic checkpoints at `26` and `28 M`, losing at most `M/4`.
 They waited about `18 h` on priority, ran on 2026-11-20, and lost their tracks
 at the plunge at `30.25` and `30.5 M`, as at `1/48`. The measurements are
 `CODE.md`'s "What step H4 has built" ("The pair from solved data").
+
+### Step B7 started: the common horizon (2026-11-20 and 2026-11-21)
+
+Erik chose step B7 after step H4 (2026-11-20) and asked first how the finder
+behaves where there is no common horizon yet: how it fails, and whether that
+is expensive. Two probes answered it before anything was built.
+
+**The analytic probe** (`bench/common_horizon_probe.jl`, on the laptop): an
+equal-mass Brill–Lindquist pair whose provider refuses points near a puncture,
+as the grid's footprint guard refuses the layer. The bisected threshold,
+`0.766 M`, is the literature's. Beyond it all three of the finder's failure
+modes occurred, depending on the seed: a stall that `atol = 0` reports as a
+success, a refusal, and a collapse. Failed attempts were cheap, and
+convergence slowed near the threshold.
+
+**The grid probe** (`bench/common_find_probe.jl`, through
+`test/binary_runs.jl common_probe=28`): step H4's four roll-on rows continued
+from their `28 M` checkpoints to the plunge, with four common attempts beside
+every pair of individual finds and nothing changed in the run. Two SimLaunch
+specs on Trillium, study `treegh-b7`: `jobs/common-probe.toml` (the `1/48`
+rows side by side, job 2899389, `36:42`) and `jobs/common-probe-96.toml` (the
+`1/96` rows one after the other, job 2899400, `3:14:45`) — a spec of its own
+because SimLaunch runs one job of a spec at a time (reported to SimLaunch as
+friction). Every job ended `FAILED` on the expected `TrackLostError` at the
+plunge. Its results are `CODE.md`'s "The common horizon and the handover";
+the logs are in `.claude/data/b7-common-probe/`.
+
+**What it decided in the finder (2026-11-21):**
+
+- **Its own acceptance on top of the finder's.** Every attempt before
+  formation stalled and would have been a success at `atol = 0`; the
+  enclosure check and a positive tolerance were what told them apart.
+- **A tolerance floor of `10⁻⁹`.** The probe's tolerance, ten times the
+  holes' residuals, passed a converged common surface by 2 % (`4.23·10⁻¹³`
+  against `4.3·10⁻¹³`): a common surface bottoms out about ten times higher
+  than a hole's. Every failed attempt stopped at `0.03` or above, so the
+  floor leaves a margin of seven orders. On the suite's fixture it also cut a
+  find from 40 iterations to 27.
+- **A sphere seed suffices**, and the previous surface is used when there is
+  one: it saved 3–8 iterations.
+- **The spin only on an accepted surface**: `find_gh_horizon` was split into
+  `locate_gh_horizon` and `with_horizon_spin`, unchanged for its callers.
+- **Attempts at the record rows only.** The probe attempted at every find
+  (`M/8` at `1/48`, `M/16` at `1/96`); the finder in the run attempts once a
+  chunk, so that every attempt is a row.
+- **Not in the recipe**: the finder observes until the handover exists, so a
+  restart of H4's checkpoints may switch it on, which `check_recipe` would
+  refuse for a recipe key.
 
 ## Possible extensions
 

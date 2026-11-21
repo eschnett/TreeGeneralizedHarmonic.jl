@@ -86,6 +86,12 @@
 #   xcts_gauge=case|solved         the lapse and shift of the XCTS start: the case's
 #                                  background's (XCTS's fixed lapse grows outward,
 #                                  bench/xcts_metric.jl), or the solution's own
+#   common=1 d_c=4 common_N=25     (step B7) the common horizon: an attempt at every
+#                                  row whose tracks are at most d_c apart, at the
+#                                  finder's resolution common_N (CommonHorizon); it
+#                                  observes and changes nothing, so a restart may
+#                                  switch it on (the CSV's common_* columns, a
+#                                  `common:` line in the log)
 #   common_probe=<t>               (step B7) from t on, common-horizon attempts
 #                                  beside each pair of individual finds, printed
 #                                  and not used (bench/common_find_probe.jl)
@@ -159,6 +165,12 @@ if haskey(OPTIONS, "common_probe")
 else
     probe_find = (;)
 end
+# The common horizon (step B7).
+common_horizon = opt("common", "0") in ("1", "true") ?
+                 CommonHorizon(T; d_c=T(rat(opt("d_c", "4"))),
+                               N=parse(Int, opt("common_N", "25")),
+                               spin=opt("spin", "1") in ("1", "true")) :
+                 nothing
 walltime = haskey(OPTIONS, "walltime") ? parse(Float64, OPTIONS["walltime"]) : nothing
 ckevery = parse(Int, opt("checkpoint_every", "4"))
 ckkeep = parse(Int, opt("keep", "2"))
@@ -402,9 +414,24 @@ header = vcat(["t", "wall", "steps", "dt", "nblocks", "points", "gauge_l2", "gau
                "max_sqrtg_alpha_between"],
               # ℳ (added in step S1), last so that earlier columns keep their places:
               # overall, then per hole and band as `bcols`
-              ["mom_l2"; ["h$(A)_r$(BANDS[k])_mom_l2" for A in 1:2 for k in 1:NBAND]])
+              ["mom_l2"; ["h$(A)_r$(BANDS[k])_mom_l2" for A in 1:2 for k in 1:NBAND]],
+              # the common horizon (added in step B7), `NaN` where no attempt was made
+              ["common_attempted", "common_success", "common_iters", "common_H",
+               "common_atol", "common_area", "common_Mirr", "common_J", "common_rmin",
+               "common_rmax", "common_ox", "common_depth1", "common_depth2",
+               "common_gap1", "common_gap2", "common_time", "common_streak",
+               "common_t_formed"])
 if isrank0 && !(restarting && isfile(csv))
     open(io -> println(io, join(header, ',')), csv, "w")
+elseif isrank0
+    # A CSV begun before columns were appended takes the longer header, so that
+    # its continued rows have names (step B7).
+    lines = readlines(csv)
+    if !isempty(lines) && lines[1] != join(header, ',') &&
+       startswith(join(header, ','), lines[1] * ",")
+        lines[1] = join(header, ',')
+        open(io -> foreach(l -> println(io, l), lines), csv, "w")
+    end
 end
 t_wall0 = time()
 num(x) = x === nothing ? NaN : x
@@ -453,10 +480,18 @@ function observe(p, t, u, rec)
     for k in 1:(2 * NBAND)
         push!(row, bandnorms(rf.band[k]).mom_l2)
     end
+    cm = get(rec, :common, nothing)
+    pair2(x, i) = x === nothing ? NaN : x[i]
+    append!(row, cm === nothing ? fill(NaN, 18) :
+                 (Int(cm.attempted), cm.success === true ? 1 : cm.success === false ? 0 : NaN,
+                  num(cm.iters), num(cm.H_norm), num(cm.atol), num(cm.area), num(cm.M_irr),
+                  num(cm.J), num(cm.r_min), num(cm.r_max), pair2(cm.origin, 1),
+                  pair2(cm.depth, 1), pair2(cm.depth, 2), pair2(cm.core_gap, 1),
+                  pair2(cm.core_gap, 2), num(cm.time), cm.streak, num(cm.t_formed)))
     isrank0 && open(io -> println(io, join(row, ',')), csv, "a")
     hist = Dict("constraints.gauge_l2" => rec.gauge_l2, "pair.separation" => rec.separation,
                 "lapse.min_between" => lapse.btw_α, "layer.residual" => rec.residual)
-    bhs = [(name="BH$A", irreducible_mass=h.M_irr, mass=h.M_ch, spin=h.J,
+    bhs = Any[(name="BH$A", irreducible_mass=h.M_irr, mass=h.M_ch, spin=h.J,
             position=collect(h.track_center), found=h.success)
            for (A, h) in enumerate(rec.holes)]
     extra = Dict("constraints" => Dict("gauge_l2" => rec.gauge_l2,
@@ -468,6 +503,14 @@ function observe(p, t, u, rec)
                                  "max_sqrtg_alpha_between" => lapse.btw_a),
                  "layer" => Dict("residual" => rec.residual),
                  "rollon_t0" => num(get(rec, :rollon_t0, nothing)))
+    if cm !== nothing
+        extra["common"] = Dict("attempted" => cm.attempted, "success" => cm.success === true,
+                               "area" => num(cm.area), "M_irr" => num(cm.M_irr),
+                               "streak" => cm.streak, "t_formed" => num(cm.t_formed))
+        cm.success === true &&
+            push!(bhs, (name="common", irreducible_mass=cm.M_irr, mass=num(cm.M_ch),
+                        spin=num(cm.J), position=collect(cm.origin), found=true))
+    end
     simwatch_update!(sw; force=true, history=hist, iteration=rec.steps, time=rec.t,
                      time_end=Float64(t_end), time_unit="M", walltime_limit=walltime,
                      black_holes=bhs, extra=extra,
@@ -479,9 +522,21 @@ function observe(p, t, u, rec)
             num(rec.holes[1].area), num(rec.holes[2].area),
             num(rec.holes[1].track_prediction_max), num(rec.holes[2].track_prediction_max),
             device_gb())
+    # (No point between the horizons leaves the fold's identity, `floatmax`.)
+    nobtw(x) = x == floatmax(T) ? NaN : x
     @printf("          α_min %.5f (between %.5f)  √γ/α_max %.4f (between %.4f)  t_0 %s\n",
-            lapse.out_α, lapse.btw_α, lapse.out_a, lapse.btw_a,
+            nobtw(lapse.out_α), nobtw(lapse.btw_α), lapse.out_a, lapse.btw_a,
             string(get(rec, :rollon_t0, "none")))
+    if cm !== nothing && cm.attempted
+        @printf("  common: %s  iters %s  |H| %.2e (atol %.2e)  area %.5f  M_irr %.6f  depth %s  core gap %s  streak %d  formed %s  %.2f s%s\n",
+                cm.success === true ? "found " : "failed", string(cm.iters), num(cm.H_norm),
+                num(cm.atol), num(cm.area), num(cm.M_irr),
+                cm.depth === nothing ? "–" : join((@sprintf("%+.4f", d) for d in cm.depth), " "),
+                cm.core_gap === nothing ? "–" :
+                join((@sprintf("%+.4f", d) for d in cm.core_gap), " "),
+                cm.streak, cm.t_formed === nothing ? "no" : @sprintf("at %.4f", cm.t_formed),
+                num(cm.time), cm.note === nothing ? "" : "  (" * first(cm.note, 120) * ")")
+    end
     flush(stdout)
     return nothing
 end
@@ -495,7 +550,8 @@ out = try
             hole_find_interval=fitted_holes && haskey(OPTIONS, "find_interval") ?
                                T(rat(OPTIONS["find_interval"])) : nothing,
             fit_initial_depth=fitted_holes ? T(rat(opt("fit_depth", "0"))) : 0,
-            initial_data=initial_data, probe_find..., ckw...)
+            initial_data=initial_data, common_horizon=common_horizon, probe_find...,
+            ckw...)
 catch err
     use_mpi || simwatch_finish!(sw; status="failed", message=sprint(showerror, err),
                                 time_end=Float64(t_end), time_unit="M")

@@ -52,8 +52,10 @@ its first runs found that the superposed data's holes lose `13 %` of their
 irreducible mass, from the data's constraint violation. Its state is parked in
 a draft pull request. **Step S1 is done** (2026-11-15 to 2026-11-17): the
 pair's data solved by XCTS. **Step S2 is done** (2026-11-17 to 2026-11-18):
-two holes far apart on those data. **Step H4 is resumed** (2026-11-18) on them
-and run (to 2026-11-20); it awaits Erik's review. Step H5 is not started. Steps H1–H3 were single
+two holes far apart on those data. **Step H4 is resumed** (2026-11-18) on them,
+run (to 2026-11-20) and merged. **Step B7 is started** (2026-11-20) on H4's
+pair: the common finder and formation are built (2026-11-21), the handover is
+next. Step H5 is not started. Steps H1–H3 were single
 holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
@@ -907,6 +909,15 @@ holes". **No hole.**
 
 `CODE.md`: "The common horizon and the handover"; milestone G7 ("Milestones"
 above).
+
+**Status (2026-11-21):** started on step H4's harmonic pair. The common finder,
+its record rows and formation are built (`src/common.jl`, `evolve!`'s
+`common_horizon`, `test/binary_runs.jl common=1`), after a probe of how the
+finder fails where there is no common horizon (`HISTORY.md`, "Step B7 started:
+the common horizon"). On H4's pair a common horizon forms at a track separation
+of `3.0 M`, `1.9 M` before the individual tracks are lost. The core gap is not
+yet measured in a run, and the handover, the remnant and the head-on runs are
+not built.
 
 **Changes:**
 

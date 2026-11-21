@@ -672,6 +672,21 @@ is the `σ_g = 10` row at `1/96`, about `27 min/M` on 192 threads:
 julia -t 192 --project=<env> test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=h4 d=8 N=24 margin=16 n_L=20 t0=0 sigma_g=10 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/16 walltime=41000 checkpoint=out/h4/ck out=out/h4
 ```
 
+Step B7's common horizon is `common=1` on the same script (`d_c=4`,
+`common_N=25`): an attempt at every row whose tracks are `d_c` apart, a
+`common:` line in the log and the CSV's `common_*` columns. It is not in the
+recipe, so a restart of an H4 row may add it. The smoke run below is the
+harmonic pair's with an attempt at every row, four minutes at four threads;
+`bench/common_horizon_probe.jl` (the analytic Brill–Lindquist pair, a minute)
+and `common_probe=<t>` (`bench/common_find_probe.jl`, four attempts beside
+every find, printed only; `jobs/common-probe*.toml`) are the probes it was
+designed from:
+
+```bash
+julia --project=. --threads=4 test/binary_runs.jl chart=harmonic interior=fitted d=8 L=8 N=8 roots=2 radii=4,3,2,6/5 q=2 masses=1,1 margin=4 t_end=1/10 chunk=1/20 finder_N=12 spin=0 adm=0 common=1 d_c=10 common_N=16 out=out/hcommon
+julia --project=. bench/common_horizon_probe.jl threshold
+```
+
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
 and device tests behind
@@ -1202,6 +1217,12 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   geometry; a change to when a piece's geometry is built has to refill after it.
   Step 8f's and 8′'s levers are refused for several holes (`CODE.md`, "What step
   H4 has built").
+- **The finder reports a stall as a success at `atol = 0`**, which every
+  individual find passes, and it cannot tell a missing horizon from a slow
+  one. A common find passes a positive tolerance and checks that its surface
+  encloses both holes' surfaces (`common_horizon_row`); anything else that
+  looks for a surface that may not exist must do the same. See `CODE.md`, "The
+  common horizon and the handover".
 - **A roll-on from zero is no source until `t_0`, by `nothing`**: `effective_source`
   hands the launch `nothing`, and every kernel path that evaluates a source must
   take `nothing` as the harmonic kind's zeros (`gauge_source`, `_source_value`,

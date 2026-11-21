@@ -481,7 +481,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  checkpoint_sync_to_disk::Bool=true, checkpoint_io=:node,
                  restart_file=nothing, simd_width=nothing, comm=nothing,
                  rollon_separation=nothing, hole_find_interval=nothing,
-                 initial_data=nothing) where {T}
+                 initial_data=nothing, common_horizon=nothing) where {T}
     # The job's wall clock starts here: whatever ran before the call —
     # startup, compilation, the queue — is the caller's margin to leave
     # (TreeHydro's rule for `max_walltime_seconds`).
@@ -725,6 +725,19 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     end
     saved === nothing || !haskey(saved, :rollon_t0) ||
         (rollon[] = from_plain(T, saved.rollon_t0))
+    # The common horizon (step B7): an attempt at every row whose tracks are at
+    # most `d_c` apart, which observes and changes nothing the run carries — so it
+    # is not in the recipe, and a restart may switch it on or off. Its state (the
+    # next seed, the streak, the formation time) is the run's from a checkpoint
+    # that has it, and the start's otherwise.
+    common_horizon === nothing || (common_horizon isa CommonHorizon && binary &&
+                                   nhole == 2) || throw(ArgumentError(
+        "common_horizon looks for the horizon that encloses a pair of holes: it " *
+        "takes a CommonHorizon and a case of two holes (binary_case), and got a " *
+        "$(typeof(common_horizon)) for a case " *
+        (binary ? "of $nhole holes." : "of one hole.")))
+    cstate = Ref{Any}(saved !== nothing && haskey(saved, :common) ?
+                      plain_common_state(saved.common) : common_state0())
     # The case a piece about `t` runs (step B3): a case of several holes has
     # its source and its holes' profiles on the tracks.
     case_at(t, track) = holes_case_at(case, track, T(t); t_0=rollon[])
@@ -1449,8 +1462,16 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                                       origin=c_preds[A], center=c_preds[A], find=find)
                           for A in 1:nhole]
                 tk = holes_track!(t, founds, c_preds)
-                (hz=founds, tk=tk,
-                 fs=hfit && tk.lost === nothing ? refit_holes!(p, u, t, tk.geom) : nothing)
+                fs = hfit && tk.lost === nothing ? refit_holes!(p, u, t, tk.geom) : nothing
+                # The common horizon after the holes' own (step B7), on the tracks
+                # and the geometry this row built.
+                cm = common_horizon === nothing ? nothing :
+                     sqrt(sum(abs2, track_position(tk.tr[2], T(t)) -
+                                    track_position(tk.tr[1], T(t)))) >
+                     common_horizon.d_c ? NO_COMMON :
+                     common_horizon_row(p, u, t, founds, map(h -> h.mass, case.holes),
+                                        tk.geom, cstate[].hlm, common_horizon)
+                (hz=founds, tk=tk, fs=fs, cm=cm)
             else
                 found = horizon_row(p, u, t, hlm_seed, length(records);
                                     force=forced || targeted, origin=c_pred,
@@ -1582,6 +1603,11 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                 rollon[] = T(t)
             end
             case.gauge isa RolledGaugeSource && (rec = (; rec..., rollon_t0=R(rollon[])))
+            # The common horizon's row and the run's streak after it (step B7).
+            if an.cm !== nothing
+                cstate[] = common_state_after(cstate[], an.cm, t, common_horizon)
+                rec = (; rec..., common=common_record(an.cm, cstate[]))
+            end
         end
         push!(records, rec)
         observer === nothing || call_observer(observer, p, t, u, rec)
@@ -1737,7 +1763,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                           tr_chunk=sample_track, sample_t, sample_track, fits, tbounds,
                           fit_initial, hfit, binary, hlm_seed, trigger_pending,
                           hole_offsets, rollon_t0=rollon[], acc,
-                          fit_cost=agreed_fit_cost(), records)
+                          fit_cost=agreed_fit_cost(), records,
+                          common_state=common_horizon === nothing ? nothing : cstate[])
         save_run(path, U.forest, U, u; recipe=recipe, criterion=criterion, run=state,
                  filters=checkpoint_hdf5_filters, sync=checkpoint_sync_to_disk,
                  io=checkpoint_io)
@@ -2003,7 +2030,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                                   sample_t, sample_track, fits, tbounds, fit_initial,
                                   hfit, binary, hlm_seed, trigger_pending, hole_offsets,
                                   rollon_t0=rollon[], acc, fit_cost=agreed_fit_cost(),
-                                  records)
+                                  records,
+                                  common_state=common_horizon === nothing ? nothing :
+                                               cstate[])
                 save_run(path, U.forest, U, u; recipe=recipe, criterion=criterion,
                          run=state, filters=checkpoint_hdf5_filters,
                          sync=checkpoint_sync_to_disk, io=checkpoint_io)
@@ -2297,7 +2326,7 @@ function horizon_row(p::GHProblem{T}, u, t, seed, index; force::Bool=false,
              r_min=nothing, r_mean=nothing, r_max=nothing, area=nothing,
              M_irr=nothing, J=nothing, spin_axis=nothing, M_ch=nothing,
              hlm=nothing, note=nothing, origin_r_min=nothing,
-             origin_r_max=nothing, grid=nothing)
+             origin_r_max=nothing, grid=nothing, H_norm=nothing)
     hz = p.case.horizon
     hz === nothing && return empty
     force || (hz.every > 0 && iszero(mod(index, hz.every))) || return empty
@@ -2318,7 +2347,7 @@ function horizon_row(p::GHProblem{T}, u, t, seed, index; force::Bool=false,
             M_irr=out.M_irr, J=out.J, spin_axis=Tuple(out.spin_axis),
             M_ch=out.M_ch, hlm=out.hlm, note=nothing,
             origin_r_min=out.origin_r_min, origin_r_max=out.origin_r_max,
-            grid=out.grid)
+            grid=out.grid, H_norm=get(out, :H_norm, nothing))
 end
 
 """
@@ -2531,7 +2560,7 @@ function run_state(::Type{T}; chunk, t, t_chunk, nsteps, nregrids, nresamples, p
                    converged, λ_initial, growth, ρ_chunk, tr, tr_chunk, sample_t,
                    sample_track, fits, tbounds, fit_initial, hfit, binary, hlm_seed,
                    trigger_pending, hole_offsets, rollon_t0, acc, fit_cost,
-                   records) where {T}
+                   records, common_state=nothing) where {T}
     return (; chunk, t=plain_reals(T(t)), t_chunk=plain_reals(T(t_chunk)),
             nsteps, nregrids, nresamples, passes, converged,
             lambda_initial=plain_reals(T(λ_initial)),
@@ -2560,5 +2589,7 @@ function run_state(::Type{T}; chunk, t, t_chunk, nsteps, nregrids, nresamples, p
                        rollon_t0=plain_reals(T(rollon_t0))) :
              (;))...,
             bounds=to_plain(acc; path="run.bounds"),
-            fit_cost, records=Tuple(records))
+            fit_cost, records=Tuple(records),
+            # The common horizon's state (step B7), where the run looks for one.
+            (common_state === nothing ? (;) : (; common=common_state))...)
 end
