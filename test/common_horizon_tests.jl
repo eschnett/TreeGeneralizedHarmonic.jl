@@ -15,6 +15,8 @@ using TreeGeneralizedHarmonic: common_horizon_row, common_state0, common_state_a
                                common_record, horizon_row
 using KernelAbstractions: CPU
 using StaticArrays: SVector
+using LinearAlgebra: norm
+using TreeGeneralizedHarmonic: StateBounds, fitted_interior
 
 isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
 isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
@@ -122,7 +124,7 @@ isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
     # the streak, and a formed horizon stays formed.
     @testset "formation is three accepted finds of nondecreasing area" begin
         ch = CommonHorizon(T)
-        ok(a) = (success=true, area=a, hlm=ComplexF64[a])
+        ok(a) = (success=true, area=a, hlm=ComplexF64[a], r_min=1.0)
         no = (success=false, area=nothing, hlm=nothing)
         st = common_state0()
         for (t, r, streak, formed) in ((1, ok(10.0), 1, nothing), (2, ok(9.0), 1, nothing),
@@ -139,6 +141,115 @@ isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
         @test !haskey(rec, :hlm) && rec.streak == 1 && rec.t_formed == 5.0
     end
 
+    # Guards the remnant's pieces at the handover: its track starts at the common
+    # surface's origin with its radii and shape, moving with the holes' mass-
+    # weighted velocity and acceleration (a head-on pair's cancel) and predicting
+    # along the quadratic; its ranges are the union of the holes'; and its finds
+    # are paced so that its least radius moves at most `G h/4` between two.
+    @testset "the remnant's track, ranges and find cadence" begin
+        unit = TrackedSpec(T; r_0=T(3 // 5), r_1=T(7 // 5), margin=4)
+        hs = head_on_holes(T; d=8, masses=(1, 1), interior=unit)
+        pair = binary_case(T; holes=hs, halfwidth=16, chunk=T(1 // 4),
+                           horizon=Horizon(T; every=1, N=12, spin=false))
+        trs = seed_tracks(pair, T(1 // 2))
+        row = (origin=(0.0, 0.0, 0.0), r_min=1.1, r_max=2.6, hlm=own.hlm, grid=own.grid)
+        tr = TreeGeneralizedHarmonic.remnant_track(0.5, row, trs, (1, 1); lmax=8)
+        @test tr.c_find == zero(SVector{3,T}) && tr.t_find == 1 // 2
+        @test tr.r_min == 1.1 && tr.r_max == 2.6 && tr.nfinds == 1 && tr.quadratic
+        @test norm(tr.v_est) < 1e-12 && norm(tr.pred.a) < 1e-12
+        @test norm(trs[1].pred.a) > 0      # each hole falls; the pair's center does not
+        @test isapprox(tr.shape[1], own.hlm[1] |> real; rtol=1e-12)
+        b1 = StateBounds{T}(0.1, 3, 0.2, 4, 1, 10, 1)
+        b2 = StateBounds{T}(0.2, 5, 0.1, 3, 2, 5, 1)
+        geom = fitted_interior(FittedSpec(T; variant=:fitted, margin=3, n_L=4), tr,
+                               forest, G; t=T(1 // 2), n_L=4)
+        rb = TreeGeneralizedHarmonic.remnant_bounds((b1, b2), geom)
+        @test (rb.α_min, rb.α_max, rb.λ_min, rb.λ_max, rb.β_max, rb.K_max) ==
+              (0.1, 5, 0.1, 4, 2, 10)
+        @test rb.r_gate == geom.r_in - geom.offset
+        gf = TreeGeneralizedHarmonic.growth_finds
+        @test gf(0.6, 3, 1 / 48, 1 / 4) == ceil(Int, 0.25 * 0.6 / (3 / 48 / 4))
+        @test gf(0.0, 3, 1 / 48, 1 / 4) == 1
+    end
+
+    # Guards the handover's code path and its run state, on the harmonic smoke
+    # pair with a stand-in for the physics: the common surface accepted at the
+    # first row is a sphere of radius 1.9 about hole 1 (no pair cheap enough for
+    # the suite forms a common horizon, `CODE.md`, "The common horizon and the
+    # handover"), and the remnant's finds return it. The pair is handed over at
+    # that row; every later row has one hole, found, its fit valid, the state
+    # finite; and a chain of one-chunk restarts across the handover is the run bit
+    # for bit, the records compared without the attempts' wall times.
+    @full_tier @testset "the pair is handed over to one remnant, and restarts bit for bit" begin
+        unitf = FittedSpec(T; variant=:fitted, margin=4, n_L=0, fit_cont=2, lmax_fit=8)
+        hc = binary_case(T; holes=head_on_holes(T; d=8, masses=(1, 1), interior=unitf,
+                                                chart=:harmonic),
+                         halfwidth=8, chunk=T(1 // 20), ε_KO=T(1 // 2), γ2=zero(T),
+                         horizon=Horizon(T; every=1, N=12, spin=false), gauge_source=:holes)
+        hf = holes_forest(T, hc; N=8, roots=2, radii=(T(4), T(3), T(2), T(6 // 5)))
+        fake = Ref{Any}(nothing)
+        R = 1.9
+        function sphere_out(f)
+            tm = f.template
+            s = R / tm.r_mean
+            return (success=true, iters=1, origin=f.c, center=f.c, center_offset=0.0,
+                    r_min=tm.r_min * s, r_mean=R, r_max=tm.r_max * s,
+                    origin_r_min=tm.r_min * s, origin_r_mean=R,
+                    origin_r_max=tm.r_max * s, area=4π * R^2, M_irr=R / 2, J=NaN,
+                    spin_axis=SVector(NaN, NaN, NaN), M_ch=NaN, hlm=tm.hlm .* s,
+                    grid=tm.grid, H_norm=1e-12, spin_success=false)
+        end
+        function fake_find(p, u, t; origin=nothing, kwargs...)
+            f = fake[]
+            f !== nothing && origin !== nothing && abs(origin[3] - f.c[3]) < 0.01 &&
+                return sphere_out(f)
+            return find_gh_horizon(p, u, t; origin=origin, kwargs...)
+        end
+        function fake_common(p, u, t, inds, masses, geom, seed, ch)
+            if fake[] === nothing
+                i = inds[1]
+                fake[] = (c=SVector{3,Float64}(i.origin) + SVector(0, 0, 0.05),
+                          template=(hlm=i.hlm, grid=i.grid, r_mean=i.r_mean,
+                                    r_min=i.r_min, r_max=i.r_max))
+            end
+            o = sphere_out(fake[])
+            return (attempted=true, success=true, note=nothing, iters=1, H_norm=1e-12,
+                    atol=1e-9, from=:sphere, origin=Tuple(o.origin),
+                    r_min=o.origin_r_min, r_mean=R, r_max=o.origin_r_max, area=o.area,
+                    M_irr=o.M_irr, J=nothing, M_ch=nothing, depth=(0.5, 0.5),
+                    core_gap=(0.1, 0.1), time=0.0, hlm=o.hlm, grid=o.grid)
+        end
+        kw = (q=q, ops=ops, chunk=T(1 // 20), cfl=T(1 // 2), t_end=T(3 // 20),
+              common_horizon=CommonHorizon(T; d_c=10, N=12, spin=false, streak=1,
+                                           handover=true),
+              common_find=fake_common, find=fake_find, checkpoint_sync_to_disk=false)
+        a = evolve!(T, hc; forest=deepcopy(hf), kw...)
+        r0 = a.records[1]
+        @test length(r0.holes) == 2 && r0.common.handover == "handed over" &&
+              r0.merged == 0
+        @test all(r -> length(r.holes) == 1 && r.holes[1].success === true &&
+                       r.holes[1].fit_valid === true && r.finite && r.merged == 0 &&
+                       r.separation === nothing && !haskey(r, :common),
+                  a.records[2:end])
+        @test length(a.records) == 4 && a.track isa Vector && length(a.track) == 1
+        @test a.interior isa HoleInteriors{1}
+        fake[] = nothing
+        pre = joinpath(mktempdir(), "handover")
+        b = evolve!(T, hc; forest=deepcopy(hf), kw..., checkpoint_path_prefix=pre,
+                    max_walltime_seconds=1e-9)
+        jobs = 1
+        while !b.finished
+            b = evolve!(T, hc; kw..., checkpoint_path_prefix=pre,
+                        max_walltime_seconds=1e-9, restart_file=latest_checkpoint(pre))
+            jobs += 1
+        end
+        @test jobs == 3
+        untimed(r) = haskey(r, :common) ? merge(r, (common=merge(r.common, (time=nothing,)),)) : r
+        @test isequal(a.u, b.u)
+        @test isequal(untimed.(a.records), untimed.(b.records))
+        @test isequal(repr(a.track), repr(b.track))
+    end
+
     # Guards the settings' refusals: a common find needs a positive tolerance and
     # a case of two holes.
     @testset "the settings refuse what cannot work" begin
@@ -147,5 +258,16 @@ isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
         @test_throws "case of two holes" evolve!(T, case; forest=deepcopy(forest), q=q,
                                                   ops=ops, t_end=T(1 // 10),
                                                   common_horizon=CommonHorizon(T))
+        # The handover is built for fitted harmonic holes: the suite's Kerr-Schild
+        # pair of tracked targets is refused before anything is built.
+        unit = TrackedSpec(T; r_0=T(3 // 5), r_1=T(7 // 5), margin=4)
+        ks = binary_case(T; holes=head_on_holes(T; d=8, masses=(1, 1), interior=unit),
+                         halfwidth=8, chunk=T(1 // 10),
+                         horizon=Horizon(T; every=1, N=12, spin=false))
+        @test_throws "not fitted" evolve!(T, ks;
+                                          forest=holes_forest(T, ks; N=8, roots=2,
+                                                              radii=(T(4),)),
+                                          q=q, ops=ops, t_end=T(1 // 10),
+                                          common_horizon=CommonHorizon(T; handover=true))
     end
 end

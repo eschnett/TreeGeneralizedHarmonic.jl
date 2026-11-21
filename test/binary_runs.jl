@@ -92,6 +92,11 @@
 #                                  observes and changes nothing, so a restart may
 #                                  switch it on (the CSV's common_* columns, a
 #                                  `common:` line in the log)
+#   handover=1 common_streak=3     (step B7) hand the pair over to one fitted remnant
+#                                  after formation (common_streak accepted finds of
+#                                  nondecreasing area); from then on the CSV's
+#                                  hole-1 columns are the remnant's, hole 2's NaN,
+#                                  and merged_t says when
 #   common_probe=<t>               (step B7) from t on, common-horizon attempts
 #                                  beside each pair of individual finds, printed
 #                                  and not used (bench/common_find_probe.jl)
@@ -169,7 +174,9 @@ end
 common_horizon = opt("common", "0") in ("1", "true") ?
                  CommonHorizon(T; d_c=T(rat(opt("d_c", "4"))),
                                N=parse(Int, opt("common_N", "25")),
-                               spin=opt("spin", "1") in ("1", "true")) :
+                               spin=opt("spin", "1") in ("1", "true"),
+                               streak=parse(Int, opt("common_streak", "3")),
+                               handover=opt("handover", "0") in ("1", "true")) :
                  nothing
 walltime = haskey(OPTIONS, "walltime") ? parse(Float64, OPTIONS["walltime"]) : nothing
 ckevery = parse(Int, opt("checkpoint_every", "4"))
@@ -420,7 +427,9 @@ header = vcat(["t", "wall", "steps", "dt", "nblocks", "points", "gauge_l2", "gau
                "common_atol", "common_area", "common_Mirr", "common_J", "common_rmin",
                "common_rmax", "common_ox", "common_depth1", "common_depth2",
                "common_gap1", "common_gap2", "common_time", "common_streak",
-               "common_t_formed"])
+               "common_t_formed",
+               # the handover (added in step B7): when the pair became the remnant
+               "merged_t"])
 if isrank0 && !(restarting && isfile(csv))
     open(io -> println(io, join(header, ',')), csv, "w")
 elseif isrank0
@@ -436,8 +445,11 @@ end
 t_wall0 = time()
 num(x) = x === nothing ? NaN : x
 function observe(p, t, u, rec)
+    # After the handover (step B7) there is one hole, the remnant: its rows are
+    # hole 1's, and hole 2's are NaN.
+    remnant = length(rec.holes) == 1
     c1 = SVector{3,T}(rec.holes[1].track_center)
-    c2 = SVector{3,T}(rec.holes[2].track_center)
+    c2 = remnant ? c1 : SVector{3,T}(rec.holes[2].track_center)
     b0 = zbin(T)
     init = (all=b0, band=ntuple(_ -> b0, Val(2 * NBAND)))
     rf = mesh_fold(BandFold{T}(c1, c2), TreeAMR.combine, init, p.diag;
@@ -446,14 +458,16 @@ function observe(p, t, u, rec)
     # The lapse rows, from the state itself (`scatter!` writes `u` into the
     # working array; the next right-hand side scatters again).
     rA(A) = max(num(rec.holes[A].track_r_max), (fitted_holes ? 1 : unit.r_1) * holes[A].mass)
-    lf = mesh_fold(LapseFold{T}(c1, c2, T(rA(1)), T(rA(2)), T(rec.separation / 2)),
+    lf = mesh_fold(LapseFold{T}(c1, c2, T(rA(1)), T(rA(remnant ? 1 : 2)),
+                                T(remnant ? 0 : rec.separation / 2)),
                    TreeAMR.combine, NOLAPSE, p.U, u)
     lapse = map(b -> b.value, lf)
     # Everything below is the same on every rank; the CSV and the log are rank
     # 0's, and the SimWatch update is collective, so every rank makes it.
     o = [r.origin === nothing ? SVector(NaN, NaN, NaN) : SVector{3,Float64}(r.origin)
          for r in rec.holes]
-    sep_found = sqrt(sum(abs2, o[2] - o[1]))
+    sep_found = remnant ? NaN : sqrt(sum(abs2, o[2] - o[1]))
+    sep = remnant ? NaN : rec.separation
     row = Any[rec.t, time() - t_wall0, rec.steps, rec.dt, rec.nblocks,
               rec.nblocks * N^3, rec.gauge_l2, rec.gauge_linf, num(rec.ham_l2),
               num(rec.ham_linf), rec.residual, rec.finite]
@@ -468,7 +482,8 @@ function observe(p, t, u, rec)
                       get(h, :fit_valid, nothing) === nothing ? NaN : Int(h.fit_valid),
                       num(get(h, :fit_residual, nothing))))
     end
-    append!(row, (rec.separation, sep_found, newton_separation(d_sep, M, rec.t),
+    remnant && append!(row, fill(NaN, length(hcols)))
+    append!(row, (sep, sep_found, newton_separation(d_sep, M, rec.t),
                   device_gb(), Sys.maxrss() / 1e9))
     for k in 1:(2 * NBAND)
         b = bandnorms(rf.band[k])
@@ -488,15 +503,16 @@ function observe(p, t, u, rec)
                   num(cm.J), num(cm.r_min), num(cm.r_max), pair2(cm.origin, 1),
                   pair2(cm.depth, 1), pair2(cm.depth, 2), pair2(cm.core_gap, 1),
                   pair2(cm.core_gap, 2), num(cm.time), cm.streak, num(cm.t_formed)))
+    push!(row, num(get(rec, :merged, nothing)))
     isrank0 && open(io -> println(io, join(row, ',')), csv, "a")
-    hist = Dict("constraints.gauge_l2" => rec.gauge_l2, "pair.separation" => rec.separation,
+    hist = Dict("constraints.gauge_l2" => rec.gauge_l2, "pair.separation" => sep,
                 "lapse.min_between" => lapse.btw_α, "layer.residual" => rec.residual)
-    bhs = Any[(name="BH$A", irreducible_mass=h.M_irr, mass=h.M_ch, spin=h.J,
+    bhs = Any[(name=remnant ? "remnant" : "BH$A", irreducible_mass=h.M_irr, mass=h.M_ch, spin=h.J,
             position=collect(h.track_center), found=h.success)
            for (A, h) in enumerate(rec.holes)]
     extra = Dict("constraints" => Dict("gauge_l2" => rec.gauge_l2,
                                        "ham_l2" => num(rec.ham_l2)),
-                 "pair" => Dict("separation" => rec.separation,
+                 "pair" => Dict("separation" => sep,
                                 "newton" => newton_separation(d_sep, M, rec.t)),
                  "lapse" => Dict("min_between" => lapse.btw_α,
                                  "min_outside" => lapse.out_α,
@@ -514,19 +530,27 @@ function observe(p, t, u, rec)
     simwatch_update!(sw; force=true, history=hist, iteration=rec.steps, time=rec.t,
                      time_end=Float64(t_end), time_unit="M", walltime_limit=walltime,
                      black_holes=bhs, extra=extra,
-                     message=@sprintf("t = %.3f M, separation %.4f", rec.t, rec.separation))
+                     message=remnant ? @sprintf("t = %.3f M, the remnant", rec.t) :
+                             @sprintf("t = %.3f M, separation %.4f", rec.t, rec.separation))
     isrank0 || return nothing
     @printf("t = %7.4f  wall %8.1f s  C_a %.3e/%.3e  ℋ %.3e  res %.3e  sep %.6f (found %.6f, newton %.6f)  areas %.5f %.5f  pred %.2e %.2e  gpu %.1f GB\n",
             rec.t, time() - t_wall0, rec.gauge_l2, rec.gauge_linf, num(rec.ham_l2),
-            rec.residual, rec.separation, sep_found, newton_separation(d_sep, M, rec.t),
-            num(rec.holes[1].area), num(rec.holes[2].area),
-            num(rec.holes[1].track_prediction_max), num(rec.holes[2].track_prediction_max),
+            rec.residual, sep, sep_found, newton_separation(d_sep, M, rec.t),
+            num(rec.holes[1].area), remnant ? NaN : num(rec.holes[2].area),
+            num(rec.holes[1].track_prediction_max),
+            remnant ? NaN : num(rec.holes[2].track_prediction_max),
             device_gb())
     # (No point between the horizons leaves the fold's identity, `floatmax`.)
     nobtw(x) = x == floatmax(T) ? NaN : x
     @printf("          α_min %.5f (between %.5f)  √γ/α_max %.4f (between %.4f)  t_0 %s\n",
             nobtw(lapse.out_α), nobtw(lapse.btw_α), lapse.out_a, lapse.btw_a,
             string(get(rec, :rollon_t0, "none")))
+    remnant && @printf("  remnant: since t = %.4f  area %.5f  M_irr %.6f  J %.3e  r %.4f–%.4f  center (%+.4f, %+.4f, %+.4f)  fit valid %s\n",
+                       num(get(rec, :merged, nothing)), num(rec.holes[1].area),
+                       num(rec.holes[1].M_irr), num(rec.holes[1].J),
+                       num(rec.holes[1].track_r_min), num(rec.holes[1].track_r_max),
+                       rec.holes[1].track_center...,
+                       string(get(rec.holes[1], :fit_valid, nothing)))
     if cm !== nothing && cm.attempted
         @printf("  common: %s  iters %s  |H| %.2e (atol %.2e)  area %.5f  M_irr %.6f  depth %s  core gap %s  streak %d  formed %s  %.2f s%s\n",
                 cm.success === true ? "found " : "failed", string(cm.iters), num(cm.H_norm),
@@ -536,6 +560,8 @@ function observe(p, t, u, rec)
                 join((@sprintf("%+.4f", d) for d in cm.core_gap), " "),
                 cm.streak, cm.t_formed === nothing ? "no" : @sprintf("at %.4f", cm.t_formed),
                 num(cm.time), cm.note === nothing ? "" : "  (" * first(cm.note, 120) * ")")
+        h = get(cm, :handover, nothing)
+        h === nothing || println("  handover: ", h)
     end
     flush(stdout)
     return nothing

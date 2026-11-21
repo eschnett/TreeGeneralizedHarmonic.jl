@@ -481,7 +481,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  checkpoint_sync_to_disk::Bool=true, checkpoint_io=:node,
                  restart_file=nothing, simd_width=nothing, comm=nothing,
                  rollon_separation=nothing, hole_find_interval=nothing,
-                 initial_data=nothing, common_horizon=nothing) where {T}
+                 initial_data=nothing, common_horizon=nothing,
+                 common_find=common_horizon_row) where {T}
     # The job's wall clock starts here: whatever ran before the call —
     # startup, compilation, the queue — is the caller's margin to leave
     # (TreeHydro's rule for `max_walltime_seconds`).
@@ -738,11 +739,54 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         (binary ? "of $nhole holes." : "of one hole.")))
     cstate = Ref{Any}(saved !== nothing && haskey(saved, :common) ?
                       plain_common_state(saved.common) : common_state0())
+    # The handover (step B7; `CODE.md`, "The common horizon and the handover"):
+    # after it the pair is one remnant, a `:fitted` hole about the common horizon
+    # — a composite of one piece on the same path, its track, fit and ranges in
+    # place of the holes' — and the holes' tracks are retired, kept at the
+    # handover's time for the profiles of `γ0` and `ε_KO` that followed them.
+    # Built for fitted harmonic holes, whose gauge follows no hole.
+    handing = common_horizon !== nothing && common_horizon.handover
+    handing && !(hfit && all(h -> h.harmonic, case.holes)) && throw(ArgumentError(
+        "the handover replaces a pair of fitted harmonic holes by one fitted " *
+        "remnant (step B7): its gauge source follows no hole, so there is none to " *
+        "hand over. This case's holes are " *
+        (hfit ? "Kerr-Schild holes, whose source follows the tracks." :
+         "not fitted: the remnant's layer is :fitted, and so must the holes' be.")))
+    merged = Ref(false)
+    t_merged = Ref(zero(T))
+    retired = Ref{Any}(nothing)
+    # The remnant's growth rate of its least radius, from its last two finds,
+    # which paces its finds (`growth_finds`).
+    rem_rate = Ref(zero(T))
+    if saved !== nothing && haskey(saved, :merged)
+        merged[] = true
+        t_merged[] = from_plain(T, saved.merged.t)
+        retired[] = from_plain(Vector{HorizonTrack{T}}, saved.merged.retired;
+                               path="run.merged.retired")
+        rem_rate[] = from_plain(T, saved.merged.rate)
+    end
+    merged_state() = merged[] ? (t=t_merged[], retired=retired[], rate=rem_rate[]) :
+                     nothing
+    # Set by the row that hands over, for the loop's own bookkeeping after it.
+    handed = Ref(false)
+    # How many pieces the composite has: the holes, or the remnant.
+    npiece() = merged[] ? 1 : nhole
+    M_rem = binary ? sum(h -> h.mass, case.holes) : zero(T)
+    remspec = handing ? scaled_spec(case.interior.specs[1], M_rem / case.holes[1].mass) :
+              nothing
+    piece_spec(A) = merged[] ? remspec : case.interior.specs[A]
+    remnant_interior(f, t, track) =
+        HoleInteriors((fitted_interior(remspec, track[1], f, G; t=T(t), n_L=n_Ls[1]),),
+                      (hole_on_line(T, M_rem, zero(T), track_center(track[1], T(t));
+                                    harmonic=true),))
     # The case a piece about `t` runs (step B3): a case of several holes has
     # its source and its holes' profiles on the tracks.
-    case_at(t, track) = holes_case_at(case, track, T(t); t_0=rollon[])
+    case_at(t, track) = merged[] ?
+                        holes_case_at(case, retired[], t_merged[]; t_0=rollon[]) :
+                        holes_case_at(case, track, T(t); t_0=rollon[])
     geometry(f, t, track) = fitted ?
                             fitted_interior(spec, track, f, G; t=T(t), n_L=n_L) :
+                            binary && merged[] ? remnant_interior(f, t, track) :
                             binary ? holes_interior(case, track, T(t); forest=f, G=G,
                                                     n_L=n_Ls) :
                             tracked_interior(spec, track, T(t); mass=ks_mass,
@@ -780,9 +824,11 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             ceil(Int, span / interval_cap - sqrt(eps(T))))
     # Several holes find together (proposed in step B3): as often as the hole
     # that asks most often, each at the spacing its own layer lives in.
-    holes_finds(tracks, hs, span) = maximum(A -> chunk_finds(tracks[A], hs[A], span),
-                                            1:nhole)
-    hole_spacings(g, f, t) = [first(layer_spacing(f, g.holes[A], T(t))) for A in 1:nhole]
+    # The remnant's horizon grows, and its finds are paced by that too (step B7).
+    holes_finds(tracks, hs, span) =
+        max(maximum(A -> chunk_finds(tracks[A], hs[A], span), 1:npiece()),
+            merged[] ? growth_finds(rem_rate[], G, hs[1], span) : 1)
+    hole_spacings(g, f, t) = [first(layer_spacing(f, g.holes[A], T(t))) for A in 1:npiece()]
 
     # The fitted target (step 8e). Its ranges come from the seed's analytic
     # data on the offset surface unless the spec states them, and the first
@@ -1194,8 +1240,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     piece_finds = Ref(0)
     piece_prediction = Ref(0.0)
     # The same per hole, for several holes (step B3).
-    hole_finds = zeros(Int, nhole)
-    hole_prediction = zeros(Float64, nhole)
+    hole_finds = zeros(Int, npiece())
+    hole_prediction = zeros(Float64, npiece())
     no_fit = (fit_valid=nothing, fit_residual=nothing, fit_min_detγ=nothing,
               fit_min_α=nothing, fit_min_λ=nothing, fit_hits=nothing,
               fit_refills=nothing)
@@ -1227,8 +1273,73 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # own geometry, at its own spec and ranges.
     function refit_holes!(p, u, t, g)
         fill_state!(p, u, t)
-        return [refit!(p, u, t, g.holes[A]; sp=case.interior.specs[A],
-                       bounds=tbounds[A], fill=false) for A in 1:nhole]
+        return [refit!(p, u, t, g.holes[A]; sp=piece_spec(A),
+                       bounds=tbounds[A], fill=false) for A in 1:npiece()]
+    end
+
+    # The handover's attempt at a row (step B7), on rank 0 inside the row's
+    # analysis after the common find `cm`, with the common state `st′` after it
+    # and the holes' tracks `trs` after this row's finds: the remnant's track,
+    # its geometry on this mesh (checked as every geometry is), its ranges and
+    # its fit of the state — or a note saying why not yet. It assigns nothing.
+    function handover_attempt(p, u, t, cm, st′, trs)
+        why(msg) = (ok=false, note=msg)
+        st′.t_formed === nothing && return why("the common horizon has not formed")
+        cm.success === true || return why("this row's common find failed")
+        (cm.core_gap !== nothing && all(>(0), cm.core_gap)) ||
+            return why("the common core does not hold both holes' cores (core gap " *
+                       "$(cm.core_gap))")
+        mesh = U.forest
+        trr = remnant_track(t, cm, trs, map(h -> h.mass, case.holes);
+                            lmax=remspec.lmax_shape)
+        g = try
+            g = remnant_interior(mesh, t, [trr])
+            check_interior_radii(mesh, g, case.background, G; t=T(t))
+            check_bounds_gate(mesh, g, case.bounds, q; t=T(t))
+            g
+        catch e
+            e isa ArgumentError || rethrow()
+            return why("the remnant's geometry: " * first(split(sprint(showerror, e), '\n')))
+        end
+        tb = remnant_bounds(tbounds, g.holes[1])
+        r = refit!(p, u, t, g.holes[1]; sp=remspec, bounds=tb)
+        r.fit.valid ||
+            return why("the remnant's fit is not a metric (min det γ " *
+                       "$(r.fit.sweep.min_detγ), min α $(r.fit.sweep.min_α))")
+        st = cstate[]
+        rate = st.r_min === nothing || !(t > st.t_last) ? zero(T) :
+               T(abs(cm.r_min - st.r_min) / (t - st.t_last))
+        return (ok=true, note="handed over", track=trr, geom=g, fit=r, bounds=tb,
+                retired=trs, rate=rate)
+    end
+
+    # The handover adopted on every rank (step B7): the run is the remnant's from
+    # here on. `tr` and `geom` are the row's to set.
+    function adopt_handover!(ho, t)
+        f = isdistributed_over(comm) ? backend_fit(ho.fit.fit, backend) : ho.fit.fit
+        fitcost.build_ns[] += ho.fit.ns
+        fitcost.nbuild[] += 1
+        merged[] = true
+        t_merged[] = T(t)
+        retired[] = ho.retired
+        rem_rate[] = ho.rate
+        fits = ((f, nothing),)
+        tbounds = (ho.bounds,)
+        hlm_seed = Any[complex_from_real(ho.track.shape, case.horizon.N - 1)]
+        resize!(hole_offsets, 1)
+        hole_offsets[1] = zero(SVector{3,T})
+        resize!(hole_finds, 1)
+        hole_finds[1] = 0
+        resize!(hole_prediction, 1)
+        hole_prediction[1] = 0.0
+        return nothing
+    end
+
+    # The remnant's growth rate from a find that moved its track (step B7).
+    function remnant_rate!(old, new)
+        new.source === :found && new.t_find > old.t_find &&
+            (rem_rate[] = abs(new.r_min - old.r_min) / (new.t_find - old.t_find))
+        return nothing
     end
 
     function adopt_fit!(r)
@@ -1251,13 +1362,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # And for each fitted hole (step H4): hole `A`'s fits replaced, the others
     # kept, the rows its own; the refills are the chunk's, every hole's.
     function adopt_hole_fits!(rs)
-        rows = map(1:nhole) do A
+        rows = map(1:npiece()) do A
             r = rs[A]
             f = isdistributed_over(comm) ? backend_fit(r.fit, backend) : r.fit
             fitcost.build_ns[] += r.ns
             fitcost.nbuild[] += 1
             if f.valid
-                fits = ntuple(B -> B == A ? (f, fits[B][1]) : fits[B], nhole)
+                fits = ntuple(B -> B == A ? (f, fits[B][1]) : fits[B], npiece())
             else
                 fitcost.nfailed[] += 1
             end
@@ -1367,8 +1478,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         hs = hole_spacings(geom, mesh, t)
         tr′ = copy(tr)
         lost = nothing
-        preds = Any[nothing for _ in 1:nhole]
-        for A in 1:nhole
+        preds = Any[nothing for _ in 1:npiece()]
+        for A in 1:npiece()
             hz = hzs[A]
             hz.success === true &&
                 (preds[A] = R(sqrt(sum(abs2, SVector{3,T}(Tuple(hz.origin)) - c_preds[A])) /
@@ -1379,7 +1490,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                  merge(hz, (origin=Tuple(SVector{3,T}(Tuple(hz.origin)) - hole_offsets[A]),)) :
                  hz
             try
-                tr′[A] = update_track(tr[A], hc, t; max_misses=spec.specs[A].max_misses,
+                tr′[A] = update_track(tr[A], hc, t; max_misses=piece_spec(A).max_misses,
                                       G=G, h=hs[A])
             catch e
                 e isa TrackLostError || rethrow()
@@ -1389,7 +1500,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             end
         end
         nf = holes_finds(tr′, hs, span)
-        for A in 1:nhole
+        for A in 1:npiece()
             (tr′[A].quadratic && hzs[A].success === true) &&
                 (tr′[A] = _with_prediction(tr′[A]; blend=span / nf))
         end
@@ -1399,7 +1510,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             check_interior_radii(mesh, geom′, case.background, G; t=T(t))
             check_bounds_gate(mesh, geom′, case.bounds, q; t=T(t))
         end
-        rows = ntuple(nhole) do A
+        rows = ntuple(npiece()) do A
             ct = track_position(tr′[A], T(t))
             (track_source=tr′[A].source, track_center=ntuple(d -> R(ct[d]), 3),
              track_velocity=ntuple(d -> R(tr′[A].v_est[d]), 3),
@@ -1446,7 +1557,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # track predicts it, and the tracks are updated together.
         # Each hole's horizon is looked for where its track puts the hole plus the
         # hole's horizon offset.
-        c_preds = binary ? [track_position(tr[A], T(t)) + hole_offsets[A] for A in 1:nhole] :
+        c_preds = binary ?
+                  [track_position(tr[A], T(t)) + hole_offsets[A] for A in 1:npiece()] :
                   nothing
         # The tracked analytic target finds at every row whatever the cadence
         # (proposed in step B2): the row's find is the last of the chunk's,
@@ -1460,18 +1572,23 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             if binary
                 founds = [horizon_row(p, u, t, hlm_seed[A], length(records); force=true,
                                       origin=c_preds[A], center=c_preds[A], find=find)
-                          for A in 1:nhole]
+                          for A in 1:npiece()]
                 tk = holes_track!(t, founds, c_preds)
                 fs = hfit && tk.lost === nothing ? refit_holes!(p, u, t, tk.geom) : nothing
                 # The common horizon after the holes' own (step B7), on the tracks
                 # and the geometry this row built.
-                cm = common_horizon === nothing ? nothing :
+                cm = common_horizon === nothing || merged[] ? nothing :
                      sqrt(sum(abs2, track_position(tk.tr[2], T(t)) -
                                     track_position(tk.tr[1], T(t)))) >
                      common_horizon.d_c ? NO_COMMON :
-                     common_horizon_row(p, u, t, founds, map(h -> h.mass, case.holes),
-                                        tk.geom, cstate[].hlm, common_horizon)
-                (hz=founds, tk=tk, fs=fs, cm=cm)
+                     common_find(p, u, t, founds, map(h -> h.mass, case.holes),
+                                 tk.geom, cstate[].hlm, common_horizon)
+                # And the handover, where the common horizon allows it (step B7).
+                ho = !handing || cm === nothing ? nothing :
+                     handover_attempt(p, u, t, cm,
+                                      common_state_after(cstate[], cm, t, common_horizon),
+                                      tk.tr)
+                (hz=founds, tk=tk, fs=fs, cm=cm, ho=ho)
             else
                 found = horizon_row(p, u, t, hlm_seed, length(records);
                                     force=forced || targeted, origin=c_pred,
@@ -1486,12 +1603,12 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         hole_rows = nothing
         if binary
             founds = an.hz
-            for A in 1:nhole
+            for A in 1:npiece()
                 founds[A].hlm === nothing || (hlm_seed[A] = founds[A].hlm)
             end
             # Each fitted hole's fit adopted, and its rows (step H4).
             hole_fit_rows = hfit && an.fs !== nothing ? adopt_hole_fits!(an.fs) : nothing
-            hole_rows = ntuple(nhole) do A
+            hole_rows = ntuple(npiece()) do A
                 f = founds[A]
                 nf = hole_finds[A] + (f.success === nothing ? 0 : 1)
                 pr = an.tk.rows[A].track_prediction
@@ -1518,6 +1635,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
               hlm=nothing, note=nothing) : an.hz
         binary || hz.hlm === nothing || (hlm_seed = hz.hlm)
         trk, lost = if binary
+            # The remnant's growth rate from its last two finds (step B7).
+            merged[] && remnant_rate!(tr[1], an.tk.tr[1])
             tr, geom = an.tk.tr, an.tk.geom
             no_track, an.tk.lost
         elseif tracked
@@ -1538,14 +1657,28 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         end
         piece_finds[] = 0
         piece_prediction[] = 0.0
+        # The handover (step B7): the remnant's track, geometry, fit and ranges
+        # adopted on every rank from rank 0's, the holes' tracks retired, and a
+        # track lost in this row no loss — the pair is gone.
+        handed_now = binary && an.ho !== nothing && an.ho.ok
+        if handed_now
+            adopt_handover!(an.ho, t)
+            geom = an.ho.geom
+            tr = [an.ho.track]
+            lost = nothing
+        end
         fr = an.fs === nothing || binary ? no_fit : adopt_fit!(an.fs)
         # The indicator last, and only where the case refines: it writes
         # `DIAG_TAU` and reads nothing the norms above left behind, and the
         # flags it produces are what the regrid below uses — one evaluation
         # of the criterion per chunk, so that the number the record holds
         # and the number the mesh was chosen by are the same number.
+        # After a handover the regrid is the remnant's: its level floor on the
+        # common horizon (step B7).
         ind = case.refinement === nothing ? nothing :
-              gh_indicator!(p, u, t; buffer=bufferwidth, travel=travel)
+              gh_indicator!(handed_now ?
+                            with_interior(p, with_ρ_max(geom, interior_ρ_max(p.interior))) :
+                            p, u, t; buffer=bufferwidth, travel=travel)
         centroid = ind === nothing || ind.centroid === nothing ? nothing :
                    ntuple(d -> R(ind.centroid[d]), 3)
         # The range projection's counts since the previous row, and the
@@ -1589,7 +1722,11 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # Several holes (step B3; `CODE.md`, "The record"): each hole's rows, and
         # the pair's separation and orbital phase — the angle of `c_2 − c_1` in
         # the plane `z = 0` — from the tracks.
-        if binary
+        if binary && length(hole_rows) == 1
+            # The remnant (step B7): one hole, no separation.
+            rec = (; rec..., holes=hole_rows, separation=nothing, phase=nothing)
+            case.gauge isa RolledGaugeSource && (rec = (; rec..., rollon_t0=R(rollon[])))
+        elseif binary
             c1 = SVector{3,Float64}(hole_rows[1].track_center)
             c2 = SVector{3,Float64}(hole_rows[2].track_center)
             Δ = c2 - c1
@@ -1607,8 +1744,13 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
             if an.cm !== nothing
                 cstate[] = common_state_after(cstate[], an.cm, t, common_horizon)
                 rec = (; rec..., common=common_record(an.cm, cstate[]))
+                handing && (rec = (; rec..., common=(; rec.common...,
+                                                     handover=an.ho === nothing ? nothing :
+                                                              an.ho.note)))
             end
         end
+        handing && (rec = (; rec..., merged=merged[] ? R(t_merged[]) : nothing))
+        handed[] = handed_now
         push!(records, rec)
         observer === nothing || call_observer(observer, p, t, u, rec)
         lost === nothing ||
@@ -1764,7 +1906,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                           fit_initial, hfit, binary, hlm_seed, trigger_pending,
                           hole_offsets, rollon_t0=rollon[], acc,
                           fit_cost=agreed_fit_cost(), records,
-                          common_state=common_horizon === nothing ? nothing : cstate[])
+                          common_state=common_horizon === nothing ? nothing : cstate[],
+                          merged_state=merged_state())
         save_run(path, U.forest, U, u; recipe=recipe, criterion=criterion, run=state,
                  filters=checkpoint_hdf5_filters, sync=checkpoint_sync_to_disk,
                  io=checkpoint_io)
@@ -1858,7 +2001,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                               with_interior(p, piece_interior(t))
         if binary
             hs_g = hole_spacings(geom, U.forest, tstart)
-            speed = maximum(A -> sqrt(sum(abs2, track_state(tr[A], tstart)[2])), 1:nhole)
+            speed = maximum(A -> sqrt(sum(abs2, track_state(tr[A], tstart)[2])), 1:npiece())
             nmove = speed > 0 ? ceilint(speed * (stop - tstart) / (minimum(hs_g) / 4)) : 1
             nfinds = holes_finds(tr, hs_g, stop - tstart)
             npieces = clamp(nfinds * cld(nmove, nfinds), 1, steps)
@@ -1908,21 +2051,22 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                     # The holes' finds at the piece's boundary (step B3), as the
                     # row's: on rank 0, every rank adopting the tracks.
                     t_f = integ.t
-                    c_fs = [track_position(tr[A], t_f) + hole_offsets[A] for A in 1:nhole]
+                    c_fs = [track_position(tr[A], t_f) + hole_offsets[A] for A in 1:npiece()]
                     span = stop - tstart
                     pf = on_root(comm; serve=(p, integ.u)) do
                         founds = [horizon_row(p, integ.u, t_f, hlm_seed[A],
                                               length(records); force=true,
                                               origin=c_fs[A], center=c_fs[A],
-                                              find=find) for A in 1:nhole]
+                                              find=find) for A in 1:npiece()]
                         (hz=founds, tk=holes_track!(t_f, founds, c_fs; span=span))
                     end
-                    for A in 1:nhole
+                    for A in 1:npiece()
                         pf.hz[A].hlm === nothing || (hlm_seed[A] = pf.hz[A].hlm)
                         hole_finds[A] += 1
                         pr = pf.tk.rows[A].track_prediction
                         pr === nothing || (hole_prediction[A] = max(hole_prediction[A], pr))
                     end
+                    merged[] && remnant_rate!(tr[1], pf.tk.tr[1])
                     tr, geom = pf.tk.tr, pf.tk.geom
                     pf.tk.lost === nothing ||
                         throw(TrackLostError(pf.tk.lost.msg, pf.tk.lost.track,
@@ -1998,6 +2142,14 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         # would invalidate the mesh the record describes.
         ind = record!(p, stop, u, dt_used, steps, λ, λ_end, cflnum)
         t_done = stop
+        # After a handover (step B7) the remnant's track is the one the next
+        # chunk's geometry, a checkpoint's rebuild and the gauge source's sample
+        # are of, as after a regrid's rebuild.
+        if handed[]
+            tr_chunk = tr
+            geom_sampled, sample_t, sample_track = geom, stop, tr
+            handed[] = false
+        end
 
         # (4) the checkpoint, **before the regrid** (decided 2026-10-01; after
         # it in TreeHydro): the state at the end of the chunk on the chunk's
@@ -2032,7 +2184,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                                   rollon_t0=rollon[], acc, fit_cost=agreed_fit_cost(),
                                   records,
                                   common_state=common_horizon === nothing ? nothing :
-                                               cstate[])
+                                               cstate[],
+                                  merged_state=merged_state())
                 save_run(path, U.forest, U, u; recipe=recipe, criterion=criterion,
                          run=state, filters=checkpoint_hdf5_filters,
                          sync=checkpoint_sync_to_disk, io=checkpoint_io)
@@ -2560,7 +2713,7 @@ function run_state(::Type{T}; chunk, t, t_chunk, nsteps, nregrids, nresamples, p
                    converged, λ_initial, growth, ρ_chunk, tr, tr_chunk, sample_t,
                    sample_track, fits, tbounds, fit_initial, hfit, binary, hlm_seed,
                    trigger_pending, hole_offsets, rollon_t0, acc, fit_cost,
-                   records, common_state=nothing) where {T}
+                   records, common_state=nothing, merged_state=nothing) where {T}
     return (; chunk, t=plain_reals(T(t)), t_chunk=plain_reals(T(t_chunk)),
             nsteps, nregrids, nresamples, passes, converged,
             lambda_initial=plain_reals(T(λ_initial)),
@@ -2591,5 +2744,10 @@ function run_state(::Type{T}; chunk, t, t_chunk, nsteps, nregrids, nresamples, p
             bounds=to_plain(acc; path="run.bounds"),
             fit_cost, records=Tuple(records),
             # The common horizon's state (step B7), where the run looks for one.
-            (common_state === nothing ? (;) : (; common=common_state))...)
+            (common_state === nothing ? (;) : (; common=common_state))...,
+            # The handover's (step B7), once it has happened.
+            (merged_state === nothing ? (;) :
+             (; merged=(t=plain_reals(T(merged_state.t)),
+                        retired=to_plain(merged_state.retired; path="run.merged.retired"),
+                        rate=plain_reals(T(merged_state.rate)))))...)
 end

@@ -2787,6 +2787,20 @@ positive from the first accepted find (`0.140 M`), and that the spin costs
 twenty times the find (`CODE.md`, "The common horizon and the handover"). The
 logs and CSVs are in `.claude/data/b7-common-48/`.
 
+**The handover built (2026-11-21).** Erik asked for stage 3 on these numbers.
+`CODE.md` had proposed it in two steps — the common layer joining the composite,
+then the holes' layers dropped at the next chunk — so that the handover could
+wait, with three pieces, until the common core held both holes' cores. The
+measured core gap is positive from the first accepted find, so it is one step:
+the pair becomes one fitted remnant at the first row after formation that passes
+the checks. It stays on the path of several holes as a composite of one piece,
+rather than ending the pair's run and starting a single hole's from its state:
+every per-hole loop, the level floors and the checks already took any number of
+pieces, and a restart is then the same code. Two things were added for it that
+`CODE.md` had not foreseen: the holes' `γ0` and `ε_KO` profiles stay where they
+were at the handover (their tracks no longer move), and the remnant's finds are
+paced by its growth, which is three to five times the jump guard per row.
+
 ## Possible extensions
 
 ### Extensions since built

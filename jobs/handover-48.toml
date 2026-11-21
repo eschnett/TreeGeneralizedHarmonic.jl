@@ -1,0 +1,36 @@
+# Step B7's handover on step H4's 1/48 roll-on rows (`common=1 handover=1`):
+# continued from their 28 M checkpoints, the common horizon found, formed, and
+# the pair handed over to one fitted remnant at the first row after formation
+# whose common core holds both holes' cores, then the remnant to 40 M. It
+# measures what the handover does to the constraints, the area and the remnant's
+# layer (`CODE.md`, "The common horizon and the handover"). The rows' commands
+# are `jobs/h4-pair.toml`'s, plus the two options and `t_end=40`.
+#
+# The start is not in this spec: copy the row's 28 M checkpoint — the older of
+# the two, `binary.it0000005071.h5` for s5 and `binary.it0000004921.h5` for s10,
+# and nothing newer — from `/scratch/eschnett/claude/xcts-s1/h4r48/{s5,s10}/ck/`
+# into the run's `<scratch>/<study>/handover-48-<label>/mutable/ck/` before the
+# first job. Copy, do not link: the run rotates the files in its `ck/`.
+name = "handover-48"
+site = "trillium"
+time = "4:00:00"                    # compilation, the plunge, the handover and about 10 M of the remnant
+resources = { nodes = 1 }
+mode = "parallel"
+checkpoints = true
+mutable_restarts = true
+
+[restart]
+to = "checkpoint"
+walltime = "walltime"
+margin = "0:20:00"
+continue_code = 3
+
+[[run]]
+label = "s5"
+threads = 96                        # the two 1/48 rows to a node
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=b7 d=8 N=12 margin=6 n_L=12 t0=0 sigma_g=5 chunk=1/4 checkpoint_every=8 t_end=40 find_interval=1/8 common=1 handover=1 out=out"
+
+[[run]]
+label = "s10"
+threads = 96
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=b7 d=8 N=12 margin=6 n_L=12 t0=0 sigma_g=10 chunk=1/4 checkpoint_every=8 t_end=40 find_interval=1/8 common=1 handover=1 out=out"

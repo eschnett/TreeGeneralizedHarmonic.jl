@@ -675,7 +675,14 @@ julia -t 192 --project=<env> test/binary_runs.jl chart=harmonic interior=fitted 
 Step B7's common horizon is `common=1` on the same script (`d_c=4`,
 `common_N=25`): an attempt at every row whose tracks are `d_c` apart, a
 `common:` line in the log and the CSV's `common_*` columns. It is not in the
-recipe, so a restart of an H4 row may add it. The smoke run below is the
+recipe, so a restart of an H4 row may add it. `handover=1` then hands the pair
+over to one fitted remnant after formation (fitted harmonic holes only;
+`jobs/handover-48.toml` runs H4's `1/48` rows through it): from that row on the
+record has one hole, `separation` is `nothing`, and the CSV's hole-2 columns
+are `NaN`. No pair cheap enough for a laptop forms a common horizon — superposed
+harmonic holes closer than `d = 8` lose their own finds to their layers — so
+`common_horizon_tests.jl` drives the handover with a stand-in common surface
+(`common_find=`, like `find=`). The smoke run below is the
 harmonic pair's with an attempt at every row, four minutes at four threads;
 `bench/common_horizon_probe.jl` (the analytic Brill–Lindquist pair, a minute)
 and `common_probe=<t>` (`bench/common_find_probe.jl`, four attempts beside

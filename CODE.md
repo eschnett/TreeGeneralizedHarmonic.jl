@@ -7641,20 +7641,50 @@ Its area is `39.8` at formation, against `25.7` for the two holes together,
 and grows monotonically to `47.3` by `30.3 M` (`M_irr` from `0.890` to
 `0.970`). `1/48` and `1/96` agree to `10⁻⁵` in the area.
 
-**The handover (proposed).** It waits until the common *core* surface,
-`m + n_L` cells below the common horizon, encloses both individual core
-surfaces. Then:
+**The handover (built in step B7, for fitted harmonic holes;
+`CommonHorizon(…; handover = true)`, `test/binary_runs.jl handover=1`).** It
+happens at the first record row after formation whose accepted common surface
+holds both holes' cores (every `core_gap` positive), whose remnant geometry
+passes the checks every geometry passes, and whose fit is a metric; a row that
+fails one of them says which in the common row's `handover` note, and the next
+row tries again. At that row, in one step **(proposed in step B7, over the two
+steps below:** the measured core gap is positive from the first accepted find,
+so there is nothing for an intermediate three-piece composite to wait for**)**:
 
-1. The common layer, `:fitted`, joins the composite. It is `:fitted`
-   whatever the individual variants were, since no analytic target exists
-   for a hole that has just merged.
-2. At the next chunk the individual layers are dropped and their tracks
-   retired. Their finds stop, and losing one after formation ends nothing.
+1. **The remnant** replaces the pair: one `:fitted` hole about the common
+   horizon, a composite of one piece on the same code path
+   (`HoleInteriors{1}`), whatever the holes' variants were, since no analytic
+   target exists for a hole that has just merged. Its spec is the holes',
+   scaled to the total mass; its `m` and `n_L` are theirs.
+2. **Its track** (`remnant_track`) starts at the common surface's origin with
+   its radii and shape, moving with the holes' mass-weighted velocity and
+   acceleration — a head-on pair's cancel — and predicts along the quadratic.
+   From the next piece on, the remnant is found as a hole is, from its track,
+   with the case's finder.
+3. **Its fit** is of the state on its own geometry, at that row, into ranges
+   that are the union of the holes' (`remnant_bounds`): there is no analytic
+   remnant to derive them from.
+4. **The holes' tracks are retired**, their finds stop, and a track lost at
+   that row ends nothing. The `γ0` Gaussians and the `ε_KO` profiles that
+   followed the tracks stay where they were at the handover
+   **(proposed in step B7)**, continuous in time; the remnant's own Gaussian
+   was always on the center of mass.
+5. **The regrid after that row is the remnant's**: the indicator flags with
+   the remnant's geometry, so the level floor covers the common horizon.
+
+**The remnant's finds are paced by its growth (proposed in step B7).** A
+just-formed horizon grows fast: on H4's pair its least radius grew `0.16 M` in
+the first `M/4` and still `0.05 M` per `M/4` at `30 M`, against a jump guard of
+`G h/2 = 0.03 M` at `1/48`. The track's jump check stays; the remnant asks for
+as many finds as keep its least radius within `G h/4` between two, at the rate
+measured from its last two finds (`growth_finds`).
 
 The composition makes this continuous outside the common core: those
-points are under the common layer before and after. Inside the common core
+points are evolved, or under a layer, before and after. Inside the common core
 `F` is not evaluated, so the individual holes' singular regions are relaxed
-toward the common fit at `ρ_max`.
+toward the common fit at `ρ_max`. The handover's state — when, the retired
+tracks and the growth rate — is run state, so a restart after it is the
+remnant's run.
 
 **Whether a just-formed common core holds both individual cores** is what
 the row's `core_gap` measures: the least depth of each hole's core surface

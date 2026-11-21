@@ -917,8 +917,10 @@ finder fails where there is no common horizon (`HISTORY.md`, "Step B7 started:
 the common horizon"). On H4's pair a common horizon forms at a track separation
 of `3.0 M`, `1.9 M` before the individual tracks are lost, and the run at
 `1/48` measured the core gap positive from the first accepted find (`0.140 M`),
-so the handover need not wait. The handover, the remnant and the head-on runs
-are not built.
+so the handover need not wait. The handover to one fitted remnant is built
+(2026-11-21) and tested with a stand-in common surface; it has not yet run on
+H4's pair. The remnant's own source (none on the harmonic route) and the
+head-on runs' acceptance against G7 are open.
 
 **Changes:**
 
