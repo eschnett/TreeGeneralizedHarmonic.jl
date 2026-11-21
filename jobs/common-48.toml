@@ -1,0 +1,37 @@
+# Step B7's common-horizon finder in the run (`common=1`, `CommonHorizon`'s
+# defaults: `d_c = 4`, `N = 25`) on step H4's 1/48 roll-on rows, continued from
+# their 28 M checkpoints to the plunge (the tracks are lost at about 30.25 M,
+# which ends the run with a TrackLostError). The rows' commands are
+# `jobs/h4-pair.toml`'s, plus the option. It measures what the probe
+# (`jobs/common-probe.toml`) could only estimate: the formation the run records,
+# and the core gap — each hole's core surface against the common horizon moved
+# inward by the holes' own core depth (`CODE.md`, "The common horizon and the
+# handover").
+#
+# The start is not in this spec: copy the row's 28 M checkpoint (and nothing
+# newer) from `/scratch/eschnett/claude/xcts-s1/h4r48/{s5,s10}/ck/` into the
+# run's `<scratch>/<study>/common-48-<label>/mutable/ck/` before the first job.
+# Copy, do not link: the run rotates the files in its `ck/`.
+name = "common-48"
+site = "trillium"
+time = "1:30:00"                    # compilation (about 15 min), 2.5 M, the finds
+resources = { nodes = 1 }
+mode = "parallel"
+checkpoints = true
+mutable_restarts = true
+
+[restart]
+to = "checkpoint"
+walltime = "walltime"
+margin = "0:20:00"
+continue_code = 3
+
+[[run]]
+label = "s5"
+threads = 96                        # the two 1/48 rows to a node
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=b7 d=8 N=12 margin=6 n_L=12 t0=0 sigma_g=5 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/8 common=1 out=out"
+
+[[run]]
+label = "s10"
+threads = 96
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=b7 d=8 N=12 margin=6 n_L=12 t0=0 sigma_g=10 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/8 common=1 out=out"
