@@ -7679,6 +7679,39 @@ the first `M/4` and still `0.05 M` per `M/4` at `30 M`, against a jump guard of
 as many finds as keep its least radius within `G h/4` between two, at the rate
 measured from its last two finds (`growth_finds`).
 
+**Measured on H4's pair at `1/48`** (`jobs/handover-48.toml`, both roll-on
+rows from their `28 M` checkpoints to `40 M`, one Trillium node, `38–40 min`):
+
+- **When.** Formation is dated `28.5 M` (`σ_g = 5`) and `28.75 M`
+  (`σ_g = 10`). The next three rows were refused by the remnant's geometry, not
+  by the core gap: its least radius `1.34–1.51 M` could not hold `m + n_L +
+  core_min = 20` cells at `h = 1/12`, the coarsest spacing of the pair's blocks
+  the common layer reaches into. The handover happened at `29.75` and `30.0 M`,
+  `0.625 M` before the tracks were lost in the runs without it. Reading that
+  spacing from the mesh the remnant will have, not the pair's, would hand over
+  at formation **(open)**.
+- **The horizon.** The area is nondecreasing at every row, `47.23` at the
+  handover to `48.44` and `48.38` at `40 M` (`M_irr` `0.969` to `0.982` and
+  `0.981`); `|J| < 3·10⁻⁸`; the center stays within `2·10⁻⁴ M` of the origin.
+  Its radii ring down, from `1.63–2.38` at the handover through round
+  (`1.98–1.99`) at `33.75 M` and back to `1.96–2.01`. After `34 M` the area
+  still grows, `2·10⁻³` of it at `σ_g = 5` and `10⁻³` at `σ_g = 10` by `40 M`;
+  whether that drift is the gauge's or the resolution's is **(open)**.
+- **The constraints.** At the handover row the masked `ℋ` norm falls from
+  `1.24·10⁻³` to `4.1·10⁻⁴` (`1.28·10⁻³` to `3.0·10⁻⁴`), the momentum norm
+  thirtyfold, and the largest `|C_a|` from `0.15` to `0.019`, part of it because
+  the remnant's core masks the region between the holes. After it `ℋ` grows to
+  `7.7·10⁻⁴` (`6.4·10⁻⁴`) by `40 M`; the `C_a` norm keeps the slope it had
+  before (`1.3·10⁻⁴` per `M`), so its growth is not the handover's. The layer's
+  residual falls from about `10` (two holes) to `5.6` at the handover and
+  `0.24–0.26` by `40 M`. No projection fired, and `α ≥ 0.59` outside the cores.
+- **The mesh.** The remnant's floor is one level coarser than the holes',
+  `1/24` against `1/48`: the floor is the coarsest level at which a layer fits
+  its horizon, and the remnant's is twice a hole's. The blocks fall from `5440`
+  to `2808` and the step doubles, so a `M` costs `110 s` against `470 s` before
+  it, `80–110 s` of which were the common finds with their spin. The remnant runs at
+  the holes' `h/M`; whether that is enough for the ringdown is **(open)**.
+
 The composition makes this continuous outside the common core: those
 points are evolved, or under a layer, before and after. Inside the common core
 `F` is not evaluated, so the individual holes' singular regions are relaxed

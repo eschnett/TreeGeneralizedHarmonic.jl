@@ -2801,6 +2801,15 @@ pieces, and a restart is then the same code. Two things were added for it that
 were at the handover (their tracks no longer move), and the remnant's finds are
 paced by its growth, which is three to five times the jump guard per row.
 
+**The handover on H4's pair (2026-11-21).** Erik asked to run it on the two
+`1/48` rows: `jobs/handover-48.toml`, study `treegh-b7-handover` at `093b4dd`,
+Trillium job 2901910, `39:47`, both rows from `28 M` to `40 M`, `COMPLETED`. Both
+handed over three rows after formation, held back by the remnant's geometry
+read on the pair's coarser blocks, and `0.625 M` before the tracks would have
+been lost; the remnant then ran to `40 M` with a nondecreasing area and no
+projection. The numbers are `CODE.md`'s "The common horizon and the handover";
+the logs and CSVs are in `.claude/data/b7-handover-48/`.
+
 ## Possible extensions
 
 ### Extensions since built

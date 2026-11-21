@@ -54,8 +54,8 @@ a draft pull request. **Step S1 is done** (2026-11-15 to 2026-11-17): the
 pair's data solved by XCTS. **Step S2 is done** (2026-11-17 to 2026-11-18):
 two holes far apart on those data. **Step H4 is resumed** (2026-11-18) on them,
 run (to 2026-11-20) and merged. **Step B7 is started** (2026-11-20) on H4's
-pair: the common finder and formation are built (2026-11-21), the handover is
-next. Step H5 is not started. Steps H1–H3 were single
+pair: the common finder, formation and the handover to one fitted remnant are
+built and have run on H4's `1/48` rows to `40 M` (2026-11-21). Step H5 is not started. Steps H1–H3 were single
 holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
@@ -918,9 +918,11 @@ the common horizon"). On H4's pair a common horizon forms at a track separation
 of `3.0 M`, `1.9 M` before the individual tracks are lost, and the run at
 `1/48` measured the core gap positive from the first accepted find (`0.140 M`),
 so the handover need not wait. The handover to one fitted remnant is built
-(2026-11-21) and tested with a stand-in common surface; it has not yet run on
-H4's pair. The remnant's own source (none on the harmonic route) and the
-head-on runs' acceptance against G7 are open.
+(2026-11-21) and tested with a stand-in common surface, and it ran on H4's
+`1/48` rows to `40 M`: the handover three rows after formation (held back by
+the remnant's geometry on the pair's coarser blocks), then a nondecreasing
+area, `|J| < 3·10⁻⁸` and no projection. Open: handing over at formation, the
+remnant's late area drift and its resolution, and G7's waveform.
 
 **Changes:**
 
