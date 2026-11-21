@@ -164,6 +164,14 @@ function scaled_spec(spec::FittedSpec{T,V,X,B}, M) where {T,V,X,B}
                                spec.fit_tilde, spec.fit_cont)
 end
 
+# A fitted spec with its margin and its ramp `k` times as many cells (step B7's
+# `remnant_depth` diagnostic): the same layer depth at `1/k` the spacing.
+deepened_spec(spec::FittedSpec{T,V,X,B}, k) where {T,V,X,B} = k == 1 ? spec :
+    FittedSpec{T,V,X,B}(k * spec.margin, k * spec.n_L, spec.core_min,
+        spec.lmax_shape, spec.lmax_fit, spec.ρ_max, spec.w_ramp, spec.ρ_ramp,
+        spec.max_misses, spec.α_trigger, spec.valvariant, spec.target,
+        spec.target_bounds, spec.fit_tilde, spec.fit_cont)
+
 """
     initial_line(spec::HoleSpec) -> HoleCenter
 

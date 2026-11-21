@@ -781,11 +781,16 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # How many pieces the composite has: the holes, or the remnant.
     npiece() = merged[] ? 1 : nhole
     M_rem = binary ? sum(h -> h.mass, case.holes) : zero(T)
-    remspec = handing ? scaled_spec(case.interior.specs[1], M_rem / case.holes[1].mass) :
+    # The remnant's spec: the first hole's at the total mass, its margin and
+    # ramp `remnant_depth` times the holes' (a diagnostic, default 1).
+    rdepth = handing ? common_horizon.remnant_depth : 1
+    remspec = handing ? deepened_spec(scaled_spec(case.interior.specs[1],
+                                                  M_rem / case.holes[1].mass), rdepth) :
               nothing
     piece_spec(A) = merged[] ? remspec : case.interior.specs[A]
     remnant_interior(f, t, track; h_cap=rem_h[]) =
-        HoleInteriors((fitted_interior(remspec, track[1], f, G; t=T(t), n_L=n_Ls[1],
+        HoleInteriors((fitted_interior(remspec, track[1], f, G; t=T(t),
+                                       n_L=rdepth * n_Ls[1],
                                        h_cap=h_cap),),
                       (hole_on_line(T, M_rem, zero(T), track_center(track[1], T(t));
                                     harmonic=true),))
@@ -1310,6 +1315,8 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     function handover_attempt(p, u, t, cm, st′, trs)
         why(msg) = (ok=false, note=msg)
         st′.t_formed === nothing && return why("the common horizon has not formed")
+        t ≥ common_horizon.handover_from ||
+            return why("held back until t = $(common_horizon.handover_from)")
         cm.success === true || return why("this row's common find failed")
         (cm.core_gap !== nothing && all(>(0), cm.core_gap)) ||
             return why("the common core does not hold both holes' cores (core gap " *

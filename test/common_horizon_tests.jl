@@ -180,6 +180,14 @@ isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
                                                                   G; t=T(1 // 2))
         @test check_interior_radii(forest, geomc, nothing, G; t=T(1 // 2),
                                    h_cap=geomc.h).h == geomc.h
+        # The depth diagnostic: twice the cells at half the spacing is the same
+        # layer.
+        sp2 = TreeGeneralizedHarmonic.deepened_spec(spec6, 2)
+        @test sp2.margin == 6 && sp2.n_L == 4 * (G + 1) && sp2.core_min == spec6.core_min
+        @test TreeGeneralizedHarmonic.deepened_spec(spec6, 1) === spec6
+        gd = fitted_interior(sp2, tr, forest, G; t=T(1 // 2), n_L=4 * (G + 1),
+                             h_cap=geom.h / 2)
+        @test gd.h == geom.h / 2 && gd.offset ≈ 3 * geom.h
         gf = TreeGeneralizedHarmonic.growth_finds
         @test gf(0.6, 3, 1 / 48, 1 / 4) == ceil(Int, 0.25 * 0.6 / (3 / 48 / 4))
         @test gf(0.0, 3, 1 / 48, 1 / 4) == 1
@@ -289,6 +297,7 @@ isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
     @testset "the settings refuse what cannot work" begin
         @test_throws "positive" CommonHorizon(T; d_c=0)
         @test_throws "stall" CommonHorizon(T; atol_factor=0)
+        @test_throws "at least 1" CommonHorizon(T; remnant_depth=0)
         @test_throws "case of two holes" evolve!(T, case; forest=deepcopy(forest), q=q,
                                                   ops=ops, t_end=T(1 // 10),
                                                   common_horizon=CommonHorizon(T))

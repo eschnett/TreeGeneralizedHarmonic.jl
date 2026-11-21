@@ -5,7 +5,8 @@
 """
     CommonHorizon(T = Float64; d_c = 4, N = 25, atol = 0, atol_factor = 10,
                   atol_floor = 1e-9, enclose = 1/20, maxiters = 1000, spin = true,
-                  streak = 3, unif_tol = 1e-8, handover = false)
+                  streak = 3, unif_tol = 1e-8, handover = false,
+                  handover_from = -Inf, remnant_depth = 1)
 
 What [`evolve!`](@ref)'s `common_horizon` keyword asks of a case of several holes:
 at every record row whose tracks are at most `d_c` apart (in the case's units),
@@ -42,6 +43,11 @@ B7; `CODE.md`, "The common horizon and the handover"): at the first row after
 formation whose common surface holds both holes' cores (a positive core gap) and
 whose fit is a metric, the two holes' layers, tracks and fits are replaced by one
 `:fitted` hole about the common horizon. Until then it observes, as without it.
+
+Two diagnostics (step B7's handover at formation, `CODE.md`, "The common horizon
+and the handover"): `handover_from` holds the handover back until that time,
+and `remnant_depth` makes the remnant's margin and ramp that many times the
+holes', so that its layer is as deep at a finer spacing.
 """
 struct CommonHorizon{T}
     d_c::T
@@ -55,13 +61,16 @@ struct CommonHorizon{T}
     streak::Int
     unif_tol::Float64
     handover::Bool
+    handover_from::Float64
+    remnant_depth::Int
 end
 
 function CommonHorizon(::Type{T}=Float64; d_c=4, N::Integer=25, atol=0,
                        atol_factor=10, atol_floor=1.0e-9, enclose=1 // 20,
                        maxiters::Integer=1000,
                        spin::Bool=true, streak::Integer=3,
-                       unif_tol=1.0e-8, handover::Bool=false) where {T}
+                       unif_tol=1.0e-8, handover::Bool=false, handover_from=-Inf,
+                       remnant_depth::Integer=1) where {T}
     T(d_c) > 0 || throw(ArgumentError(
         "d_c is the tracks' separation below which a common horizon is looked " *
         "for, and must be positive, got $d_c."))
@@ -78,9 +87,13 @@ function CommonHorizon(::Type{T}=Float64; d_c=4, N::Integer=25, atol=0,
         "fraction, and must not be negative, got $enclose."))
     (maxiters ≥ 1 && streak ≥ 1) || throw(ArgumentError(
         "maxiters and streak must be positive, got $maxiters and $streak."))
+    remnant_depth ≥ 1 || throw(ArgumentError(
+        "remnant_depth multiplies the remnant's margin and ramp, and must be at " *
+        "least 1, got $remnant_depth."))
     return CommonHorizon{T}(T(d_c), Int(N), Float64(atol), Float64(atol_factor),
                             Float64(atol_floor), Float64(enclose), Int(maxiters),
-                            spin, Int(streak), Float64(unif_tol), handover)
+                            spin, Int(streak), Float64(unif_tol), handover,
+                            Float64(handover_from), Int(remnant_depth))
 end
 
 # The run state the common finder carries from one row to the next, and in a

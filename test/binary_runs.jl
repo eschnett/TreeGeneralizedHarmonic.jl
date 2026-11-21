@@ -97,6 +97,9 @@
 #                                  nondecreasing area); from then on the CSV's
 #                                  hole-1 columns are the remnant's, hole 2's NaN,
 #                                  and merged_t says when
+#   handover_from=<t> remnant_depth=<k>
+#                                  (step B7, diagnostics) no handover before t; the
+#                                  remnant's margin and ramp k times the holes'
 #   common_probe=<t>               (step B7) from t on, common-horizon attempts
 #                                  beside each pair of individual finds, printed
 #                                  and not used (bench/common_find_probe.jl)
@@ -176,7 +179,9 @@ common_horizon = opt("common", "0") in ("1", "true") ?
                                N=parse(Int, opt("common_N", "25")),
                                spin=opt("spin", "1") in ("1", "true"),
                                streak=parse(Int, opt("common_streak", "3")),
-                               handover=opt("handover", "0") in ("1", "true")) :
+                               handover=opt("handover", "0") in ("1", "true"),
+                               handover_from=Float64(rat(opt("handover_from", "-1"))),
+                               remnant_depth=parse(Int, opt("remnant_depth", "1"))) :
                  nothing
 walltime = haskey(OPTIONS, "walltime") ? parse(Float64, OPTIONS["walltime"]) : nothing
 ckevery = parse(Int, opt("checkpoint_every", "4"))
