@@ -923,8 +923,9 @@ so the handover need not wait. The handover to one fitted remnant is built
 the remnant's geometry on the pair's coarser blocks), then a nondecreasing
 area, `|J| < 3·10⁻⁸` and no projection. The remnant's spacing is now the holes'
 scaled by the masses rather than the pair's mesh's, so the handover comes at
-formation (tested with the stand-in; H4's rows not rerun). Open: the rerun, the
-remnant's late area drift and its resolution, and G7's waveform.
+formation: on H4's rows it did, at `h = 1/24`, and the remnant then failed
+within a `M` (`CODE.md`, "The common horizon and the handover", "When."). Open:
+why, the remnant's late area drift and its resolution, and G7's waveform.
 
 **Changes:**
 

@@ -2819,8 +2819,12 @@ there, and the regrid refines the pair's blocks; a restart from the handover
 row's checkpoint skips the problem's radius check until its first regrid, as the
 run does. The alternative, regridding inside the row before building the
 geometry, would have made the regrid two code paths. `common_horizon_tests.jl`'s
-handover test now hands over on a mesh a level too coarse; H4's rows were not
-rerun.
+handover test now hands over on a mesh a level too coarse. H4's two `1/48`
+rows were rerun with it from their `28 M` checkpoints (Trillium job 2902600,
+`.claude/data/b7-handover-48-formation`): both handed over at the row that
+declared formation, `29.0` and `29.25 M`, at `h = 1/24`, and both remnants
+failed within a `M` on a negative `sqrt` in the right-hand side, the layer's
+residual near `500` from the first row on where the run at `1/12` had `5.6`.
 
 ## Possible extensions
 

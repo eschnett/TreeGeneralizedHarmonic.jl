@@ -7703,8 +7703,17 @@ rows from their `28 M` checkpoints to `40 M`, one Trillium node, `38–40 min`):
   the remnant's spacing is no longer read from the pair's mesh (item 1 above):
   with it the handover is at the row that declares formation, `29.0` and
   `29.25 M`, which the stand-in test reproduces (a remnant layer in blocks at
-  `1/4` refused at every row without the cap, handed over at `1/8` with it);
-  H4's rows have not been rerun with it **(open)**.
+  `1/4` refused at every row without the cap, handed over at `1/8` with it).
+  **Rerun with it** (`.claude/data/b7-handover-48-formation`, job 2902600),
+  both rows handed over at those rows, at `h = 1/24`, **and the remnant failed
+  within a `M`**: a `sqrt` of a negative number in the right-hand side at
+  `29.25 → 29.5 M` (`σ_g = 5`) and `30.0 → 30.25 M` (`σ_g = 10`). The layer's
+  residual was `480–530` at the first row after the handover against `5.6` in
+  the run at `1/12` from `29.75 M`, the largest `|C_a|` rose instead of falling
+  (`0.21`, then `0.36`), and `α ≥ 0.67` outside the cores throughout. Whether
+  the earlier, more distorted surface (radii `1.43–2.49` against `1.63–2.38`)
+  or the shallower layer at `1/24` is the cause is **(open)**; the bullets
+  below are the run at `1/12`.
 - **The horizon.** The area is nondecreasing at every row, `47.23` at the
   handover to `48.44` and `48.38` at `40 M` (`M_irr` `0.969` to `0.982` and
   `0.981`); `|J| < 3·10⁻⁸`; the center stays within `2·10⁻⁴ M` of the origin.
