@@ -86,6 +86,9 @@
 #   xcts_gauge=case|solved         the lapse and shift of the XCTS start: the case's
 #                                  background's (XCTS's fixed lapse grows outward,
 #                                  bench/xcts_metric.jl), or the solution's own
+#   common_probe=<t>               (step B7) from t on, common-horizon attempts
+#                                  beside each pair of individual finds, printed
+#                                  and not used (bench/common_find_probe.jl)
 #
 # A run that stops at `walltime` exits with status 3, so a job script can resubmit;
 # the same command continues from the newest checkpoint and appends to the CSV.
@@ -148,6 +151,14 @@ function face_mismatch(background, data, L)
 end
 XCTS_FILE === nothing || include(joinpath(@__DIR__, "..", "bench", "xcts_metric.jl"))
 XCTS_FILE === nothing || (t_end = 0)
+# Common-horizon attempts beside the run's finds (step B7), which change nothing
+# the run carries.
+if haskey(OPTIONS, "common_probe")
+    include(joinpath(@__DIR__, "..", "bench", "common_find_probe.jl"))
+    probe_find = (find=CommonProbe(find_gh_horizon; t_from=Float64(rat(OPTIONS["common_probe"]))),)
+else
+    probe_find = (;)
+end
 walltime = haskey(OPTIONS, "walltime") ? parse(Float64, OPTIONS["walltime"]) : nothing
 ckevery = parse(Int, opt("checkpoint_every", "4"))
 ckkeep = parse(Int, opt("keep", "2"))
@@ -484,7 +495,7 @@ out = try
             hole_find_interval=fitted_holes && haskey(OPTIONS, "find_interval") ?
                                T(rat(OPTIONS["find_interval"])) : nothing,
             fit_initial_depth=fitted_holes ? T(rat(opt("fit_depth", "0"))) : 0,
-            initial_data=initial_data, ckw...)
+            initial_data=initial_data, probe_find..., ckw...)
 catch err
     use_mpi || simwatch_finish!(sw; status="failed", message=sprint(showerror, err),
                                 time_end=Float64(t_end), time_unit="M")
