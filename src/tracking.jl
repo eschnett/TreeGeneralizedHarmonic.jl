@@ -735,10 +735,18 @@ It **refuses** `r_in − (m + n_L + core_min) h ≤ 0` by name: the core would
 be smaller than `core_min` spacings, or the offset surface would reach the
 center. [`check_interior_radii`](@ref) is still what asserts the result
 against the mesh, as it asserts the sphere.
+
+`h_cap` caps the spacing, `h = min(h_mesh, h_cap)`: the geometry is then the
+one the mesh will have once the next regrid's level floor, which is read from
+this geometry's `offset/m`, has refined the layer's blocks to `h_cap` (added in
+step B7, for the remnant at the handover, whose layer lies in blocks the pair's
+mesh left coarser; `CODE.md`, "The common horizon and the handover"). On the
+mesh it is built on, such a geometry fails `check_interior_radii` until that
+regrid.
 """
 function fitted_interior(spec::FittedSpec{T,V,X}, tr::HorizonTrack, forest,
                          G::Integer; t, n_L::Integer=spec.n_L,
-                         ρ_max=zero(T)) where {T,V,X}
+                         ρ_max=zero(T), h_cap=nothing) where {T,V,X}
     n_L > 0 || throw(ArgumentError(
         "the ramp n_L must be resolved before a geometry is built: 0 in a " *
         "FittedSpec means step 8c's rule max(4G, ⌈G (10 ρ_max M)^{1/3}⌉), " *
@@ -758,6 +766,7 @@ function fitted_interior(spec::FittedSpec{T,V,X}, tr::HorizonTrack, forest,
         "no block of this forest meets the tracked layer's annulus " *
         "[$(r_in - (m + n_L) * h0), $(r_out - m * h0)] around $(Tuple(c)): " *
         "the tracked horizon is outside the domain."))
+    h_cap === nothing || (h = min(h, T(h_cap)))
     need = (m + n_L + spec.core_min) * h
     r_in - need > 0 || throw(ArgumentError(
         "the tracked horizon's smallest radius r_in = $r_in cannot hold the " *

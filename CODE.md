@@ -7655,7 +7655,19 @@ so there is nothing for an intermediate three-piece composite to wait for**)**:
    horizon, a composite of one piece on the same code path
    (`HoleInteriors{1}`), whatever the holes' variants were, since no analytic
    target exists for a hole that has just merged. Its spec is the holes',
-   scaled to the total mass; its `m` and `n_L` are theirs.
+   scaled to the total mass; its `m` and `n_L` are theirs. **Its spacing is
+   the holes' scaled by the masses** (`1/48` → `1/24` for H4's equal pair:
+   the remnant keeps their `h/M`), halved down to the holes' own while its
+   layer does not fit inside the common horizon, and **not read from the
+   pair's mesh** (`fitted_interior`'s `h_cap`): the common layer reaches
+   blocks the pair's floors left a level coarser, and the regrid after the
+   handover row refines them, since the floor is read from this geometry. So
+   the geometry is checked at that spacing, and a mesh more than one level
+   coarser across the layer — one regrid refines by one level — is "not yet".
+   This needs a regrid after the row: a run that does not regrid, and the
+   initial row, keep the mesh's own spacing; a restart from the handover
+   row's checkpoint builds the problem it computes its flags with unchecked,
+   as the run did, and regrids first.
 2. **Its track** (`remnant_track`) starts at the common surface's origin with
    its radii and shape, moving with the holes' mass-weighted velocity and
    acceleration — a head-on pair's cancel — and predicts along the quadratic.
@@ -7687,9 +7699,12 @@ rows from their `28 M` checkpoints to `40 M`, one Trillium node, `38–40 min`):
   by the core gap: its least radius `1.34–1.51 M` could not hold `m + n_L +
   core_min = 20` cells at `h = 1/12`, the coarsest spacing of the pair's blocks
   the common layer reaches into. The handover happened at `29.75` and `30.0 M`,
-  `0.625 M` before the tracks were lost in the runs without it. Reading that
-  spacing from the mesh the remnant will have, not the pair's, would hand over
-  at formation **(open)**.
+  `0.625 M` before the tracks were lost in the runs without it. That is why
+  the remnant's spacing is no longer read from the pair's mesh (item 1 above):
+  with it the handover is at the row that declares formation, `29.0` and
+  `29.25 M`, which the stand-in test reproduces (a remnant layer in blocks at
+  `1/4` refused at every row without the cap, handed over at `1/8` with it);
+  H4's rows have not been rerun with it **(open)**.
 - **The horizon.** The area is nondecreasing at every row, `47.23` at the
   handover to `48.44` and `48.38` at `40 M` (`M_irr` `0.969` to `0.982` and
   `0.981`); `|J| < 3·10⁻⁸`; the center stays within `2·10⁻⁴ M` of the origin.

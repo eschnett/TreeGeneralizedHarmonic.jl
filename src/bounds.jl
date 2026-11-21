@@ -236,8 +236,10 @@ check_bounds_gate(forest, ::Nothing, ::Nothing, q; t=0) = nothing
 # reads is one reach inside the offset surface's smallest radius.
 function check_bounds_gate(forest::Forest{3}, int::FittedInterior{T},
                            bounds::StateBounds{T}, q::Integer;
-                           t=zero(T)) where {T}
+                           t=zero(T), h_cap=nothing) where {T}
     h, _ = geometry_spacing(forest, int, T(t))
+    # The mesh the next regrid makes (step B7; `check_interior_radii`'s `h_cap`).
+    h_cap === nothing || (h = min(h, T(h_cap)))
     R = _stencil_reach(q, T)
     r_1 = int.r_in - int.offset
     allowed = r_1 - R * h
@@ -249,7 +251,7 @@ function check_bounds_gate(forest::Forest{3}, int::FittedInterior{T},
         "Move r_gate inward — default_gate proposes (r_in − offset) − 2Gh."))
     return (h=h, reach=R, allowed=allowed)
 end
-check_bounds_gate(forest, int, ::Nothing, q; t=0) = nothing
+check_bounds_gate(forest, int, ::Nothing, q; t=0, h_cap=nothing) = nothing
 
 # --- the pointwise map ------------------------------------------------------
 

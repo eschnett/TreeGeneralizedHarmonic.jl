@@ -758,14 +758,23 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # The remnant's growth rate of its least radius, from its last two finds,
     # which paces its finds (`growth_finds`).
     rem_rate = Ref(zero(T))
+    # The remnant's spacing (`fitted_interior`'s `h_cap`): the holes' spacing
+    # scaled by the masses, chosen at the handover, so that it happens on the
+    # pair's mesh, whose blocks about the common horizon may be a level coarser
+    # than the remnant's, and the regrid after it refines them. `Inf` where the
+    # run does not regrid, and in a checkpoint written before it was kept.
+    rem_h = Ref(T(Inf))
+    capping = regrid && case.refinement !== nothing
     if saved !== nothing && haskey(saved, :merged)
         merged[] = true
         t_merged[] = from_plain(T, saved.merged.t)
         retired[] = from_plain(Vector{HorizonTrack{T}}, saved.merged.retired;
                                path="run.merged.retired")
         rem_rate[] = from_plain(T, saved.merged.rate)
+        haskey(saved.merged, :h) && (rem_h[] = from_plain(T, saved.merged.h))
     end
-    merged_state() = merged[] ? (t=t_merged[], retired=retired[], rate=rem_rate[]) :
+    merged_state() = merged[] ?
+                     (t=t_merged[], retired=retired[], rate=rem_rate[], h=rem_h[]) :
                      nothing
     # Set by the row that hands over, for the loop's own bookkeeping after it.
     handed = Ref(false)
@@ -775,8 +784,9 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     remspec = handing ? scaled_spec(case.interior.specs[1], M_rem / case.holes[1].mass) :
               nothing
     piece_spec(A) = merged[] ? remspec : case.interior.specs[A]
-    remnant_interior(f, t, track) =
-        HoleInteriors((fitted_interior(remspec, track[1], f, G; t=T(t), n_L=n_Ls[1]),),
+    remnant_interior(f, t, track; h_cap=rem_h[]) =
+        HoleInteriors((fitted_interior(remspec, track[1], f, G; t=T(t), n_L=n_Ls[1],
+                                       h_cap=h_cap),),
                       (hole_on_line(T, M_rem, zero(T), track_center(track[1], T(t));
                                     harmonic=true),))
     # The case a piece about `t` runs (step B3): a case of several holes has
@@ -1163,11 +1173,16 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
                                kgeom(geometry(forest, targeted || binary ? t_saved :
                                                       t_chunk, track_chunk),
                                      t_chunk) : case.interior, ρ_chunk)
+        # A checkpoint of the row that handed over holds the pair's mesh, which
+        # the remnant's geometry is not checked against until the regrid below
+        # has refined it (step B7; `handover_attempt`), as in the run.
         p0 = GHProblem(U, schedule, case; q=q, t=sample_t,
                        interior=tracked ? kgeom(geom_sampled, sample_t) : geom,
                        accounting=acc, target=fitmode ? target_cache(U) : nothing,
                        fits=fits, t_target=t_saved, target_rate=rate_on,
-                       trail=trail_on, target_exact=exact_on, simd_width=simd_width)
+                       trail=trail_on, target_exact=exact_on, simd_width=simd_width,
+                       margin_check=!(merged[] && isfinite(rem_h[]) &&
+                                      t_merged[] == t_saved))
         # Several holes (step B3): the row's case as well — its source and its
         # profiles on the tracks the row's composite was built from.
         p0 = binary ? with_case(p0, case_at(t_saved, track_chunk);
@@ -1280,8 +1295,18 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # The handover's attempt at a row (step B7), on rank 0 inside the row's
     # analysis after the common find `cm`, with the common state `st′` after it
     # and the holes' tracks `trs` after this row's finds: the remnant's track,
-    # its geometry on this mesh (checked as every geometry is), its ranges and
-    # its fit of the state — or a note saying why not yet. It assigns nothing.
+    # its geometry, its ranges and its fit of the state — or a note saying why
+    # not yet. It assigns nothing.
+    #
+    # The geometry is the one the mesh will have after this row's regrid: its
+    # spacing the holes' scaled by the masses (the remnant keeps their `h/M`),
+    # halved down to the holes' own while the layer does not fit inside the
+    # common horizon, and checked at that spacing — the level floor this
+    # geometry asks for refines the pair's coarser blocks about the common
+    # horizon at the regrid, one level, which is why a mesh more than one level
+    # coarser there is not yet. The pair's mesh alone held the remnant three
+    # rows past formation on H4's pair (`CODE.md`, "The common horizon and the
+    # handover").
     function handover_attempt(p, u, t, cm, st′, trs)
         why(msg) = (ok=false, note=msg)
         st′.t_formed === nothing && return why("the common horizon has not formed")
@@ -1292,11 +1317,39 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         mesh = U.forest
         trr = remnant_track(t, cm, trs, map(h -> h.mass, case.holes);
                             lmax=remspec.lmax_shape)
-        g = try
-            g = remnant_interior(mesh, t, [trr])
-            check_interior_radii(mesh, g, case.background, G; t=T(t))
-            check_bounds_gate(mesh, g, case.bounds, q; t=T(t))
-            g
+        # No regrid follows the initial row, so a handover there keeps the mesh's
+        # own spacing.
+        capped = capping && t > 0
+        hsp = p.interior.holes
+        h_least = minimum(hl -> hl.h, hsp)
+        h_rem = capped ? minimum(A -> hsp[A].h * M_rem / case.holes[A].mass, 1:nhole) :
+            T(Inf)
+        g = nothing
+        while true
+            g = try
+                remnant_interior(mesh, t, [trr]; h_cap=h_rem)
+            catch e
+                e isa ArgumentError || rethrow()
+                capped && h_rem / 2 ≥ h_least * (1 - 8 * eps(T)) || return why(
+                    "the remnant's geometry: " * first(split(sprint(showerror, e), '\n')))
+                nothing
+            end
+            g === nothing || break
+            h_rem /= 2
+        end
+        g_rem = g.holes[1]
+        if capped
+            h_have, _ = geometry_spacing(mesh, g_rem, T(t))
+            h_have ≤ 2 * g_rem.h * (1 + 8 * eps(T)) || return why(
+                "the mesh about the common horizon has h = $h_have, more than one " *
+                "level coarser than the remnant's h = $(g_rem.h), and one regrid " *
+                "refines by one level")
+        end
+        try
+            check_interior_radii(mesh, g_rem, g.own[1], G; t=T(t),
+                                 h_cap=capped ? g_rem.h : nothing)
+            check_bounds_gate(mesh, g_rem, case.bounds, q; t=T(t),
+                              h_cap=capped ? g_rem.h : nothing)
         catch e
             e isa ArgumentError || rethrow()
             return why("the remnant's geometry: " * first(split(sprint(showerror, e), '\n')))
@@ -1310,7 +1363,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         rate = st.r_min === nothing || !(t > st.t_last) ? zero(T) :
                T(abs(cm.r_min - st.r_min) / (t - st.t_last))
         return (ok=true, note="handed over", track=trr, geom=g, fit=r, bounds=tb,
-                retired=trs, rate=rate)
+                retired=trs, rate=rate, h=capped ? g_rem.h : T(Inf))
     end
 
     # The handover adopted on every rank (step B7): the run is the remnant's from
@@ -1323,6 +1376,7 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
         t_merged[] = T(t)
         retired[] = ho.retired
         rem_rate[] = ho.rate
+        rem_h[] = ho.h
         fits = ((f, nothing),)
         tbounds = (ho.bounds,)
         hlm_seed = Any[complex_from_real(ho.track.shape, case.horizon.N - 1)]
@@ -2749,5 +2803,6 @@ function run_state(::Type{T}; chunk, t, t_chunk, nsteps, nregrids, nresamples, p
             (merged_state === nothing ? (;) :
              (; merged=(t=plain_reals(T(merged_state.t)),
                         retired=to_plain(merged_state.retired; path="run.merged.retired"),
-                        rate=plain_reals(T(merged_state.rate)))))...)
+                        rate=plain_reals(T(merged_state.rate)),
+                        h=plain_reals(T(merged_state.h)))))...)
 end

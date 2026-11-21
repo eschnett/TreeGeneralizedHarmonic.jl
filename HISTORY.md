@@ -2810,6 +2810,18 @@ been lost; the remnant then ran to `40 M` with a nondecreasing area and no
 projection. The numbers are `CODE.md`'s "The common horizon and the handover";
 the logs and CSVs are in `.claude/data/b7-handover-48/`.
 
+**The remnant's spacing at the handover (2026-11-21).** Erik asked for the
+handover at formation. The three refused rows had read the remnant's spacing
+from the pair's mesh, `1/12` across the common layer, where the regrid after the
+handover would have made it `1/24`. The remnant's geometry is now built at the
+holes' spacing scaled by the masses (`fitted_interior`'s `h_cap`) and checked
+there, and the regrid refines the pair's blocks; a restart from the handover
+row's checkpoint skips the problem's radius check until its first regrid, as the
+run does. The alternative, regridding inside the row before building the
+geometry, would have made the regrid two code paths. `common_horizon_tests.jl`'s
+handover test now hands over on a mesh a level too coarse; H4's rows were not
+rerun.
+
 ## Possible extensions
 
 ### Extensions since built

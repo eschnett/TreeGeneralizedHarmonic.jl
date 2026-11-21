@@ -2107,10 +2107,14 @@ is the smallest core radius that has to clear the set, since the core
 surface is not a sphere.
 
 It throws, and it is meant to, with the remedies the sphere's check names.
+
+`h_cap` checks the geometry against the mesh the next regrid will make, its
+spacing `min(h, h_cap)` ([`fitted_interior`](@ref)'s `h_cap`; step B7's
+handover, which then also checks that one regrid can get there).
 """
 function check_interior_radii(forest::Forest{3}, int::FittedInterior{T},
                               background, G::Integer; t=zero(T),
-                              center=nothing) where {T}
+                              center=nothing, h_cap=nothing) where {T}
     int.margin ≥ G + 1 || throw(ArgumentError(
         "the interior's margin is m = $(int.margin) but the ghost width is " *
         "G = $G, and CODE.md's floor is m ≥ G + 1 = $(G + 1): the margin has " *
@@ -2121,6 +2125,7 @@ function check_interior_radii(forest::Forest{3}, int::FittedInterior{T},
         "no block of this forest meets the tracked layer's annulus around " *
         "$(center_at(int.center, t)) at t = $t: the layer is outside the " *
         "domain."))
+    h_cap === nothing || (h = min(h, T(h_cap)))
     r_core = (int.r_in - int.offset) - int.thickness
     δ = if center === nothing
         zero(T)

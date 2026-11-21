@@ -167,28 +167,49 @@ isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
         @test (rb.α_min, rb.α_max, rb.λ_min, rb.λ_max, rb.β_max, rb.K_max) ==
               (0.1, 5, 0.1, 4, 2, 10)
         @test rb.r_gate == geom.r_in - geom.offset
+        # The spacing cap (the remnant's at the handover): the geometry the mesh
+        # will have once its floor has refined the layer's blocks, which this
+        # mesh fails until then and passes at the capped spacing.
+        spec6 = FittedSpec(T; variant=:fitted, margin=3, n_L=2 * (G + 1))
+        geomc = fitted_interior(spec6, tr, forest, G; t=T(1 // 2), n_L=2 * (G + 1),
+                                h_cap=geom.h / 2)
+        @test geomc.h == geom.h / 2 && geomc.offset == 3 * geom.h / 2
+        @test fitted_interior(spec6, tr, forest, G; t=T(1 // 2), n_L=2 * (G + 1),
+                              h_cap=2 * geom.h).h == geom.h
+        @test_throws "not far enough inside" check_interior_radii(forest, geomc, nothing,
+                                                                  G; t=T(1 // 2))
+        @test check_interior_radii(forest, geomc, nothing, G; t=T(1 // 2),
+                                   h_cap=geomc.h).h == geomc.h
         gf = TreeGeneralizedHarmonic.growth_finds
         @test gf(0.6, 3, 1 / 48, 1 / 4) == ceil(Int, 0.25 * 0.6 / (3 / 48 / 4))
         @test gf(0.0, 3, 1 / 48, 1 / 4) == 1
     end
 
     # Guards the handover's code path and its run state, on the harmonic smoke
-    # pair with a stand-in for the physics: the common surface accepted at the
-    # first row is a sphere of radius 1.9 about hole 1 (no pair cheap enough for
-    # the suite forms a common horizon, `CODE.md`, "The common horizon and the
-    # handover"), and the remnant's finds return it. The pair is handed over at
-    # that row; every later row has one hole, found, its fit valid, the state
-    # finite; and a chain of one-chunk restarts across the handover is the run bit
-    # for bit, the records compared without the attempts' wall times.
-    @full_tier @testset "the pair is handed over to one remnant, and restarts bit for bit" begin
+    # pair with a stand-in for the physics: the common surface, accepted from the
+    # second row on, is a sphere of radius 3.3 about a point `M` from hole 1 (no
+    # pair cheap enough for the suite forms a common horizon, `CODE.md`, "The
+    # common horizon and the handover"), and the remnant's finds return it. Its
+    # layer reaches blocks of the pair's mesh at `h = 1/4`, which cannot hold it,
+    # as on H4's pair: the handover is at the row the common surface is first
+    # accepted all the same, at the holes' spacing scaled by the masses (`1/8`),
+    # and the regrid after it refines those blocks. Every later row has one hole,
+    # found, its fit valid, the state finite; and a chain of one-chunk restarts
+    # across the handover — one of them from that row's own checkpoint, on the
+    # pair's mesh — is the run bit for bit, the records compared without the
+    # attempts' wall times.
+    @full_tier @testset "the pair is handed over to one remnant at the first accepted row, and restarts bit for bit" begin
         unitf = FittedSpec(T; variant=:fitted, margin=4, n_L=0, fit_cont=2, lmax_fit=8)
         hc = binary_case(T; holes=head_on_holes(T; d=8, masses=(1, 1), interior=unitf,
                                                 chart=:harmonic),
                          halfwidth=8, chunk=T(1 // 20), ε_KO=T(1 // 2), γ2=zero(T),
-                         horizon=Horizon(T; every=1, N=12, spin=false), gauge_source=:holes)
+                         horizon=Horizon(T; every=1, N=12, spin=false), gauge_source=:holes,
+                         refinement=Refinement(T; refine_tol=T(2 // 5),
+                                               coarsen_tol=T(1 // 10), maxlevel_cap=4,
+                                               floor_margin=zero(T), ceiling_cells=0))
         hf = holes_forest(T, hc; N=8, roots=2, radii=(T(4), T(3), T(2), T(6 // 5)))
         fake = Ref{Any}(nothing)
-        R = 1.9
+        R = 3.3
         function sphere_out(f)
             tm = f.template
             s = R / tm.r_mean
@@ -206,9 +227,13 @@ isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
             return find_gh_horizon(p, u, t; origin=origin, kwargs...)
         end
         function fake_common(p, u, t, inds, masses, geom, seed, ch)
+            t < 1 / 20 - 1e-12 &&
+                return merge(TreeGeneralizedHarmonic.NO_COMMON,
+                             (attempted=true, success=false, note="not yet", iters=1,
+                              H_norm=1.0, atol=1e-9, from=:sphere, time=0.0))
             if fake[] === nothing
                 i = inds[1]
-                fake[] = (c=SVector{3,Float64}(i.origin) + SVector(0, 0, 0.05),
+                fake[] = (c=SVector{3,Float64}(i.origin) + SVector(1, 0, 0.05),
                           template=(hlm=i.hlm, grid=i.grid, r_mean=i.r_mean,
                                     r_min=i.r_min, r_max=i.r_max))
             end
@@ -222,17 +247,26 @@ isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
         kw = (q=q, ops=ops, chunk=T(1 // 20), cfl=T(1 // 2), t_end=T(3 // 20),
               common_horizon=CommonHorizon(T; d_c=10, N=12, spin=false, streak=1,
                                            handover=true),
-              common_find=fake_common, find=fake_find, checkpoint_sync_to_disk=false)
+              common_find=fake_common, find=fake_find, checkpoint_sync_to_disk=false,
+              regrid=true)
         a = evolve!(T, hc; forest=deepcopy(hf), kw...)
-        r0 = a.records[1]
-        @test length(r0.holes) == 2 && r0.common.handover == "handed over" &&
-              r0.merged == 0
+        r0, r1 = a.records[1], a.records[2]
+        @test length(r0.holes) == 2 && r0.common.handover == "the common horizon has not formed"
+        @test length(r1.holes) == 2 && r1.common.handover == "handed over" &&
+              r1.merged == T(1 // 20)
         @test all(r -> length(r.holes) == 1 && r.holes[1].success === true &&
-                       r.holes[1].fit_valid === true && r.finite && r.merged == 0 &&
+                       r.holes[1].fit_valid === true && r.finite && r.merged == T(1 // 20) &&
                        r.separation === nothing && !haskey(r, :common),
-                  a.records[2:end])
+                  a.records[3:end])
         @test length(a.records) == 4 && a.track isa Vector && length(a.track) == 1
         @test a.interior isa HoleInteriors{1}
+        # The remnant's spacing is the holes' `1/16` times the mass ratio, the
+        # pair's mesh across its layer was a level coarser, and the regrid
+        # refined it.
+        rem = a.interior.holes[1]
+        @test rem.h == 1 // 8
+        @test first(geometry_spacing(hf, rem, T(3 // 20))) == 1 // 4
+        @test first(geometry_spacing(a.forest, rem, T(3 // 20))) == 1 // 8
         fake[] = nothing
         pre = joinpath(mktempdir(), "handover")
         b = evolve!(T, hc; forest=deepcopy(hf), kw..., checkpoint_path_prefix=pre,
