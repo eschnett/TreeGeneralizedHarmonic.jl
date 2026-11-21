@@ -1,4 +1,6 @@
-# Step B7's probe of the common horizon on step H4's roll-on rows: each row is
+# Step B7's probe of the common horizon on step H4's 1/48 roll-on rows (the 1/96
+# rows are `jobs/common-probe-96.toml`: SimLaunch runs one job of a spec at a
+# time, and two 1/96 rows need a node each). Each row is
 # continued from its 28 M checkpoint to the plunge (the tracks are lost at about
 # 30.25 M, which ends the run with a TrackLostError), with `common_probe=28`. Beside
 # each pair of individual finds, `bench/common_find_probe.jl` attempts a common
@@ -7,12 +9,12 @@
 #
 # The rows' commands are `jobs/h4-pair.toml`'s, plus the option. The start is not
 # in this spec: copy the row's 28 M checkpoint (and nothing newer) from
-# `/scratch/eschnett/claude/xcts-s1/h4r{48,96s5,96s10}/…/ck/` into the run's
+# `/scratch/eschnett/claude/xcts-s1/h4r48/{s5,s10}/ck/` into the run's
 # `<scratch>/<study>/common-probe-<label>/mutable/ck/` before the first job. Copy,
 # do not link: the run rotates the files in its `ck/`.
 name = "common-probe"
 site = "trillium"
-time = "3:00:00"                    # 1/96: about 2.5 M at 1600 s/M, and the attempts
+time = "3:00:00"                    # compilation (about 15 min), 2.5 M, the attempts
 resources = { nodes = 1 }
 mode = "parallel"
 checkpoints = true
@@ -33,13 +35,3 @@ cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8
 label = "s10-48"
 threads = 96
 cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=b7 d=8 N=12 margin=6 n_L=12 t0=0 sigma_g=10 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/8 common_probe=28 out=out"
-
-[[run]]
-label = "s5-96"
-threads = 192                       # a node to itself
-cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=b7 d=8 N=24 margin=16 n_L=20 t0=0 sigma_g=5 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/16 common_probe=28 out=out"
-
-[[run]]
-label = "s10-96"
-threads = 192
-cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=b7 d=8 N=24 margin=16 n_L=20 t0=0 sigma_g=10 chunk=1/4 checkpoint_every=8 t_end=60 find_interval=1/16 common_probe=28 out=out"
