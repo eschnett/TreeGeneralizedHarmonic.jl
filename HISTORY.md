@@ -135,7 +135,7 @@ The briefs of the finished steps are under
   - [Step H4 shelved: the data are to be solved (2026-11-15)](#step-h4-shelved-the-data-are-to-be-solved-2026-11-15)
   - [Step S1 started: XCTS's data on the grid (2026-11-15)](#step-s1-started-xctss-data-on-the-grid-2026-11-15)
   - [Step H4 resumed: the pair on solved data (2026-11-18 to 2026-11-20)](#step-h4-resumed-the-pair-on-solved-data-2026-11-18-to-2026-11-20)
-  - [A multi-patch wave zone priced (2026-11-22)](#a-multi-patch-wave-zone-priced-2026-11-22)
+  - [The cube and the shells chosen for the wave zone (2026-11-22)](#the-cube-and-the-shells-chosen-for-the-wave-zone-2026-11-22)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2731,7 +2731,7 @@ They waited about `18 h` on priority, ran on 2026-11-20, and lost their tracks
 at the plunge at `30.25` and `30.5 M`, as at `1/48`. The measurements are
 `CODE.md`'s "What step H4 has built" ("The pair from solved data").
 
-### A multi-patch wave zone priced (2026-11-22)
+### The cube and the shells chosen for the wave zone (2026-11-22)
 
 Before designing step B5, Erik asked whether the package supports
 multi-patch systems.
@@ -2744,25 +2744,50 @@ multi-patch systems.
   vertex-centered sets, and seams on a forest of patches. Point
   interpolation on patches (M19) is on a branch.
 
-Erik asked for the alternative to be priced before step B5 is designed. The
-pricing is `CODE.md`'s "A multi-patch wave zone (priced)", built from:
+**The pricing (d7ab80b).** Erik asked for the alternative to be priced
+first. It was priced as a cube in cubed-sphere shells, from:
 
 - TreeAMR's "A multi-patch forest" and "Glued faces";
 - TreeWaveOLDG's "The seven-patch ball", whose two passes and whose shell
   time steps it borrows;
-- this package's own point counts.
+- the point counts of `CODE.md`'s "What it costs".
 
-**The conclusion: the ball does not pay on cost.** It saves at most `1.2×`
-on G7, and on G8 it costs more, because a forest of patches takes no half
-turn. The causes are three:
+Its conclusion: the ball does not pay on cost. It is about even on G7, and on
+G8 it costs more, because a forest of patches takes no half turn. The causes
+are three:
 
 - the holes are most of the points;
 - the cube's face fixes the shells' angular resolution at about `160` a side;
 - a shell point is estimated at `1.75` Cartesian ones.
 
-What it would buy is accuracy: a spherical outer boundary and grid spheres for
-the extraction. Step B5 measures the first of these on the Cartesian grid. The
-recommendation is to keep step B5 Cartesian **(open: Erik's call)**.
+That commit put a whole half hole, `12` million points, into G7's octant
+and so gave G7 `21` million Cartesian against `18–20` with shells. The
+octant holds a quarter of a hole, and the recount is `15` against `12–14`.
+
+**What a larger radius changes.** In discussion, the shells' wave zone grows
+as `R` and the octree's as `R³`: `3×` apart at `150 M` and `7×` at `200 M`.
+
+**Erik's decisions** (2026-11-22):
+
+- No boundary condition is designed for the Cartesian grid: it would not be
+  useful in the long term. That drops the relative hook from step B5.
+- Radiative boundary conditions, but only simple ones. Constraint-preserving
+  ones not at the moment.
+- The goal is for production runs to have a causally disconnected outer
+  boundary. So even extraction at `R = 100 M` needs the boundary at `200 M`
+  or beyond.
+- The holes stay in the inner Cartesian region, with its mesh refinement.
+
+So step B5 was rewritten around the cube and the shells. The design is
+`CODE.md`'s "The cube and the shells", and what it needs from TreeAMR is item
+8 of its "Upstream prerequisites". Two points of that design came out of
+the decision:
+
+- Causal disconnection sets two radii: the outer sphere at `T + R_ext`, and
+  the wave resolved out to `(T + R_ext)/2`, because the junk's reflection
+  off a coarse grid returns from there.
+- The layout is TreeWaveOLDG's thirteen-patch ball, whose outer shells are
+  exactly radial.
 
 ## Possible extensions
 

@@ -103,7 +103,7 @@ the dependency order.
 - [Step B2 — The tracked analytic target](#step-b2--the-tracked-analytic-target)
 - [Step B3 — Several holes in one case](#step-b3--several-holes-in-one-case)
 - [Step B4 — The symmetric domains and the half turn](#step-b4--the-symmetric-domains-and-the-half-turn)
-- [Step B5 — The far boundary, the wave zone and a Teukolsky wave](#step-b5--the-far-boundary-the-wave-zone-and-a-teukolsky-wave)
+- [Step B5 — The cube and the shells, a radiative sphere and a Teukolsky wave](#step-b5--the-cube-and-the-shells-a-radiative-sphere-and-a-teukolsky-wave)
 - [Step B6 — `Ψ₄` and the extraction](#step-b6--ψ₄-and-the-extraction)
 - [Step B7 — Merger: the common horizon and the handover (G7)](#step-b7--merger-the-common-horizon-and-the-handover-g7)
 - [Step B8 — Constraint-satisfying data from XCTS](#step-b8--constraint-satisfying-data-from-xcts)
@@ -841,37 +841,56 @@ octant"; TreeAMR's `CODE.md` on the half turn (M14).
 - **A hole crosses the seam:** tracked through the crossing, with no
   refusal and no failed find.
 
-## Step B5 — The far boundary, the wave zone and a Teukolsky wave
+## Step B5 — The cube and the shells, a radiative sphere and a Teukolsky wave
 
-`CODE.md`: "The outer boundary and the wave zone", "Refinement for two
-holes". **No hole.**
+`CODE.md`: "The outer boundary and the wave zone", "The cube and the
+shells". **No hole.**
 
-**Before its design:** a multi-patch wave zone, a Cartesian cube in
-cubed-sphere shells, was priced (`CODE.md`, "A multi-patch wave zone
-(priced)"). It does not pay on cost, so the step stays Cartesian unless
-Erik decides otherwise **(open)**.
+Erik decided the layout before the design: a Cartesian cube with the holes
+and their mesh refinement, inside spherical shells out to an outer sphere
+causally disconnected from the extraction, with a simple radiative condition
+there. No boundary condition for the Cartesian grid is built.
+
+**Needs from TreeAMR** `CODE.md`'s "Upstream prerequisites", item 8: patch
+corners left unfilled, reversed vertex-like axes across a glue, and, for the
+octant, reflecting faces per patch **(open: not started in TreeAMR)**.
+Without per-patch reflecting faces the step runs on the whole ball.
 
 **Changes:**
 
 - **The Teukolsky wave:** the linearised even-parity `ℓ = 2`, `m = 0`
   quadrupole wave (Teukolsky 1982) as an `isbits` `AbstractMetric`,
   `η + ε h`.
-- **The boundary choice:** the frozen hook (the data at `t = 0`) and the
-  relative hook beside the analytic one.
-- **The wave-zone floor** in `Refinement`.
-- **`test/octant_runs.jl` options** for all three.
+- **The ball:** TreeWaveOLDG's thirteen-patch ball, with:
+  - the atlas, the three layers' maps with their Jacobians and `√g`;
+  - the outer shells' radial grading;
+  - the cube's level floor.
+- **Physical positions through the atlas** wherever a position is formed,
+  and `√g`-weighted norms and the physical CFL.
+- **The two-pass kernel:** the shells and the cube's outer edges, with the
+  gradient set and its exchange.
+- **The sphere:** the radiative condition, and the frozen hook with the
+  patch.
+- **`test/octant_runs.jl` options** for the ball, its radii and its grading.
 
 **Accept:**
 
-- **The wave converges** at order `q` with the analytic hook, on the
-  octant its symmetry allows, at an amplitude where `ε²` is below
-  truncation.
-- **Each hook's reflection** is recorded, for two box sizes: the error
-  against the analytic wave inside the box after the wave meets the
-  boundary.
-- **The floor holds the wave:** the indicator does not coarsen the wave
-  zone while the wave crosses it.
-- **The outer levels' cost** is recorded.
+- **The two-pass kernel is right.** Its right-hand side of the Teukolsky
+  wave is the wave's time derivative to truncation, at order `q`, on every
+  patch. The cube's blocks away from its edges give the existing kernel's
+  bits.
+- **The wave converges** at order `q` on the ball, at an amplitude where
+  `ε²` is below truncation, through the cube–shell glues and the middle
+  sphere. The glues' reflection is at truncation.
+- **The sphere's reflection** of the `ℓ = 2` wave is recorded, for the
+  radiative condition and the frozen hook, at two outer radii.
+- **The grading's reflection** is recorded against how fast the radial
+  spacing grows. That sets the spacing between `R_ext` and `r_res`.
+- **Causal disconnection holds.** Two outer spheres, both beyond
+  `T + R_ext`, agree at `R_ext` to far below the truncation error.
+- **The cost of a shell point** is recorded against a Cartesian one (the
+  prediction is `1.75×`), together with the gradient set's memory.
+- **MPI:** one and three ranks agree.
 
 ## Step B6 — `Ψ₄` and the extraction
 
