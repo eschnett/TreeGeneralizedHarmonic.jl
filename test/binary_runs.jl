@@ -97,6 +97,9 @@
 #                                  nondecreasing area); from then on the CSV's
 #                                  hole-1 columns are the remnant's, hole 2's NaN,
 #                                  and merged_t says when
+#   char_probe=1                   (step B7) the characteristics on surfaces below
+#                                  every accepted common surface and the remnant's
+#                                  (bench/characteristics_probe.jl, out/chars.csv)
 #   handover_from=<t> remnant_depth=<k>
 #                                  (step B7, diagnostics) no handover before t; the
 #                                  remnant's margin and ramp k times the holes'
@@ -172,6 +175,15 @@ if haskey(OPTIONS, "common_probe")
     probe_find = (find=CommonProbe(find_gh_horizon; t_from=Float64(rat(OPTIONS["common_probe"]))),)
 else
     probe_find = (;)
+end
+# The characteristics inside the common horizon and the remnant's (step B7):
+# both finders wrapped, one `chars:` line per depth and `out/chars.csv`.
+if opt("char_probe", "0") in ("1", "true")
+    include(joinpath(@__DIR__, "..", "bench", "characteristics_probe.jl"))
+    char_probe = CharProbe(get(probe_find, :find, find_gh_horizon),
+                           TreeGeneralizedHarmonic.common_horizon_row;
+                           csv=joinpath(outdir, "chars.csv"))
+    probe_find = (find=CharFind(char_probe), common_find=char_probe)
 end
 # The common horizon (step B7).
 common_horizon = opt("common", "0") in ("1", "true") ?
