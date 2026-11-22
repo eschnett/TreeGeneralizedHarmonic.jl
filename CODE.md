@@ -7656,8 +7656,10 @@ so there is nothing for an intermediate three-piece composite to wait for**)**:
    (`HoleInteriors{1}`), whatever the holes' variants were, since no analytic
    target exists for a hole that has just merged. Its spec is the holes',
    scaled to the total mass; its `m` and `n_L` are theirs. **Its spacing is
-   the holes' scaled by the masses** (`1/48` → `1/24` for H4's equal pair:
-   the remnant keeps their `h/M`), halved down to the holes' own while its
+   the holes' scaled by the masses** (the remnant keeps their `h/M`: on H4's
+   `1/48` rows the holes' layers lie in `1/24` blocks, so it is `1/12`, and
+   `1/24` from `29.0` to `29.5 M`, where `1/12` does not fit), halved down to
+   the holes' own while its
    layer does not fit inside the common horizon, and **not read from the
    pair's mesh** (`fitted_interior`'s `h_cap`): the common layer reaches
    blocks the pair's floors left a level coarser, and the regrid after the
@@ -7707,13 +7709,46 @@ rows from their `28 M` checkpoints to `40 M`, one Trillium node, `38–40 min`):
   **Rerun with it** (`.claude/data/b7-handover-48-formation`, job 2902600),
   both rows handed over at those rows, at `h = 1/24`, **and the remnant failed
   within a `M`**: a `sqrt` of a negative number in the right-hand side at
-  `29.25 → 29.5 M` (`σ_g = 5`) and `30.0 → 30.25 M` (`σ_g = 10`). The layer's
-  residual was `480–530` at the first row after the handover against `5.6` in
-  the run at `1/12` from `29.75 M`, the largest `|C_a|` rose instead of falling
-  (`0.21`, then `0.36`), and `α ≥ 0.67` outside the cores throughout. Whether
-  the earlier, more distorted surface (radii `1.43–2.49` against `1.63–2.38`)
-  or the shallower layer at `1/24` is the cause is **(open)**; the bullets
-  below are the run at `1/12`.
+  `29.25 → 29.5 M` (`σ_g = 5`) and `30.0 → 30.25 M` (`σ_g = 10`), the layer's
+  residual `480–530` at the first row after the handover against `5.6` in the
+  run from `29.75 M`.
+
+  **It is the time, not the spacing** (`jobs/handover-48-diag.toml`, job
+  2903430, `.claude/data/b7-handover-48-diag`; the `σ_g = 5` row held back by
+  `CommonHorizon`'s `handover_from`). The common horizon's radii are
+  `1.88 : 1` at formation and `1.74`, `1.63` and about `1.5 : 1` a quarter, a
+  half and three quarters of a `M` later:
+
+  | handover | radii | `h` | outcome |
+  |---|---|---|---|
+  | `29.0 M` (formation) | `1.88` | `1/24` | fails at `29.25–29.5 M` |
+  | `29.25 M` (formation, `σ_g = 10`) | `1.87` | `1/24` | fails at `30.0–30.25 M` |
+  | `29.25 M` | `1.74` | `1/24` | to `36 M`; residual up to `57`, `\|C_a\|` up to `0.14` |
+  | `29.5 M` | `1.63` | `1/24` | to `36 M`; residual up to `20` |
+  | `29.75 M` | `1.5` | `1/12` | to `36 M`; the run above, bit for bit |
+  | `29.75 M`, `remnant_depth = 2` | `1.5` | `1/24` | `\|C_a\| ≤ 0.0095` after it, half the `1/12` run's |
+
+  The three that hold reach the same horizon: at `36 M` the areas agree to
+  `4·10⁻⁵` of themselves (`48.3566–48.3568`), the constraint norms to the
+  digits printed. **The characteristics do not explain the failure**
+  (`bench/characteristics_probe.jl`, `test/binary_runs.jl char_probe=1`,
+  `.claude/data/b7-char-probe`): the outgoing light front relative to the
+  moving surface, `u₊ = −β^i ŝ_i + α|ŝ|_γ − v_n`, is negative at every point of
+  every surface from the horizon to `0.75 M` below it from the second accepted
+  common find on (`28.75 M`) — at formation `−0.19 … −0.13` through the
+  `1/24` layer's outer surface and `−0.24 … −0.01` at its core surface, and
+  `u₊ ≈ 0` on the horizon by `34 M`, as on a stationary one. What fails is the
+  lapse inside the layer: in the remnant handed over at formation the least
+  `α` `0.5 M` below the horizon falls from `0.535` to `0.12` in `0.2 M`, while
+  it holds near `0.56` in the remnants that survive. The layer relaxes toward a
+  target whose lapse is far too small; why the fit of a `1.88 : 1` surface is
+  such a target is **(open)**. **Hand over once the radii are within `1.75 : 1`
+  (proposed)**, which on this pair is a quarter of a `M` after formation.
+  The `remnant_depth = 2` row stopped at `34 M` on the piece boundary's radius
+  check: `fitted_interior` and `check_interior_radii` read the layer's spacing
+  over annuli built from slightly different radii, and a partly refined annulus
+  fell between them (offset `0.25` from `1/48` blocks, checked against a `1/24`
+  block) **(open)**. The bullets below are the run at `1/12`.
 - **The horizon.** The area is nondecreasing at every row, `47.23` at the
   handover to `48.44` and `48.38` at `40 M` (`M_irr` `0.969` to `0.982` and
   `0.981`); `|J| < 3·10⁻⁸`; the center stays within `2·10⁻⁴ M` of the origin.
@@ -7756,7 +7791,11 @@ first accepted find, about 5 cells, and grows to `0.377 M` by `30 M`; it is the
 holes' depth less `0.001–0.002 M`. **A common core as deep as the holes' holds
 both of their cores from the first accepted find on**, so the handover need not
 wait. Were it too small, the handover would wait, with both individual layers
-active inside the common horizon until it fits.
+active inside the common horizon until it fits. The gap is measured against the holes' core depth (`0.375 M`), not the
+remnant's, which is `0.75 M` at `1/24` and `1.5 M` at `1/12`: a remnant core
+holds the holes' cores only where the gap exceeds the difference, and on H4's
+pair the remnants that held had theirs in their layer, relaxed toward the fit
+**(open: measure it against the remnant's depth)**.
 
 **The shape at `lmax = 24`** costs about `0.6 µs` per layer point, up from
 `79 ns` at `lmax = 8` as `(lmax + 1)²`, but only over the common layer's

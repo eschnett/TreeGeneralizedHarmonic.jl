@@ -694,6 +694,11 @@ julia --project=. --threads=4 test/binary_runs.jl chart=harmonic interior=fitted
 julia --project=. bench/common_horizon_probe.jl threshold
 ```
 
+`char_probe=1` adds the outgoing light front through surfaces below every
+accepted common surface and the remnant's (`bench/characteristics_probe.jl`,
+`out/chars.csv`); `handover_from=<t>` and `remnant_depth=<k>` are the
+handover's diagnostics (`jobs/handover-48-diag.toml`, `jobs/char-probe-48.toml`).
+
 Later: the CLI (`julia --project bin/gh.jl --case=boosted_kerr …`) and
 the viewers (`julia --project=bin bin/visualize.jl`) arrive in step 9,
 and device tests behind

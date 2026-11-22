@@ -924,8 +924,14 @@ the remnant's geometry on the pair's coarser blocks), then a nondecreasing
 area, `|J| < 3·10⁻⁸` and no projection. The remnant's spacing is now the holes'
 scaled by the masses rather than the pair's mesh's, so the handover comes at
 formation: on H4's rows it did, at `h = 1/24`, and the remnant then failed
-within a `M` (`CODE.md`, "The common horizon and the handover", "When."). Open:
-why, the remnant's late area drift and its resolution, and G7's waveform.
+within a `M`. The diagnosis (`CODE.md`, "The common horizon and the handover",
+"When.") put it on the surface, not the spacing: every handover from a quarter
+of a `M` after formation on held, and the characteristics point inward through
+every layer surface. Proposed: hand over once the common horizon's radii are
+within `1.75 : 1`. Open: why the fit of a `1.88 : 1` surface drives the layer's
+lapse down, the core gap against the remnant's depth, the radius check at a
+piece boundary, the remnant's late area drift and its resolution, and G7's
+waveform.
 
 **Changes:**
 

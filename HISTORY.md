@@ -2826,6 +2826,25 @@ declared formation, `29.0` and `29.25 M`, at `h = 1/24`, and both remnants
 failed within a `M` on a negative `sqrt` in the right-hand side, the layer's
 residual near `500` from the first row on where the run at `1/12` had `5.6`.
 
+**Why the remnant failed at formation (2026-11-21).** Two suspects: the
+shallower layer at `1/24`, and the surface, whose radii were `1.88 : 1` at
+formation against `1.63 : 1` at the run that held. Erik suggested the second,
+and that the characteristics inside a just-formed horizon may point in odd
+directions. Two diagnostics went into `CommonHorizon` (`handover_from`, the
+earliest handover, and `remnant_depth`, the remnant's margin and ramp times
+`k`) and a probe of the outgoing light front through surfaces below the horizon
+(`bench/characteristics_probe.jl`), checked against Kerr-Schild's
+`(1 − 2M/r)/(1 + 2M/r)`. Trillium jobs 2903430 (the `σ_g = 5` row held to
+`29.25`, `29.5` and `29.75 M`, and `29.75 M` at `remnant_depth = 2`) and 2903483
+(the probe, at formation and at `29.75 M` with the deeper layer) settled it:
+every handover from `29.25 M` on held, at `1/24` too, and both handovers at a
+`1.87–1.88 : 1` surface failed. The probe found the light front moving inward
+through every layer surface from `28.75 M` on, so the characteristics were not
+the cause; the lapse inside the layer collapsed toward the fit's instead. It also
+showed that the holes' layers on H4's rows lie in `1/24` blocks, so the scaled
+spacing the earlier paragraph called `1/24` is `1/12`, and `1/24` only where
+`1/12` does not fit.
+
 ## Possible extensions
 
 ### Extensions since built
