@@ -852,9 +852,11 @@ causally disconnected from the extraction, with a simple radiative condition
 there. No boundary condition for the Cartesian grid is built.
 
 **Needs from TreeAMR** `CODE.md`'s "Upstream prerequisites", item 8: patch
-corners left unfilled, reversed vertex-like axes across a glue, and, for the
-octant, reflecting faces per patch **(open: not started in TreeAMR)**.
-Without per-patch reflecting faces the step runs on the whole ball.
+corners, reversed vertex-like axes across a glue, and, for the octant,
+reflecting faces per patch. **Erik designs and implements them in TreeAMR
+first, corner ghosts included**; the step waits for that, and its kernel
+follows TreeAMR's design: one pass with corner ghosts, two without. Without
+per-patch reflecting faces the step runs on the whole ball.
 
 **Changes:**
 

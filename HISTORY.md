@@ -2789,6 +2789,11 @@ the decision:
 - The layout is TreeWaveOLDG's thirteen-patch ball, whose outer shells are
   exactly radial.
 
+Erik then took TreeAMR's part on himself: he designs and implements it there
+first, corner ghosts included. With corner ghosts the shells can take one
+pass with the existing mixed stencils, and the two-pass scheme becomes the
+fallback.
+
 ## Possible extensions
 
 ### Extensions since built

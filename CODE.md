@@ -5047,9 +5047,12 @@ What this package needs from TreeAMR. None blocks G0–G3.
    package's sets are vertex-centered, with ghosts along every axis. Every
    piece below is refused or not designed in TreeAMR today, each with its
    reason there:
-   - **Patch corners:** leave a ghost region beyond two glued faces at once
-     unfilled, rather than refuse the set. The two-pass kernel never reads
-     one.
+   **Erik designs and implements this in TreeAMR first, corner ghosts
+   included**; the list is what this package asked for, and TreeAMR's
+   design supersedes it.
+   - **Patch corners:** fill a ghost region beyond two glued faces at once,
+     or at least leave it unfilled rather than refuse the set. The two-pass
+     kernel never reads one; a one-pass kernel with mixed stencils does.
    - **A reversed vertex-like axis across a glue:** the shared plane's
      ownership along a reversed tangent (M14's `seam_shift`, generalised to
      a glue), and an owner for the plane of a high face glued to a high
@@ -7833,6 +7836,11 @@ background, mask, symmetry map and analysis quantity keeps its meaning.
 - **Where `V` lives (open).** A field set covers every block, so `V` costs
   `240 B` a point and a ghost fill of thirty variables everywhere, unless
   TreeAMR fills a set over a subset of its blocks.
+- **With corner ghosts in TreeAMR** (item 8: Erik designs them there), the
+  shells can instead take one pass: the existing compact stencils, mixed
+  ones included, with the chain rule contracted in. That needs no gradient
+  set and no second exchange, and the two passes are then the fallback
+  **(open until TreeAMR's design is settled)**.
 
 **The radiative sphere** **(proposed)**: Sommerfeld's condition on every
 component of `h` and `Π`,
