@@ -52,8 +52,10 @@ its first runs found that the superposed data's holes lose `13 %` of their
 irreducible mass, from the data's constraint violation. Its state is parked in
 a draft pull request. **Step S1 is done** (2026-11-15 to 2026-11-17): the
 pair's data solved by XCTS. **Step S2 is done** (2026-11-17 to 2026-11-18):
-two holes far apart on those data. **Step H4 is resumed** (2026-11-18) on them
-and run (to 2026-11-20); it awaits Erik's review. Step H5 is not started. Steps H1–H3 were single
+two holes far apart on those data. **Step H4 is resumed** (2026-11-18) on them,
+run (to 2026-11-20) and merged. **Step B7 is started** (2026-11-20) on H4's
+pair: the common finder, formation and the handover to one fitted remnant are
+built and have run on H4's `1/48` rows to `40 M` (2026-11-21). Step H5 is not started. Steps H1–H3 were single
 holes and needed only `main`.
 
 **Steps B1–B3 will not land** (Erik, 2026-11-12):
@@ -907,6 +909,32 @@ holes". **No hole.**
 
 `CODE.md`: "The common horizon and the handover"; milestone G7 ("Milestones"
 above).
+
+**Status (2026-11-21):** started on step H4's harmonic pair. The common finder,
+its record rows and formation are built (`src/common.jl`, `evolve!`'s
+`common_horizon`, `test/binary_runs.jl common=1`), after a probe of how the
+finder fails where there is no common horizon (`HISTORY.md`, "Step B7 started:
+the common horizon"). On H4's pair a common horizon forms at a track separation
+of `3.0 M`, `1.9 M` before the individual tracks are lost, and the run at
+`1/48` measured the core gap positive from the first accepted find (`0.140 M`),
+so the handover need not wait. The handover to one fitted remnant is built
+(2026-11-21) and tested with a stand-in common surface, and it ran on H4's
+`1/48` rows to `40 M`: the handover three rows after formation (held back by
+the remnant's geometry on the pair's coarser blocks), then a nondecreasing
+area, `|J| < 3·10⁻⁸` and no projection. The remnant's spacing is now the holes'
+scaled by the masses rather than the pair's mesh's, so the handover comes at
+formation: on H4's rows it did, at `h = 1/24`, and the remnant then failed
+within a `M`. The diagnosis (`CODE.md`, "The common horizon and the handover",
+"When.") put it on the surface, not the spacing: every handover from a quarter
+of a `M` after formation on held, and the characteristics point inward through
+every layer surface. The handover now waits until the common horizon's radii
+are within `7/4 : 1` (`handover_aspect`). Rerun with it (job 2906098), both of
+H4's `1/48` rows were handed over a quarter of a `M` after formation at `1/24`
+and reached `40 M` with the `1/12` runs' horizon and constraints.
+Open: why the fit of a `1.88 : 1` surface drives the layer's
+lapse down, the core gap against the remnant's depth, the radius check at a
+piece boundary, the remnant's late area drift and its resolution, and G7's
+waveform.
 
 **Changes:**
 

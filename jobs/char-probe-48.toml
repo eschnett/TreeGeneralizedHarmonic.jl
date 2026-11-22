@@ -1,0 +1,37 @@
+# Step B7: the characteristics inside the common horizon and the remnant's
+# (`bench/characteristics_probe.jl`, `test/binary_runs.jl char_probe=1`), on the
+# `σ_g = 5` row of `jobs/handover-48.toml` from its `28 M` checkpoint. After every
+# accepted common find and every find of the remnant it prints, per depth below
+# the found surface, the outgoing light speed relative to the surface, and writes
+# `out/chars.csv`. Two rows: the handover at formation at `h = 1/24`, which
+# failed within a `M` (job 2902600), to read the remnant until it fails; and the
+# handover held to `29.75 M` with the layer twice the cells (`remnant_depth=2`),
+# to read the ringdown to `34 M`.
+#
+# The start is not in this spec: copy `binary.it0000005071.h5`, and nothing
+# newer, from `/scratch/eschnett/claude/xcts-s1/h4r48/s5/ck/` into every run's
+# `<scratch>/<study>/char-probe-48-<label>/mutable/ck/` before the first job.
+# Copy, do not link: the run rotates the files in its `ck/`.
+name = "char-probe-48"
+site = "trillium"
+time = "3:00:00"                    # one row of the handover at 96 threads took 40 min to 40 M
+resources = { nodes = 1 }
+mode = "parallel"
+checkpoints = true
+mutable_restarts = true
+
+[restart]
+to = "checkpoint"
+walltime = "walltime"
+margin = "0:20:00"
+continue_code = 3
+
+[[run]]
+label = "form"
+threads = 96
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=b7c d=8 N=12 margin=6 n_L=12 t0=0 sigma_g=5 chunk=1/4 checkpoint_every=8 find_interval=1/8 common=1 handover=1 char_probe=1 out=out t_end=31"
+
+[[run]]
+label = "f2975d2"
+threads = 96
+cmd = "test/binary_runs.jl chart=harmonic interior=fitted seed=rest L=32 roots=8 radii=8,4,2,1,3/4 q=4 cfl=1/2 fit_cont=2 lmax_fit=8 mesh=follow floor_margin=1/4 finder_N=16 spin=1 adm=1 group=b7c d=8 N=12 margin=6 n_L=12 t0=0 sigma_g=5 chunk=1/4 checkpoint_every=8 find_interval=1/8 common=1 handover=1 char_probe=1 out=out t_end=34 handover_from=29.75 remnant_depth=2"

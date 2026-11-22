@@ -94,6 +94,7 @@ else
         include("tracked_target_tests.jl")  # step B2: the tracked analytic target
         include("holes_tests.jl")       # step B3: several holes in one case
         include("harmonic_holes_tests.jl")  # step H4: two harmonic holes, no source
+        include("common_horizon_tests.jl")  # step B7: the common horizon of a pair
         include("simwatch_tests.jl")    # 2026-10-02: SimWatch status files
         include("type_tests.jl")
         include("threading_tests.jl")

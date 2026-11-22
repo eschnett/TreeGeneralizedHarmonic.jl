@@ -5074,6 +5074,7 @@ says that TreeAMR's `[compat]` selects **0.1.1**.
 | `src/tracking.jl` | the tracked horizon, host-side (after `horizon.jl` and before `driver.jl`): the conversions from the finder's `hlm` (`real_shape`) and of the analytic horizon (`analytic_shape`) into real coefficients, `HorizonTrack` with `seed_track`, `update_track`, `track_center` and `TrackLostError`, `fitted_interior` — the kernel argument from a track and a mesh — `surface_shift` (the gauge source's re-sample rule), and `axis_dispersion`/`margin_efolds`, the leakage e-folds, moved in from `test/dispersion.jl`; the quadratic prediction (`TrackLine`, `track_state`, `track_position`, `fit_track_quadratic`, `find_count`, `find_interval`, `seeded_track`) and the tracked analytic target's `tracked_interior` |
 | `src/fit.jl` | the fitted target (after `tracking.jl` and before `driver.jl`): the fit's variables (`fit_variables`, `state_from_fit`), the real solid harmonics (`_solid_harmonic_fold`, `real_solid_harmonics`, `fit_directions`), the two samplers (`state_sampler`, `analytic_sampler`), the least squares (`solve_fit`, `fit_row_weights`), the validity sweep (`fit_sweep`), `FitParams` and `InteriorFit` with `build_fit`, `fit_residual` and `fit_valid`, the kernel-callable evaluator `fit_variables_at`/`fit_state`, and the kernel half: `derive_target_bounds`, the 40-variable cache (`target_cache`, `fit_target_kernel!`, `fill_target!`) and the initial data's `fitted_state_kernel!`. The variant's branch is in `evolution.jl` (`GHProblem`'s `target`/`fits`/`t_target`, `refill_target`), its residual in `constraints.jl`'s error kernel, its flow in `driver.jl` (`refit!`, the refill and the pieces of a moving chunk) |
 | `src/checkpoint.jl` | checkpoint and restart (after `fit.jl` and before `driver.jl`): the file names and their rotation and `latest_checkpoint` (TreeHydro's), `plain_reals` for exact reals, `to_plain`/`from_plain` for the run state's own structs and `fit_from_plain` for an `InteriorFit`, `run_recipe` and `run_criterion`, `check_recipe`, `save_run`/`load_run` over TreeIOHDF5's `save_checkpoint`/`load_checkpoint`, and `check_checkpoint_keywords`. `evolve!` writes and reads through it; `test/checkpoint_tests.jl` is its file |
+| `src/common.jl` | the common horizon of a pair (step B7; after `horizon.jl` and `holes.jl`, before `driver.jl`): `CommonHorizon`, the settings `evolve!`'s `common_horizon` takes; `common_horizon_row`, one attempt and its four checks; the depth of a surface below another (`surface_table`, `least_depth`); the core gap; the streak and the formation (`common_state_after`). `test/common_horizon_tests.jl` is its file |
 | `src/driver.jl` | `evolve!`, the analysis record per chunk, `observer`, `check_cfl`, `horizon_shell`, `forest_levels`, `default_relaxation_rate` — the layer's default `4/M`, the one place the number is written — and `discrete_gradient_momentum!` — GHSO2's `Π` post-pass, which lives here because it runs once on the initial data and is the driver's option, not the initial data's. `GHCase` is in `initialdata.jl` |
 | `src/io.jl` | the analysis time series, slice output |
 | `src/benchmark.jl` | per-phase timings in TreeWave's format |
@@ -7552,43 +7553,267 @@ on the same commit and cadence:
 
 ### The common horizon and the handover
 
-**Finding it.** The finder looks for a common horizon at every find once
-the tracks are closer than `d_c` **(proposed `4 M`**, before formation in
-every equal-mass simulation**)**.
+**Finding it (built in step B7).** `evolve!(…; common_horizon =
+CommonHorizon(T; d_c, N, …))` (`src/common.jl`) attempts a common horizon at
+every record row once the tracks are at most `d_c` apart (`4 M` by default,
+before formation in every equal-mass simulation). It changes nothing the run
+carries until the handover exists, so it is neither part of the case nor of the
+recipe a checkpoint holds: a restart may switch it on. Its state — the next
+seed, the streak and the formation time — is run state.
 
-- It is seeded on a sphere about the center of mass that encloses both
-  individual horizons.
-- Before formation the find fails. A failed common find is recorded, never
-  thrown and never coasted: there is no common track until the first
-  success.
-- It needs `lmax ≈ 24`: ThreePunctures measured that `KorzynskiSpin` needs
-  that on a just-formed horizon.
-- **Formation** is three successive finds with a nondecreasing area that
-  enclose both individual horizons: every collocation point of each
-  individual surface lies at positive depth below the common one
-  **(proposed)**.
+- **The seed** is the previous accepted common surface, recentred on the holes'
+  mass-weighted center. Without one it is a sphere about that center, `1/20`
+  beyond the farthest point of the holes' found surfaces. On H4's pair the
+  previous surface saved only 3–8 of about 45 iterations.
+- **The resolution** is `N = 25` (`lmax = 24`): ThreePunctures measured that
+  `KorzynskiSpin` needs that on a just-formed horizon. On H4's pair `N = 16`
+  agreed with it to `10⁻⁴` in the area at formation and `10⁻⁶` later, at 0.6
+  times the cost.
+- **The attempts are made at the record rows only**, not at the finds between
+  them **(proposed in step B7)**: one attempt a chunk, so that every attempt is
+  a row.
+- **A surface is accepted on four checks of this package's own**, because the
+  finder cannot tell a missing horizon from a slow one (below):
+  1. the finder converged at a positive tolerance, ten times the worse
+     residual of the holes' own finds but at least `10⁻⁹`;
+  2. the residual is finite;
+  3. every collocation point of each hole's found surface lies at positive
+     depth below it;
+  4. its origin lies between the holes.
 
-**The handover (proposed).** It waits until the common *core* surface,
-`m + n_L` cells below the common horizon, encloses both individual core
-surfaces. Then:
+  The floor in (1) is there because a common surface's residual bottoms out
+  higher than a hole's: on H4's pair the holes' finds reached `2–6·10⁻¹⁴` and
+  the common ones `1–5·10⁻¹³`, within 2 % of ten times the holes'. Every
+  attempt that failed stopped at `0.03` or above.
+- **A failure is a row** with a note saying which check failed, never thrown
+  and never coasted: there is no common track until the first success.
+- **The spin** is computed only on an accepted surface
+  (`locate_gh_horizon`, then `with_horizon_spin`).
+- **Formation** is three successive accepted finds with a nondecreasing area,
+  dated at the first of them. A failure or a smaller area restarts the
+  streak; a formed horizon stays formed.
 
-1. The common layer, `:fitted`, joins the composite. It is `:fitted`
-   whatever the individual variants were, since no analytic target exists
-   for a hole that has just merged.
-2. At the next chunk the individual layers are dropped and their tracks
-   retired. Their finds stop, and losing one after formation ends nothing.
+**How the finder fails where there is no common horizon (measured in step
+B7).** `ApparentHorizonFinder` is Gundlach's fast flow. It stops on a stall
+(three iterations without a 1 % improvement), at `maxiters`, or when the mean
+radius collapses below `10⁻⁶`, and **at `atol = 0`, which every individual
+find passes, it reports a stall as a success.** Measured:
+
+- On an analytic Brill–Lindquist pair (`bench/common_horizon_probe.jl`),
+  common horizons exist up to a separation of `0.766 M`, the literature's
+  value. Beyond it the three failure modes all occur, depending on the seed:
+  a stall (the false success), a surface that shrinks onto one puncture's
+  excluded sphere (the guard's refusal), and a collapse.
+- On H4's pair (`bench/common_find_probe.jl`, at `1/48` and `1/96`, both
+  `σ_g`) every attempt before formation stalled: 8–55 iterations, `0.45–0.5 s`
+  each. The residual it stalled at shrinks as formation approaches, from
+  `1.6` to `0.03`, and the next attempt converged. None was refused, none
+  collapsed, none converged on one hole.
+- On the suite's Kerr-Schild pair at `d = 8` the flow shrinks the sphere onto
+  a hole's layer at once, and the footprint guard refuses it (`0.05 s`).
+
+**What a common find costs (measured in step B7, on H4's pair at `1/96`, one
+Trillium node):**
+
+| Attempt | Iterations | Time |
+|---|---|---|
+| failed, before formation | 8–55 | `0.45–0.5 s` |
+| the first after formation, `N = 16` / `N = 25` | about 260 | `0.6–1.2 s` / `2–4 s` |
+| later ones, `N = 16` / `N = 25` | 190 down to 45 | `0.5–0.8 s` / `0.7–1.0 s` |
+| a hole's own find, with the spin | — | `1.8–2.0 s` |
+
+One `N = 25` attempt a find is about `16 s` per `M`, under 1 % of the `1/96`
+run's `2000 s` per `M`. **The spin costs twenty times the find**: in the run at
+`1/48` (two rows on one Trillium node, 96 threads each) an accepted attempt
+with the spin took `17–33 s`, against `0.8–1.4 s` for the same surface without
+it in the probe. At one attempt a row (`chunk = M/4`) that is about `90 s` per
+`M`, 18 % of the `1/48` run and about 4 % of the `1/96` one. Lowering its
+cost — the spin at a lower `N`, or not at every row — is **(open)**.
+
+**When it forms on H4's pair.** At a track separation of `3.0 M` in all four
+roll-on rows: between `28.31` and `28.37 M` at `σ_g = 5`, between `28.56` and
+`28.62 M` at `σ_g = 10`, about `1.9 M` before the individual tracks are lost.
+The run's finder, attempting once a row, first accepts a surface at `28.5` and
+`28.75 M` and records formation (three rows) dated there, at `29.0` and
+`29.25 M`; its areas are the probe's to seven digits, and `|J| < 4·10⁻⁸` on
+the head-on pair.
+Its area is `39.8` at formation, against `25.7` for the two holes together,
+and grows monotonically to `47.3` by `30.3 M` (`M_irr` from `0.890` to
+`0.970`). `1/48` and `1/96` agree to `10⁻⁵` in the area.
+
+**The handover (built in step B7, for fitted harmonic holes;
+`CommonHorizon(…; handover = true)`, `test/binary_runs.jl handover=1`).** It
+happens at the first record row after formation whose accepted common surface
+holds both holes' cores (every `core_gap` positive), is round enough — its
+largest radius about its origin at most `handover_aspect = 7/4` times its
+smallest (measured below, "When.") — whose remnant geometry
+passes the checks every geometry passes, and whose fit is a metric; a row that
+fails one of them says which in the common row's `handover` note, and the next
+row tries again. At that row, in one step **(proposed in step B7, over the two
+steps below:** the measured core gap is positive from the first accepted find,
+so there is nothing for an intermediate three-piece composite to wait for**)**:
+
+1. **The remnant** replaces the pair: one `:fitted` hole about the common
+   horizon, a composite of one piece on the same code path
+   (`HoleInteriors{1}`), whatever the holes' variants were, since no analytic
+   target exists for a hole that has just merged. Its spec is the holes',
+   scaled to the total mass; its `m` and `n_L` are theirs. **Its spacing is
+   the holes' scaled by the masses** (the remnant keeps their `h/M`: on H4's
+   `1/48` rows the holes' layers lie in `1/24` blocks, so it is `1/12`, and
+   `1/24` from `29.0` to `29.5 M`, where `1/12` does not fit), halved down to
+   the holes' own while its
+   layer does not fit inside the common horizon, and **not read from the
+   pair's mesh** (`fitted_interior`'s `h_cap`): the common layer reaches
+   blocks the pair's floors left a level coarser, and the regrid after the
+   handover row refines them, since the floor is read from this geometry. So
+   the geometry is checked at that spacing, and a mesh more than one level
+   coarser across the layer — one regrid refines by one level — is "not yet".
+   This needs a regrid after the row: a run that does not regrid, and the
+   initial row, keep the mesh's own spacing; a restart from the handover
+   row's checkpoint builds the problem it computes its flags with unchecked,
+   as the run did, and regrids first.
+2. **Its track** (`remnant_track`) starts at the common surface's origin with
+   its radii and shape, moving with the holes' mass-weighted velocity and
+   acceleration — a head-on pair's cancel — and predicts along the quadratic.
+   From the next piece on, the remnant is found as a hole is, from its track,
+   with the case's finder.
+3. **Its fit** is of the state on its own geometry, at that row, into ranges
+   that are the union of the holes' (`remnant_bounds`): there is no analytic
+   remnant to derive them from.
+4. **The holes' tracks are retired**, their finds stop, and a track lost at
+   that row ends nothing. The `γ0` Gaussians and the `ε_KO` profiles that
+   followed the tracks stay where they were at the handover
+   **(proposed in step B7)**, continuous in time; the remnant's own Gaussian
+   was always on the center of mass.
+5. **The regrid after that row is the remnant's**: the indicator flags with
+   the remnant's geometry, so the level floor covers the common horizon.
+
+**The remnant's finds are paced by its growth (proposed in step B7).** A
+just-formed horizon grows fast: on H4's pair its least radius grew `0.16 M` in
+the first `M/4` and still `0.05 M` per `M/4` at `30 M`, against a jump guard of
+`G h/2 = 0.03 M` at `1/48`. The track's jump check stays; the remnant asks for
+as many finds as keep its least radius within `G h/4` between two, at the rate
+measured from its last two finds (`growth_finds`).
+
+**Measured on H4's pair at `1/48`** (`jobs/handover-48.toml`, both roll-on
+rows from their `28 M` checkpoints to `40 M`, one Trillium node, `38–40 min`):
+
+- **When.** Formation is dated `28.5 M` (`σ_g = 5`) and `28.75 M`
+  (`σ_g = 10`). The next three rows were refused by the remnant's geometry, not
+  by the core gap: its least radius `1.34–1.51 M` could not hold `m + n_L +
+  core_min = 20` cells at `h = 1/12`, the coarsest spacing of the pair's blocks
+  the common layer reaches into. The handover happened at `29.75` and `30.0 M`,
+  `0.625 M` before the tracks were lost in the runs without it. That is why
+  the remnant's spacing is no longer read from the pair's mesh (item 1 above):
+  with it the handover is at the row that declares formation, `29.0` and
+  `29.25 M`, which the stand-in test reproduces (a remnant layer in blocks at
+  `1/4` refused at every row without the cap, handed over at `1/8` with it).
+  **Rerun with it** (`.claude/data/b7-handover-48-formation`, job 2902600),
+  both rows handed over at those rows, at `h = 1/24`, **and the remnant failed
+  within a `M`**: a `sqrt` of a negative number in the right-hand side at
+  `29.25 → 29.5 M` (`σ_g = 5`) and `30.0 → 30.25 M` (`σ_g = 10`), the layer's
+  residual `480–530` at the first row after the handover against `5.6` in the
+  run from `29.75 M`.
+
+  **It is the time, not the spacing** (`jobs/handover-48-diag.toml`, job
+  2903430, `.claude/data/b7-handover-48-diag`; the `σ_g = 5` row held back by
+  `CommonHorizon`'s `handover_from`). The common horizon's radii are
+  `1.88 : 1` at formation and `1.74`, `1.63` and about `1.5 : 1` a quarter, a
+  half and three quarters of a `M` later:
+
+  | handover | radii | `h` | outcome |
+  |---|---|---|---|
+  | `29.0 M` (formation) | `1.88` | `1/24` | fails at `29.25–29.5 M` |
+  | `29.25 M` (formation, `σ_g = 10`) | `1.87` | `1/24` | fails at `30.0–30.25 M` |
+  | `29.25 M` | `1.74` | `1/24` | to `36 M`; residual up to `57`, `\|C_a\|` up to `0.14` |
+  | `29.5 M` | `1.63` | `1/24` | to `36 M`; residual up to `20` |
+  | `29.75 M` | `1.5` | `1/12` | to `36 M`; the run above, bit for bit |
+  | `29.75 M`, `remnant_depth = 2` | `1.5` | `1/24` | `\|C_a\| ≤ 0.0095` after it, half the `1/12` run's |
+
+  The three that hold reach the same horizon: at `36 M` the areas agree to
+  `4·10⁻⁵` of themselves (`48.3566–48.3568`), the constraint norms to the
+  digits printed. **The characteristics do not explain the failure**
+  (`bench/characteristics_probe.jl`, `test/binary_runs.jl char_probe=1`,
+  `.claude/data/b7-char-probe`): the outgoing light front relative to the
+  moving surface, `u₊ = −β^i ŝ_i + α|ŝ|_γ − v_n`, is negative at every point of
+  every surface from the horizon to `0.75 M` below it from the second accepted
+  common find on (`28.75 M`) — at formation `−0.19 … −0.13` through the
+  `1/24` layer's outer surface and `−0.24 … −0.01` at its core surface, and
+  `u₊ ≈ 0` on the horizon by `34 M`, as on a stationary one. What fails is the
+  lapse inside the layer: in the remnant handed over at formation the least
+  `α` `0.5 M` below the horizon falls from `0.535` to `0.12` in `0.2 M`, while
+  it holds near `0.56` in the remnants that survive. The layer relaxes toward a
+  target whose lapse is far too small; why the fit of a `1.88 : 1` surface is
+  such a target is **(open)**. **So the handover waits until the radii are
+  within `7/4 : 1`** (`CommonHorizon`'s `handover_aspect`), which on this pair
+  is a quarter of a `M` after formation; should a lapse at the handover still go
+  wrong, it may be changed once there, smoothed for instance **(proposed)**.
+  **With the rule** (`jobs/handover-48.toml`, job 2906098,
+  `.claude/data/b7-handover3`) both rows were handed over a quarter of a `M`
+  after formation, at `29.25 M` (`1.74 : 1`, `σ_g = 5`) and `29.5 M`
+  (`1.73 : 1`, `σ_g = 10`), at `h = 1/24`, and reached `40 M` in `35 min` on
+  half a Trillium node each. The `σ_g = 5` row is the diagnosis's `29.25 M`
+  row bit for bit to `36 M`. At `40 M` both agree with the runs at `1/12` below
+  to `4·10⁻⁶` of the area and in the constraint norms to the digits printed.
+  The transient is larger at `σ_g = 10`: the layer's residual reaches `126`
+  (`57` at `σ_g = 5`) and the largest `|C_a|` `0.17` at `31 M`, back to
+  `0.009` by `33 M`. No projection fired. The margin below `7/4` is therefore
+  thin on this row.
+  The `remnant_depth = 2` row stopped at `34 M` on the piece boundary's radius
+  check: `fitted_interior` and `check_interior_radii` read the layer's spacing
+  over annuli built from slightly different radii, and a partly refined annulus
+  fell between them (offset `0.25` from `1/48` blocks, checked against a `1/24`
+  block) **(open)**. The bullets below are the run at `1/12`; the rule's runs at
+  `1/24` reach the same numbers by `40 M`.
+- **The horizon.** The area is nondecreasing at every row, `47.23` at the
+  handover to `48.44` and `48.38` at `40 M` (`M_irr` `0.969` to `0.982` and
+  `0.981`); `|J| < 3·10⁻⁸`; the center stays within `2·10⁻⁴ M` of the origin.
+  Its radii ring down, from `1.63–2.38` at the handover through round
+  (`1.98–1.99`) at `33.75 M` and back to `1.96–2.01`. After `34 M` the area
+  still grows, `2·10⁻³` of it at `σ_g = 5` and `10⁻³` at `σ_g = 10` by `40 M`.
+  The drift is the same, to `4·10⁻⁶`, with the remnant's layer at `1/24`, so the
+  layer's spacing does not cause it. Whether it comes from the gauge or the
+  exterior's resolution is **(open)**.
+- **The constraints.** At the handover row the masked `ℋ` norm falls from
+  `1.24·10⁻³` to `4.1·10⁻⁴` (`1.28·10⁻³` to `3.0·10⁻⁴`), the momentum norm
+  thirtyfold, and the largest `|C_a|` from `0.15` to `0.019`, part of it because
+  the remnant's core masks the region between the holes. After it `ℋ` grows to
+  `7.7·10⁻⁴` (`6.4·10⁻⁴`) by `40 M`; the `C_a` norm keeps the slope it had
+  before (`1.3·10⁻⁴` per `M`), so its growth is not the handover's. The layer's
+  residual falls from about `10` (two holes) to `5.6` at the handover and
+  `0.24–0.26` by `40 M`. No projection fired, and `α ≥ 0.59` outside the cores.
+- **The mesh.** The remnant's floor is one level coarser than the holes',
+  `1/24` against `1/48`: the floor is the coarsest level at which a layer fits
+  its horizon, and the remnant's is twice a hole's. The blocks fall from `5440`
+  to `2808` and the step doubles, so a `M` costs `110 s` against `470 s` before
+  it, `80–110 s` of which were the common finds with their spin. The remnant runs at
+  the holes' `h/M`; whether that is enough for the ringdown is **(open)**.
 
 The composition makes this continuous outside the common core: those
-points are under the common layer before and after. Inside the common core
+points are evolved, or under a layer, before and after. Inside the common core
 `F` is not evaluated, so the individual holes' singular regions are relaxed
-toward the common fit at `ρ_max`.
+toward the common fit at `ρ_max`. The handover's state — when, the retired
+tracks and the growth rate — is run state, so a restart after it is the
+remnant's run.
 
-**What is not known** is whether a just-formed common core can hold both
-individual cores at an affordable `h`. The common horizon appears around
-the pair with a gap that narrows at the neck, and `m + n_L ≈ 36` cells is
-`0.56 M` at `1/64`. The head-on run measures the gap. If it is too small,
-the handover waits, with both individual layers active inside the common
-horizon until it fits.
+**Whether a just-formed common core holds both individual cores** is what
+the row's `core_gap` measures: the least depth of each hole's core surface
+below the common horizon moved inward by the holes' own core depth `m + n_L`
+cells. Positive, a common layer as deep as the holes' would hold that hole's
+core inside its own. On H4's pair the holes' horizons lie `0.11 M` inside the
+common one at formation and `0.39 M` inside by `30.3 M`. Their cores lie the
+same `0.375 M` inside their horizons at `1/48` and at `1/96` (`m + n_L` cells
+in both), so the gap is about that depth. **Measured in the run at `1/48`**
+(`jobs/common-48.toml`, both roll-on rows): the core gap is `0.140 M` at the
+first accepted find, about 5 cells, and grows to `0.377 M` by `30 M`; it is the
+holes' depth less `0.001–0.002 M`. **A common core as deep as the holes' holds
+both of their cores from the first accepted find on**, so the handover need not
+wait. Were it too small, the handover would wait, with both individual layers
+active inside the common horizon until it fits. The gap is measured against the holes' core depth (`0.375 M`), not the
+remnant's, which is `0.75 M` at `1/24` and `1.5 M` at `1/12`: a remnant core
+holds the holes' cores only where the gap exceeds the difference, and on H4's
+pair the remnants that held had theirs in their layer, relaxed toward the fit
+**(open: measure it against the remnant's depth)**.
 
 **The shape at `lmax = 24`** costs about `0.6 µs` per layer point, up from
 `79 ns` at `lmax = 8` as `(lmax + 1)²`, but only over the common layer's
@@ -7820,8 +8045,13 @@ for step 9's viewers.
 - **Per hole:** the track's center and velocity, `r_min` and `r_max`, the
   horizon's `A`, `M_irr`, `J` and `M_ch`, and the fit's validity.
 - **For the pair:** the separation and the orbital phase.
-- **The common horizon:** its rows from its first attempt, with
-  `success = false` until formation.
+- **The common horizon (built in step B7):** the row's `common`, from the
+  first row whose tracks are `d_c` apart: whether it was attempted and passed
+  every check (a `note` says which failed), the finder's iterations, residual
+  and tolerance, the surface's origin, radii, area, `M_irr` and, on an
+  accepted one, `J` and `M_ch`, each hole's depth below it and core gap, the
+  attempt's wall time, and the run's streak and formation time after it.
+  `test/binary_runs.jl` appends them to its CSV as `common_*`.
 - **The run:** the handover's state, the constraints under the composite
   mask, and the gauge roll-on's `f(t)`.
 - **The extraction** goes to its own file.
@@ -9075,9 +9305,9 @@ pair](#solved-data-for-the-pair)). The last item is the pair run from those data
     the tracks' separation (`1.015` against `1.000`, and `1.012` against
     `0.987`). The finder's footprint then reaches the other hole's layer,
     three finds are refused, and the track is lost (`TrackLostError`).
-    There is no common-horizon finder ([The common horizon and the
-    handover](#the-common-horizon-and-the-handover), **(proposed)**), so a
-    row cannot go further.
+    A common horizon has formed `1.9 M` before this ([The common horizon and
+    the handover](#the-common-horizon-and-the-handover)), but the handover
+    that would let a row go further is **(proposed)**.
   - **Within `4 M` of the holes the constraints converge at order four,
     until the outer faces arrive.** Ratio `1/48` : `1/96` of the L2 norms in
     bands about the nearer hole, roll-on with `σ_g = 10` (the `σ_g = 5` row

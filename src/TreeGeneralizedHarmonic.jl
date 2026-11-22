@@ -56,8 +56,9 @@ using TreeAMR
 using TreeIOHDF5
 
 import SpacetimeMetrics
-using AbstractSphericalHarmonics: EquiangularGrid, SphereGrid, ash_grid_size,
-                                  ash_point_coord, ash_resample, ash_transform
+using AbstractSphericalHarmonics: EquiangularGrid, SphereGrid, ash_evaluate,
+                                  ash_grid_size, ash_lmax, ash_phis, ash_point_coord,
+                                  ash_resample, ash_thetas, ash_transform
 using ApparentHorizonFinder: ADMVars, find_horizon, horizon_grid,
                              horizon_points
 import Adapt
@@ -199,6 +200,8 @@ export refinement_buffer, refinement_centroid
 # upstream on 2026-09-26, TreeAMR 0.1.3's M11)
 export Horizon, gh_interpolate, gh_interpolate_grad, UnevolvedRegion
 export GHADMProvider, gh_adm_provider, find_gh_horizon, horizon_radii
+# The common horizon of several holes (step B7)
+export CommonHorizon
 
 # The driver
 export evolve!, check_cfl, forest_levels, horizon_shell, default_relaxation_rate
@@ -259,6 +262,9 @@ include("fit.jl")
 # After `fit.jl` and `tracking.jl`, whose structs the run state holds, and
 # before `driver.jl`, which writes and reads it (added 2026-10-01).
 include("checkpoint.jl")
+# After `horizon.jl` and `holes.jl` (it locates a surface and reads the holes'
+# geometry) and before `driver.jl`, which attempts it at every row (step B7).
+include("common.jl")
 include("driver.jl")
 # SimWatch status files (2026-10-02): host-side, for run scripts.
 include("simwatch.jl")

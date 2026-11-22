@@ -257,10 +257,14 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
     # every row from their own tracks, the record's rows per hole and for the
     # pair, and a chain of restarts — one chunk a job — that is the
     # uninterrupted run bit for bit, the two tracks, their horizon offsets and
-    # the finder's seeds included.
+    # the finder's seeds included. With the common finder on (step B7): an
+    # attempt at every row, each a recorded failure at `d = 8`, and its state
+    # through the restarts — the records compared without the attempts' wall
+    # times.
     @full_tier @testset "a pair evolves, finds both holes and restarts bit for bit" begin
         pre = joinpath(mktempdir(), "pair")
-        common = (q=q, ops=ops, t_end=T(2 // 10), checkpoint_sync_to_disk=false)
+        common = (q=q, ops=ops, t_end=T(2 // 10), checkpoint_sync_to_disk=false,
+                  common_horizon=CommonHorizon(T; d_c=10, N=12))
         a = evolve!(T, pair; forest=deepcopy(pair_forest), common...)
         @test length(a.records) == 3
         @test all(r -> r.horizon_success === true && r.finite, a.records)
@@ -277,6 +281,9 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         @test r2.holes[1].track_center[1] < 0 < r2.holes[2].track_center[1]
         @test all(r -> maximum(h -> h.track_prediction_max, r.holes) < 1, a.records)
         @test all(h -> abs(h.horizon_offset[1]) < 1 // 8, r0.holes)
+        @test all(r -> r.common.attempted && r.common.success === false &&
+                       r.common.note !== nothing && r.common.streak == 0 &&
+                       r.common.t_formed === nothing, a.records)
         @info "the suite's pair (step B3)" separation = [r.separation for r in a.records] gauge_l2 = [r.gauge_l2 for r in a.records] residual = [r.residual for r in a.records] areas = [map(h -> h.area, r.holes) for r in a.records] offsets = [h.horizon_offset[1] for h in r0.holes]
 
         b = evolve!(T, pair; forest=deepcopy(pair_forest), common...,
@@ -289,7 +296,8 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         end
         @test jobs == 2
         @test isequal(a.u, b.u)
-        @test isequal(a.records, b.records)
+        untimed(r) = merge(r, (common=merge(r.common, (time=nothing,)),))
+        @test isequal(untimed.(a.records), untimed.(b.records))
         @test isequal(repr(a.track), repr(b.track))
         @test a.nsteps == b.nsteps
     end

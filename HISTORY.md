@@ -135,6 +135,7 @@ The briefs of the finished steps are under
   - [Step H4 shelved: the data are to be solved (2026-11-15)](#step-h4-shelved-the-data-are-to-be-solved-2026-11-15)
   - [Step S1 started: XCTS's data on the grid (2026-11-15)](#step-s1-started-xctss-data-on-the-grid-2026-11-15)
   - [Step H4 resumed: the pair on solved data (2026-11-18 to 2026-11-20)](#step-h4-resumed-the-pair-on-solved-data-2026-11-18-to-2026-11-20)
+  - [Step B7 started: the common horizon (2026-11-20 and 2026-11-21)](#step-b7-started-the-common-horizon-2026-11-20-and-2026-11-21)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2729,6 +2730,130 @@ on from the periodic checkpoints at `26` and `28 M`, losing at most `M/4`.
 They waited about `18 h` on priority, ran on 2026-11-20, and lost their tracks
 at the plunge at `30.25` and `30.5 M`, as at `1/48`. The measurements are
 `CODE.md`'s "What step H4 has built" ("The pair from solved data").
+
+### Step B7 started: the common horizon (2026-11-20 and 2026-11-21)
+
+Erik chose step B7 after step H4 (2026-11-20) and asked first how the finder
+behaves where there is no common horizon yet: how it fails, and whether that
+is expensive. Two probes answered it before anything was built.
+
+**The analytic probe** (`bench/common_horizon_probe.jl`, on the laptop): an
+equal-mass Brill–Lindquist pair whose provider refuses points near a puncture,
+as the grid's footprint guard refuses the layer. The bisected threshold,
+`0.766 M`, is the literature's. Beyond it all three of the finder's failure
+modes occurred, depending on the seed: a stall that `atol = 0` reports as a
+success, a refusal, and a collapse. Failed attempts were cheap, and
+convergence slowed near the threshold.
+
+**The grid probe** (`bench/common_find_probe.jl`, through
+`test/binary_runs.jl common_probe=28`): step H4's four roll-on rows continued
+from their `28 M` checkpoints to the plunge, with four common attempts beside
+every pair of individual finds and nothing changed in the run. Two SimLaunch
+specs on Trillium, study `treegh-b7`: `jobs/common-probe.toml` (the `1/48`
+rows side by side, job 2899389, `36:42`) and `jobs/common-probe-96.toml` (the
+`1/96` rows one after the other, job 2899400, `3:14:45`) — a spec of its own
+because SimLaunch runs one job of a spec at a time (reported to SimLaunch as
+friction). Every job ended `FAILED` on the expected `TrackLostError` at the
+plunge. Its results are `CODE.md`'s "The common horizon and the handover";
+the logs are in `.claude/data/b7-common-probe/`.
+
+**What it decided in the finder (2026-11-21):**
+
+- **Its own acceptance on top of the finder's.** Every attempt before
+  formation stalled and would have been a success at `atol = 0`; the
+  enclosure check and a positive tolerance were what told them apart.
+- **A tolerance floor of `10⁻⁹`.** The probe's tolerance, ten times the
+  holes' residuals, passed a converged common surface by 2 % (`4.23·10⁻¹³`
+  against `4.3·10⁻¹³`): a common surface bottoms out about ten times higher
+  than a hole's. Every failed attempt stopped at `0.03` or above, so the
+  floor leaves a margin of seven orders. On the suite's fixture it also cut a
+  find from 40 iterations to 27.
+- **A sphere seed suffices**, and the previous surface is used when there is
+  one: it saved 3–8 iterations.
+- **The spin only on an accepted surface**: `find_gh_horizon` was split into
+  `locate_gh_horizon` and `with_horizon_spin`, unchanged for its callers.
+- **Attempts at the record rows only.** The probe attempted at every find
+  (`M/8` at `1/48`, `M/16` at `1/96`); the finder in the run attempts once a
+  chunk, so that every attempt is a row.
+- **Not in the recipe**: the finder observes until the handover exists, so a
+  restart of H4's checkpoints may switch it on, which `check_recipe` would
+  refuse for a recipe key.
+
+**The finder in the run (2026-11-21).** H4's two `1/48` roll-on rows from
+their `28 M` checkpoints with `common=1` (`jobs/common-48.toml`, study
+`treegh-b7-common`, Trillium job 2901597, `23:49`, ending `FAILED` on the
+expected `TrackLostError` at `30.25` and `30.5 M`). It measured the core gap,
+positive from the first accepted find (`0.140 M`), and that the spin costs
+twenty times the find (`CODE.md`, "The common horizon and the handover"). The
+logs and CSVs are in `.claude/data/b7-common-48/`.
+
+**The handover built (2026-11-21).** Erik asked for stage 3 on these numbers.
+`CODE.md` had proposed it in two steps — the common layer joining the composite,
+then the holes' layers dropped at the next chunk — so that the handover could
+wait, with three pieces, until the common core held both holes' cores. The
+measured core gap is positive from the first accepted find, so it is one step:
+the pair becomes one fitted remnant at the first row after formation that passes
+the checks. It stays on the path of several holes as a composite of one piece,
+rather than ending the pair's run and starting a single hole's from its state:
+every per-hole loop, the level floors and the checks already took any number of
+pieces, and a restart is then the same code. Two things were added for it that
+`CODE.md` had not foreseen: the holes' `γ0` and `ε_KO` profiles stay where they
+were at the handover (their tracks no longer move), and the remnant's finds are
+paced by its growth, which is three to five times the jump guard per row.
+
+**The handover on H4's pair (2026-11-21).** Erik asked to run it on the two
+`1/48` rows: `jobs/handover-48.toml`, study `treegh-b7-handover` at `093b4dd`,
+Trillium job 2901910, `39:47`, both rows from `28 M` to `40 M`, `COMPLETED`. Both
+handed over three rows after formation, held back by the remnant's geometry
+read on the pair's coarser blocks, and `0.625 M` before the tracks would have
+been lost; the remnant then ran to `40 M` with a nondecreasing area and no
+projection. The numbers are `CODE.md`'s "The common horizon and the handover";
+the logs and CSVs are in `.claude/data/b7-handover-48/`.
+
+**The remnant's spacing at the handover (2026-11-21).** Erik asked for the
+handover at formation. The three refused rows had read the remnant's spacing
+from the pair's mesh, `1/12` across the common layer, where the regrid after the
+handover would have made it `1/24`. The remnant's geometry is now built at the
+holes' spacing scaled by the masses (`fitted_interior`'s `h_cap`) and checked
+there, and the regrid refines the pair's blocks; a restart from the handover
+row's checkpoint skips the problem's radius check until its first regrid, as the
+run does. The alternative, regridding inside the row before building the
+geometry, would have made the regrid two code paths. `common_horizon_tests.jl`'s
+handover test now hands over on a mesh a level too coarse. H4's two `1/48`
+rows were rerun with it from their `28 M` checkpoints (Trillium job 2902600,
+`.claude/data/b7-handover-48-formation`): both handed over at the row that
+declared formation, `29.0` and `29.25 M`, at `h = 1/24`, and both remnants
+failed within a `M` on a negative `sqrt` in the right-hand side, the layer's
+residual near `500` from the first row on where the run at `1/12` had `5.6`.
+
+**Why the remnant failed at formation (2026-11-21).** Two suspects: the
+shallower layer at `1/24`, and the surface, whose radii were `1.88 : 1` at
+formation against `1.63 : 1` at the run that held. Erik suggested the second,
+and that the characteristics inside a just-formed horizon may point in odd
+directions. Two diagnostics went into `CommonHorizon` (`handover_from`, the
+earliest handover, and `remnant_depth`, the remnant's margin and ramp times
+`k`) and a probe of the outgoing light front through surfaces below the horizon
+(`bench/characteristics_probe.jl`), checked against Kerr-Schild's
+`(1 − 2M/r)/(1 + 2M/r)`. Trillium jobs 2903430 (the `σ_g = 5` row held to
+`29.25`, `29.5` and `29.75 M`, and `29.75 M` at `remnant_depth = 2`) and 2903483
+(the probe, at formation and at `29.75 M` with the deeper layer) settled it:
+every handover from `29.25 M` on held, at `1/24` too, and both handovers at a
+`1.87–1.88 : 1` surface failed. The probe found the light front moving inward
+through every layer surface from `28.75 M` on, so the characteristics were not
+the cause; the lapse inside the layer collapsed toward the fit's instead. It also
+showed that the holes' layers on H4's rows lie in `1/24` blocks, so the scaled
+spacing the earlier paragraph called `1/24` is `1/12`, and `1/24` only where
+`1/12` does not fit.
+Erik then asked for the rule: the handover waits until the common surface's
+radii are within `7/4 : 1` (`handover_aspect`), and he noted that a lapse that
+still went wrong could be changed once at the handover, smoothed for instance.
+The rule was built (1cf0f90), and H4's two `1/48` rows were rerun with it on
+2026-11-22 (Trillium job 2906098, study `treegh-b7-handover3`, from a363f8c).
+They were handed over at `29.25` and `29.5 M` (`1.74` and `1.73 : 1`) and
+reached `40 M`. At `40 M` they agree with the earlier runs at `1/12` in the area
+to `4·10⁻⁶`. The `σ_g = 10` row's transient was the larger one: residual `126`
+and `|C_a|` `0.17` at `31 M`. No lapse went wrong, so the smoothing was not
+built.
 
 ## Possible extensions
 

@@ -613,11 +613,21 @@ the find, which is GHSO2's behaviour: the area and the location are still
 the run's numbers. A failed *find* is reported in `success`; the flow's
 own diagnostics are `iters` and `H_norm`.
 """
-function find_gh_horizon(p::GHProblem{T,G,q}, u, t; N::Integer=16,
-                         r_seed=nothing, origin=nothing, hlm=nothing,
-                         center=nothing, spin::Bool=true, unif_tol=1.0e-8,
-                         atol=0.0, maxiters::Integer=1000,
-                         verbosity::Integer=0) where {T,G,q}
+function find_gh_horizon(p::GHProblem, u, t; spin::Bool=true, unif_tol=1.0e-8,
+                         kwargs...)
+    out, result, provider = locate_gh_horizon(p, u, t; kwargs...)
+    return spin ? with_horizon_spin(out, result, provider, unif_tol) : out
+end
+
+# The find without the spin (split out in step B7): the location, the shape, the
+# area and the radii, with `J`, `spin_axis` and `M_ch` left `NaN` — and the
+# finder's result and the provider, which `with_horizon_spin` takes. A common
+# find judges the surface first and pays for the spin only on one it accepts
+# (`common_horizon_row`).
+function locate_gh_horizon(p::GHProblem{T,G,q}, u, t; N::Integer=16,
+                           r_seed=nothing, origin=nothing, hlm=nothing,
+                           center=nothing, atol=0.0, maxiters::Integer=1000,
+                           verbosity::Integer=0) where {T,G,q}
     case = p.case
     fill_state!(p, u, t)
 
@@ -663,19 +673,22 @@ function find_gh_horizon(p::GHProblem{T,G,q}, u, t; N::Integer=16,
 
     area = result.area
     M_irr = sqrt(area / (16π))
-    J, axis, spin_success = if spin
-        gh_horizon_spin(result, provider, Float64(unif_tol))
-    else
-        (NaN, SVector{3,Float64}(NaN, NaN, NaN), false)
-    end
-    M_ch = isnan(J) ? NaN : sqrt(M_irr^2 + J^2 / (4 * M_irr^2))
+    out = (success=result.success, iters=result.iters, origin=result.origin,
+           center=c64, center_offset=sqrt(sum(abs2, result.origin - c64)),
+           r_min=r_min, r_mean=r_mean, r_max=r_max, origin_r_min=o_min,
+           origin_r_mean=o_mean, origin_r_max=o_max, area=area, M_irr=M_irr,
+           J=NaN, spin_axis=SVector{3,Float64}(NaN, NaN, NaN), M_ch=NaN,
+           hlm=result.hlm, grid=result.grid, H_norm=result.H_norm,
+           spin_success=false)
+    return out, result, provider
+end
 
-    return (success=result.success, iters=result.iters, origin=result.origin,
-            center=c64, center_offset=sqrt(sum(abs2, result.origin - c64)),
-            r_min=r_min, r_mean=r_mean, r_max=r_max, origin_r_min=o_min,
-            origin_r_mean=o_mean, origin_r_max=o_max, area=area, M_irr=M_irr,
-            J=J, spin_axis=axis, M_ch=M_ch, hlm=result.hlm, grid=result.grid,
-            H_norm=result.H_norm, spin_success=spin_success)
+# The Korzyński spin of a located surface, and `M_ch` from it.
+function with_horizon_spin(out, result, provider, unif_tol)
+    J, axis, spin_success = gh_horizon_spin(result, provider, Float64(unif_tol))
+    M_irr = out.M_irr
+    M_ch = isnan(J) ? NaN : sqrt(M_irr^2 + J^2 / (4 * M_irr^2))
+    return merge(out, (J=J, spin_axis=axis, M_ch=M_ch, spin_success=spin_success))
 end
 
 # The Korzyński spin on the surface the flow converged to, with the failure
