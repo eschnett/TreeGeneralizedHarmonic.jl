@@ -2847,6 +2847,13 @@ spacing the earlier paragraph called `1/24` is `1/12`, and `1/24` only where
 Erik then asked for the rule: the handover waits until the common surface's
 radii are within `7/4 : 1` (`handover_aspect`), and he noted that a lapse that
 still went wrong could be changed once at the handover, smoothed for instance.
+The rule was built (1cf0f90), and H4's two `1/48` rows were rerun with it on
+2026-11-22 (Trillium job 2906098, study `treegh-b7-handover3`, from a363f8c).
+They were handed over at `29.25` and `29.5 M` (`1.74` and `1.73 : 1`) and
+reached `40 M`. At `40 M` they agree with the earlier runs at `1/12` in the area
+to `4·10⁻⁶`. The `σ_g = 10` row's transient was the larger one: residual `126`
+and `|C_a|` `0.17` at `31 M`. No lapse went wrong, so the smoothing was not
+built.
 
 ## Possible extensions
 

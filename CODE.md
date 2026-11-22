@@ -7748,18 +7748,32 @@ rows from their `28 M` checkpoints to `40 M`, one Trillium node, `38–40 min`):
   within `7/4 : 1`** (`CommonHorizon`'s `handover_aspect`), which on this pair
   is a quarter of a `M` after formation; should a lapse at the handover still go
   wrong, it may be changed once there, smoothed for instance **(proposed)**.
+  **With the rule** (`jobs/handover-48.toml`, job 2906098,
+  `.claude/data/b7-handover3`) both rows were handed over a quarter of a `M`
+  after formation, at `29.25 M` (`1.74 : 1`, `σ_g = 5`) and `29.5 M`
+  (`1.73 : 1`, `σ_g = 10`), at `h = 1/24`, and reached `40 M` in `35 min` on
+  half a Trillium node each. The `σ_g = 5` row is the diagnosis's `29.25 M`
+  row bit for bit to `36 M`. At `40 M` both agree with the runs at `1/12` below
+  to `4·10⁻⁶` of the area and in the constraint norms to the digits printed.
+  The transient is larger at `σ_g = 10`: the layer's residual reaches `126`
+  (`57` at `σ_g = 5`) and the largest `|C_a|` `0.17` at `31 M`, back to
+  `0.009` by `33 M`. No projection fired. The margin below `7/4` is therefore
+  thin on this row.
   The `remnant_depth = 2` row stopped at `34 M` on the piece boundary's radius
   check: `fitted_interior` and `check_interior_radii` read the layer's spacing
   over annuli built from slightly different radii, and a partly refined annulus
   fell between them (offset `0.25` from `1/48` blocks, checked against a `1/24`
-  block) **(open)**. The bullets below are the run at `1/12`.
+  block) **(open)**. The bullets below are the run at `1/12`; the rule's runs at
+  `1/24` reach the same numbers by `40 M`.
 - **The horizon.** The area is nondecreasing at every row, `47.23` at the
   handover to `48.44` and `48.38` at `40 M` (`M_irr` `0.969` to `0.982` and
   `0.981`); `|J| < 3·10⁻⁸`; the center stays within `2·10⁻⁴ M` of the origin.
   Its radii ring down, from `1.63–2.38` at the handover through round
   (`1.98–1.99`) at `33.75 M` and back to `1.96–2.01`. After `34 M` the area
-  still grows, `2·10⁻³` of it at `σ_g = 5` and `10⁻³` at `σ_g = 10` by `40 M`;
-  whether that drift is the gauge's or the resolution's is **(open)**.
+  still grows, `2·10⁻³` of it at `σ_g = 5` and `10⁻³` at `σ_g = 10` by `40 M`.
+  The drift is the same, to `4·10⁻⁶`, with the remnant's layer at `1/24`, so the
+  layer's spacing does not cause it. Whether it comes from the gauge or the
+  exterior's resolution is **(open)**.
 - **The constraints.** At the handover row the masked `ℋ` norm falls from
   `1.24·10⁻³` to `4.1·10⁻⁴` (`1.28·10⁻³` to `3.0·10⁻⁴`), the momentum norm
   thirtyfold, and the largest `|C_a|` from `0.15` to `0.019`, part of it because
