@@ -846,6 +846,11 @@ octant"; TreeAMR's `CODE.md` on the half turn (M14).
 `CODE.md`: "The outer boundary and the wave zone", "Refinement for two
 holes". **No hole.**
 
+**Before its design:** a multi-patch wave zone, a Cartesian cube in
+cubed-sphere shells, was priced (`CODE.md`, "A multi-patch wave zone
+(priced)"). It does not pay on cost, so the step stays Cartesian unless
+Erik decides otherwise **(open)**.
+
 **Changes:**
 
 - **The Teukolsky wave:** the linearised even-parity `ℓ = 2`, `m = 0`

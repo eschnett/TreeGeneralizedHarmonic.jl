@@ -135,6 +135,7 @@ The briefs of the finished steps are under
   - [Step H4 shelved: the data are to be solved (2026-11-15)](#step-h4-shelved-the-data-are-to-be-solved-2026-11-15)
   - [Step S1 started: XCTS's data on the grid (2026-11-15)](#step-s1-started-xctss-data-on-the-grid-2026-11-15)
   - [Step H4 resumed: the pair on solved data (2026-11-18 to 2026-11-20)](#step-h4-resumed-the-pair-on-solved-data-2026-11-18-to-2026-11-20)
+  - [A multi-patch wave zone priced (2026-11-22)](#a-multi-patch-wave-zone-priced-2026-11-22)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2729,6 +2730,39 @@ on from the periodic checkpoints at `26` and `28 M`, losing at most `M/4`.
 They waited about `18 h` on priority, ran on 2026-11-20, and lost their tracks
 at the plunge at `30.25` and `30.5 M`, as at `1/48`. The measurements are
 `CODE.md`'s "What step H4 has built" ("The pair from solved data").
+
+### A multi-patch wave zone priced (2026-11-22)
+
+Before designing step B5, Erik asked whether the package supports
+multi-patch systems.
+
+- **This package does not.** Every kernel, background, mask, symmetry map
+  and interpolation assumes the mesh's coordinates are Cartesian.
+- **TreeAMR does, with limits.** Its M17 (`Forest(patches; glue, …)`,
+  merged and in the `v0.2.10` tag) keeps the coordinates logical and every
+  glued face conforming. It refuses patch corners for cell- and
+  vertex-centered sets, and seams on a forest of patches. Point
+  interpolation on patches (M19) is on a branch.
+
+Erik asked for the alternative to be priced before step B5 is designed. The
+pricing is `CODE.md`'s "A multi-patch wave zone (priced)", built from:
+
+- TreeAMR's "A multi-patch forest" and "Glued faces";
+- TreeWaveOLDG's "The seven-patch ball", whose two passes and whose shell
+  time steps it borrows;
+- this package's own point counts.
+
+**The conclusion: the ball does not pay on cost.** It saves at most `1.2×`
+on G7, and on G8 it costs more, because a forest of patches takes no half
+turn. The causes are three:
+
+- the holes are most of the points;
+- the cube's face fixes the shells' angular resolution at about `160` a side;
+- a shell point is estimated at `1.75` Cartesian ones.
+
+What it would buy is accuracy: a spherical outer boundary and grid spheres for
+the extraction. Step B5 measures the first of these on the Cartesian grid. The
+recommendation is to keep step B5 Cartesian **(open: Erik's call)**.
 
 ## Possible extensions
 
