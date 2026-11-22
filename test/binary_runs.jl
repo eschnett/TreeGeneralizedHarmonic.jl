@@ -100,6 +100,8 @@
 #   char_probe=1                   (step B7) the characteristics on surfaces below
 #                                  every accepted common surface and the remnant's
 #                                  (bench/characteristics_probe.jl, out/chars.csv)
+#   handover_aspect=7/4            (step B7) hand over only once the common surface's
+#                                  largest radius is at most this times its smallest
 #   handover_from=<t> remnant_depth=<k>
 #                                  (step B7, diagnostics) no handover before t; the
 #                                  remnant's margin and ramp k times the holes'
@@ -193,7 +195,8 @@ common_horizon = opt("common", "0") in ("1", "true") ?
                                streak=parse(Int, opt("common_streak", "3")),
                                handover=opt("handover", "0") in ("1", "true"),
                                handover_from=Float64(rat(opt("handover_from", "-1"))),
-                               remnant_depth=parse(Int, opt("remnant_depth", "1"))) :
+                               remnant_depth=parse(Int, opt("remnant_depth", "1")),
+                               handover_aspect=Float64(rat(opt("handover_aspect", "7/4")))) :
                  nothing
 walltime = haskey(OPTIONS, "walltime") ? parse(Float64, OPTIONS["walltime"]) : nothing
 ckevery = parse(Int, opt("checkpoint_every", "4"))

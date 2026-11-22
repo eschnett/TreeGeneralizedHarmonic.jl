@@ -927,8 +927,9 @@ formation: on H4's rows it did, at `h = 1/24`, and the remnant then failed
 within a `M`. The diagnosis (`CODE.md`, "The common horizon and the handover",
 "When.") put it on the surface, not the spacing: every handover from a quarter
 of a `M` after formation on held, and the characteristics point inward through
-every layer surface. Proposed: hand over once the common horizon's radii are
-within `1.75 : 1`. Open: why the fit of a `1.88 : 1` surface drives the layer's
+every layer surface. The handover now waits until the common horizon's radii
+are within `7/4 : 1` (`handover_aspect`); H4's rows have not been rerun with it.
+Open: why the fit of a `1.88 : 1` surface drives the layer's
 lapse down, the core gap against the remnant's depth, the radius check at a
 piece boundary, the remnant's late area drift and its resolution, and G7's
 waveform.

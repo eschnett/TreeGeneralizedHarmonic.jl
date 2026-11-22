@@ -2844,6 +2844,9 @@ the cause; the lapse inside the layer collapsed toward the fit's instead. It als
 showed that the holes' layers on H4's rows lie in `1/24` blocks, so the scaled
 spacing the earlier paragraph called `1/24` is `1/12`, and `1/24` only where
 `1/12` does not fit.
+Erik then asked for the rule: the handover waits until the common surface's
+radii are within `7/4 : 1` (`handover_aspect`), and he noted that a lapse that
+still went wrong could be changed once at the handover, smoothed for instance.
 
 ## Possible extensions
 

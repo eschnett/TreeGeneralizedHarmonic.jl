@@ -7644,7 +7644,9 @@ and grows monotonically to `47.3` by `30.3 M` (`M_irr` from `0.890` to
 **The handover (built in step B7, for fitted harmonic holes;
 `CommonHorizon(…; handover = true)`, `test/binary_runs.jl handover=1`).** It
 happens at the first record row after formation whose accepted common surface
-holds both holes' cores (every `core_gap` positive), whose remnant geometry
+holds both holes' cores (every `core_gap` positive), is round enough — its
+largest radius about its origin at most `handover_aspect = 7/4` times its
+smallest (measured below, "When.") — whose remnant geometry
 passes the checks every geometry passes, and whose fit is a metric; a row that
 fails one of them says which in the common row's `handover` note, and the next
 row tries again. At that row, in one step **(proposed in step B7, over the two
@@ -7742,8 +7744,10 @@ rows from their `28 M` checkpoints to `40 M`, one Trillium node, `38–40 min`):
   `α` `0.5 M` below the horizon falls from `0.535` to `0.12` in `0.2 M`, while
   it holds near `0.56` in the remnants that survive. The layer relaxes toward a
   target whose lapse is far too small; why the fit of a `1.88 : 1` surface is
-  such a target is **(open)**. **Hand over once the radii are within `1.75 : 1`
-  (proposed)**, which on this pair is a quarter of a `M` after formation.
+  such a target is **(open)**. **So the handover waits until the radii are
+  within `7/4 : 1`** (`CommonHorizon`'s `handover_aspect`), which on this pair
+  is a quarter of a `M` after formation; should a lapse at the handover still go
+  wrong, it may be changed once there, smoothed for instance **(proposed)**.
   The `remnant_depth = 2` row stopped at `34 M` on the piece boundary's radius
   check: `fitted_interior` and `check_interior_radii` read the layer's spacing
   over annuli built from slightly different radii, and a partly refined annulus

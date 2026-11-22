@@ -1312,12 +1312,22 @@ function evolve!(::Type{T}, case::GHCase{T}; forest=nothing, q::Integer, ops,
     # coarser there is not yet. The pair's mesh alone held the remnant three
     # rows past formation on H4's pair (`CODE.md`, "The common horizon and the
     # handover").
+    #
+    # And the surface must be round enough (`handover_aspect`): on H4's pair a
+    # remnant handed its `1.88 : 1` surface at formation failed within a `M`, its
+    # layer's lapse collapsing toward the fit's, and every one handed a
+    # `1.74 : 1` or rounder surface held.
     function handover_attempt(p, u, t, cm, st′, trs)
         why(msg) = (ok=false, note=msg)
         st′.t_formed === nothing && return why("the common horizon has not formed")
         t ≥ common_horizon.handover_from ||
             return why("held back until t = $(common_horizon.handover_from)")
         cm.success === true || return why("this row's common find failed")
+        aspect = cm.r_max / cm.r_min
+        aspect ≤ common_horizon.handover_aspect || return why(
+            "the common surface is not round enough: its radii are $(cm.r_min)–" *
+            "$(cm.r_max) about its origin, $(aspect) : 1, above " *
+            "$(common_horizon.handover_aspect) : 1")
         (cm.core_gap !== nothing && all(>(0), cm.core_gap)) ||
             return why("the common core does not hold both holes' cores (core gap " *
                        "$(cm.core_gap))")

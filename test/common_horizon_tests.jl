@@ -275,6 +275,14 @@ isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
         @test rem.h == 1 // 8
         @test first(geometry_spacing(hf, rem, T(3 // 20))) == 1 // 4
         @test first(geometry_spacing(a.forest, rem, T(3 // 20))) == 1 // 8
+        # The aspect bound: a surface less round than it allows is not handed
+        # over, and the row says why.
+        fake[] = nothing
+        c = evolve!(T, hc; forest=deepcopy(hf), kw..., t_end=T(1 // 10),
+                    common_horizon=CommonHorizon(T; d_c=10, N=12, spin=false, streak=1,
+                                                 handover=true, handover_aspect=1))
+        @test startswith(c.records[2].common.handover, "the common surface is not round")
+        @test all(r -> length(r.holes) == 2, c.records)
         fake[] = nothing
         pre = joinpath(mktempdir(), "handover")
         b = evolve!(T, hc; forest=deepcopy(hf), kw..., checkpoint_path_prefix=pre,
@@ -298,6 +306,7 @@ isdefined(@__MODULE__, :hole_fixture) || include("evolution_cases.jl")
         @test_throws "positive" CommonHorizon(T; d_c=0)
         @test_throws "stall" CommonHorizon(T; atol_factor=0)
         @test_throws "at least 1" CommonHorizon(T; remnant_depth=0)
+        @test_throws "at least 1" CommonHorizon(T; handover_aspect=1 // 2)
         @test_throws "case of two holes" evolve!(T, case; forest=deepcopy(forest), q=q,
                                                   ops=ops, t_end=T(1 // 10),
                                                   common_horizon=CommonHorizon(T))
