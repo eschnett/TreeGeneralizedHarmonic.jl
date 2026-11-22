@@ -1,7 +1,10 @@
 # Step B7's handover on step H4's 1/48 roll-on rows (`common=1 handover=1`):
 # continued from their 28 M checkpoints, the common horizon found, formed, and
 # the pair handed over to one fitted remnant at the first row after formation
-# whose common core holds both holes' cores, then the remnant to 40 M. It
+# whose common core holds both holes' cores and whose common surface's radii are
+# within `handover_aspect = 7/4` to one (the default: `s5` at `29.25 M`, `s10` at
+# `29.5 M`; handed over at formation, at `1.87–1.88`, both remnants failed within
+# a `M`), then the remnant to 40 M. It
 # measures what the handover does to the constraints, the area and the remnant's
 # layer (`CODE.md`, "The common horizon and the handover"). The rows' commands
 # are `jobs/h4-pair.toml`'s, plus the two options and `t_end=40`.
