@@ -869,7 +869,10 @@ step does not.
   and the atlas passed to every `GhostSchedule`, to `regrid!` and on a
   restore.
 - **First, a check:** whether IMEXRungeKutta's partition by block owner
-  covers the state's appendix.
+  covers the state's appendix. **(Done 2026-11-25:** not as it was — the
+  cores alone, which IMEXRungeKutta refuses — and now two ranges per thread,
+  its blocks' cores and their appendix; `CODE.md`, "The cube and the
+  shells", and `test/ball_tests.jl`.**)**
 - **The appendix wherever the state is walked:** `appendix = true` on every
   `map_blocks!` over the state, writes through `statearray(du, fs;
   appendix = true)` and `isowned`.

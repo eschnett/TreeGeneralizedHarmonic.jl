@@ -54,6 +54,7 @@ using TreeAMR
 # dependency (decided 2026-10-01, for HDF5 then), so that a run can always be
 # checkpointed.
 using TreeIOHDF5
+import TreeMultiPatch
 
 import SpacetimeMetrics
 using AbstractSphericalHarmonics: EquiangularGrid, SphereGrid, ash_grid_size,

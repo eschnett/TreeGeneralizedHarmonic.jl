@@ -8002,9 +8002,19 @@ shell point is counted as `1.75`.
 - **The appendix wherever the state is walked**: fourteen `map_blocks!`
   calls in `driver.jl`, `constraints.jl`, `bounds.jl`, `fit.jl`,
   `evolution.jl` and `refinement.jl` — the right-hand side, the limiter, the
-  initial data, the error reference and the monitors. Whether
-  IMEXRungeKutta's partition by block owner covers the appendix, which lies
-  after all the cores, is **(open: to check first)**.
+  initial data, the error reference and the monitors.
+- **The integrator's partition covers the appendix** (checked in step B5).
+  The appendix lies after all the cores, block by block, so a partition of
+  the cores alone misses it, which IMEXRungeKutta refuses (`check_cover`), and
+  this package's `state_partition` refused the length before. IMEXRungeKutta
+  takes several ranges per thread, so [`state_partition`] gives each thread
+  two: its blocks' cores and their appendix, which is contiguous because the
+  appendix is in block order. A block's appendix length is counted through
+  the public `isowned` on its high planes, so nothing of TreeAMR's layout is
+  read. On a brick the partition is the one range per thread of before.
+  `test/ball_tests.jl` checks that every appendix entry lands in its block's
+  thread's range and that the stage arithmetic by owner is the broadcast's to
+  the bit.
 - **Positions through the atlas, `√g`-weighted norms and the refinement
   rule** above.
 - **The one-pass shell kernel**, the frozen hook on the sphere, then

@@ -137,6 +137,7 @@ The briefs of the finished steps are under
   - [Step H4 resumed: the pair on solved data (2026-11-18 to 2026-11-20)](#step-h4-resumed-the-pair-on-solved-data-2026-11-18-to-2026-11-20)
   - [The cube and the shells chosen for the wave zone (2026-11-22)](#the-cube-and-the-shells-chosen-for-the-wave-zone-2026-11-22)
   - [The cube and the shells on TreeAMR's M20 (2026-11-25)](#the-cube-and-the-shells-on-treeamrs-m20-2026-11-25)
+  - [Step B5 as built (2026-11-25)](#step-b5-as-built-2026-11-25)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2832,6 +2833,18 @@ What M20 changed in the design:
   TreeMultiPatch's registration.
 - **Step B5 no longer waits on TreeAMR**: it runs on the whole ball, and
   only its grading row and Sommerfeld's condition wait on item 8.
+
+### Step B5 as built (2026-11-25)
+
+**The partition and the appendix.** The first check of step B5 was whether
+IMEXRungeKutta's partition by block owner covers the state's appendix. It
+did not: `state_partition` checked the state's length against the cores and
+threw, and TreeAMR's own test helper, of which it is a copy, gives the cores
+alone, which IMEXRungeKutta refuses as a partition that misses an index. No
+upstream change was needed: IMEXRungeKutta takes an iterable of ranges per
+thread, and the appendix is in block order, so each thread's appendix is one
+range beside its cores. On a 56-block thirteen-patch ball (`N = 8`, twenty
+variables) the appendix is 114380 entries after 573440 of cores.
 
 ## Possible extensions
 
