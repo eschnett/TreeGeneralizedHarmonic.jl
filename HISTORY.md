@@ -2856,6 +2856,24 @@ differentiation is the linearised statement, `□h = 0` and `∂_i h_ij = 0` fro
 tensor's `O(a²)` from three nested dual passes (70 s) in the full tier, whose
 skipped-test message no longer says "evolves a hole".
 
+**The ball's kernel.** The design priced the chain rule at about `830`
+multiply-adds a point, applied to the twenty variables' derivatives. As built it
+goes into the Π components' coefficients instead (`Ã^{ab}`, `β̃^a`, `Ã^a`), once
+per point, so a component on a shell costs what it costs on the cube. The ball's
+right-hand side is a launch of its own over the closed range, so that the
+brick's launch is the code of before; a cube block in it calls the brick's point
+functions with its physical origins, and its cores came out the brick kernel's
+bits at the first try, at one point at a time and on four lanes. The shells'
+lanes came out the scalar kernel's bits too. The first order measurement used a
+pulse of width `1`, eight of the cube's spacings at `N = 8`, and the cube's
+glued faces converged at 3.2 and then 2.0: the largest error sat at the face
+centres, whose ghosts, interpolated in the inner shells near the cube's edges,
+converge at 4.1, 5.2, 5.6 and 5.8 between `N = 8` and `24`. At width `2` every
+patch is at 3.9–4.1, and the test uses it.
+
+**The `AppendixArray` has no `size(A, d)`**, only `size(A)`; the ball's linear
+store (`AppendixLinear`) reads the tuple.
+
 ## Possible extensions
 
 ### Extensions since built

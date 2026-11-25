@@ -780,7 +780,11 @@ function refine_flags(τfs::FieldSet{T,3}, lb::AnyLevelBounds{T},
         end
     end
 
-    marks = buffer > 0 ? buffered_marks(lb, flags, buffer) : flags
+    # On the ball (step B5) every block within reach of a glue stays at its
+    # level, before the margin and after it (`glue_frozen`).
+    flags = freeze_glue_flags(forest, flags)
+    marks = buffer > 0 ? freeze_glue_flags(forest, buffered_marks(lb, flags, buffer)) :
+            flags
     return (flags=marks, τ_max=tau_max(τfs; slot=slot),
             centroid=refinement_centroid(τfs, boxfires),
             nfiring=rank_reduce(+, forest, sum(first, boxfires; init=0)))

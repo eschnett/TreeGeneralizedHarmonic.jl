@@ -979,7 +979,7 @@ aarch64, eight with AVX-512, one on a device), and `1` is the scalar kernel. The
 lanes compute the scalar kernel's numbers to roundoff, and the same numbers at any
 thread count.
 """
-struct GHProblem{T,G,q,HASH,DISS,INT,W,F,S,H,D,O,V,C,I,A,X,Y}
+struct GHProblem{T,G,q,HASH,DISS,INT,W,F,S,H,D,O,V,C,I,A,X,Y,B}
     U::F
     schedule::S
     Hsrc::H                      # the sampled gauge source, or `nothing`
@@ -1016,13 +1016,18 @@ struct GHProblem{T,G,q,HASH,DISS,INT,W,F,S,H,D,O,V,C,I,A,X,Y}
     # The SIMD width of the kernel (added 2026-10-05): `W` points at a time on the
     # CPU, `1` on a device (`lanes.jl`, `default_simd_width`).
     valsimd::Val{W}
+    # The cube and the shells (step B5): `nothing` on a brick, a `BallGeometry` on
+    # a forest of patches (`ball.jl`). Last, so that every method that names the
+    # leading parameters dispatches as before.
+    ball::B
 end
 
 function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
                    t=zero(T), interior=case.interior, margin_check=true,
                    accounting=nothing, target=nothing, fits=nothing,
                    t_target=zero(T), target_rate::Bool=false, trail=zero(T),
-                   target_exact::Bool=false, simd_width=nothing) where {T}
+                   target_exact::Bool=false, simd_width=nothing, layout=nothing,
+                   frozen::Bool=false) where {T}
     q ≥ 2 && iseven(q) || throw(ArgumentError(
         "the finite-difference order must be even and at least 2, so that " *
         "the centered stencils have an integer half-width q/2 and CODE.md's " *
@@ -1095,9 +1100,37 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
     else
         nothing
     end
-    diag = FieldSet{T}(U.forest, NDIAG; G=0, centering=U.centering,
+    # The cube and the shells (step B5): the atlas, and a `diag` set that holds
+    # the appendix's points too, so that a fold over it counts them.
+    # Over the whole forest, so that every rank refuses alike.
+    patched = any(k -> patch(U.forest, k) != 1, U.forest.leaves)
+    patched && layout === nothing && throw(ArgumentError(
+        "this field set's forest has patches, whose positions only the atlas " *
+        "knows: pass `layout`, the TreeMultiPatch layout the forest was built " *
+        "from (CODE.md, \"The cube and the shells\")."))
+    if layout !== nothing
+        U.glue === :interpolate || throw(ArgumentError(
+            "on a forest of patches the state is filled across a glue by " *
+            "interpolation, which a finite-difference stencil needs at a kinked " *
+            "glue: build the field set with `glue = :interpolate` (CODE.md, \"The " *
+            "cube and the shells\")."))
+        interior === nothing || throw(ArgumentError(
+            "a hole on the ball needs TreeAMR's M19 (point interpolation on " *
+            "patches) for its finder, its fits and its ADM provider, which is not " *
+            "released: step B5's ball runs without an interior (CODE.md, " *
+            "\"Upstream prerequisites\", item 8)."))
+        HASH === false || throw(ArgumentError(
+            "the ball runs a harmonic background in step B5: a sampled gauge " *
+            "source needs the atlas in its sampling, and an algebraic one a " *
+            "hole, neither of which is built on patches yet."))
+    end
+    ball = layout === nothing ? nothing : ball_geometry(U, layout; frozen=frozen)
+    diag = layout === nothing ?
+           FieldSet{T}(U.forest, NDIAG; G=0, centering=U.centering,
                        parity=even_parity(U.forest, NDIAG),
-                       rotation=identity_rotation(U.forest, NDIAG), backend=backend)
+                       rotation=identity_rotation(U.forest, NDIAG), backend=backend) :
+           FieldSet{T}(U.forest, NDIAG; G=0, centering=U.centering, backend=backend,
+                       glue=:interpolate)
 
     origins = to_backend(backend, block_origins(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))
@@ -1128,11 +1161,11 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
     return GHProblem{T,U.G,Int(q),HASH,DISS,INT,W,typeof(U),typeof(schedule),
                      typeof(Hsrc),typeof(diag),typeof(origins),
                      typeof(spacings),typeof(case),typeof(interior),
-                     typeof(accounting),typeof(target),typeof(fits)}(
+                     typeof(accounting),typeof(target),typeof(fits),typeof(ball)}(
         U, schedule, Hsrc, diag, origins, spacings, case, interior,
         accounting, target, fits, T(t_target), target_rate, T(trail),
         target_exact, hasdirichlet, Val(U.G),
-        Val(Int(q)), Val(HASH), Val(DISS), Val(INT), Val(W))
+        Val(Int(q)), Val(HASH), Val(DISS), Val(INT), Val(W), ball)
 end
 
 """
@@ -1163,11 +1196,11 @@ function with_interior(p::GHProblem{T,G,q,HASH,DISS,INT0,W}, interior;
     return GHProblem{T,G,q,HASH,DISS,INT,W,typeof(p.U),typeof(p.schedule),
                      typeof(p.Hsrc),typeof(p.diag),typeof(p.origins),
                      typeof(p.spacings),typeof(p.case),typeof(interior),
-                     typeof(p.accounting),typeof(target),typeof(fits)}(
+                     typeof(p.accounting),typeof(target),typeof(fits),typeof(p.ball)}(
         p.U, p.schedule, p.Hsrc, p.diag, p.origins, p.spacings, p.case,
         interior, p.accounting, target, fits, T(t_target), target_rate,
         T(trail), target_exact, p.hasdirichlet,
-        p.valG, p.valq, p.valH, p.valdiss, Val(INT), p.valsimd)
+        p.valG, p.valq, p.valH, p.valdiss, Val(INT), p.valsimd, p.ball)
 end
 
 """
@@ -1195,11 +1228,11 @@ function with_case(p::GHProblem{T,G,q,HASH,DISS,INT,W}, case::GHCase{T};
                      typeof(q2.schedule),typeof(Hsrc),typeof(q2.diag),
                      typeof(q2.origins),typeof(q2.spacings),typeof(case),
                      typeof(interior),typeof(q2.accounting),typeof(q2.target),
-                     typeof(q2.fits)}(
+                     typeof(q2.fits),typeof(q2.ball)}(
         q2.U, q2.schedule, Hsrc, q2.diag, q2.origins, q2.spacings, case, interior,
         q2.accounting, q2.target, q2.fits, q2.t_target, q2.target_rate, q2.trail,
         q2.target_exact, q2.hasdirichlet, q2.valG, q2.valq, q2.valH, q2.valdiss,
-        q2.valint, q2.valsimd)
+        q2.valint, q2.valsimd, q2.ball)
 end
 
 """
@@ -1336,7 +1369,7 @@ TreeGRRMHD's verbs have the same names.
 function prepare!(p::GHProblem{T}, u, t) where {T}
     scatter!(p.U, u)
     if p.hasdirichlet
-        fill_ghosts!(p.U, p.schedule; boundary=dirichlet(p.case, T(t)))
+        fill_ghosts!(p.U, p.schedule; boundary=gh_boundary(p, T(t)))
     else
         fill_ghosts!(p.U, p.schedule)
     end
@@ -1354,8 +1387,14 @@ working array in between: `rhs!` reads that array as it finds it. `matter` is
 state vector. Public, not exported.
 """
 function rhs!(du, p::GHProblem, t; matter=nothing)
-    map_blocks!(gh_rhs_kernel!, p.U,
-                gh_rhs_kernel_args(p, du, t, bind_matter(matter, p.U))...)
+    if p.ball === nothing
+        map_blocks!(gh_rhs_kernel!, p.U,
+                    gh_rhs_kernel_args(p, du, t, bind_matter(matter, p.U))...)
+    else
+        # The cube and the shells (step B5), `ball.jl`: one launch over the closed
+        # range, the branch per block on its patch.
+        ball_rhs!(du, p, t, bind_matter(matter, p.U))
+    end
     return nothing
 end
 
@@ -1451,8 +1490,10 @@ It reads the working array, not a state vector: call it after a
 """
 function max_speed(p::GHProblem{T}; t=zero(T),
                    mask=interior_mask(p.interior, t)) where {T}
+    # `appendix = true` covers the high glued face planes of a ball's blocks
+    # (step B5); on a brick the keyword changes nothing.
     map_blocks!(gh_speed_kernel!, p.U, p.diag.work, p.U.work, p.origins,
-                p.spacings, mask, p.valG)
+                p.spacings, mask, p.valG; appendix=true)
     # `zero(T)` as the identity rather than `typemin`: a characteristic
     # speed is `α√(tr γ^{ij}) + |β| ≥ 0`, and `typemin` is not defined for
     # every type this package runs in. A `NaN` still propagates, which is
@@ -1484,8 +1525,15 @@ function gh_dt(p::GHProblem{T}, u; cfl, t=zero(T)) where {T}
         "a metric any more (a blown-up run) or identically zero, which no " *
         "initial data of this package produces — h = 0 is Minkowski, whose " *
         "speed is √3."))
-    return T(cfl) * minimum_spacing(T, p.U.forest) / λ
+    return T(cfl) * dt_spacing(p) / λ
 end
+
+# The spacing the time step is the CFL bound of: the finest spacing of a brick,
+# and on the ball (step B5) the smallest of the cube's physical spacings and the
+# shells' logical spacings over their logical speed of light (`BallGeometry`).
+dt_spacing(p::GHProblem) = _dt_spacing(p.ball, p)
+_dt_spacing(::Nothing, p::GHProblem{T}) where {T} = minimum_spacing(T, p.U.forest)
+_dt_spacing(g, p) = g.hmin
 
 """
     max_speed(p::GHProblem, u, t) -> T

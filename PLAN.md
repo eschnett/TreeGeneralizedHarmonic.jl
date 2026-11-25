@@ -868,7 +868,9 @@ step does not.
 - **The dependencies and the field set:** TreeAMR 0.2.12, TreeIOHDF5
   0.1.11, TreeMultiPatch; `glue = :interpolate`, `Operators(…; glue = 6)`,
   and the atlas passed to every `GhostSchedule`, to `regrid!` and on a
-  restore.
+  restore. **(Dependencies done 2026-11-25; the field set and its schedule
+  in `ball_problem`; `regrid!` and a restore with the atlas not yet: no
+  `evolve!` on the ball.)**
 - **First, a check:** whether IMEXRungeKutta's partition by block owner
   covers the state's appendix. **(Done 2026-11-25:** not as it was — the
   cores alone, which IMEXRungeKutta refuses — and now two ranges per thread,
@@ -876,15 +878,21 @@ step does not.
   shells", and `test/ball_tests.jl`.**)**
 - **The appendix wherever the state is walked:** `appendix = true` on every
   `map_blocks!` over the state, writes through `statearray(du, fs;
-  appendix = true)` and `isowned`.
+  appendix = true)` and `isowned`. **(Done 2026-11-25 for the right-hand
+  side, the speed and the error; the limiters, the monitors and the fits are
+  refused on a ball by TreeAMR, which asks for the keyword.)**
 - **The ball:** TreeMultiPatch's `ThirteenPatchBall`, with physical
   positions through `chart_map` wherever a position is formed,
   `volume_element`-weighted norms, and `refine_flags` kept off the shells
-  and the cube's blocks within reach of a glue.
+  and the cube's blocks within reach of a glue. **(Done 2026-11-25,
+  `src/ball.jl`; Minkowski stays Minkowski to the bit, `test/ball_tests.jl`.)**
 - **The one-pass shell kernel:** the existing stencils in logical
   coordinates with the chain rule, the dissipation along logical axes, and
   the cube's blocks on the existing kernel. The map is evaluated in the
-  kernel or stored in a set, whichever the H200 prefers.
+  kernel or stored in a set, whichever the H200 prefers. **(Done 2026-11-25
+  on the CPU, the map evaluated in the kernel: the cube's bits, the lanes,
+  and order 4 on every patch, `test/ball_tests.jl`. The H200's choice is
+  open.)**
 - **The sphere:** the frozen hook through the atlas, then Sommerfeld's
   condition once the sphere's plane can be evolved.
 - **`test/octant_runs.jl` options** for the ball and its radii.

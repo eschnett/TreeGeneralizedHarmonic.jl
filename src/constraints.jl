@@ -510,7 +510,7 @@ end
 function _prepare_monitor!(p::GHProblem, u, t)
     scatter!(p.U, u)
     if p.hasdirichlet
-        fill_ghosts!(p.U, p.schedule; boundary=dirichlet(p.case, t))
+        fill_ghosts!(p.U, p.schedule; boundary=gh_boundary(p, t))
     else
         fill_ghosts!(p.U, p.schedule)
     end

@@ -1006,6 +1006,14 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   ranks part ways at the next collective and the job hangs. What the
   checkpoint's `data` holds must be the same on every rank, or TreeIOHDF5
   refuses the save (`CODE.md`, "Running distributed").
+- **On the ball a problem's `origins` are logical** (step B5). TreeAMR's
+  coordinates stay logical on a forest of patches: a shell's position is
+  `TreeAMR.chart_map(layout, ξ, p)`, and the cube's physical origins and
+  spacings are `p.ball.corigins` and `p.ball.cspacings`. Every `map_blocks!`
+  over the state of a ball needs `appendix = true` or `false` (TreeAMR
+  refuses the call without it), and a kernel writes the appendix through
+  `statearray(du, U; appendix = true)`. See `CODE.md`, "The cube and the
+  shells".
 - **Hooks depend on time.** `dirichlet(case, t)` is built at each call.
   It goes to `fill_ghosts!` inside the RHS, to `regrid!`, and to
   `adapt_to_initial_data!`, each with that call's `t`. See `CODE.md`, "Outer boundary: Dirichlet from the background, at the current time".

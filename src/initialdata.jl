@@ -1909,9 +1909,15 @@ One line over [`state_callback`](@ref), written out because it is the
 call every study makes twice, and because a field set filled from a
 *different* layout than the state's would sample the solution at
 different points (TreeWave's note on the error field set).
+
+`layout` (added in step B5) is the atlas of a forest of patches, through which
+each point's logical position is mapped ([`ball_state_callback`](@ref)); `nothing`
+on a brick.
 """
-fill_exact!(fs::FieldSet, case::GHCase, t; interior=case.interior) =
-    fill_by_coordinates!(state_callback(case, t; interior=interior), fs)
+fill_exact!(fs::FieldSet, case::GHCase, t; interior=case.interior, layout=nothing) =
+    layout === nothing ?
+    fill_by_coordinates!(state_callback(case, t; interior=interior), fs) :
+    fill_by_coordinates!(ball_state_callback(case, layout, t), fs)
 
 """
     add_noise!(U::FieldSet, rng; amplitude) -> U

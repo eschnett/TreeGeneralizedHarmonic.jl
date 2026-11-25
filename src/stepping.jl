@@ -157,7 +157,7 @@ target's data. `u` may be a segment of a multi-set state vector. Public, not
 exported.
 """
 function initial_state!(u, p::GHProblem{T}, t) where {T}
-    fill_exact!(p.U, p.case, T(t); interior=p.interior)
+    fill_exact!(p.U, p.case, T(t); interior=p.interior, layout=ball_layout(p.ball))
     gather!(u, p.U)
     stage_limit!(u, p, T(t))
     return u
