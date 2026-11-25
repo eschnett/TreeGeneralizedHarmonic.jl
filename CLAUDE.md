@@ -103,8 +103,8 @@ julia --project=. -e 'using Pkg; Pkg.test(; julia_args = ["--threads=4"])'
 
 The clean-checkout check, which is what the `[sources]` pins exist for: a
 tree with no `Manifest.toml` resolves the five pinned packages from
-GitHub and TreeAMR from the General registry (TreeIOHDF5 among the five, and HDF5 with its
-binary library through it), and passes. It is a real check —
+GitHub and TreeAMR and TreeIOHDF5 from the General registry (HDF5 with its
+binary library through TreeIOHDF5), and passes. It is a real check —
 every source is public, so it works anonymously, which is what CI does:
 
 ```bash
@@ -688,9 +688,9 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
 
 - **Five dependencies are pinned to GitHub `main`, and TreeAMR comes
   from the registry**. `SpacetimeMetrics`, `ApparentHorizonFinder`,
-  `KorzynskiSpin`, `IMEXRungeKutta` and `TreeIOHDF5` are
-  what `Project.toml`'s `[sources]` entries resolve, and TreeAMR is
-  General's release — so `~/src/jl/…` is *not*
+  `KorzynskiSpin`, `IMEXRungeKutta` and `TreeMultiPatch` are
+  what `Project.toml`'s `[sources]` entries resolve, and TreeAMR and
+  TreeIOHDF5 are General's releases — so `~/src/jl/…` is *not*
   what the tests see; an unpushed change there is invisible here, a pushed
   change to TreeAMR's `main` is invisible too until it is *released*, and
   the local SpacetimeMetrics checkout has been behind `main` before. Read
@@ -705,12 +705,10 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   See `CODE.md`, "File layout".
 - **Most `[sources]` pins are necessary, not chosen.** A
   pin goes only when its package is in General at the bound asked for:
-  `KorzynskiSpin` is not registered at all, and
+  `IMEXRungeKutta` and `TreeMultiPatch` are not registered at all, and
   `ApparentHorizonFinder` **2.1** is not released (General carries
   `2.0.0`, and `[compat]` here asks for `2.1`).
   See `CODE.md`, "File layout".
-
-  **Inconsistent:** this rule names `KorzynskiSpin` and `ApparentHorizonFinder` as the necessary pins; `CODE.md`, "File layout", says three are necessary and that `TreeIOHDF5` is not in General at all, while the same paragraph and `HISTORY.md`'s "Releases and dependencies" (the status of 2026-10-09) call `TreeIOHDF5` registered (`[compat]` `0.1.0`).
 
 - **TreeIOHDF5 `main` can be ahead of the TreeAMR it admits**.
   A copy of an older commit on

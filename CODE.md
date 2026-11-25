@@ -5117,8 +5117,8 @@ says that TreeAMR's `[compat]` selects **0.1.1**.
 paragraph below, and `CLAUDE.md`'s "Things that will bite", name more
 `[sources]` pins than two.
 
-Dependencies: `TreeAMR` (registered) and `SpacetimeMetrics` (pinned to
-GitHub `main` by `[sources]`),
+Dependencies: `TreeAMR` (registered, `[compat]` `0.2.12`, its M20) and
+`SpacetimeMetrics` (pinned to GitHub `main` by `[sources]`),
 `KernelAbstractions`, `StaticArrays`
 (kernel-safe, and what `SpacetimeMetrics` speaks),
 `IMEXRungeKutta` (unregistered, pinned to GitHub `main` by `[sources]`; neither
@@ -5126,21 +5126,20 @@ GitHub `main` by `[sources]`),
 of its tests), `LinearAlgebra` (`det`, `dot`
 and `tr` on `StaticArrays`, which the pointwise algebra uses; a standard
 library), `TreeIOHDF5` (TreeAMR's companion package for checkpoints, registered,
-`[compat]` `0.1.0`),
+`[compat]` `0.1.11`, which checkpoints the appendix of [the cube and the
+shells](#the-cube-and-the-shells)), `TreeMultiPatch` (the balls' maps and
+their atlas, step B5; unregistered, pinned to GitHub `main` by `[sources]`),
 `ApparentHorizonFinder` and `KorzynskiSpin` (from G4,
 both pinned to GitHub `main` by `[sources]` like `SpacetimeMetrics` and both
 listed in `test/Project.toml` as well, because `prerequisite_tests.jl`
 holds them to the same standard: a moving `main` that dropped a name must
 fail at the top of the suite). The `[sources]` entries would by themselves put the Julia floor at 1.11, and
-three of them are necessary rather than chosen — `KorzynskiSpin` and `TreeIOHDF5` are not in
-General at all, and `ApparentHorizonFinder` `2.1` is not released there
-(General has `2.0.0`). Vendoring a package or
+three of them are necessary rather than chosen — `IMEXRungeKutta` and
+`TreeMultiPatch` are not in General at all, and `ApparentHorizonFinder` `2.1`
+is not released there (General has `2.0.0`); `KorzynskiSpin` (`1.1.0`) and
+`SpacetimeMetrics` (`1.7.0`) are, so their pins are choices (the status of
+2026-11-25). Vendoring a package or
 adding a local-path source would hide that instead of stating it.
-
-**Inconsistent:** the paragraph above lists `TreeIOHDF5` as registered
-(`[compat]` `0.1.0`, as `HISTORY.md`'s [Releases and dependencies](HISTORY.md#releases-and-dependencies) does) and then as one
-of the `[sources]` entries that are necessary because it is "not in General
-at all".
 
 **The Julia floor is 1.13** (`julia = "1.13"`), and CI runs 1.13 only,
 because supporting earlier versions slows
@@ -5188,7 +5187,7 @@ and the record's `finite` read.
   `hole_runs.jl` a `calibration` section; `hole_runs.jl` has the `generic` section,
   the matrix.
 
-**TreeAMR is General's release under `[compat]` `0.2.6`**; the other pinned packages are what `Project.toml`'s `[sources]` entries resolve. `SpacetimeMetrics` is
+**TreeAMR is General's release under `[compat]` `0.2.12`**; the other pinned packages are what `Project.toml`'s `[sources]` entries resolve. `SpacetimeMetrics` is
   registered at the bound this package asks for, so its pin is a choice
   rather than a necessity.
 

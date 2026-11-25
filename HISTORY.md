@@ -2981,6 +2981,18 @@ nested-mesh ghost fill took a moving-hole row on one H200 from `254` to
 - `ApparentHorizonFinder` and `KorzynskiSpin`, the horizon diagnostics,
   are used from step 7.
 
+From 2026-11-25 the package requires **TreeAMR 0.2.12** (its M20: ghosts
+interpolated across a glue and closed ownership with the state's appendix)
+and **TreeIOHDF5 0.1.11** (the appendix in a checkpoint), and depends on
+**TreeMultiPatch** (the balls' maps) through a `[sources]` pin to its GitHub
+`main`, for step B5. TreeMultiPatch's repository is public, so the
+clean-checkout check resolves it anonymously. The quick tier passed unchanged
+on the raised bounds (5705 assertions and 36 skipped in 16m08 at four
+threads on the development machine). The same day the dependency paragraphs
+of `CODE.md` and `CLAUDE.md` were corrected to the pins `Project.toml` has:
+TreeIOHDF5 had left `[sources]` when it was registered, and `KorzynskiSpin`
+is registered (`1.1.0`), so its pin, like `SpacetimeMetrics'`, is a choice.
+
 ### TreeAMR
 
 - **2026-10-19.** Threads, GPUs and MPI through the mesh: TreeAMR's M7 is
