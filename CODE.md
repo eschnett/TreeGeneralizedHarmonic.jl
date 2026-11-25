@@ -5041,32 +5041,36 @@ What this package needs from TreeAMR. None blocks G0–G3.
    override). They belong in TreeAMR — its MPI extension for the rank and
    device helpers, a test utility for the job — so that the applications call
    them rather than copy them.
-8. **Patches for a vertex-centered, second-order system** **(proposed)**,
-   for [the cube and the shells](#the-cube-and-the-shells). TreeWaveOLDG's
-   balls use element sets, which TreeAMR fills on faces only; this
-   package's sets are vertex-centered, with ghosts along every axis. Every
-   piece below is refused or not designed in TreeAMR today, each with its
-   reason there:
-   **Erik designs and implements this in TreeAMR first, corner ghosts
-   included**; the list is what this package asked for, and TreeAMR's
-   design supersedes it.
-   - **Patch corners:** fill a ghost region beyond two glued faces at once,
-     or at least leave it unfilled rather than refuse the set. The two-pass
-     kernel never reads one; a one-pass kernel with mixed stencils does.
-   - **A reversed vertex-like axis across a glue:** the shared plane's
-     ownership along a reversed tangent (M14's `seam_shift`, generalised to
-     a glue), and an owner for the plane of a high face glued to a high
-     face. TreeAMR's `CODE.md` ties this to the same milestone as the
-     corners.
-   - **Reflecting faces per patch**, for the octant and the bitant.
-     TreeWaveOLDG names the same need.
-   - **The half turn on a forest of patches**, for G8's quarter domain.
-     TreeAMR refuses seams with patches today.
-   - **Optionally, a fill over a subset of the blocks**, so that the
-     gradient set costs only where the two-pass kernel runs.
-   - **Releases:** M19, point interpolation on patches, for the finder, the
-     fits and the extraction; and TreeIOHDF5's `patches` feature, for
-     checkpoints.
+8. **Patches for a vertex-centered, second-order system**, for [the cube
+   and the shells](#the-cube-and-the-shells). TreeAMR 0.2.12 (its M20) has
+   most of it: ghosts interpolated across a glue at faces, edges and patch
+   corners (`glue = :interpolate`), closed ownership with the state's
+   appendix, coordinates aligned across a glue, and all of it over MPI and
+   on a device; TreeIOHDF5 0.1.11 checkpoints the appendix, and
+   TreeMultiPatch holds the balls' maps. What remains:
+   - **Point interpolation on patches**, TreeAMR's M19: designed, on a
+     TreeAMR branch, not released. The horizon finder, the fits and the ADM
+     provider call `interpolate`, which refuses a forest of patches. It
+     blocks every hole on the ball, not step B5's wave, and not an
+     extraction radius on a radial node.
+   - **Symmetries on patches**, TreeAMR's M21 **(proposed there)**: face
+     kinds per patch face for the mirrors, turn seams as glue entries for
+     the half turn, the fold of an interpolated ghost near a mirror or a
+     seam, and TreeMultiPatch's symmetric balls. A mirror plane or a turn
+     seam does not freeze the cube's refinement there. Without it every run
+     is the whole ball.
+   - **A graded radius on the outer shells**, in TreeMultiPatch, whose outer
+     shells are linear in `r` today. Any monotone `r(ξ_k)` keeps the
+     shells aligned in the radius.
+   - **A coarsening inside the outer shells** **(open)**: a coarse-fine
+     sphere crossing the glues between the outer shells, which are aligned
+     in the radius. TreeAMR refuses a refinement boundary at a glue, so the
+     shells' angular spacing is the cube's face spacing.
+   - **The radiative sphere's plane** **(open)**: owned at an outer face,
+     or filled by a hook that reads the state, so that Sommerfeld's
+     condition can evolve it. M21's per-patch face kinds name an outflow
+     outer sphere.
+   - **TreeMultiPatch registered**; until then a `[sources]` pin.
 
 Two further items are *not* needed for the proof of concept and are
 recorded with the extensions that would need them: an interior-reading
@@ -7774,104 +7778,146 @@ are the long term: a boundary that is a sphere, extraction spheres that are
 grid surfaces, and a far region that grows as `log L`. Cost is not the
 reason; it is about even (below).
 
-TreeAMR glues patches at their faces (its M17, `Forest(patches; glue, …)`),
-and TreeWaveOLDG runs its scalar wave on such balls ("The seven-patch ball"
-and "The thirteen-patch ball" in its `CODE.md`). This package needs from
-TreeAMR what a scalar element scheme did not ([Upstream
-prerequisites](#upstream-prerequisites), item 8).
+**What is upstream.** TreeAMR glues patches at their faces (its M17) and,
+since 0.2.12, fills a field set built with `glue = :interpolate` across a
+glue by interpolation in the patch across, at faces, edges and patch
+corners alike (its M20, "Finite differences across a glue" in its
+`CODE.md`). A finite-difference scheme needs that on a cubed sphere: the
+maps join with a kink, and a copied ghost makes a stencil differentiate the
+kink. TreeMultiPatch holds the balls' maps, and TreeWave runs its scalar
+wave on the seven-patch ball ("Patches" in its `CODE.md`). What this
+package still needs upstream is [Upstream
+prerequisites](#upstream-prerequisites), item 8.
 
-**The ball** **(proposed)**: TreeWaveOLDG's thirteen-patch ball.
+**The ball** **(proposed)**: TreeMultiPatch's
+`ThirteenPatchBall(a, R_m, L, (n, m, m′))`.
 
-- **Patch 1 is the cube** `[−a, a]³`, the octree with its holes, interiors,
-  floors and indicator. Its map is the identity, and nothing in it changes.
-- **Patches 2–7 are the inner shells**, blending each face of the cube into
-  a middle sphere `|x| = R_m > a√3`.
-- **Patches 8–13 are the outer shells**, exactly radial from `R_m` to the
-  outer sphere `L`.
+- **Patch 1 is the cube** `[−a, a]³` of `n³` roots, the octree with its
+  holes, interiors, floors and indicator. Its map is affine
+  (`affine_map`), and nothing in it changes.
+- **Patches 2–7 are the inner shells**, blending each face of the cube
+  into the middle sphere `|x| = R_m`, `m` roots along the radius.
+- **Patches 8–13 are the outer shells**, `x = r(ξ_k) c/|c|` from `R_m` to
+  the outer sphere `L`, `m′` roots along the radius.
   - Their `r = const` surfaces are spheres, so the extraction spheres are
     grid surfaces, and the radiative condition's normal is radial.
-  - Their `√g` factorizes.
-  - Their radial map is free, so the radial spacing can grow beyond the
-    wave zone.
-- **The glues:** the cube to each inner shell, and each inner shell to the
-  outer shell over it, by the identity; within each layer, quarter turns.
-- **Conformity at the glue** (TreeAMR keeps every glued face conforming,
-  with one cell size a level on every patch). The shells' angular cells at
-  the cube are the cube's outermost cells: `n = 2a/h_c` per patch side.
-  - The cube must hold the pair's region at `1/4` to `32 M` and nest out
-    to the wave zone's `h_c = M/2`, so `a ≈ 40 M` and `n ≈ 160`.
-  - That is ten times finer than the wave's `ℓ ≤ 8` need at `100 M`.
-    A coarsening inside the outer shells halves it; TreeAMR allows a
-    coarse-fine face inside a patch.
-- **`R_m ≈ 2a = 80 M`**, so the extraction radii are `R ≥ 100 M`
-  **(proposed)**, all in the outer shells.
+  - Their `√g` factorizes (`factored_volume`).
+  - Their radius is linear in `ξ_k` in TreeMultiPatch; a graded radius is
+    item 8.
+- **The radii.** The cube's corner ghosts must lie inside the inner shells,
+  `R_m > √3 a (1 + 2G/(n N))` (TreeAMR's condition). `R_m ≈ 2a = 80 M`, so
+  the extraction radii are `R ≥ 100 M` **(proposed)**, all in the outer
+  shells.
+
+**The shells' angular spacing is the cube's face spacing.** TreeAMR keeps
+every block within reach of a kinked glue at one level ("No refinement
+boundary at a glue"): their flags are dropped, and a change that 2:1
+balance would carry into one is refused. Every shell block is next to a
+glue, so the shells and the cube's face blocks are one level.
+
+- A face is `n N 2^ℓ` cells a side at every radius: the cube's spacing
+  `h_c = 2a/(n N 2^ℓ)` at its face, and about `(π/2) r/(n N 2^ℓ)` along a
+  sphere of radius `r`.
+- **The cube's face must carry the wave at `h_c = M/2`**, since the wave
+  zone from `32 M` lies partly in the cube. With `a ≈ 40 M` that is `160`
+  cells a side, about `1 M` along the sphere at `100 M`: ten times finer
+  than `ℓ ≤ 8` needs.
+- **A coarsening inside the outer shells** would halve it each time, but a
+  coarse-fine sphere there crosses the glues between the outer shells,
+  which TreeAMR refuses (item 8, **open**).
+- The radial spacing is free: `m′` sets it.
 
 **The state stays in Cartesian components** on every patch. A glue then
-carries it unchanged — TreeAMR's glue has no variable map, and Cartesian
-components need none — and only the derivatives see the map. Every
-background, mask, symmetry map and analysis quantity keeps its meaning.
+interpolates each component as a scalar — TreeAMR's glue has no variable
+map, and Cartesian components need none — and only the derivatives see the
+map. Every background, mask, symmetry map and analysis quantity keeps its
+meaning.
 
-**The shells' right-hand side** **(proposed)**: two passes, as TreeWaveOLDG's.
+**Closed ownership.** Under `glue = :interpolate` a point on a glued face is
+owned and evolved by every patch that holds it, each with its own stencil,
+so the copies differ by the scheme's error. The high glued face planes
+follow the cores as the state's **appendix**: every `map_blocks!` over the
+state passes `appendix = true` (TreeAMR refuses the call without the
+keyword) and writes through `statearray(du, fs; appendix = true)`, asking
+`isowned` before a write. A fold counts each point once.
 
-- **Why two passes.** A mixed second derivative reads ghosts beyond two
-  faces at once. Where two glued faces meet — every shell, and the cube's
-  edges — there is no one block across them, and TreeAMR fills no ghost
-  there.
-- **The passes:**
-  1. The first pass forms each logical first derivative of `h` from the
-     face ghosts along its own axis, and writes the Cartesian gradient
-     `V_{ab,i}`, thirty variables, into a second field set.
-  2. An exchange carries `V` across the faces.
-  3. The second pass forms `∂_j V_{ab,i}` and `∂_i Π_ab` from face ghosts
-     along each axis, with the map's Jacobian contracted in, and then the
-     pointwise algebra, unchanged.
-- **A second derivative is then a derivative of a derivative**: a wider
-  stencil with the same order.
-- **The dissipation acts along logical axes.**
-- **The cube's blocks keep the existing kernel**, the holes' validated one,
-  except those that touch two glued faces, the cube's outer edges, which run
-  the two-pass kernel with the identity map.
-- **The kernel variant is a `Val`** built in `GHProblem`'s constructor, with
-  the map's identity.
-- **Where `V` lives (open).** A field set covers every block, so `V` costs
-  `240 B` a point and a ghost fill of thirty variables everywhere, unless
-  TreeAMR fills a set over a subset of its blocks.
-- **With corner ghosts in TreeAMR** (item 8: Erik designs them there), the
-  shells can instead take one pass: the existing compact stencils, mixed
-  ones included, with the chain rule contracted in. That needs no gradient
-  set and no second exchange, and the two passes are then the fallback
-  **(open until TreeAMR's design is settled)**.
+**The shells' right-hand side** **(proposed)**: one pass, the existing
+kernel's stencils in logical coordinates with the chain rule contracted in.
 
-**The radiative sphere** **(proposed)**: Sommerfeld's condition on every
-component of `h` and `Π`,
+- **Why one pass suffices.** The interpolated ghosts fill the edges and the
+  patch corners, so the compact stencils, mixed ones included, read filled
+  points on every block. TreeAMR's M20 prototype ran this package's scheme
+  — fourth-order stencils, mixed derivatives as products of first ones,
+  sixth-order Kreiss–Oliger dissipation, RK4, `G = 3`, 6-point Lagrange
+  ghosts — through a kinked glue in two dimensions at order 4, and its
+  `glue_tests.jl` measures the fourth-order first and second derivatives at
+  order 4 beside a kinked glue.
+- **The interpolation** is `Operators(…; glue = 6)`: exact to degree 5, as
+  a second derivative of order 4 needs (the interface-order rule's reason),
+  and within TreeAMR's `k ≤ 2(G + 1) = 8`.
+- **The chain rule.** With `K^a_i = ∂ξ^a/∂x^i` and the map's Hessian
+  `H^k_bc = ∂²x^k/∂ξ^b∂ξ^c`,
 
-    ∂_t u = −∂_r u − (u − u₀)/r,
+      ∂_i u = K^a_i ∂_a u
+      ∂_i∂_j u = K^a_i K^b_j ∂_a∂_b u + (∂_i K^a_j) ∂_a u,
+      ∂_i K^a_j = −K^a_k H^k_bc K^b_i K^c_j,
 
-with `u₀` the frozen data at the sphere.
+  twenty-seven numbers a point. For the twenty variables that is about
+  `830` fused multiply-adds, `1.7 kflop` beside the kernel's `6.5`
+  **(predicted)**.
+- **The map in the kernel or in a set (open).** TreeWave stores its
+  coefficients in a field set filled at every stored point. Twenty-seven
+  coefficients are `216 B` a point read from memory; TreeMultiPatch's maps
+  are `isbits` and run in a device kernel, so they can be evaluated where
+  they are used instead, at the cost of flops and registers. The H200's
+  SASS and its timing decide (spills show as `STL`/`LDL`).
+- **The cube's blocks keep the existing kernel**, bit for bit. The branch
+  is per block, on its patch, inside one launch; the layout's type is a
+  `Val`-like parameter built in `GHProblem`'s constructor.
+- **The dissipation acts along logical axes**, at `ε_KO = 1/2`: where three
+  patches meet the prototype found a spatial instability that `0.5` damps
+  and a smaller time step does not. GHSO2's recipe is `0.5` already.
+- **The chain rule's algebra is generic in its number type**, so it runs
+  on the CPU's SIMD lanes as the kernel does.
 
-- **Where it acts:** on the outermost owned plane of the outer shells. The
-  radial derivative there is one-sided of order `q` along the shells'
-  radial axis, which is the radius. The no-one-sided-stencil rule is about
-  the holes' interior, not the outer boundary.
-- **The radial ghosts** are extrapolated to order `q`, so that the interior
-  stencils beside the sphere read smooth data.
-- **It is first order:** a wave of angular order `ℓ` reflects at
-  `O(ℓ(ℓ+1)/(kR)²)`, as TreeWaveOLDG measured. A causally disconnected
-  sphere needs no better.
-- **The frozen data** (option 1) stay as the other choice, through the
-  Dirichlet hook with the patch (TreeAMR's `WithPatch`).
-- **The ghosts depend on the state,** which TreeAMR's coordinate hooks
-  cannot read, so a kernel of this package writes them after the exchange,
-  as TreeWaveOLDG's does.
+**The time step** stays global, from the cube's finest level. With no
+subcycling every point takes the holes' step, so the shells' own CFL limit
+does not bind; TreeWaveOLDG measured the shells beside the cube's corners
+at `0.15–0.39` of its root level's step, and TreeMultiPatch's
+`logical_speed` gives the check.
+
+**The outer sphere.** The outermost shells' high radial face is the only
+face of the ball that is not glued. Its plane is not owned: the hook fills
+it and the ghosts beyond.
+
+- **The frozen data first** (option 1 of [the outer
+  boundary](#the-outer-boundary-and-the-wave-zone)), through a hook that
+  maps each point through the atlas, as TreeWave's `PlaneWaveHook` does.
+  With a causally disconnected sphere nothing more is needed for the
+  extraction.
+- **Sommerfeld's condition** **(proposed, after)** on every component of
+  `h` and `Π`,
+
+      ∂_t u = −∂_r u − (u − u₀)/r,
+
+  with `u₀` the frozen data, one-sided of order `q` along the shells'
+  radial axis, which is the radius. It needs the sphere's plane evolved,
+  which the hook's plane is not: either the plane owned at an outer face,
+  or a hook that reads the state (item 8, **open**). It is first order: a
+  wave of angular order `ℓ` reflects at `O(ℓ(ℓ+1)/(kR)²)`, as TreeWaveOLDG
+  measured. A causally disconnected sphere needs no better. The
+  no-one-sided-stencil rule is about the holes' interior, not the outer
+  boundary.
 
 **Causal disconnection** sets two radii:
 
 - **The outer sphere at `L ≥ T + R_ext`.** The boundary acts from `t = 0`:
   the data's mismatch there and the condition's own error both start then.
 - **The wave resolved out to `r_res = (T + R_ext)/2`.** Beyond `r_res` the
-  radial spacing may grow without limit. A wave emitted at `t_e` and
-  reflected by a coarse grid at `r` returns to `R_ext` at `t_e + 2r − R_ext`,
-  and the earliest, the junk at `t_e = 0`, sets the radius.
+  radial spacing may grow without limit, once the outer shells' radius can
+  be graded (item 8). A wave emitted at `t_e` and reflected by a coarse grid
+  at `r` returns to `R_ext` at `t_e + 2r − R_ext`, and the earliest, the
+  junk at `t_e = 0`, sets the radius.
 - **How fast the spacing may grow** inside `r_res` is what the reflection of
   a graded shell decides **(open: step B5 measures it)**. Waves that return
   in time are emitted early, when the inspiral's wavelength is long.
@@ -7879,64 +7925,98 @@ with `u₀` the frozen data at the sphere.
   [What it costs](#what-it-costs-predicted) leaves as thin as 2:1 balance
   allows from `R_ext` on.
 
+**Positions, norms and refinement.**
+
+- **Every position goes through `chart_map`**: the backgrounds, the hook,
+  the initial data, the error reference, and the damping and dissipation
+  profiles. That is three `coordinates` calls and a dozen reads of
+  `block_origins` and `block_spacings`. The masks, the interiors, the
+  indicator and the floors see only the cube.
+- **Norms are weighted by `volume_element`.** The constraint and ADM
+  monitors take derivatives, so they need the chain rule too.
+- **`refine_flags` flags no shell block and no cube block within reach of a
+  glue**; `regrid!` would drop the flag or refuse the change. The cube's
+  floors and the holes' nesting stay inside a margin of its faces.
+
+**Wave extraction on the outer shells** **(proposed)**:
+
+- **An extraction radius on a radial node** reads `Ψ₄` at grid points: no
+  point interpolation, so no M19. Between nodes it is a 6-point
+  interpolation in the radius.
+- **`Ψ₄` needs the physical second derivatives**: the chain rule again.
+- **The modes.** A quadrature over the six faces with `angular_volume` as
+  weights, counting each seam point once. The trapezoid rule across the
+  face edges' kinks is second order, so it needs a higher-order rule per
+  face, or a resampling within the sphere onto step B6's equiangular grid
+  **(open)**.
+
 **What a shell point costs** **(predicted, not measured)**: about `1.5–2×`
-a Cartesian point. That is a second kernel, a ghost fill of thirty variables
-beside the state's twenty, and perhaps `1–2 kflop` of chain rule beside the
-kernel's `6.5`. The counts below use `1.75×`. With no subcycling every point
-takes the holes' step, so the shells' own CFL limit does not bind;
-TreeWaveOLDG measured the shells beside the cube's corners at `0.15–0.39` of
-its root level's step.
+a Cartesian point. The chain rule is about a quarter of the kernel. The
+interpolated ghosts are the rest: TreeAMR measured `106 ns` per ghost and
+variable at `216` taps (the cube to the inner shells and between inner
+shells), `24 ns` at `36` (between outer shells, in the angles only) and
+`7.5 ns` at `6` (across the middle sphere, in the radius only), on one
+Apple M3 Pro thread; only the blocks on a glue pay. The counts below use
+`1.75×`.
 
 **The points**, in millions, counted as in [What it
 costs](#what-it-costs-predicted): volumes of balls, the wave zone from `32 M`
-to `100 M` at `M/2`, and the frozen boundary at `L = T + R_ext`. Each layout
-is on the smallest domain its symmetry allows: G8's half-turn quarter domain
-and G7's octant for the Cartesian grid, the bitant and the octant for the
-patches (item 8 below). A shell point is counted as `1.75`.
+to `100 M` at `M/2`, the frozen boundary at `L = T + R_ext`, and the outer
+shells graded beyond `r_res`. Each layout is on the smallest domain its
+symmetry allows: G8's half-turn quarter domain and G7's octant for the
+Cartesian grid, the bitant and the octant for the patches (both item 8). A
+shell point is counted as `1.75`.
 
-| | Cartesian | `a = 40`, one coarsening | `a = 40`, none | `a = 48`, one coarsening |
-|---|---|---|---|---|
-| G8 (`L = 1060 M`), wave zone and far region | `18.7` | `9.0`, weighted `14.6` | `15.3`, `25.7` | `14.8`, `23.7` |
-| G8 in all | `35` | `47` | `58` | `56` |
-| G7 (`L = 300 M`), wave zone and far region | `7.2` | `2.2`, weighted `3.5` | `3.2`, `5.3` | `3.6`, `5.7` |
-| G7 in all | `15` | `12` | `13` | `14` |
+| | Cartesian | cube and shells, `a = 40` |
+|---|---|---|
+| G8 (`L = 1060 M`), wave zone and far region | `18.7` | `15.3`, weighted `25.7` |
+| G8 in all | `35` | `58` |
+| G7 (`L = 300 M`), wave zone and far region | `7.2` | `3.2`, weighted `5.3` |
+| G7 in all | `15` | `13` |
 
 - **The holes' share is the same in both layouts:** `12` million a half
   hole at `1/64`, a little under half that on G7's octant, plus `4` million
   a quarter domain for the pair's region.
-- **On G7 the shells save `1.1–1.3×`.**
-- **On G8 they cost more**, because a forest of patches takes no half turn
-  and the bitant is twice the quarter domain. With the half turn they would
-  be `23–29` million, `1.2–1.5×` below the Cartesian grid.
+- **On G7 the shells save about `1.15×`.**
+- **On G8 they cost more** on the bitant, which is twice the quarter
+  domain. With the half turn on patches (item 8) they would be about `29`
+  million against `35`.
+- **Without a graded radius** G7's outer shells from `80 M` to `300 M` at
+  `M/2` are about `440` radial planes of `6 × 160²`: `68` million on the
+  whole ball, `8.5` on the octant.
+- **Without symmetries on patches** every run is the whole ball: eight
+  times the octant on G7, about `100` million.
 - **The far region grows as `log L` in the shells** and as the number of
   levels in the octree, so a longer run changes little. A larger `R_ext`
   changes much: the wave zone grows as `R` in the shells and as `R³` in the
   octree, `3×` apart at `150 M` and `7×` at `200 M`.
-- **Without per-patch reflecting faces** the shells need the whole ball:
-  eight times the octant on G7.
 
 **What this package builds:**
 
-- **The atlas:** the three layers' maps with their Jacobians, `√g`, and
-  the radial grading.
-- **Physical positions through the atlas** wherever a position is formed:
-  the backgrounds, the Dirichlet hook, the initial data, the masks, the
-  indicator, the floors and the analysis. That is three `coordinates`
-  calls, and a dozen reads of `block_origins` and `block_spacings`.
-- **`√g`-weighted norms** through `block_fold`, and the physical CFL.
-- **The two-pass kernel**, the radiative sphere and the frozen hook on the
-  sphere.
-- **The octant on patches.** TreeAMR sets the face kinds per `(dim, side)`
-  for every patch at once, so each shell's axes must be labelled so that
-  its symmetry planes are the reflecting side of the dimension of their
-  physical normal, or TreeAMR must take face kinds per patch (item 8). The
-  parity table stays the Cartesian one.
-- **The extraction on the outer shells' spheres.** Step B6's transform
-  reads a cubed-sphere angular grid, not an equiangular one: by quadrature
-  on it, or by interpolation within the sphere **(open)**.
-- **MPI and the device.** TreeAMR's glue has its MPI path and runs the
-  same copy kernel on a device. This package needs the ball in its MPI
-  workload and on an H200.
+- **The dependencies.** TreeAMR `0.2.12` and TreeIOHDF5 `0.1.11` (the
+  appendix in a checkpoint), and TreeMultiPatch through a `[sources]` pin
+  until it is registered: a necessary pin, by the rule of [File
+  layout](#file-layout).
+- **The field set and its schedule.** `glue = :interpolate`,
+  `Operators(…; glue = 6)`, and the atlas passed to every `GhostSchedule`,
+  to `regrid!` and on a restore.
+- **The appendix wherever the state is walked**: fourteen `map_blocks!`
+  calls in `driver.jl`, `constraints.jl`, `bounds.jl`, `fit.jl`,
+  `evolution.jl` and `refinement.jl` — the right-hand side, the limiter, the
+  initial data, the error reference and the monitors. Whether
+  IMEXRungeKutta's partition by block owner covers the appendix, which lies
+  after all the cores, is **(open: to check first)**.
+- **Positions through the atlas, `√g`-weighted norms and the refinement
+  rule** above.
+- **The one-pass shell kernel**, the frozen hook on the sphere, then
+  Sommerfeld's condition.
+- **The initial data out to `L`.** Superposed analytic data reach any
+  radius. An XCTS solution must reach `L`, or be continued beyond its own
+  domain **(open)**.
+- **The extraction on the outer shells' spheres.**
+- **MPI and the device.** TreeAMR's interpolated fill has its MPI path (the
+  sender computes the ghosts) and its device kernels. This package needs
+  the ball in its MPI workload and on an H200.
 
 **The larger cost lever is still subcycling** ([What it
 costs](#what-it-costs-predicted)): about `4×` on the whole run, in either

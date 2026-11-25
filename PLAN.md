@@ -851,48 +851,67 @@ and their mesh refinement, inside spherical shells out to an outer sphere
 causally disconnected from the extraction, with a simple radiative condition
 there. No boundary condition for the Cartesian grid is built.
 
-**Needs from TreeAMR** `CODE.md`'s "Upstream prerequisites", item 8: patch
-corners, reversed vertex-like axes across a glue, and, for the octant,
-reflecting faces per patch. **Erik designs and implements them in TreeAMR
-first, corner ghosts included**; the step waits for that, and its kernel
-follows TreeAMR's design: one pass with corner ghosts, two without. Without
-per-patch reflecting faces the step runs on the whole ball.
+**Needs from upstream** (`CODE.md`'s "Upstream prerequisites", item 8):
+TreeAMR 0.2.12, released, and TreeMultiPatch, through a `[sources]` pin
+until it is registered. The step needs neither M19 (it has no hole, and its
+extraction radii lie on radial nodes) nor M21: it runs on the whole ball.
+The grading's row waits for a graded radius in TreeMultiPatch, and
+Sommerfeld's condition for the sphere's plane (both item 8); the rest of the
+step does not.
 
 **Changes:**
 
 - **The Teukolsky wave:** the linearised even-parity `ℓ = 2`, `m = 0`
   quadrupole wave (Teukolsky 1982) as an `isbits` `AbstractMetric`,
   `η + ε h`.
-- **The ball:** TreeWaveOLDG's thirteen-patch ball, with:
-  - the atlas, the three layers' maps with their Jacobians and `√g`;
-  - the outer shells' radial grading;
-  - the cube's level floor.
-- **Physical positions through the atlas** wherever a position is formed,
-  and `√g`-weighted norms and the physical CFL.
-- **The two-pass kernel:** the shells and the cube's outer edges, with the
-  gradient set and its exchange.
-- **The sphere:** the radiative condition, and the frozen hook with the
-  patch.
-- **`test/octant_runs.jl` options** for the ball, its radii and its grading.
+- **The dependencies and the field set:** TreeAMR 0.2.12, TreeIOHDF5
+  0.1.11, TreeMultiPatch; `glue = :interpolate`, `Operators(…; glue = 6)`,
+  and the atlas passed to every `GhostSchedule`, to `regrid!` and on a
+  restore.
+- **First, a check:** whether IMEXRungeKutta's partition by block owner
+  covers the state's appendix.
+- **The appendix wherever the state is walked:** `appendix = true` on every
+  `map_blocks!` over the state, writes through `statearray(du, fs;
+  appendix = true)` and `isowned`.
+- **The ball:** TreeMultiPatch's `ThirteenPatchBall`, with physical
+  positions through `chart_map` wherever a position is formed,
+  `volume_element`-weighted norms, and `refine_flags` kept off the shells
+  and the cube's blocks within reach of a glue.
+- **The one-pass shell kernel:** the existing stencils in logical
+  coordinates with the chain rule, the dissipation along logical axes, and
+  the cube's blocks on the existing kernel. The map is evaluated in the
+  kernel or stored in a set, whichever the H200 prefers.
+- **The sphere:** the frozen hook through the atlas, then Sommerfeld's
+  condition once the sphere's plane can be evolved.
+- **`test/octant_runs.jl` options** for the ball and its radii.
 
 **Accept:**
 
-- **The two-pass kernel is right.** Its right-hand side of the Teukolsky
-  wave is the wave's time derivative to truncation, at order `q`, on every
-  patch. The cube's blocks away from its edges give the existing kernel's
-  bits.
+- **Minkowski stays Minkowski** on the ball to rounding, on every patch,
+  the appendix included.
+- **The shell kernel is right.** Its right-hand side of the Teukolsky wave
+  is the wave's time derivative to truncation, at order `q`, on every
+  patch, the points on a glue and beside a patch corner included. The
+  cube's blocks give the existing kernel's bits.
 - **The wave converges** at order `q` on the ball, at an amplitude where
-  `ε²` is below truncation, through the cube–shell glues and the middle
-  sphere. The glues' reflection is at truncation.
-- **The sphere's reflection** of the `ℓ = 2` wave is recorded, for the
-  radiative condition and the frozen hook, at two outer radii.
+  `ε²` is below truncation, through the three kinds of glue: the cube to
+  the inner shells, between shells, and the middle sphere. The glues'
+  reflection is at truncation.
+- **The ball is stable** at `ε_KO = 1/2`, on random data to many crossings,
+  and keeps the inversion and the mirrors to rounding.
+- **The sphere's reflection** of the `ℓ = 2` wave is recorded at two outer
+  radii, for the frozen hook and, once it is built, the radiative
+  condition.
 - **The grading's reflection** is recorded against how fast the radial
-  spacing grows. That sets the spacing between `R_ext` and `r_res`.
+  spacing grows, once TreeMultiPatch has a graded radius. That sets the
+  spacing between `R_ext` and `r_res`.
 - **Causal disconnection holds.** Two outer spheres, both beyond
   `T + R_ext`, agree at `R_ext` to far below the truncation error.
 - **The cost of a shell point** is recorded against a Cartesian one (the
-  prediction is `1.75×`), together with the gradient set's memory.
-- **MPI:** one and three ranks agree.
+  prediction is `1.75×`), split into the kernel and the interpolated fill,
+  with the map evaluated and stored.
+- **MPI and the device:** one and three ranks agree, and the ball runs on
+  an H200.
 
 ## Step B6 — `Ψ₄` and the extraction
 

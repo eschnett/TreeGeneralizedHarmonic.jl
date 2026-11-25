@@ -136,6 +136,7 @@ The briefs of the finished steps are under
   - [Step S1 started: XCTS's data on the grid (2026-11-15)](#step-s1-started-xctss-data-on-the-grid-2026-11-15)
   - [Step H4 resumed: the pair on solved data (2026-11-18 to 2026-11-20)](#step-h4-resumed-the-pair-on-solved-data-2026-11-18-to-2026-11-20)
   - [The cube and the shells chosen for the wave zone (2026-11-22)](#the-cube-and-the-shells-chosen-for-the-wave-zone-2026-11-22)
+  - [The cube and the shells on TreeAMR's M20 (2026-11-25)](#the-cube-and-the-shells-on-treeamrs-m20-2026-11-25)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2793,6 +2794,44 @@ Erik then took TreeAMR's part on himself: he designs and implements it there
 first, corner ghosts included. With corner ghosts the shells can take one
 pass with the existing mixed stencils, and the two-pass scheme becomes the
 fallback.
+
+### The cube and the shells on TreeAMR's M20 (2026-11-25)
+
+TreeAMR 0.2.12, registered on 2026-11-25, carries Erik's M20: a field set
+built with `glue = :interpolate` is filled across a glue by interpolation in
+the patch across, at faces, edges and patch corners, and owns every point of
+its glued faces, with the high planes in an appendix after the cores. The
+balls' maps moved into a new package, TreeMultiPatch (unregistered), and
+TreeWave runs its second-order scalar wave on the seven-patch ball. Erik
+asked what supporting the thirteen-patch ball would take, with all the holes
+in the refined cube, and then for the design to be rewritten to match.
+
+What M20 changed in the design:
+
+- **One pass, not two.** Interpolated ghosts fill the patch corners, so the
+  shells run the existing compact stencils with the chain rule contracted
+  in. M20's prototype had run this package's scheme (fourth order, `G = 3`,
+  6-point ghosts) through a kinked glue in two dimensions at order 4. The
+  two-pass kernel, its thirty-variable gradient set and the open question
+  of where that set lives are gone, and so is the ask for a fill over a
+  subset of the blocks.
+- **Item 8's asks for patch corners and for a reversed vertex-like axis**
+  are answered by M20: interpolated corners, and closed ownership instead of
+  a shifted seam plane.
+- **No coarsening inside the outer shells.** M20 keeps every block within
+  reach of a kinked glue at one level, and every shell block is next to one,
+  so the shells' angular spacing is the cube's face spacing. The pricing's
+  columns with one coarsening went: on the octant G7 is `13` million
+  against `12`, and on the bitant G8 `58` against `47`. A coarse-fine
+  sphere across the outer shells' glues, which are aligned in the radius,
+  is a new open item.
+- **What remains upstream:** M19's release (the finder, the fits and the
+  ADM provider on patches), M21's symmetries on patches (proposed in
+  TreeAMR the same day, with Erik's decisions on refinement), a graded
+  radius in TreeMultiPatch, the radiative sphere's plane, and
+  TreeMultiPatch's registration.
+- **Step B5 no longer waits on TreeAMR**: it runs on the whole ball, and
+  only its grading row and Sommerfeld's condition wait on item 8.
 
 ## Possible extensions
 
