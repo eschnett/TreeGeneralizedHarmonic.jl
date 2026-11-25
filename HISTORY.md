@@ -2874,6 +2874,13 @@ patch is at 3.9–4.1, and the test uses it.
 **The `AppendixArray` has no `size(A, d)`**, only `size(A)`; the ball's linear
 store (`AppendixLinear`) reads the tuple.
 
+**The first runs.** `test/ball_runs.jl` took 113 s for a unit of time of the
+wave at `N = 8` on two threads of the development machine (34391 points, 56
+blocks), most of it the interpolated fill: at `N = 8` and `G = 3` a block has
+more ghosts than points. The wave's error at `a = 10⁻⁶` was `1.3·10⁻¹⁰` in L2
+at `t = 1`. Random data of size `10⁻⁶` on flat space with the frozen sphere
+rose to `6.4·10⁻⁶` in L2 by `t = 1/2` and decayed to `3.0·10⁻⁶` by `t = 2`.
+
 ## Possible extensions
 
 ### Extensions since built

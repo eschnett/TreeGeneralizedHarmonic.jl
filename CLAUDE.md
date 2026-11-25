@@ -446,6 +446,17 @@ rsynced directory, `. "$R/bench/simwatch.sh"` with `R` that directory — not
 the running studies' scripts name and source again at their exit, which stay
 as they are.
 
+Step B5's runs on the cube and the shells are `test/ball_runs.jl`, one run
+per call (options in its header: `case=teukolsky|noise`, the ball's `Lc`, `Rm`,
+`R1` and `roots`, `N`, `frozen`, `t_end`, `chunk`, `out=`), with CSV and
+SimWatch. A unit of time at `N = 8` is about two minutes here, most of it the
+interpolated ghost fill, so the acceptance rows are `jobs/b5-ball.toml` on one
+Symmetry node:
+
+```bash
+julia --project=. --threads=4 test/ball_runs.jl case=teukolsky N=8 t_end=1 out=out/b5
+```
+
 The star-damping study is `test/star_runs.jl`. Each call is one Plummer star
 with its matter held fixed, run to `500 M` at a given `γ0 M` and `γ2`; the
 options are listed in its header. A run continues from `out/ck.jls` and refuses

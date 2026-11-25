@@ -7939,6 +7939,11 @@ it and the ghosts beyond.
 - **The frozen data first** (option 1 of [the outer
   boundary](#the-outer-boundary-and-the-wave-zone)), through a hook that
   maps each point through the atlas, as TreeWave's `PlaneWaveHook` does.
+  **(Built in step B5:** `ball_problem(…; frozen = true)`, whose hook,
+  `ball_dirichlet`, writes the background at `t = 0`; without it the hook
+  writes the background at the fill's time, which is how the convergence rows
+  see no sphere at all. `test/ball_runs.jl` runs both, and `jobs/b5-ball.toml`
+  the acceptance rows; their results are not in yet.**)**
   With a causally disconnected sphere nothing more is needed for the
   extraction.
 - **Sommerfeld's condition** **(proposed, after)** on every component of

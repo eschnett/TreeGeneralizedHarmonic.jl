@@ -894,8 +894,14 @@ step does not.
   and order 4 on every patch, `test/ball_tests.jl`. The H200's choice is
   open.)**
 - **The sphere:** the frozen hook through the atlas, then Sommerfeld's
-  condition once the sphere's plane can be evolved.
-- **`test/octant_runs.jl` options** for the ball and its radii.
+  condition once the sphere's plane can be evolved. **(The frozen hook done
+  2026-11-25, `ball_problem(…; frozen = true)`.)**
+- **`test/octant_runs.jl` options** for the ball and its radii. **(A script
+  of its own instead, `test/ball_runs.jl`, since the ball has no `evolve!`
+  yet: the wave or random data, the ball's radii and roots, the frozen or
+  live sphere, CSV and SimWatch. Its rows are `jobs/b5-ball.toml`: the
+  convergence at `N = 8, 12, 16, 24`, the reflection at `R1 = 4, 8`, and
+  random data to `t = 100`.)**
 
 **Accept:**
 
