@@ -2846,6 +2846,16 @@ thread, and the appendix is in block order, so each thread's appendix is one
 range beside its cores. On a 56-block thirteen-patch ball (`N = 8`, twenty
 variables) the appendix is 114380 entries after 573440 of cores.
 
+**The Teukolsky wave.** Its regular form is the outgoing wave of `F(t − r)`
+plus the ingoing wave of `−F(t + r)`, and its closed form near the origin is a
+cancellation of `1/r⁵` terms; the series about the origin replaced it there
+once every term turned out to have `n + p = 5`, which makes the series a single
+derivative of `F` per power of `r`. Its check against automatic
+differentiation is the linearised statement, `□h = 0` and `∂_i h_ij = 0` from
+`ddmetric` (30 s of compilation), in the quick tier, and the nonlinear Ricci
+tensor's `O(a²)` from three nested dual passes (70 s) in the full tier, whose
+skipped-test message no longer says "evolves a hole".
+
 ## Possible extensions
 
 ### Extensions since built

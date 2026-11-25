@@ -108,6 +108,7 @@ export horizon_dissipation
 export gh_forest, hole_forest
 export minkowski_case, minkowski_octant_case, gauge_wave_case, shifted_minkowski_case
 export hole_case, kerr_schild_case, harmonic_kerr_case
+export TeukolskyWave, teukolsky_abc
 export background_state, state_tuple, case_state_tuple, state_callback
 export fill_exact!, add_noise!, with_background
 
@@ -228,6 +229,7 @@ include("interior.jl")
 # `diag` slots and `point_position`, which are resolved when they compile.
 include("bounds.jl")
 include("gauge.jl")
+include("teukolsky.jl")   # step B5: the Teukolsky wave
 # After `interior.jl` and `gauge.jl`, whose layers and profiles it composes, and
 # before `initialdata.jl`, whose `GHCase` holds the holes (added in step B3).
 include("holes.jl")

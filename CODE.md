@@ -101,6 +101,7 @@ research project; the inherited documents live in `notes/`.
   - [Initial data](#initial-data)
   - [The outer boundary and the wave zone](#the-outer-boundary-and-the-wave-zone)
   - [The cube and the shells](#the-cube-and-the-shells)
+  - [The Teukolsky wave](#the-teukolsky-wave)
   - [The symmetric domains](#the-symmetric-domains)
   - [Refinement for two holes](#refinement-for-two-holes)
   - [The waveform](#the-waveform)
@@ -8030,6 +8031,42 @@ shell point is counted as `1.75`.
 **The larger cost lever is still subcycling** ([What it
 costs](#what-it-costs-predicted)): about `4×` on the whole run, in either
 layout.
+
+### The Teukolsky wave
+
+Step B5's wave, and the one step B6's `Ψ₄` is checked on:
+`TeukolskyWave(T; amplitude = a, width = λ)` in `src/teukolsky.jl`, the
+linearised even-parity `ℓ = 2`, `m = 0` quadrupole wave of Teukolsky (1982),
+an `isbits` `AbstractMetric`, `g = η + h`.
+
+- **The metric.** Teukolsky's spherical form, `h_tμ = 0` and
+
+      h_rr = A f_rr,  h_rθ = B f_rθ r,  h_θθ = (C f¹_θθ + A f²_θθ) r²,
+      h_φφ = (C f¹_φφ + A f²_φφ) r² sin²θ
+
+  with `f_rr = 2 − 3 sin²θ`, `f_rθ = −3 sinθ cosθ`, `f¹_θθ = 3 sin²θ`,
+  `f²_θθ = −1`, `f¹_φφ = −3 sin²θ`, `f²_φφ = 3 sin²θ − 1`, and `A`, `B`, `C`
+  sums of `F⁽ⁿ⁾/rᵖ`. In Cartesian components it is written with `r̂` and
+  `sinθ θ̂ = (z x, z y, −ρ²)/r²`, which are smooth off the origin.
+- **Regular at the origin.** The outgoing wave of `F(t − r)` plus the
+  ingoing wave of `−F(t + r)` (the time reverse, which flips the terms with
+  an odd derivative): the `1/r⁵ … 1/r²` terms cancel, and `A = B = C =
+  −(2/5) F⁽⁵⁾(t)` at `r = 0`.
+- **Near the origin a series.** Every term has `n + p = 5`, so `A = Σ_m κ_A(m)
+  F⁽ᵐ⁺⁵⁾(t) rᵐ`, even in `r`, with exact rational `κ`. Inside `r < λ/2` the
+  metric is fifteen terms of it, which agree with the closed form at `λ/2` to
+  roundoff (the closed form loses `(λ/r)⁵` there, a factor of 32); at the
+  origin itself it is the limit `A(t, 0) diag(−1, −1, 2)`, whose spatial
+  gradient is zero. So `dmetric` is finite at every grid point, the origin
+  included, which is a vertex of the cube.
+- **The profile** is `F(x) = (a λ⁵/24)(x/λ) e^{−x²/λ²}`, so that `h =
+  a diag(1, 1, −2)` at the origin at `t = 0`: `a` is the size of `h`.
+- **First order only.** `h/a` is transverse, traceless and solves `□h = 0`
+  exactly, and the nonlinear Ricci tensor and the harmonic gauge source
+  `Γ_a` are `O(a²)` (measured, `test/teukolsky_tests.jl`). So `isharmonic`
+  is `true` for it, right to that order, and the case has no gauge source;
+  a run measures the scheme at an amplitude where `a²` is below its
+  truncation error.
 
 ### The symmetric domains
 

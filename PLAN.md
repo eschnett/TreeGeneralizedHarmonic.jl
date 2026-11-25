@@ -863,7 +863,8 @@ step does not.
 
 - **The Teukolsky wave:** the linearised even-parity `ℓ = 2`, `m = 0`
   quadrupole wave (Teukolsky 1982) as an `isbits` `AbstractMetric`,
-  `η + ε h`.
+  `η + ε h`. **(Done 2026-11-25:** `TeukolskyWave`, `src/teukolsky.jl`,
+  tested in `test/teukolsky_tests.jl`; `CODE.md`, "The Teukolsky wave".**)**
 - **The dependencies and the field set:** TreeAMR 0.2.12, TreeIOHDF5
   0.1.11, TreeMultiPatch; `glue = :interpolate`, `Operators(…; glue = 6)`,
   and the atlas passed to every `GhostSchedule`, to `regrid!` and on a

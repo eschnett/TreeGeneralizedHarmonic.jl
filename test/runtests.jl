@@ -51,6 +51,7 @@ else
         include("stepping_tests.jl")
         # Step B5's cube and shells (added 2026-11-25): after the integrator's
         # file, whose partition it extends to the state's appendix.
+        include("teukolsky_tests.jl")
         include("ball_tests.jl")
         # The kernel on SIMD lanes (added 2026-10-05): after the runs' helpers, whose
         # hole fixture it evaluates, and after `evolution_tests.jl`, whose `rhs_scale`
