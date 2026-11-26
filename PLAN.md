@@ -901,7 +901,8 @@ step does not.
   yet: the wave or random data, the ball's radii and roots, the frozen or
   live sphere, CSV and SimWatch. Its rows are `jobs/b5-ball.toml`: the
   convergence at `N = 8, 12, 16, 24`, the reflection at `R1 = 4, 8`, and
-  random data to `t = 100`.)**
+  random data to `t = 100`. They ran as Symmetry job 611479 on 2026-11-25. The
+  results are in `CODE.md`, "The cube and the shells".)**
 
 **Accept:**
 
@@ -914,12 +915,16 @@ step does not.
 - **The wave converges** at order `q` on the ball, at an amplitude where
   `ε²` is below truncation, through the three kinds of glue: the cube to
   the inner shells, between shells, and the middle sphere. The glues'
-  reflection is at truncation.
+  reflection is at truncation. **(Done 2026-11-25: L2 order 3.9–4.4 at
+  `t = 2` on every patch, job 611479.)**
 - **The ball is stable** at `ε_KO = 1/2`, on random data to many crossings,
-  and keeps the inversion and the mirrors to rounding.
+  and keeps the inversion and the mirrors to rounding. **(Stability done
+  2026-11-25: random data decay tenfold by `t = 100`. The inversion and the
+  mirrors are not checked yet.)**
 - **The sphere's reflection** of the `ℓ = 2` wave is recorded at two outer
   radii, for the frozen hook and, once it is built, the radiative
-  condition.
+  condition. **(The frozen hook done 2026-11-25: it reflects totally, at
+  `R1 = 4` and `8`.)**
 - **The grading's reflection** is recorded against how fast the radial
   spacing grows, once TreeMultiPatch has a graded radius. That sets the
   spacing between `R_ext` and `r_res`.

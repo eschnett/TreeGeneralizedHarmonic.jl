@@ -2881,6 +2881,38 @@ more ghosts than points. The wave's error at `a = 10⁻⁶` was `1.3·10⁻¹⁰
 at `t = 1`. Random data of size `10⁻⁶` on flat space with the frozen sphere
 rose to `6.4·10⁻⁶` in L2 by `t = 1/2` and decayed to `3.0·10⁻⁶` by `t = 2`.
 
+**The acceptance rows** (`jobs/b5-ball.toml`, study `b5-ball`, Symmetry job
+611479, snapshot `929be4f`) ran as nine runs sharing one 64-core `amdq` node.
+The whole job took 62 minutes, against the three to four hours its header
+predicted. The longest runs were `live-R8` (3690 s), `refl-R8` (3527 s) and
+`noise` (3347 s). `conv-24` took 1559 s and at most 2.9 GB.
+
+- **Convergence.** The L2 errors at `t = 2` for `N = 8, 12, 16, 24` are:
+
+  | Region | `N = 8` | `N = 12` | `N = 16` | `N = 24` | Orders |
+  |---|---|---|---|---|---|
+  | Cube | `2.77·10⁻¹⁰` | `4.75·10⁻¹¹` | `1.36·10⁻¹¹` | `2.48·10⁻¹²` | 4.35, 4.36, 4.19 |
+  | Inner shells | `2.06·10⁻¹⁰` | `3.72·10⁻¹¹` | `1.14·10⁻¹¹` | `2.30·10⁻¹²` | 4.22, 4.13, 3.94 |
+  | Outer shells | `2.43·10⁻¹⁰` | `4.31·10⁻¹¹` | `1.28·10⁻¹¹` | `2.43·10⁻¹²` | 4.27, 4.21, 4.11 |
+
+  At `t = 1` the orders are 3.5–4.3; the lowest is the cube's last pair.
+- **The frozen sphere.** Over the ball, the L2 error with the frozen sphere
+  against the live one is:
+
+  | `R1` | `t = 2` | `t = 6` | `t = 16` | Live sphere |
+  |---|---|---|---|---|
+  | 4 | `1.8·10⁻⁷` | `6.7·10⁻⁷` | `7.3·10⁻⁷` | `4–7·10⁻¹¹` |
+  | 8 | `1.3·10⁻⁹` | `5.9·10⁻⁸` | `1.8·10⁻⁷` | `4–7·10⁻¹¹` |
+
+  In the cube both radii reach about `1.5·10⁻⁶` by `t = 16`; at `R1 = 8` this
+  starts at `t ≈ 8`. The reflection is total, as Dirichlet's must be.
+- **Noise.** Random data of size `10⁻⁶` at `N = 8` peaked at `3.0·10⁻⁶` in L2
+  (`9.5·10⁻⁶` in L∞) at `t = 2`. They decayed to `2.7·10⁻⁷` (`6.4·10⁻⁷`) by
+  `t = 100`.
+
+None of the runs checkpointed. Erik kept the job as it was; checkpointing goes
+into `test/ball_runs.jl` and the spec before the next submission.
+
 ## Possible extensions
 
 ### Extensions since built

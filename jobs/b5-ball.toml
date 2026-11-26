@@ -15,9 +15,10 @@
 #   space with the frozen sphere, at N = 8 to `t = 100`, about twelve crossing
 #   times of the ball; its "error" is the state itself.
 #
-# No run checkpoints: the longest (`conv-24`, `refl-R8`, `live-R8`) are
-# predicted at three to four hours at the node's share of threads, from 113 s
-# per unit of time at N = 8 on two threads of the development machine.
+# No run checkpoints yet; add `checkpoint=`/`walltime=` before the next
+# submission. Job 611479 (2026-11-25) took 62 minutes for all nine runs. The
+# longest were `live-R8` (62 min), `refl-R8` and `noise` (56 min each), and
+# `conv-24` (26 min).
 name = "b5-ball"
 site = "symmetry"
 time = "8:00:00"

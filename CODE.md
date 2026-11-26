@@ -7943,7 +7943,12 @@ it and the ghosts beyond.
   `ball_dirichlet`, writes the background at `t = 0`; without it the hook
   writes the background at the fill's time, which is how the convergence rows
   see no sphere at all. `test/ball_runs.jl` runs both, and `jobs/b5-ball.toml`
-  the acceptance rows; their results are not in yet.**)**
+  the acceptance rows.**)** The frozen sphere reflects the `ℓ = 2` wave
+  completely, as a Dirichlet face must: the wave of width `2` and amplitude
+  `10⁻⁶` at `N = 12` leaves an error of `7·10⁻⁷` in L2 over the ball at
+  `R1 = 4` and `2·10⁻⁷` at `R1 = 8`, against the live sphere's `4–7·10⁻¹¹`.
+  A larger radius only delays it: at `R1 = 8` the cube sees it from `t ≈ 8`,
+  and reaches `1.5·10⁻⁶` by `t = 16`, as at `R1 = 4`.
   With a causally disconnected sphere nothing more is needed for the
   extraction.
 - **Sommerfeld's condition** **(proposed, after)** on every component of
@@ -7959,6 +7964,17 @@ it and the ghosts beyond.
   measured. A causally disconnected sphere needs no better. The
   no-one-sided-stencil rule is about the holes' interior, not the outer
   boundary.
+
+**Measured on the ball (step B5, `jobs/b5-ball.toml`).** The ball is
+`(Lc, Rm, R1) = (1, 5/2, 4)` with roots `(2, 1, 1)`, the wave is the Teukolsky
+wave of width `2` and amplitude `10⁻⁶`, and the live sphere is used. At `t = 2`
+the √g-weighted L2 error converges at order `3.9–4.4` between `N = 8, 12, 16`
+and `24`, in the cube, the inner shells and the outer shells alike. L∞
+converges at `4.3–4.5`. So the three kinds of glue converge at the interior's
+order, and the glue reflects at truncation. Random data of size `10⁻⁶` on flat
+space with the frozen sphere, at `N = 8` and `ε_KO = 1/2`, rise from `2.6·10⁻⁶`
+to `3.0·10⁻⁶` in L2 by `t = 2`. They then decay to `2.7·10⁻⁷` by `t = 100`,
+about twelve crossings of the ball: it is stable.
 
 **Causal disconnection** sets two radii:
 
