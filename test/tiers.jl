@@ -52,7 +52,7 @@ macro full_tier(ex)
         else
             push!(FULL_TIER_SKIPPED, $name)
             @testset $name begin
-                @test_skip "evolves a hole: full tier only (TREEGH_TEST_TIER=full)"
+                @test_skip "full tier only (TREEGH_TEST_TIER=full)"
             end
         end
     end

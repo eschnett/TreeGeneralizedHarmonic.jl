@@ -16,7 +16,7 @@
 # and at every thread count.
 
 """
-    state_partition(U::FieldSet, u) -> Vector{UnitRange{Int}} or nothing
+    state_partition(U::FieldSet, u) -> Vector or nothing
 
 The block-ownership partition of the state vector `u` of `U`, as
 IMEXRungeKutta's `partition` keyword takes it: element `c` holds the entries
@@ -26,6 +26,19 @@ chunk `launch_by_owner!` and `threaded_chunks` run on default-pool thread
 fewer blocks than threads. A block's entries are contiguous in the state
 vector (`statearray`'s last index is the block), so each thread owns one
 range.
+
+**With an appendix** (added in step B5; a set interpolated across a glue,
+`CODE.md`, "The cube and the shells") the state vector is the cores, block by
+block, and then the appendix, block by block: the high glued face planes each
+block owns. Element `c` is then two ranges, its blocks' cores and its blocks'
+appendix, which IMEXRungeKutta takes as one thread's entries (its
+`owner_partition` accepts an iterable of ranges per thread). A block's
+appendix length is counted through the public `isowned` on its three high
+planes, so nothing of TreeAMR's appendix layout is read; that the appendix
+follows the cores in block order is TreeAMR's contract ("Closed ownership and
+the appendix" in its `CODE.md`), and `test/ball_tests.jl` checks that every
+appendix entry lands in its block's thread's range. On a brick the result is
+the plain ranges of before, bit for bit.
 
 `nothing` for a state that is not a CPU `Array`, which is IMEXRungeKutta's
 broadcast path: a device array is combined by one fused broadcast on the
@@ -38,16 +51,52 @@ package runs until it is named there.
 function state_partition(U::FieldSet{T,D}, u) where {T,D}
     u isa Array || return nothing
     L = U.forest.N^D * U.nvars
-    length(u) == L * nblocks(U) || throw(DimensionMismatch(
+    n = statelength(U)
+    length(u) == n || throw(DimensionMismatch(
         "the state vector has $(length(u)) entries but the field set's blocks " *
-        "hold $(L * nblocks(U)): a partition of one mesh's state cannot be " *
-        "applied to another's."))
-    parts = UnitRange{Int}[(first(r) - 1) * L + 1:last(r) * L
-                           for r in TreeAMR.threadchunks(nblocks(U))]
+        "hold $n: a partition of one mesh's state cannot be applied to " *
+        "another's."))
+    chunks = TreeAMR.threadchunks(nblocks(U))
+    if n == L * nblocks(U)
+        parts = UnitRange{Int}[(first(r) - 1) * L + 1:last(r) * L for r in chunks]
+        while length(parts) < Threads.nthreads()
+            push!(parts, 1:0)
+        end
+        return parts
+    end
+    # The appendix: every block's entries after all the cores, in block order.
+    counts = appendix_counts(U, u)
+    first_entry = cumsum([0; counts]) .+ (L * nblocks(U) + 1)
+    sum(counts) == n - L * nblocks(U) || throw(DimensionMismatch(
+        "the field set's blocks own $(sum(counts)) appendix entries, and its " *
+        "state vector has $(n - L * nblocks(U)) after the cores: the appendix " *
+        "is not the high glued face planes TreeAMR's contract says it is."))
+    parts = Vector{UnitRange{Int}}[[(first(r) - 1) * L + 1:last(r) * L,
+                                    first_entry[first(r)]:(first_entry[last(r) + 1] - 1)]
+                                   for r in chunks]
     while length(parts) < Threads.nthreads()
-        push!(parts, 1:0)
+        push!(parts, [1:0])
     end
     return parts
+end
+
+# The number of appendix entries of each local block of `U` (added in step B5):
+# the points of its three high planes it owns, through the public `isowned` of
+# the state's `AppendixArray`, times the variables. Host-side, `3(N + 1)²` tests
+# a block.
+function appendix_counts(U::FieldSet{T,D}, u) where {T,D}
+    N = U.forest.N
+    A = statearray(u, U; appendix=true)
+    counts = zeros(Int, nblocks(U))
+    for b in 1:nblocks(U)
+        c = 0
+        for I in CartesianIndices(ntuple(_ -> N + 1, Val(D)))
+            any(d -> I[d] == N + 1, 1:D) || continue
+            isowned(A, Tuple(I)..., 1, b) && (c += 1)
+        end
+        counts[b] = c * U.nvars
+    end
+    return counts
 end
 
 """
@@ -108,7 +157,7 @@ target's data. `u` may be a segment of a multi-set state vector. Public, not
 exported.
 """
 function initial_state!(u, p::GHProblem{T}, t) where {T}
-    fill_exact!(p.U, p.case, T(t); interior=p.interior)
+    fill_exact!(p.U, p.case, T(t); interior=p.interior, layout=ball_layout(p.ball))
     gather!(u, p.U)
     stage_limit!(u, p, T(t))
     return u

@@ -103,7 +103,7 @@ the dependency order.
 - [Step B2 — The tracked analytic target](#step-b2--the-tracked-analytic-target)
 - [Step B3 — Several holes in one case](#step-b3--several-holes-in-one-case)
 - [Step B4 — The symmetric domains and the half turn](#step-b4--the-symmetric-domains-and-the-half-turn)
-- [Step B5 — The far boundary, the wave zone and a Teukolsky wave](#step-b5--the-far-boundary-the-wave-zone-and-a-teukolsky-wave)
+- [Step B5 — The cube and the shells, a radiative sphere and a Teukolsky wave](#step-b5--the-cube-and-the-shells-a-radiative-sphere-and-a-teukolsky-wave)
 - [Step B6 — `Ψ₄` and the extraction](#step-b6--ψ₄-and-the-extraction)
 - [Step B7 — Merger: the common horizon and the handover (G7)](#step-b7--merger-the-common-horizon-and-the-handover-g7)
 - [Step B8 — Constraint-satisfying data from XCTS](#step-b8--constraint-satisfying-data-from-xcts)
@@ -841,32 +841,100 @@ octant"; TreeAMR's `CODE.md` on the half turn (M14).
 - **A hole crosses the seam:** tracked through the crossing, with no
   refusal and no failed find.
 
-## Step B5 — The far boundary, the wave zone and a Teukolsky wave
+## Step B5 — The cube and the shells, a radiative sphere and a Teukolsky wave
 
-`CODE.md`: "The outer boundary and the wave zone", "Refinement for two
-holes". **No hole.**
+`CODE.md`: "The outer boundary and the wave zone", "The cube and the
+shells". **No hole.**
+
+Erik decided the layout before the design: a Cartesian cube with the holes
+and their mesh refinement, inside spherical shells out to an outer sphere
+causally disconnected from the extraction, with a simple radiative condition
+there. No boundary condition for the Cartesian grid is built.
+
+**Needs from upstream** (`CODE.md`'s "Upstream prerequisites", item 8):
+TreeAMR 0.2.12, released, and TreeMultiPatch, through a `[sources]` pin
+until it is registered. The step needs neither M19 (it has no hole, and its
+extraction radii lie on radial nodes) nor M21: it runs on the whole ball.
+The grading's row waits for a graded radius in TreeMultiPatch, and
+Sommerfeld's condition for the sphere's plane (both item 8); the rest of the
+step does not.
 
 **Changes:**
 
 - **The Teukolsky wave:** the linearised even-parity `ℓ = 2`, `m = 0`
   quadrupole wave (Teukolsky 1982) as an `isbits` `AbstractMetric`,
-  `η + ε h`.
-- **The boundary choice:** the frozen hook (the data at `t = 0`) and the
-  relative hook beside the analytic one.
-- **The wave-zone floor** in `Refinement`.
-- **`test/octant_runs.jl` options** for all three.
+  `η + ε h`. **(Done 2026-11-25:** `TeukolskyWave`, `src/teukolsky.jl`,
+  tested in `test/teukolsky_tests.jl`; `CODE.md`, "The Teukolsky wave".**)**
+- **The dependencies and the field set:** TreeAMR 0.2.12, TreeIOHDF5
+  0.1.11, TreeMultiPatch; `glue = :interpolate`, `Operators(…; glue = 6)`,
+  and the atlas passed to every `GhostSchedule`, to `regrid!` and on a
+  restore. **(Dependencies done 2026-11-25; the field set and its schedule
+  in `ball_problem`; `regrid!` and a restore with the atlas not yet: no
+  `evolve!` on the ball.)**
+- **First, a check:** whether IMEXRungeKutta's partition by block owner
+  covers the state's appendix. **(Done 2026-11-25:** not as it was — the
+  cores alone, which IMEXRungeKutta refuses — and now two ranges per thread,
+  its blocks' cores and their appendix; `CODE.md`, "The cube and the
+  shells", and `test/ball_tests.jl`.**)**
+- **The appendix wherever the state is walked:** `appendix = true` on every
+  `map_blocks!` over the state, writes through `statearray(du, fs;
+  appendix = true)` and `isowned`. **(Done 2026-11-25 for the right-hand
+  side, the speed and the error; the limiters, the monitors and the fits are
+  refused on a ball by TreeAMR, which asks for the keyword.)**
+- **The ball:** TreeMultiPatch's `ThirteenPatchBall`, with physical
+  positions through `chart_map` wherever a position is formed,
+  `volume_element`-weighted norms, and `refine_flags` kept off the shells
+  and the cube's blocks within reach of a glue. **(Done 2026-11-25,
+  `src/ball.jl`; Minkowski stays Minkowski to the bit, `test/ball_tests.jl`.)**
+- **The one-pass shell kernel:** the existing stencils in logical
+  coordinates with the chain rule, the dissipation along logical axes, and
+  the cube's blocks on the existing kernel. The map is evaluated in the
+  kernel or stored in a set, whichever the H200 prefers. **(Done 2026-11-25
+  on the CPU, the map evaluated in the kernel: the cube's bits, the lanes,
+  and order 4 on every patch, `test/ball_tests.jl`. The H200's choice is
+  open.)**
+- **The sphere:** the frozen hook through the atlas, then Sommerfeld's
+  condition once the sphere's plane can be evolved. **(The frozen hook done
+  2026-11-25, `ball_problem(…; frozen = true)`.)**
+- **`test/octant_runs.jl` options** for the ball and its radii. **(A script
+  of its own instead, `test/ball_runs.jl`, since the ball has no `evolve!`
+  yet: the wave or random data, the ball's radii and roots, the frozen or
+  live sphere, CSV and SimWatch. Its rows are `jobs/b5-ball.toml`: the
+  convergence at `N = 8, 12, 16, 24`, the reflection at `R1 = 4, 8`, and
+  random data to `t = 100`. They ran as Symmetry job 611479 on 2026-11-25. The
+  results are in `CODE.md`, "The cube and the shells".)**
 
 **Accept:**
 
-- **The wave converges** at order `q` with the analytic hook, on the
-  octant its symmetry allows, at an amplitude where `ε²` is below
-  truncation.
-- **Each hook's reflection** is recorded, for two box sizes: the error
-  against the analytic wave inside the box after the wave meets the
-  boundary.
-- **The floor holds the wave:** the indicator does not coarsen the wave
-  zone while the wave crosses it.
-- **The outer levels' cost** is recorded.
+- **Minkowski stays Minkowski** on the ball to rounding, on every patch,
+  the appendix included.
+- **The shell kernel is right.** Its right-hand side of the Teukolsky wave
+  is the wave's time derivative to truncation, at order `q`, on every
+  patch, the points on a glue and beside a patch corner included. The
+  cube's blocks give the existing kernel's bits.
+- **The wave converges** at order `q` on the ball, at an amplitude where
+  `ε²` is below truncation, through the three kinds of glue: the cube to
+  the inner shells, between shells, and the middle sphere. The glues'
+  reflection is at truncation. **(Done 2026-11-25: L2 order 3.9–4.4 at
+  `t = 2` on every patch, job 611479.)**
+- **The ball is stable** at `ε_KO = 1/2`, on random data to many crossings,
+  and keeps the inversion and the mirrors to rounding. **(Stability done
+  2026-11-25: random data decay tenfold by `t = 100`. The inversion and the
+  mirrors are not checked yet.)**
+- **The sphere's reflection** of the `ℓ = 2` wave is recorded at two outer
+  radii, for the frozen hook and, once it is built, the radiative
+  condition. **(The frozen hook done 2026-11-25: it reflects totally, at
+  `R1 = 4` and `8`.)**
+- **The grading's reflection** is recorded against how fast the radial
+  spacing grows, once TreeMultiPatch has a graded radius. That sets the
+  spacing between `R_ext` and `r_res`.
+- **Causal disconnection holds.** Two outer spheres, both beyond
+  `T + R_ext`, agree at `R_ext` to far below the truncation error.
+- **The cost of a shell point** is recorded against a Cartesian one (the
+  prediction is `1.75×`), split into the kernel and the interpolated fill,
+  with the map evaluated and stored.
+- **MPI and the device:** one and three ranks agree, and the ball runs on
+  an H200.
 
 ## Step B6 — `Ψ₄` and the extraction
 

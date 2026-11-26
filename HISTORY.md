@@ -135,6 +135,9 @@ The briefs of the finished steps are under
   - [Step H4 shelved: the data are to be solved (2026-11-15)](#step-h4-shelved-the-data-are-to-be-solved-2026-11-15)
   - [Step S1 started: XCTS's data on the grid (2026-11-15)](#step-s1-started-xctss-data-on-the-grid-2026-11-15)
   - [Step H4 resumed: the pair on solved data (2026-11-18 to 2026-11-20)](#step-h4-resumed-the-pair-on-solved-data-2026-11-18-to-2026-11-20)
+  - [The cube and the shells chosen for the wave zone (2026-11-22)](#the-cube-and-the-shells-chosen-for-the-wave-zone-2026-11-22)
+  - [The cube and the shells on TreeAMR's M20 (2026-11-25)](#the-cube-and-the-shells-on-treeamrs-m20-2026-11-25)
+  - [Step B5 as built (2026-11-25)](#step-b5-as-built-2026-11-25)
 - [Possible extensions](CODE.md#possible-extensions)
   - [Extensions since built](#extensions-since-built)
   - [Dates of the remaining extensions' notes](#dates-of-the-remaining-extensions-notes)
@@ -2730,6 +2733,186 @@ They waited about `18 h` on priority, ran on 2026-11-20, and lost their tracks
 at the plunge at `30.25` and `30.5 M`, as at `1/48`. The measurements are
 `CODE.md`'s "What step H4 has built" ("The pair from solved data").
 
+### The cube and the shells chosen for the wave zone (2026-11-22)
+
+Before designing step B5, Erik asked whether the package supports
+multi-patch systems.
+
+- **This package does not.** Every kernel, background, mask, symmetry map
+  and interpolation assumes the mesh's coordinates are Cartesian.
+- **TreeAMR does, with limits.** Its M17 (`Forest(patches; glue, …)`,
+  merged and in the `v0.2.10` tag) keeps the coordinates logical and every
+  glued face conforming. It refuses patch corners for cell- and
+  vertex-centered sets, and seams on a forest of patches. Point
+  interpolation on patches (M19) is on a branch.
+
+**The pricing (d7ab80b).** Erik asked for the alternative to be priced
+first. It was priced as a cube in cubed-sphere shells, from:
+
+- TreeAMR's "A multi-patch forest" and "Glued faces";
+- TreeWaveOLDG's "The seven-patch ball", whose two passes and whose shell
+  time steps it borrows;
+- the point counts of `CODE.md`'s "What it costs".
+
+Its conclusion: the ball does not pay on cost. It is about even on G7, and on
+G8 it costs more, because a forest of patches takes no half turn. The causes
+are three:
+
+- the holes are most of the points;
+- the cube's face fixes the shells' angular resolution at about `160` a side;
+- a shell point is estimated at `1.75` Cartesian ones.
+
+That commit put a whole half hole, `12` million points, into G7's octant
+and so gave G7 `21` million Cartesian against `18–20` with shells. The
+octant holds a quarter of a hole, and the recount is `15` against `12–14`.
+
+**What a larger radius changes.** In discussion, the shells' wave zone grows
+as `R` and the octree's as `R³`: `3×` apart at `150 M` and `7×` at `200 M`.
+
+**Erik's decisions** (2026-11-22):
+
+- No boundary condition is designed for the Cartesian grid: it would not be
+  useful in the long term. That drops the relative hook from step B5.
+- Radiative boundary conditions, but only simple ones. Constraint-preserving
+  ones not at the moment.
+- The goal is for production runs to have a causally disconnected outer
+  boundary. So even extraction at `R = 100 M` needs the boundary at `200 M`
+  or beyond.
+- The holes stay in the inner Cartesian region, with its mesh refinement.
+
+So step B5 was rewritten around the cube and the shells. The design is
+`CODE.md`'s "The cube and the shells", and what it needs from TreeAMR is item
+8 of its "Upstream prerequisites". Two points of that design came out of
+the decision:
+
+- Causal disconnection sets two radii: the outer sphere at `T + R_ext`, and
+  the wave resolved out to `(T + R_ext)/2`, because the junk's reflection
+  off a coarse grid returns from there.
+- The layout is TreeWaveOLDG's thirteen-patch ball, whose outer shells are
+  exactly radial.
+
+Erik then took TreeAMR's part on himself: he designs and implements it there
+first, corner ghosts included. With corner ghosts the shells can take one
+pass with the existing mixed stencils, and the two-pass scheme becomes the
+fallback.
+
+### The cube and the shells on TreeAMR's M20 (2026-11-25)
+
+TreeAMR 0.2.12, registered on 2026-11-25, carries Erik's M20: a field set
+built with `glue = :interpolate` is filled across a glue by interpolation in
+the patch across, at faces, edges and patch corners, and owns every point of
+its glued faces, with the high planes in an appendix after the cores. The
+balls' maps moved into a new package, TreeMultiPatch (unregistered), and
+TreeWave runs its second-order scalar wave on the seven-patch ball. Erik
+asked what supporting the thirteen-patch ball would take, with all the holes
+in the refined cube, and then for the design to be rewritten to match.
+
+What M20 changed in the design:
+
+- **One pass, not two.** Interpolated ghosts fill the patch corners, so the
+  shells run the existing compact stencils with the chain rule contracted
+  in. M20's prototype had run this package's scheme (fourth order, `G = 3`,
+  6-point ghosts) through a kinked glue in two dimensions at order 4. The
+  two-pass kernel, its thirty-variable gradient set and the open question
+  of where that set lives are gone, and so is the ask for a fill over a
+  subset of the blocks.
+- **Item 8's asks for patch corners and for a reversed vertex-like axis**
+  are answered by M20: interpolated corners, and closed ownership instead of
+  a shifted seam plane.
+- **No coarsening inside the outer shells.** M20 keeps every block within
+  reach of a kinked glue at one level, and every shell block is next to one,
+  so the shells' angular spacing is the cube's face spacing. The pricing's
+  columns with one coarsening went: on the octant G7 is `13` million
+  against `12`, and on the bitant G8 `58` against `47`. A coarse-fine
+  sphere across the outer shells' glues, which are aligned in the radius,
+  is a new open item.
+- **What remains upstream:** M19's release (the finder, the fits and the
+  ADM provider on patches), M21's symmetries on patches (proposed in
+  TreeAMR the same day, with Erik's decisions on refinement), a graded
+  radius in TreeMultiPatch, the radiative sphere's plane, and
+  TreeMultiPatch's registration.
+- **Step B5 no longer waits on TreeAMR**: it runs on the whole ball, and
+  only its grading row and Sommerfeld's condition wait on item 8.
+
+### Step B5 as built (2026-11-25)
+
+**The partition and the appendix.** The first check of step B5 was whether
+IMEXRungeKutta's partition by block owner covers the state's appendix. It
+did not: `state_partition` checked the state's length against the cores and
+threw, and TreeAMR's own test helper, of which it is a copy, gives the cores
+alone, which IMEXRungeKutta refuses as a partition that misses an index. No
+upstream change was needed: IMEXRungeKutta takes an iterable of ranges per
+thread, and the appendix is in block order, so each thread's appendix is one
+range beside its cores. On a 56-block thirteen-patch ball (`N = 8`, twenty
+variables) the appendix is 114380 entries after 573440 of cores.
+
+**The Teukolsky wave.** Its regular form is the outgoing wave of `F(t − r)`
+plus the ingoing wave of `−F(t + r)`, and its closed form near the origin is a
+cancellation of `1/r⁵` terms; the series about the origin replaced it there
+once every term turned out to have `n + p = 5`, which makes the series a single
+derivative of `F` per power of `r`. Its check against automatic
+differentiation is the linearised statement, `□h = 0` and `∂_i h_ij = 0` from
+`ddmetric` (30 s of compilation), in the quick tier, and the nonlinear Ricci
+tensor's `O(a²)` from three nested dual passes (70 s) in the full tier, whose
+skipped-test message no longer says "evolves a hole".
+
+**The ball's kernel.** The design priced the chain rule at about `830`
+multiply-adds a point, applied to the twenty variables' derivatives. As built it
+goes into the Π components' coefficients instead (`Ã^{ab}`, `β̃^a`, `Ã^a`), once
+per point, so a component on a shell costs what it costs on the cube. The ball's
+right-hand side is a launch of its own over the closed range, so that the
+brick's launch is the code of before; a cube block in it calls the brick's point
+functions with its physical origins, and its cores came out the brick kernel's
+bits at the first try, at one point at a time and on four lanes. The shells'
+lanes came out the scalar kernel's bits too. The first order measurement used a
+pulse of width `1`, eight of the cube's spacings at `N = 8`, and the cube's
+glued faces converged at 3.2 and then 2.0: the largest error sat at the face
+centres, whose ghosts, interpolated in the inner shells near the cube's edges,
+converge at 4.1, 5.2, 5.6 and 5.8 between `N = 8` and `24`. At width `2` every
+patch is at 3.9–4.1, and the test uses it.
+
+**The `AppendixArray` has no `size(A, d)`**, only `size(A)`; the ball's linear
+store (`AppendixLinear`) reads the tuple.
+
+**The first runs.** `test/ball_runs.jl` took 113 s for a unit of time of the
+wave at `N = 8` on two threads of the development machine (34391 points, 56
+blocks), most of it the interpolated fill: at `N = 8` and `G = 3` a block has
+more ghosts than points. The wave's error at `a = 10⁻⁶` was `1.3·10⁻¹⁰` in L2
+at `t = 1`. Random data of size `10⁻⁶` on flat space with the frozen sphere
+rose to `6.4·10⁻⁶` in L2 by `t = 1/2` and decayed to `3.0·10⁻⁶` by `t = 2`.
+
+**The acceptance rows** (`jobs/b5-ball.toml`, study `b5-ball`, Symmetry job
+611479, snapshot `929be4f`) ran as nine runs sharing one 64-core `amdq` node.
+The whole job took 62 minutes, against the three to four hours its header
+predicted. The longest runs were `live-R8` (3690 s), `refl-R8` (3527 s) and
+`noise` (3347 s). `conv-24` took 1559 s and at most 2.9 GB.
+
+- **Convergence.** The L2 errors at `t = 2` for `N = 8, 12, 16, 24` are:
+
+  | Region | `N = 8` | `N = 12` | `N = 16` | `N = 24` | Orders |
+  |---|---|---|---|---|---|
+  | Cube | `2.77·10⁻¹⁰` | `4.75·10⁻¹¹` | `1.36·10⁻¹¹` | `2.48·10⁻¹²` | 4.35, 4.36, 4.19 |
+  | Inner shells | `2.06·10⁻¹⁰` | `3.72·10⁻¹¹` | `1.14·10⁻¹¹` | `2.30·10⁻¹²` | 4.22, 4.13, 3.94 |
+  | Outer shells | `2.43·10⁻¹⁰` | `4.31·10⁻¹¹` | `1.28·10⁻¹¹` | `2.43·10⁻¹²` | 4.27, 4.21, 4.11 |
+
+  At `t = 1` the orders are 3.5–4.3; the lowest is the cube's last pair.
+- **The frozen sphere.** Over the ball, the L2 error with the frozen sphere
+  against the live one is:
+
+  | `R1` | `t = 2` | `t = 6` | `t = 16` | Live sphere |
+  |---|---|---|---|---|
+  | 4 | `1.8·10⁻⁷` | `6.7·10⁻⁷` | `7.3·10⁻⁷` | `4–7·10⁻¹¹` |
+  | 8 | `1.3·10⁻⁹` | `5.9·10⁻⁸` | `1.8·10⁻⁷` | `4–7·10⁻¹¹` |
+
+  In the cube both radii reach about `1.5·10⁻⁶` by `t = 16`; at `R1 = 8` this
+  starts at `t ≈ 8`. The reflection is total, as Dirichlet's must be.
+- **Noise.** Random data of size `10⁻⁶` at `N = 8` peaked at `3.0·10⁻⁶` in L2
+  (`9.5·10⁻⁶` in L∞) at `t = 2`. They decayed to `2.7·10⁻⁷` (`6.4·10⁻⁷`) by
+  `t = 100`.
+
+None of the runs checkpointed. Erik kept the job as it was; checkpointing goes
+into `test/ball_runs.jl` and the spec before the next submission.
+
 ## Possible extensions
 
 ### Extensions since built
@@ -2877,6 +3060,18 @@ nested-mesh ghost fill took a moving-hole row on one H200 from `254` to
 
 - `ApparentHorizonFinder` and `KorzynskiSpin`, the horizon diagnostics,
   are used from step 7.
+
+From 2026-11-25 the package requires **TreeAMR 0.2.12** (its M20: ghosts
+interpolated across a glue and closed ownership with the state's appendix)
+and **TreeIOHDF5 0.1.11** (the appendix in a checkpoint), and depends on
+**TreeMultiPatch** (the balls' maps) through a `[sources]` pin to its GitHub
+`main`, for step B5. TreeMultiPatch's repository is public, so the
+clean-checkout check resolves it anonymously. The quick tier passed unchanged
+on the raised bounds (5705 assertions and 36 skipped in 16m08 at four
+threads on the development machine). The same day the dependency paragraphs
+of `CODE.md` and `CLAUDE.md` were corrected to the pins `Project.toml` has:
+TreeIOHDF5 had left `[sources]` when it was registered, and `KorzynskiSpin`
+is registered (`1.1.0`), so its pin, like `SpacetimeMetrics'`, is a choice.
 
 ### TreeAMR
 

@@ -54,6 +54,7 @@ using TreeAMR
 # dependency (decided 2026-10-01, for HDF5 then), so that a run can always be
 # checkpointed.
 using TreeIOHDF5
+import TreeMultiPatch
 
 import SpacetimeMetrics
 using AbstractSphericalHarmonics: EquiangularGrid, SphereGrid, ash_grid_size,
@@ -107,6 +108,9 @@ export horizon_dissipation
 export gh_forest, hole_forest
 export minkowski_case, minkowski_octant_case, gauge_wave_case, shifted_minkowski_case
 export hole_case, kerr_schild_case, harmonic_kerr_case
+export TeukolskyWave, teukolsky_abc
+export BallGeometry, ball_geometry, ball_error!, ball_norms, ball_state_callback
+export shell_geometry, glue_frozen, dt_spacing, ball_case, ball_problem
 export background_state, state_tuple, case_state_tuple, state_callback
 export fill_exact!, add_noise!, with_background
 
@@ -227,6 +231,7 @@ include("interior.jl")
 # `diag` slots and `point_position`, which are resolved when they compile.
 include("bounds.jl")
 include("gauge.jl")
+include("teukolsky.jl")   # step B5: the Teukolsky wave
 # After `interior.jl` and `gauge.jl`, whose layers and profiles it composes, and
 # before `initialdata.jl`, whose `GHCase` holds the holes (added in step B3).
 include("holes.jl")
@@ -236,6 +241,7 @@ include("boundaries.jl")
 # (added 2026-10-05).
 include("lanes.jl")
 include("evolution.jl")
+include("ball.jl")         # step B5: the cube and the shells
 include("admvars.jl")      # 2026-11-05: the vertex metric in ADM variables
 # After `evolution.jl` and `bounds.jl`: the integrator couples `gh_rhs!` to
 # the two limiters (added 2026-09-26, replacing OrdinaryDiffEq's RK4).

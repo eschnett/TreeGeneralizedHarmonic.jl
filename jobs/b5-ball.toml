@@ -1,0 +1,62 @@
+# Step B5's rows on the cube and the shells (`test/ball_runs.jl`, one run each),
+# all on one CPU node at once: the Teukolsky wave's convergence through every
+# glue, the outer sphere's reflection at two radii, and random data on flat
+# space for many crossing times. PLAN.md, step B5, "Accept".
+#
+# - `conv-<N>`: the wave of width 2 with the exact wave on the outer sphere, to
+#   `t = 2`, at N = 8, 12, 16, 24 on the ball (1, 5/2, 4) of roots (2, 1, 1). The
+#   orders come from each pair's `err_l2_*` columns.
+# - `refl-R4`, `refl-R8`: the same wave at N = 12 with the sphere frozen at its
+#   `t = 0` data, to `t = 16`, at R1 = 4 and R1 = 8 (the outer shells' radial
+#   roots 1 and 4, about the same radial spacing); `live-R4`, `live-R8` are the
+#   same runs with the exact wave on the sphere, so that the difference of the
+#   two is the sphere's reflection and not the truncation error.
+# - `noise`: random data of size 1e-6 at every point the state holds, on flat
+#   space with the frozen sphere, at N = 8 to `t = 100`, about twelve crossing
+#   times of the ball; its "error" is the state itself.
+#
+# No run checkpoints yet; add `checkpoint=`/`walltime=` before the next
+# submission. Job 611479 (2026-11-25) took 62 minutes for all nine runs. The
+# longest were `live-R8` (62 min), `refl-R8` and `noise` (56 min each), and
+# `conv-24` (26 min).
+name = "b5-ball"
+site = "symmetry"
+time = "8:00:00"
+resources = { nodes = 1 }
+mode = "parallel"
+
+[[run]]
+label = "conv-8"
+cmd = "test/ball_runs.jl case=teukolsky N=8 t_end=2 chunk=1/4 group=b5-conv out=out"
+
+[[run]]
+label = "conv-12"
+cmd = "test/ball_runs.jl case=teukolsky N=12 t_end=2 chunk=1/4 group=b5-conv out=out"
+
+[[run]]
+label = "conv-16"
+cmd = "test/ball_runs.jl case=teukolsky N=16 t_end=2 chunk=1/4 group=b5-conv out=out"
+
+[[run]]
+label = "conv-24"
+cmd = "test/ball_runs.jl case=teukolsky N=24 t_end=2 chunk=1/4 group=b5-conv out=out"
+
+[[run]]
+label = "refl-R4"
+cmd = "test/ball_runs.jl case=teukolsky N=12 R1=4 roots=2,1,1 frozen=1 t_end=16 chunk=1/2 group=b5-refl out=out"
+
+[[run]]
+label = "live-R4"
+cmd = "test/ball_runs.jl case=teukolsky N=12 R1=4 roots=2,1,1 frozen=0 t_end=16 chunk=1/2 group=b5-refl out=out"
+
+[[run]]
+label = "refl-R8"
+cmd = "test/ball_runs.jl case=teukolsky N=12 R1=8 roots=2,1,4 frozen=1 t_end=16 chunk=1/2 group=b5-refl out=out"
+
+[[run]]
+label = "live-R8"
+cmd = "test/ball_runs.jl case=teukolsky N=12 R1=8 roots=2,1,4 frozen=0 t_end=16 chunk=1/2 group=b5-refl out=out"
+
+[[run]]
+label = "noise"
+cmd = "test/ball_runs.jl case=noise noise=1e-6 N=8 frozen=1 t_end=100 chunk=2 group=b5-noise out=out"
