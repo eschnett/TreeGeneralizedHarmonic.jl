@@ -107,7 +107,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         U = FieldSet{T}(forest, 20; G=G, centering=vertexcentered(3))
         fill_exact!(U, case, zero(T))
         origins = TreeGeneralizedHarmonic.to_backend(CPU(),
-                                                     block_origins(forest, T))
+            TreeGeneralizedHarmonic.block_corners(forest, T))
         spacings = TreeGeneralizedHarmonic.to_backend(CPU(),
                                                       block_spacings(forest, T))
         masked = field_scales(U, interior_mask(case.interior, zero(T)), origins,
@@ -129,7 +129,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         GW = FieldSet{T}(gwforest, 20; G=G, centering=vertexcentered(3))
         fill_exact!(GW, gw, zero(T))
         go = TreeGeneralizedHarmonic.to_backend(CPU(),
-                                                block_origins(gwforest, T))
+            TreeGeneralizedHarmonic.block_corners(gwforest, T))
         gs = TreeGeneralizedHarmonic.to_backend(CPU(),
                                                 block_spacings(gwforest, T))
         gwscales = field_scales(GW, AllPoints(), go, gs)
@@ -170,7 +170,10 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         v[2, 4, 5] = v[6, 4, 5] = T(1 // 5)          # above coarsen_tol only
         marks = refine_flags(τfs, lb, ref).flags
         @test marks[b0] isa Tuple && first(marks[b0]) === Refine
-        @test last(marks[b0]) == (2:6, 4:4, 5:5)
+        # In cell indices, the cells touching the firing nodes `lo … hi`,
+        # `max(1, lo − 1):min(N, hi)` (TreeAMR 0.3's `firing_boxes`; the
+        # nodes themselves, `(2:6, 4:4, 5:5)`, before).
+        @test last(marks[b0]) == (1:6, 3:4, 4:5)
 
         # The same block at the cap: `(Keep, box)`, the equal-level margin
         # that travels with the feature. Keying the box on `refine_tol`
@@ -180,7 +183,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
                             maxlevel_cap=0, floor_margin=zero(T))
         marks = refine_flags(τfs, plain_bounds(forest, 0), capped).flags
         @test marks[b0] isa Tuple && first(marks[b0]) === Keep
-        @test last(marks[b0]) == (2:6, 4:4, 5:5)
+        @test last(marks[b0]) == (1:6, 3:4, 4:5)
 
         # Between the thresholds, below the cap: the feature is there and
         # resolved, so the block is held with its box and not refined.
@@ -188,7 +191,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         v[3, 4, 5] = T(1 // 5)
         marks = refine_flags(τfs, lb, ref).flags
         @test marks[b0] isa Tuple && first(marks[b0]) === Keep
-        @test last(marks[b0]) == (3:3, 4:4, 5:5)
+        @test last(marks[b0]) == (2:3, 3:4, 4:5)
 
         # The gap between the thresholds is the dead band, and a
         # `Refinement` without one is refused rather than accepted as a
@@ -250,7 +253,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         @test lb.floor_level == 1
         τfs = FieldSet{T}(forest, NDIAG; G=0, centering=vertexcentered(3))
         origins = TreeGeneralizedHarmonic.to_backend(CPU(),
-                                                     block_origins(forest, T))
+            TreeGeneralizedHarmonic.block_corners(forest, T))
         spacings = TreeGeneralizedHarmonic.to_backend(CPU(),
                                                       block_spacings(forest, T))
         mask = interior_mask(case.interior, zero(T))
@@ -293,7 +296,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         forest = pass.forest
         τfs = FieldSet{T}(forest, NDIAG; G=0, centering=vertexcentered(3))
         origins = TreeGeneralizedHarmonic.to_backend(CPU(),
-                                                     block_origins(forest, T))
+            TreeGeneralizedHarmonic.block_corners(forest, T))
         spacings = TreeGeneralizedHarmonic.to_backend(CPU(),
                                                       block_spacings(forest, T))
         mask = interior_mask(case.interior, zero(T))

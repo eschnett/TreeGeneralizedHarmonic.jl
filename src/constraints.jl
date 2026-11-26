@@ -217,43 +217,57 @@ the one ported function written against `dmetric`.
     inner = ntuple(d -> I[d], Val(3))
     T = eltype(diag)
 
-    inv_h = inv(spacings[b])
-    w1 = derivative_weights(T, Val(q), Val(1))
-    st, sv, sb = work_strides(work)
-    var = 1 + (b - 1) * sb +
-          (I[1] + G[1] - 1) * st[1] + (I[2] + G[2] - 1) * st[2] +
-          (I[3] + G[3] - 1) * st[3]
+    # A masked point writes zeros and reads nothing (amended with the port to
+    # TreeAMR 0.3): the frozen core's data need not be a metric, and since
+    # closed blocks TreeAMR projects a reflecting wall plane onto each
+    # variable's parity at every fill, which in the core at an octant's
+    # corner leaves `g^{tt}` positive — `metric_quantities`' `sqrt` would
+    # throw rather than give the `NaN` the branch below was written for.
+    if !is_evolved(mask, point_position(origins, spacings, b, I))
+        ntuple(Val(4)) do a
+            diag[inner..., DIAG_CGH + a - 1, b] = zero(T)
+            nothing
+        end
+        diag[inner..., DIAG_MASK, b] = zero(T)
+    else
+        inv_h = inv(spacings[b])
+        w1 = derivative_weights(T, Val(q), Val(1))
+        st, sv, sb = work_strides(work)
+        var = 1 + (b - 1) * sb +
+              (I[1] + G[1] - 1) * st[1] + (I[2] + G[2] - 1) * st[2] +
+              (I[3] + G[3] - 1) * st[3]
 
-    hv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (v - 1) * sv]),
-                              Val(NC)))
-    Πv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (NC + v - 1) * sv]),
-                              Val(NC)))
-    ∂h = ntuple(Val(3)) do d
-        inv_h * SVector{NC,T}(ntuple(Val(NC)) do v
-            axis_stencil(w1, work, var + (v - 1) * sv, st[d])
-        end)
+        hv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (v - 1) * sv]),
+                                  Val(NC)))
+        Πv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (NC + v - 1) * sv]),
+                                  Val(NC)))
+        ∂h = ntuple(Val(3)) do d
+            inv_h * SVector{NC,T}(ntuple(Val(NC)) do v
+                axis_stencil(w1, work, var + (v - 1) * sv, st[d])
+            end)
+        end
+
+        g4, gu4, α, β, _, sqrtγ = metric_quantities(_sym4(hv))
+        ∂ₜh = β[1]*∂h[1] + β[2]*∂h[2] + β[3]*∂h[3] + (α / sqrtγ) * Πv
+        # At the point's position and time, for a source that reads them (step B1).
+        Hl, _ = gauge_source(T, Hwork, inner, b, Val(HASH),
+                             point_position(origins, spacings, b, I), t, hv, ∂ₜh, ∂h)
+        Cl = g4 * gauge_constraint_at_node(g4, _dg4_last(∂ₜh, ∂h), gu4 * Hl)
+
+        # **A branch, not a multiplication by zero (fixed in step 5).** Step 4
+        # wrote `keep * Cl[a]`, which is the same number for every mask that
+        # exists when nothing is masked. It is not the same number once the
+        # interior is: the frozen core holds stale data on which `C_a` may be
+        # `NaN`, and `0 · NaN = NaN` — `CLAUDE.md`'s trap, met here rather than
+        # in the right-hand side. Every masked slot in this file is written
+        # through a branch for that reason.
+        keep = is_evolved(mask, point_position(origins, spacings, b, I))
+        ntuple(Val(4)) do a
+            diag[inner..., DIAG_CGH + a - 1, b] = keep ? Cl[a] : zero(T)
+            nothing
+        end
+        diag[inner..., DIAG_MASK, b] = keep ? one(T) : zero(T)
     end
-
-    g4, gu4, α, β, _, sqrtγ = metric_quantities(_sym4(hv))
-    ∂ₜh = β[1]*∂h[1] + β[2]*∂h[2] + β[3]*∂h[3] + (α / sqrtγ) * Πv
-    # At the point's position and time, for a source that reads them (step B1).
-    Hl, _ = gauge_source(T, Hwork, inner, b, Val(HASH),
-                         point_position(origins, spacings, b, I), t, hv, ∂ₜh, ∂h)
-    Cl = g4 * gauge_constraint_at_node(g4, _dg4_last(∂ₜh, ∂h), gu4 * Hl)
-
-    # **A branch, not a multiplication by zero (fixed in step 5).** Step 4
-    # wrote `keep * Cl[a]`, which is the same number for every mask that
-    # exists when nothing is masked. It is not the same number once the
-    # interior is: the frozen core holds stale data on which `C_a` may be
-    # `NaN`, and `0 · NaN = NaN` — `CLAUDE.md`'s trap, met here rather than
-    # in the right-hand side. Every masked slot in this file is written
-    # through a branch for that reason.
-    keep = is_evolved(mask, point_position(origins, spacings, b, I))
-    ntuple(Val(4)) do a
-        diag[inner..., DIAG_CGH + a - 1, b] = keep ? Cl[a] : zero(T)
-        nothing
-    end
-    diag[inner..., DIAG_MASK, b] = keep ? one(T) : zero(T)
 end
 
 """
@@ -427,80 +441,91 @@ matter's, `ℋ − 16πρ` and `ℳ_i − 8πS_i`. Without it the kernel is the 
     x = point_position(origins, spacings, b, I)
     γ0 = damping_rate(damping, t, x)
 
-    inv_h = inv(spacings[b])
-    inv_h² = inv_h * inv_h
-    w1 = derivative_weights(T, Val(q), Val(1))
-    w2 = derivative_weights(T, Val(q), Val(2))
-    st, sv, sb = work_strides(work)
-    var = 1 + (b - 1) * sb +
-          (I[1] + G[1] - 1) * st[1] + (I[2] + G[2] - 1) * st[2] +
-          (I[3] + G[3] - 1) * st[3]
+    # A masked point writes zeros and reads nothing, as in
+    # `gh_constraint_kernel!` (amended with the port to TreeAMR 0.3).
+    if !is_evolved(mask, x)
+        diag[inner..., DIAG_HAM, b] = zero(T)
+        ntuple(Val(3)) do i
+            diag[inner..., DIAG_MOM + i - 1, b] = zero(T)
+            nothing
+        end
+        diag[inner..., DIAG_MASK, b] = zero(T)
+    else
+        inv_h = inv(spacings[b])
+        inv_h² = inv_h * inv_h
+        w1 = derivative_weights(T, Val(q), Val(1))
+        w2 = derivative_weights(T, Val(q), Val(2))
+        st, sv, sb = work_strides(work)
+        var = 1 + (b - 1) * sb +
+              (I[1] + G[1] - 1) * st[1] + (I[2] + G[2] - 1) * st[2] +
+              (I[3] + G[3] - 1) * st[3]
 
-    hv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (v - 1) * sv]),
-                              Val(NC)))
-    Πv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (NC + v - 1) * sv]),
-                              Val(NC)))
-    ∂h = ntuple(Val(3)) do d
-        inv_h * SVector{NC,T}(ntuple(Val(NC)) do v
-            axis_stencil(w1, work, var + (v - 1) * sv, st[d])
-        end)
-    end
-    ∂Π = ntuple(Val(3)) do d
-        inv_h * SVector{NC,T}(ntuple(Val(NC)) do v
-            axis_stencil(w1, work, var + (NC + v - 1) * sv, st[d])
-        end)
-    end
-    # The six spatial second derivatives, packed `(xx, xy, xz, yy, yz, zz)`.
-    ∂∂h = ntuple(Val(6)) do n
-        d1 = n == 1 ? 1 : n == 2 ? 1 : n == 3 ? 1 : n == 4 ? 2 : n == 5 ? 2 : 3
-        d2 = n == 1 ? 1 : n == 2 ? 2 : n == 3 ? 3 : n == 4 ? 2 : n == 5 ? 3 : 3
-        inv_h² * SVector{NC,T}(ntuple(Val(NC)) do v
-            d1 == d2 ? axis_stencil(w2, work, var + (v - 1) * sv, st[d1]) :
-            mixed_stencil(w1, work, var + (v - 1) * sv, st[d1], st[d2])
-        end)
-    end
+        hv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (v - 1) * sv]),
+                                  Val(NC)))
+        Πv = SVector{NC,T}(ntuple(v -> (@inbounds work[var + (NC + v - 1) * sv]),
+                                  Val(NC)))
+        ∂h = ntuple(Val(3)) do d
+            inv_h * SVector{NC,T}(ntuple(Val(NC)) do v
+                axis_stencil(w1, work, var + (v - 1) * sv, st[d])
+            end)
+        end
+        ∂Π = ntuple(Val(3)) do d
+            inv_h * SVector{NC,T}(ntuple(Val(NC)) do v
+                axis_stencil(w1, work, var + (NC + v - 1) * sv, st[d])
+            end)
+        end
+        # The six spatial second derivatives, packed `(xx, xy, xz, yy, yz, zz)`.
+        ∂∂h = ntuple(Val(6)) do n
+            d1 = n == 1 ? 1 : n == 2 ? 1 : n == 3 ? 1 : n == 4 ? 2 : n == 5 ? 2 : 3
+            d2 = n == 1 ? 1 : n == 2 ? 2 : n == 3 ? 3 : n == 4 ? 2 : n == 5 ? 3 : 3
+            inv_h² * SVector{NC,T}(ntuple(Val(NC)) do v
+                d1 == d2 ? axis_stencil(w2, work, var + (v - 1) * sv, st[d1]) :
+                mixed_stencil(w1, work, var + (v - 1) * sv, st[d1], st[d2])
+            end)
+        end
 
-    g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(hv))
-    # The algebraic source's gradient needs `∂_t g`, which the first
-    # evolution equation gives without the source (added 2026-10-02).
-    ∂ₜh₀ = β[1]*∂h[1] + β[2]*∂h[2] + β[3]*∂h[3] + (α / sqrtγ) * Πv
-    Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), x, t, hv, ∂ₜh₀, ∂h)
-    ∂ₜh, ∂ₜΠ₀ = gh_node_rhs_expanded(hv, Πv, ∂h, ∂Π, ∂∂h, Hl, dHl, γ0, γ2)
-    # The matter at the point, and its term in `∂ₜΠ` (GH-3; each name assigned
-    # once, since the closures below capture some of them).
-    m = _monitor_matter(mat, inner, b, Val(HASMATTER))
-    ∂ₜΠ = _with_matter_source(∂ₜΠ₀, m, g4, α, β, γu, sqrtγ)
+        g4, gu4, α, β, γu, sqrtγ = metric_quantities(_sym4(hv))
+        # The algebraic source's gradient needs `∂_t g`, which the first
+        # evolution equation gives without the source (added 2026-10-02).
+        ∂ₜh₀ = β[1]*∂h[1] + β[2]*∂h[2] + β[3]*∂h[3] + (α / sqrtγ) * Πv
+        Hl, dHl = gauge_source(T, Hwork, inner, b, Val(HASH), x, t, hv, ∂ₜh₀, ∂h)
+        ∂ₜh, ∂ₜΠ₀ = gh_node_rhs_expanded(hv, Πv, ∂h, ∂Π, ∂∂h, Hl, dHl, γ0, γ2)
+        # The matter at the point, and its term in `∂ₜΠ` (GH-3; each name assigned
+        # once, since the closures below capture some of them).
+        m = _monitor_matter(mat, inner, b, Val(HASMATTER))
+        ∂ₜΠ = _with_matter_source(∂ₜΠ₀, m, g4, α, β, γu, sqrtγ)
 
-    φ = α / sqrtγ
-    # ∂_i∂_t g: the first evolution equation differentiated along x^i.
-    ∂ᵢ∂ₜh = ntuple(Val(3)) do i
-        dα, dβ, dsqrtγ, _ = metric_derivatives_along(gu4, α, β, γu, sqrtγ, ∂h[i])
-        dφ = (dα - φ * dsqrtγ) / sqrtγ
-        acc = dφ * Πv + φ * ∂Π[i]
-        acc + (dβ[1] * ∂h[1] + dβ[2] * ∂h[2] + dβ[3] * ∂h[3]) +
-        (β[1] * ∂∂h[_pairindex3(i, 1)] + β[2] * ∂∂h[_pairindex3(i, 2)] +
-         β[3] * ∂∂h[_pairindex3(i, 3)])
+        φ = α / sqrtγ
+        # ∂_i∂_t g: the first evolution equation differentiated along x^i.
+        ∂ᵢ∂ₜh = ntuple(Val(3)) do i
+            dα, dβ, dsqrtγ, _ = metric_derivatives_along(gu4, α, β, γu, sqrtγ, ∂h[i])
+            dφ = (dα - φ * dsqrtγ) / sqrtγ
+            acc = dφ * Πv + φ * ∂Π[i]
+            acc + (dβ[1] * ∂h[1] + dβ[2] * ∂h[2] + dβ[3] * ∂h[3]) +
+            (β[1] * ∂∂h[_pairindex3(i, 1)] + β[2] * ∂∂h[_pairindex3(i, 2)] +
+             β[3] * ∂∂h[_pairindex3(i, 3)])
+        end
+        # ∂_t∂_t g: the same equation differentiated along t, with ∂_tΠ from
+        # the reduced equation.
+        dαt, dβt, dsqrtγt, _ = metric_derivatives_along(gu4, α, β, γu, sqrtγ, ∂ₜh)
+        dφt = (dαt - φ * dsqrtγt) / sqrtγ
+        ∂ₜ∂ₜh = dφt * Πv + φ * ∂ₜΠ +
+                (dβt[1] * ∂h[1] + dβt[2] * ∂h[2] + dβt[3] * ∂h[3]) +
+                (β[1] * ∂ᵢ∂ₜh[1] + β[2] * ∂ᵢ∂ₜh[2] + β[3] * ∂ᵢ∂ₜh[3])
+
+        dd = (∂ₜ∂ₜh, ∂ᵢ∂ₜh[1], ∂ᵢ∂ₜh[2], ∂ᵢ∂ₜh[3],
+              ∂∂h[1], ∂∂h[2], ∂∂h[3], ∂∂h[4], ∂∂h[5], ∂∂h[6])
+        ℋ₀, ℳ₀ = adm_constraints_at_node(g4, gu4, α, β, _dg4(∂ₜh, ∂h), _ddg4(dd))
+        ℋ, ℳ = _with_matter_constraints(ℋ₀, ℳ₀, m)
+
+        keep = is_evolved(mask, x)
+        diag[inner..., DIAG_HAM, b] = keep ? ℋ : zero(T)
+        ntuple(Val(3)) do i
+            diag[inner..., DIAG_MOM + i - 1, b] = keep ? ℳ[i] : zero(T)
+            nothing
+        end
+        diag[inner..., DIAG_MASK, b] = keep ? one(T) : zero(T)
     end
-    # ∂_t∂_t g: the same equation differentiated along t, with ∂_tΠ from
-    # the reduced equation.
-    dαt, dβt, dsqrtγt, _ = metric_derivatives_along(gu4, α, β, γu, sqrtγ, ∂ₜh)
-    dφt = (dαt - φ * dsqrtγt) / sqrtγ
-    ∂ₜ∂ₜh = dφt * Πv + φ * ∂ₜΠ +
-            (dβt[1] * ∂h[1] + dβt[2] * ∂h[2] + dβt[3] * ∂h[3]) +
-            (β[1] * ∂ᵢ∂ₜh[1] + β[2] * ∂ᵢ∂ₜh[2] + β[3] * ∂ᵢ∂ₜh[3])
-
-    dd = (∂ₜ∂ₜh, ∂ᵢ∂ₜh[1], ∂ᵢ∂ₜh[2], ∂ᵢ∂ₜh[3],
-          ∂∂h[1], ∂∂h[2], ∂∂h[3], ∂∂h[4], ∂∂h[5], ∂∂h[6])
-    ℋ₀, ℳ₀ = adm_constraints_at_node(g4, gu4, α, β, _dg4(∂ₜh, ∂h), _ddg4(dd))
-    ℋ, ℳ = _with_matter_constraints(ℋ₀, ℳ₀, m)
-
-    keep = is_evolved(mask, x)
-    diag[inner..., DIAG_HAM, b] = keep ? ℋ : zero(T)
-    ntuple(Val(3)) do i
-        diag[inner..., DIAG_MOM + i - 1, b] = keep ? ℳ[i] : zero(T)
-        nothing
-    end
-    diag[inner..., DIAG_MASK, b] = keep ? one(T) : zero(T)
 end
 
 # The state → working array → ghosts preamble both monitors share. It is
@@ -656,7 +681,7 @@ volume those points cover, [`evolved_volume`](@ref), which is global,
 instead.
 """
 masked_counts(p::GHProblem{T}) where {T} =
-    block_mapreduce(identity, +, zero(T), p.diag; vars=DIAG_MASK)
+    block_mapreduce(identity, +, zero(T), p.diag; vars=DIAG_MASK, primaries=true)
 
 """
     evolved_volume(p::GHProblem; weighting = :volume, at_level = nothing) -> T
@@ -745,7 +770,7 @@ end
 function _diag_norms(p::GHProblem{T}, ::Val{NV}, ::Val{VOL}, ::Val{M}, lo::Int,
                      level::Int) where {T,NV,VOL,M}
     r = mesh_fold(SlotNorms{NV,VOL,M}(level), TreeAMR.combine, _slot_init(T, Val(NV)),
-                  p.diag; vars=lo:(lo + NV - 1))
+                  p.diag; vars=lo:(lo + NV - 1), primaries=true)
     return (first=lo, points=r.n.value, volume=r.vol.value,
             s2=SVector{NV,T}(map(s -> s.value, r.s2)),
             mx=SVector{NV,T}(map(m -> m.value, r.mx)))
@@ -892,7 +917,7 @@ function _level_norms(p::GHProblem{T}, ::Val{NV}, ::Val{VOL}, lmin::Int,
     M = DIAG_MASK - DIAG_CGH + 1
     init = ntuple(_ -> _slot_init(T, Val(NV)), Val(L))
     r = mesh_fold(LevelSlotNorms{NV,VOL,M,L}(lmin), TreeAMR.combine, init, p.diag;
-                  vars=DIAG_CGH:DIAG_MASK)
+                  vars=DIAG_CGH:DIAG_MASK, primaries=true)
     return map(r) do b
         (first=DIAG_CGH, points=b.n.value, volume=b.vol.value,
          s2=SVector{NV,T}(map(s -> s.value, b.s2)),

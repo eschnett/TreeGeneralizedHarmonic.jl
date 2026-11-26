@@ -37,7 +37,7 @@ package runs until it is named there.
 """
 function state_partition(U::FieldSet{T,D}, u) where {T,D}
     u isa Array || return nothing
-    L = U.forest.N^D * U.nvars
+    L = prod(U.forest.N .+ staggers(U)) * U.nvars
     length(u) == L * nblocks(U) || throw(DimensionMismatch(
         "the state vector has $(length(u)) entries but the field set's blocks " *
         "hold $(L * nblocks(U)): a partition of one mesh's state cannot be " *
@@ -228,11 +228,12 @@ end
     gh_solve(p::GHProblem, u, tspan; dt, alias_u0 = false, matter = nothing) -> u′
 
 Integrate `p` from `u` over `tspan` with [`gh_integrator`](@ref) and return
-the state at `tspan[2]`: a fresh vector, or `u` itself, updated in place,
-with `alias_u0 = true`. `matter` is the integrator's, held fixed.
+the state at `tspan[2]`, settled ([`settle!`](@ref)): a fresh vector, or
+`u` itself, updated in place, with `alias_u0 = true`. `matter` is the
+integrator's, held fixed.
 """
 function gh_solve(p::GHProblem, u, tspan; dt, alias_u0::Bool=false, matter=nothing)
     integ = gh_integrator(p, u, tspan; dt=dt, alias_u0=alias_u0, matter=matter)
     IRK.solve!(integ)
-    return integ.u
+    return settle!(p, integ.u, eltype(p.U.work)(tspan[2]))
 end

@@ -97,24 +97,37 @@ const NDIAG = 17
 # the whole state error; the per-component split, if a component is ever
 # in question, is a targeted kernel and not a permanent cost on every run.
 
-# The position of an **owned** point, formed exactly as TreeAMR forms it —
-# the same origin, the same spacing, the same expression in the same order
-# — so that a mask, an interior profile or a Dirichlet value computed here
-# lands on the value `coordinates(fs, b, idx)` gives and not merely near
-# it. TreeAMR's own `coordinates_kernel!` writes
-# `origin[d] + (I[d] - off[d]) * h` with `off` a whole cell along a
-# vertex-like dimension, and every field set in this package is
+# The position of an **own** point, formed exactly as TreeAMR forms it —
+# through its `nodeposition`, from the block's patch corner `lo`, its
+# integer corner `B` and its spacing — so that a mask, an interior profile
+# or a Dirichlet value computed here lands on the value
+# `coordinates(fs, b, idx)` gives and not merely near it, and so that the
+# copies of a point on a block face, an own point of every block holding
+# it (TreeAMR 0.3, closed blocks), sit at one position bit for bit, which
+# `origin + (I − 1) h` does not give. `origins` holds `(lo, B)` per block
+# ([`block_corners`](@ref)). Every field set in this package is
 # vertex-centered (`CODE.md`, "Field sets and layout"), which
 # [`GHProblem`](@ref) checks so that this line may assume it.
 @inline function point_position(origins, spacings, b::Int, I)
     h = spacings[b]
-    origin = origins[b]
-    off = oftype(h, 1 // 1)
+    lo, B = origins[b]
     # Spelled out rather than `ntuple(d -> …, Val(3))`: no closure for a device
     # to compile as a call (amended 2026-10-05).
-    return (origin[1] + (I[1] - off) * h, origin[2] + (I[2] - off) * h,
-            origin[3] + (I[3] - off) * h)
+    return (TreeAMR.nodeposition(lo[1], h, B[1], I[1], 1, nothing),
+            TreeAMR.nodeposition(lo[2], h, B[2], I[2], 1, nothing),
+            TreeAMR.nodeposition(lo[3], h, B[3], I[3], 1, nothing))
 end
+
+"""
+    block_corners(forest, T) -> Vector
+
+Per local block its patch's low corner, in `T`, and its integer corner:
+what [`point_position`](@ref) places a point from, as TreeAMR's
+`nodeposition` does. `isbits`, so it travels to a device as the origins
+did.
+"""
+block_corners(forest, ::Type{T}) where {T} =
+    collect(zip(block_lows(forest, T), block_bases(forest)))
 
 # --- the kernel-side stencil contractions -----------------------------------
 #
@@ -1099,7 +1112,7 @@ function GHProblem(U::FieldSet{T,3}, schedule, case::GHCase{T}; q::Integer,
                        parity=even_parity(U.forest, NDIAG),
                        rotation=identity_rotation(U.forest, NDIAG), backend=backend)
 
-    origins = to_backend(backend, block_origins(U.forest, T))
+    origins = to_backend(backend, block_corners(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))
     DISS = has_dissipation(case.ε_KO)
     hasdirichlet = has_outer_face(case)
@@ -1344,6 +1357,23 @@ function prepare!(p::GHProblem{T}, u, t) where {T}
 end
 
 """
+    settle!(p::GHProblem, u, t) -> u
+
+`u` as the mesh sees it at time `t`: [`prepare!`](@ref), then the working
+array gathered back into `u`. A point on a block face is an own point of
+every block holding it (TreeAMR 0.3, closed blocks), and the integrator
+carries each copy with its own right-hand side; the fill gives the copies
+the primary's value, and a Dirichlet boundary plane the hook's, but the
+integrator's state keeps them as integrated until the next fill. An error,
+a norm or a comparison of two states reads a settled one.
+"""
+function settle!(p::GHProblem, u, t)
+    prepare!(p, u, t)
+    gather!(u, p.U)
+    return u
+end
+
+"""
     rhs!(du, p::GHProblem, t; matter = nothing)
 
 The right-hand side of the state that [`prepare!`](@ref) left in `p`, at time
@@ -1458,7 +1488,8 @@ function max_speed(p::GHProblem{T}; t=zero(T),
     # every type this package runs in. A `NaN` still propagates, which is
     # what makes a blown-up state visible here rather than as a `dt` of
     # zero two lines later.
-    return mesh_mapreduce(identity, max, zero(T), p.diag; vars=DIAG_SPEED)
+    return mesh_mapreduce(identity, max, zero(T), p.diag; vars=DIAG_SPEED,
+                          primaries=false)
 end
 
 """

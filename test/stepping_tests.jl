@@ -41,7 +41,7 @@ end
         part = state_partition(fs, u0)
         @test length(part) == Threads.nthreads()
         @test reduce(vcat, collect.(part)) == 1:length(u0)
-        L = fs.forest.N^3 * fs.nvars
+        L = (fs.forest.N + 1)^3 * fs.nvars        # a closed box (TreeAMR 0.3)
         @test all(r -> isempty(r) || (first(r) - 1) % L == 0 && length(r) % L == 0,
                   part)
         tid = zeros(Int, nblocks(fs))
@@ -67,7 +67,8 @@ end
                       dt=dt, stage_limiter=gh_limiter!,
                       step_limiter=gh_limiter!, partition=nothing)
         IRK.solve!(ib)
-        @test isequal(owner, ib.u)
+        # `gh_solve` returns a settled state (TreeAMR 0.3's closed blocks).
+        @test isequal(owner, TreeGeneralizedHarmonic.settle!(p, ib.u, nsteps * dt))
         @test all(isfinite, owner) && owner != u0
     end
 
@@ -96,7 +97,7 @@ end
             IRK.step!(integ)
         end
         @test integ.t == nsteps * dt
-        @test isequal(w, plain)
+        @test isequal(TreeGeneralizedHarmonic.settle!(p, w, nsteps * dt), plain)
         # And a different problem is what the remaining steps see: the same
         # wave without dissipation (a different right-hand side — the
         # background itself never enters `F` on a periodic mesh with no
@@ -130,7 +131,7 @@ end
               4nbytes
         i2 = mk()
         IRK.solve!(i2)
-        @test isequal(i2.u, fresh)
+        @test isequal(TreeGeneralizedHarmonic.settle!(p, i2.u, 4dt), fresh)
         # Another mesh's state does not fit, and says so rather than
         # allocating behind the caller's back.
         forest2, fs2, p2 = gh_setup(T, case; N=8, roots=1, q=q)

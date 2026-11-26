@@ -179,7 +179,7 @@ export state_partition, gh_limiter!, gh_integrator, gh_solve, ProblemRef
 # with TreeGRRMHD, 2026-11-09): public, not exported, because TreeGRRMHD's verbs
 # have the same names and a script loads both packages. `max_speed` is exported
 # above; its method `max_speed(p, u, t)` is the speed for `Δt`.
-public prepare!, rhs!, stage_limit!, step_limit!, initial_state!, evolved_sets
+public prepare!, settle!, rhs!, stage_limit!, step_limit!, initial_state!, evolved_sets
 
 # Constraints and the masks their norms take
 export AllPoints, is_evolved, adm_constraints_at_node

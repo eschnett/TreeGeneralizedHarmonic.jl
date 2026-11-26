@@ -365,7 +365,8 @@ function gh_tau_pass(::Type{T}, case::GHCase{T}; N, roots, q=2, t=zero(T),
     boundary = dirichlet(case, T(t))
     boundary === nothing ? fill_ghosts!(U, sched) :
     fill_ghosts!(U, sched; boundary=boundary)
-    origins = TreeGeneralizedHarmonic.to_backend(backend, block_origins(f, T))
+    origins = TreeGeneralizedHarmonic.to_backend(backend,
+                                                 TreeGeneralizedHarmonic.block_corners(f, T))
     spacings = TreeGeneralizedHarmonic.to_backend(backend, block_spacings(f, T))
     mask = interior_mask(case.interior, T(t))
     scales = field_scales(U, mask, origins, spacings)

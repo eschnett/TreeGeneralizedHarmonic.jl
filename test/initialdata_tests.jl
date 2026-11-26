@@ -104,7 +104,8 @@ end
 
     @test isbits(state_callback(case, t).f)
     ref = zeros(T, size(fs.work))
-    for b in 1:nblocks(fs), k in 1:8, j in 1:8, i in 1:8
+    # The own points are each block's closed box, `1:N+1` (TreeAMR 0.3).
+    for b in 1:nblocks(fs), k in 1:9, j in 1:9, i in 1:9
         idx = (i + G, j + G, k + G)
         vals = state_tuple(case.background, t, coordinates(fs, b, idx))
         for v in 1:20

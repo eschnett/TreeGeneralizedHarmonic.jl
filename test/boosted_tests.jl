@@ -645,7 +645,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
             for k in 1:nleaves(f)
                 org = block_origin(T, f, f.leaves[k])
                 i = ntuple(d -> round(Int, (x[d] - org[d]) / spacing(T, f, f.leaves[k])), 3)
-                all(d -> 0 ≤ i[d] < f.N, 1:3) && return k, i .+ (1 .+ U.G)
+                all(d -> 0 ≤ i[d] ≤ f.N, 1:3) && return k, i .+ (1 .+ U.G)
             end
             return nothing
         end
@@ -788,7 +788,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
             for k in 1:nleaves(f)
                 org = block_origin(T, f, f.leaves[k])
                 i = ntuple(d -> round(Int, (x[d] - org[d]) / spacing(T, f, f.leaves[k])), 3)
-                all(d -> 0 ≤ i[d] < f.N, 1:3) && return k, i .+ (1 .+ U.G)
+                all(d -> 0 ≤ i[d] ≤ f.N, 1:3) && return k, i .+ (1 .+ U.G)
             end
             return nothing
         end
@@ -1029,7 +1029,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
             for k in 1:nleaves(f)
                 org = block_origin(T, f, f.leaves[k])
                 i = ntuple(d -> round(Int, (x[d] - org[d]) / spacing(T, f, f.leaves[k])), 3)
-                all(d -> 0 ≤ i[d] < f.N, 1:3) && return k, i .+ (1 .+ U.G)
+                all(d -> 0 ≤ i[d] ≤ f.N, 1:3) && return k, i .+ (1 .+ U.G)
             end
             return nothing
         end

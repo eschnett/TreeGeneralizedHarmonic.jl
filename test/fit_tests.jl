@@ -694,6 +694,10 @@ end
         for i in eachindex(u)
             u[i] += T(1 // 1000) * sin(T(i))
         end
+        # One value a point: the perturbation gives the copies of a shared
+        # point (TreeAMR 0.3) different values, and the kernel reads the
+        # primary's, which the fill gives every copy.
+        unify!(u, fs, sched)
         bd = derive_target_bounds(T, cf.background, gf; t=0)
         fit = build_fit(analytic_sampler(cf.background, 0.0; δ=gf.h / 8), gf,
                         cf.interior; cont=1, bounds=bd)
@@ -854,6 +858,10 @@ end
         for i in eachindex(u)
             u[i] += T(1 // 1000) * sin(T(i))
         end
+        # One value a point: the perturbation gives the copies of a shared
+        # point (TreeAMR 0.3) different values, and the kernel reads the
+        # primary's, which the fill gives every copy.
+        unify!(u, fs, GhostSchedule(fs, ops))
         bd = derive_target_bounds(T, cf.background, gf; t=0)
         fit = build_fit(analytic_sampler(cf.background, 0.0; δ=gf.h / 8), gf,
                         cf.interior; cont=1, bounds=bd)

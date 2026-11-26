@@ -279,7 +279,7 @@ the signature for its callers.
 """
 function field_scales(U::FieldSet{T,3}, mask, origins, spacings) where {T}
     r = mesh_fold(ScaleFold(mask), TreeAMR.combine, ntuple(_ -> Max(zero(T)), Val(NC)),
-                  U; vars=1:NC)
+                  U; vars=1:NC, primaries=false)
     return map(m -> m.value, r)
 end
 
@@ -375,7 +375,7 @@ TreeAMR's `mesh_mapreduce`: per-block maxima combined on the host, so it is
 bit-identical whatever the thread count.
 """
 tau_max(τfs::FieldSet{T,3}; slot::Integer=DIAG_TAU) where {T} =
-    mesh_mapreduce(identity, max, zero(T), τfs; vars=slot)
+    mesh_mapreduce(identity, max, zero(T), τfs; vars=slot, primaries=false)
 
 # --- the level floor and the level ceiling ----------------------------------
 #
@@ -882,10 +882,12 @@ function refinement_centroid(fs::FieldSet{T,3}, fires) where {T}
         k = blockkey(fs, b)
         h = spacing(T, forest, k)
         o = block_origin(T, forest, k)
-        # A vertex-centered owned index `i` sits at `origin + (i − 1)h`,
-        # which is `point_position`'s expression and TreeAMR's own.
+        # The box is in cell indices (TreeAMR 0.3: the cells touching the
+        # firing nodes, `max(1, lo − 1):min(N, hi)`), and cell `i` is
+        # centred at `origin + (i − ½)h`, so the box's centre is that of the
+        # firing nodes `lo … hi` wherever no face clamps it.
         x = SVector{3,T}(ntuple(Val(3)) do d
-            o[d] + (T(first(box[d]) + last(box[d])) / 2 - 1) * h
+            o[d] + (T(first(box[d]) + last(box[d])) / 2 - T(1 // 2)) * h
         end)
         w = T(n) * h^3
         num += w * x
@@ -979,7 +981,7 @@ function indicator_flags(U::FieldSet{T,3}, case::GHCase{T}, t;
         "floor_margin, ceiling_cells)`. There is one refinement mechanism in " *
         "this package and it is CODE.md's masked Löhner indicator."))
     backend = get_backend(U.work)
-    origins = to_backend(backend, block_origins(U.forest, T))
+    origins = to_backend(backend, block_corners(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))
     # The interior is the one the run holds (amended in step 8d): a tracked
     # case's geometry is the chunk's, not the case's rule.

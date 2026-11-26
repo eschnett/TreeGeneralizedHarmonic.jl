@@ -342,7 +342,9 @@ TreeGeneralizedHarmonic.Adapt.adapt_storage(::AdmToView, a::Array) =
         at = adm(FieldSet{T}(forest, 16; G=1, centering=vertexcentered(3)))
         @test at((1, 1, N), 1).α > 0
         @test_throws BoundsError at((0, 1, 1), 1)
-        @test_throws BoundsError at((1, N + 1, 1), 1)
+        # The own range is the closed box `1:N+1` (TreeAMR 0.3); `N + 1` was
+        # the first index refused before.
+        @test_throws BoundsError at((1, N + 2, 1), 1)
         @test_throws BoundsError at((1, 1, 1), nblocks(fs) + 1)
         f(a, n, b) = a(n, b)
         f(at, (2, 3, 4), 5)

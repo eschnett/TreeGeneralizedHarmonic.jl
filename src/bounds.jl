@@ -755,7 +755,7 @@ function _apply_bounds_kernel!(bd::StateBounds, int, p, u, t)
     # points.
     r = mesh_fold(_bounds_counts, TreeAMR.combine,
                   (n=Sum(zero(T)), nf=Sum(zero(T)), r=Max(zero(T))), p.diag;
-                  vars=DIAG_BOUNDS:DIAG_BOUNDS_R)
+                  vars=DIAG_BOUNDS:DIAG_BOUNDS_R, primaries=true)
     n = round(Int, tofloat64(r.n.value))
     acc = p.accounting
     if acc !== nothing
@@ -925,7 +925,7 @@ function validity_and_nonfinite(p, u, t)
                      interior_mask(int, T(t)))
     init = (layer=_validity_bin(T), shell=_validity_bin(T), evolved=_validity_bin(T),
             nonfinite=Sum(0))
-    r = mesh_fold(f, TreeAMR.combine, init, p.U, u)
+    r = mesh_fold(f, TreeAMR.combine, init, p.U, u; primaries=true)
     layer = _validity_report(r.layer)
     shell = _validity_report(r.shell)
     evolved = _validity_report(r.evolved)
@@ -959,5 +959,6 @@ slot and a reduction until then).
 """
 function evolved_nonfinite(p, u, t; mask=interior_mask(p.interior,
                                                        eltype(p.U.work)(t)))
-    return mesh_fold(NonfiniteFold(mask), TreeAMR.combine, Sum(0), p.U, u).value
+    return mesh_fold(NonfiniteFold(mask), TreeAMR.combine, Sum(0), p.U, u;
+                     primaries=true).value
 end

@@ -367,6 +367,11 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         # The stationarity the two buy: the worst `|du|` of the exact state
         # over the **evolved** region, split into the two evolution
         # equations, because they answer differently.
+        # At the primaries: a point on a block face is an own point of every
+        # block holding it (TreeAMR 0.3), and the coarse copy of a
+        # coarse-fine face point holds the fine `Π` after the fill, which
+        # its own stencil's `D_i h` does not cancel; its `du` is never read.
+        pmask = primary_mask(fs)
         function stationarity(u, p)
             du = similar(u)
             gh_rhs!(du, u, p, zero(T))
@@ -376,6 +381,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
             for b in 1:nblocks(fs), k in 1:forest.N, j in 1:forest.N,
                 i in 1:forest.N
 
+                isprimary(pmask, i, j, k, b) || continue
                 x = coordinates(fs, b, (i + G, j + G, k + G))
                 sqrt(sum(abs2, x)) ≥ case.interior.r_1 || continue
                 wh = max(wh, maximum(abs, A[i, j, k, 1:10, b]))

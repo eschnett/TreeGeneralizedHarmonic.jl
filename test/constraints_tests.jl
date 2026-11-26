@@ -315,11 +315,17 @@ end
         num = zero(T)
         den = zero(T)
         peak = zero(T)
+        # Each point once, at its primary copy: a block holds both face
+        # planes (TreeAMR 0.3).
+        pmask = primary_mask(prob.diag)
         for b in 1:nblocks(prob.diag)
             cellvolume = spacing(T, forest, blockkey(prob.diag, b))^3
             block = interiorview(prob.diag, b, v)
-            num += cellvolume * sum(x -> x * x, block)
-            den += cellvolume * length(block)
+            for I in CartesianIndices(block)
+                isprimary(pmask, Tuple(I)..., b) || continue
+                num += cellvolume * block[I]^2
+                den += cellvolume
+            end
             peak = max(peak, maximum(abs, block))
         end
         n = masked_norms(prob, v)
@@ -336,7 +342,8 @@ end
     closed = masked_norms(prob, DIAG_CGH)
     @test closed.l2 != open.l2
     @test closed.linf ≤ open.linf
-    kept = sum(block_mapreduce(identity, +, zero(T), prob.diag; vars=DIAG_MASK))
+    kept = sum(block_mapreduce(identity, +, zero(T), prob.diag; vars=DIAG_MASK,
+                               primaries=true))
     total = nblocks(prob.diag) * forest.N^3
     @test 0 < kept < total
     # Every excluded point holds exactly zero, in the constraint slots and

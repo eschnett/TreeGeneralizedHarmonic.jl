@@ -283,6 +283,22 @@ its spelling**)**."
   down). Steps 5 and 6 add the masked error, the interior residual and the
   indicator beside them. That the field sets are vertex-centered and
   `GHProblem` refuses anything else was added in step 4.
+- **2026-11-26 (TreeAMR's M22 step 10).** Ported to TreeAMR 0.3's closed
+  blocks: `point_position` forms positions through `nodeposition` from
+  `block_corners`, the reductions say `primaries`, both outer boundary planes
+  are evolved with the hook filling the ghosts beyond (TreeAMR's default
+  `wall = :evolved`; under half-open ownership the upper plane was a ghost
+  the hook filled, and `:prescribed` would break the discrete-gradient
+  post-pass's roundoff stationarity at the lower one), `gh_solve`
+  returns a settled state (`settle!`), and `add_noise!` draws per point
+  from its position instead of per block from a `Xoshiro` seeded with the
+  Morton key, which would give the copies of a shared point different
+  values; the noise data changed with it. The metric adapter and a matter
+  adapter answer on the closed box, `1 … N+1`. The two constraint monitors
+  skip masked points instead of computing and discarding: TreeAMR 0.3
+  projects a reflecting wall plane onto each variable's parity at every
+  fill, which in the frozen core at an octant's corner leaves data that is
+  not a metric, and `metric_quantities`' `sqrt` throws there.
 
 ### Finite-difference stencils
 

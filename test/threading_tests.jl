@@ -76,11 +76,20 @@ end
         nums = T[]
         dens = T[]
         peak = zero(T)
+        # Each point once, at its primary copy (TreeAMR 0.3: a block holds
+        # both face planes).
+        pmask = primary_mask(prob.diag)
         for b in 1:nblocks(prob.diag)
             cellvolume = spacing(T, forest, blockkey(prob.diag, b))^3
             block = interiorview(prob.diag, b, v)
-            push!(nums, sum(x -> x * x, block) * cellvolume)
-            push!(dens, T(length(block)) * cellvolume)
+            s, n = zero(T), 0
+            for I in CartesianIndices(block)
+                isprimary(pmask, Tuple(I)..., b) || continue
+                s += block[I] * block[I]
+                n += 1
+            end
+            push!(nums, s * cellvolume)
+            push!(dens, T(n) * cellvolume)
             peak = max(peak, maximum(abs, block))
         end
         n = masked_norms(prob, v)
@@ -92,7 +101,7 @@ end
     scatter!(fs, u)
     λ = max_speed(prob)
     speeds = block_mapreduce(identity, max, zero(T), prob.diag;
-                             vars=TreeGeneralizedHarmonic.DIAG_SPEED)
+                             vars=TreeGeneralizedHarmonic.DIAG_SPEED, primaries=false)
     @test λ === maximum(speeds)
     @test λ > sqrt(T(3))                   # this case has a shift
 end

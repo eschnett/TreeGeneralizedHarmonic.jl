@@ -95,7 +95,8 @@ verbs_step_limit!(u, _, p, t) = GHV.step_limit!(view(u, p.s[2]), p.gh, t)
     @test integ.u === u
     ref = gh_solve(gh, u0, (zero(T), t_end); dt=dt, matter=matter)
     @test all(isfinite, ref) && ref != u0
-    @test isequal(view(u, s[2]), ref)
+    # `gh_solve` returns a settled state (TreeAMR 0.3's closed blocks).
+    @test isequal(TreeGeneralizedHarmonic.settle!(gh, view(u, s[2]), t_end), ref)
     @test isequal(view(u, s[1]), other0)
 end
 
