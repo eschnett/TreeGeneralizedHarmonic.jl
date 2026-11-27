@@ -338,13 +338,31 @@ its spelling**)**."
   and the quadrant agrees with the box to `5.0e−14` after sixteen steps
   (`4.0e−11` on 0.2.12), the bitant to `4.6e−14` (`7.5e−11`). The
   rotating quadrant's moving case fell from `1.05e−8` to `4.65e−9`, not
-  to 0.2.12's `1.3e−10` **(open)**. One claim moved with the anchor: the
+  to 0.2.12's `1.3e−10`, for a reason of its own (below). One claim moved with the anchor: the
   moving `:damped` core's relaxation compared every core point with the
   target, and at `t1` the hole's center is the node `x = −2h` to
   rounding; the anchor put the node `3e−17` below the center where 0.2.12
   put it `8e−17` above, the target there depends on the side, and the
   frozen core's distance from it went from 24 to 138. That node is now
-  left out, and the numbers are 0.2.12's again (14.47 against 24.22).
+  left out, and the numbers are 0.2.12's again (14.47 against 24.22). The node is left out of both sides of the
+  comparison. A hole at rest at the origin of a centred box now always
+  has a node exactly at `r = 0` (0.2.12 put it `±1.1e−16` away at a
+  spacing a double cannot hold), and the core rules take their explicit
+  `iszero(r)` branch there (`n = ẑ`) instead of a direction rounding
+  chose.
+  The rotating quadrant against the box (traced 2026-11-27, accepted by
+  the review): the first difference enters at the first fill, on the
+  seam planes' own points only. The quadrant's two seam planes are
+  copies of each other through the turn, and stage 0 makes them one
+  number, exactly through the turn; on 0.2.12 both planes were owned and
+  evolved side by side, as the box's are, and the box's values at `p`
+  and `Rp` differ by the background's asymmetry, 136–610 ulps there. The
+  moving layer's time difference amplifies it: at rest `4.3e−14` →
+  `8.1e−13`, moving `1.3e−10` → `4.65e−9`, on the axis `1.2e−10` →
+  `2.7e−11`, and off the seam the quadrant matches the box as well as or
+  better than before. The quadrant is the symmetric one of the two; the
+  bounds hold (`1.25e−12` and `9.1e−8`), and the comment names the
+  source.
 
 ### Finite-difference stencils
 

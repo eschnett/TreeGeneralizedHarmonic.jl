@@ -368,12 +368,15 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         scatter!(D, u1)
         scatter!(U, u0)
         now, stale = zero(T), zero(T)
-        # Not the node at the hole's center: at `t1` the center is the node
-        # `x = −2h` to rounding (`c = −0.20833333333333331`), and the
-        # target there depends on the side of it a node rounds to (0.2.12
-        # placed it `8e−17` above, the zero anchor of TreeAMR 0.3 `3e−17`
-        # below, and the frozen core's distance from the target went from
-        # 24 to 138 with nothing else changed).
+        # Not the node at the hole's center, on both sides of the comparison
+        # (the evolved state and the frozen one skip it alike): at `t1` the
+        # center is the node `x = −2h` to rounding, one ulp from it
+        # (`c = −0.20833333333333331`), and the core's target, a function of
+        # the direction `(x − c)/r`, depends on which side the node lies,
+        # which the position's anchor decides (0.2.12 placed it `8e−17`
+        # above, TreeAMR 0.3's zero anchor `3e−17` below; the frozen core's
+        # distance from the target went from 24 to 138 with nothing else
+        # changed).
         c1 = center_at(moving.center, t1)
         for (k, J, x) in core_points(moving, t1)
             sum(abs2, x - c1) < (T(5 // 48) / 100)^2 && continue
@@ -782,6 +785,21 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         # sixteen) — the box's own asymmetry injected step by step, and so it is
         # bounded by `nsteps · dt` times the rate's asymmetry. The x-quadrant's
         # mirror claim above is the same mechanism (`3.8e−11`).
+        #
+        # On TreeAMR 0.3's closed blocks (measured 2026-11-27) the seam adds a
+        # second, larger source of the same kind. The quadrant's two seam
+        # planes are copies of each other through the turn, and the first fill
+        # (stage 0) makes them one number, exactly through the turn; the box
+        # holds two values there, at `p` and `Rp`, which differ by the
+        # background's asymmetry — 136–610 ulps at the seam planes in the core
+        # and the layer after the first fill, nothing on the axis or off the
+        # seam. The quadrant is the symmetric one of the two. The moving
+        # layer's time difference amplifies it: at rest `4.3e−14` → `8.1e−13`,
+        # moving `1.3e−10` → `4.65e−9`, all on the seam planes; on the axis
+        # `1.2e−10` → `2.7e−11`, and off the seam the quadrant matches the box
+        # as well as or better than on 0.2.12. Both stay within the bounds
+        # below: at rest `8.1e−13` against `64 ε · max|u| = 1.25e−12`, moving
+        # `4.65e−9` against the rate's asymmetry over the run, `9.1e−8`.
         q = 2
         G = q ÷ 2 + 1
         ops = Operators(prolongation=q + 2, restriction=q + 2)
@@ -873,10 +891,10 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
               "rate's $asym_rate (δ = $δ)"
         @test mov.npts > 27_000 && rest.npts > 27_000
         @test o.change > 1e-6 && mov.seam > 1e-3        # moved, and turns at the seam
-        @test rest.diff ≤ 64 * eps(T) * rest.scale     # measured 3.6e−14 (0.4 ε)
+        @test rest.diff ≤ 64 * eps(T) * rest.scale     # measured 8.1e−13 (41 ε; 0.4 ε on 0.2.12)
         @test asym_u ≤ 256 * eps(T) * uscale            # measured 56 ε
         @test asym_rate ≤ 2 * asym_u / δ                 # the difference's 1/δ
-        @test mov.diff ≤ nsteps * dt * asym_rate         # measured 1.3e−10 of 9.1e−8
+        @test mov.diff ≤ nsteps * dt * asym_rate         # measured 4.65e−9 of 9.1e−8 (1.3e−10 on 0.2.12)
     end
 
     @testset "the bitant takes the hole spinning about z and moving in z = 0, and refuses any other" begin
