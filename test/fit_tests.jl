@@ -560,17 +560,21 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
                                           SVector{20}(state_tuple(case.background, t,
                                                                   Tuple(xs[i]))))),
                          eachindex(xs))
-        # Measured at t = 3/20 M: the fits differ by 0.031 on the surface,
-        # falling to 0.016 at the center, where the samples differ from the
-        # truth by 0.034 and the run's masked error is 0.035 in L∞ (3.1e−3
-        # in L2). The fit is a least-squares projection of the samples —
-        # linear in them to first order — whose amplification on the surface
-        # is measured at 0.92, and the inward extrapolation halves it; the
-        # factor 2 is that amplification's headroom, not a tolerance on the
-        # physics.
+        # Measured at t = 3/20 M, against the run's masked error (Erik's
+        # decision, 2026-11-26: "Rewrite GH's two fit_tests claims against
+        # the run's error"). On TreeAMR 0.2.12 the fits differed by 0.0316
+        # on the surface and 0.0315 at the center, the samples by 0.034 and
+        # the run by 0.035 in L∞; on 0.3's closed blocks the surface and the
+        # samples improved (0.0192, 0.021, the run 0.022) while the inward
+        # extrapolation stayed (0.0319 at the center): it is the fit's own,
+        # the same components (`11`, `15`, `18`, `20`) in both. So the
+        # samples' error, and the surface's, no longer bound the center,
+        # which they did on 0.2.12 by 0.3 %; the run's error does, with the
+        # factor 2 of the fit's amplification (0.92 on the surface) as
+        # headroom, not a tolerance on the physics.
         @test maximum(diff) ≤ 2 * rec.err_linf
-        @test maximum(diff) ≤ 1.5 * sample
-        @test diff[1] ≤ diff[end]
+        @test diff[1] ≤ 2 * rec.err_linf
+        @test diff[end] ≤ 1.5 * sample
         @info "the evolved state's fit against the analytic fit at t = 0.15 M (step 8e)" diff_by_radius = diff sample_error = sample err_linf = rec.err_linf err_l2 = rec.err_l2 residual = (fe.residual.value, fa.residual.value)
     end
 

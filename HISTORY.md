@@ -305,6 +305,17 @@ its spelling**)**."
   `N = 8` and 16 (4.68 before; the coarse samples' error fell, 5.8e−4 →
   2.2e−4, the fine one's is unchanged, and TreeAMR's `interpolate` is bit
   for bit 0.2.12's on a refined vertex set), so the test asks `≥ 3`. The
+  coarse samples' error is the only one that moved: 5.8e−4 → 2.2e−4 at
+  `N = 8`, 2.03e−5 and 1.43e−6 at 16 and 32 on both (a rate of 3.83
+  from 16 to 32 on both). The evolved state's fit against the analytic
+  one (`fit_tests.jl`, at `t = 3/20 M`) failed its two claims tied to the
+  samples: the surface improved (0.0316 → 0.0192, the samples 0.034 →
+  0.021, the run's L∞ error 0.035 → 0.022) and the center did not move
+  (0.0315 → 0.0319), the fit's own inward extrapolation, in the same
+  components on both; 0.2.12 had passed `center ≤ surface` by 0.3 %.
+  Erik's decision (2026-11-26): "Rewrite GH's two fit_tests claims
+  against the run's error". The center and the whole sweep are bounded
+  by `2 err_linf`, the surface by `1.5` of the samples' error. The
   moving hole on the quadrant and the bitant differed from the box by
   `1.1e−8` and `1.5e−8` (`4.0e−11` before), above `ε^{2/3}` of the scale.
   The cause is the positions, not the walls: TreeAMR 0.3 forms a position
