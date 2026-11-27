@@ -368,7 +368,15 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         scatter!(D, u1)
         scatter!(U, u0)
         now, stale = zero(T), zero(T)
+        # Not the node at the hole's center: at `t1` the center is the node
+        # `x = −2h` to rounding (`c = −0.20833333333333331`), and the
+        # target there depends on the side of it a node rounds to (0.2.12
+        # placed it `8e−17` above, the zero anchor of TreeAMR 0.3 `3e−17`
+        # below, and the frozen core's distance from the target went from
+        # 24 to 138 with nothing else changed).
+        c1 = center_at(moving.center, t1)
         for (k, J, x) in core_points(moving, t1)
+            sum(abs2, x - c1) < (T(5 // 48) / 100)^2 && continue
             ut = case_state_tuple(case.background, moving, t1, x)
             for var in 1:20
                 now = max(now, abs(D.work[J..., var, k] - ut[var]))
@@ -616,22 +624,14 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         q = 2
         G = q ÷ 2 + 1
         ops = Operators(prolongation=q + 2, restriction=q + 2)
-        # A dyadic spacing, `h = 1/16` (half-width 2, `N = 16`): TreeAMR 0.3
-        # forms a position from the patch's low corner and the point's
-        # integer coordinate in one rounding (`nodeposition`), and the
-        # quadrant's corner (`y = z = 0`) is not the box's (`−2`), so at a
-        # spacing a double cannot hold (`5/48`) the same point gets
-        # positions an ulp apart in the two meshes, the exact data differ
-        # by as much, and the layer's rate amplifies it to `1e−8`
-        # (measured; `5e−14` at `h = 1/16` on 0.2.12 and on 0.3 alike).
-        hk = (; halfwidth=T(2), r_0=T(2 // 5), r_1=T(11 // 10), chunk=T(1 // 10),
+        hk = (; halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=T(11 // 10), chunk=T(1 // 10),
               v=v, x0=-1 // 4, gauge_source=:algebraic)
-        h = T(1 // 16)
+        h = T(5 // 48)
         dt = h / 8
         nsteps = 16
         runs = map((:quadrant, false)) do octant
             case = kerr_schild_case(T; hk..., octant=octant)
-            f = gh_forest(T, case; N=16, roots=octant === false ? 4 : (4, 2, 2))
+            f = gh_forest(T, case; N=12, roots=octant === false ? 4 : (4, 2, 2))
             U = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
                             parity=state_parity(f))
             fill_exact!(U, case, zero(T))
@@ -1009,15 +1009,14 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         q = 2
         G = q ÷ 2 + 1
         ops = Operators(prolongation=q + 2, restriction=q + 2)
-        # The dyadic spacing of the quadrant's test, for its reason.
-        hk = (; halfwidth=T(2), r_0=T(2 // 5), r_1=T(11 // 10), chunk=T(1 // 10),
+        hk = (; halfwidth=T(5 // 2), r_0=T(2 // 5), r_1=T(11 // 10), chunk=T(1 // 10),
               a=T(1 // 5), v=v, x0=-1 // 4, gauge_source=:algebraic)
-        h = T(1 // 16)
+        h = T(5 // 48)
         dt = h / 8
         nsteps = 16
         runs = map((:bitant, false)) do octant
             case = kerr_schild_case(T; hk..., octant=octant)
-            f = gh_forest(T, case; N=16, roots=octant === false ? 4 : (4, 4, 2))
+            f = gh_forest(T, case; N=12, roots=octant === false ? 4 : (4, 4, 2))
             U = FieldSet{T}(f, 20; G=G, centering=vertexcentered(3),
                             parity=state_parity(f))
             fill_exact!(U, case, zero(T))

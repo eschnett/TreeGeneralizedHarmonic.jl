@@ -331,8 +331,20 @@ its spelling**)**."
   core's data is not it. At a dyadic spacing, `h = 1/16` (half-width 2,
   `N = 16`), the two meshes agree to `5.3e−14` after sixteen steps, bit
   for bit the same number on 0.2.12 and on 0.3, and the bitant to
-  `8.5e−14`; the two tests now run there, their bound unchanged (the
-  review's request: trace, do not move a bound).
+  `8.5e−14`. TreeAMR's step 10b then anchored positions at zero where
+  zero is on a patch's grid (Erik: "yes, design and add this."), which
+  makes the quadrant's and the box's positions the same bits at any
+  spacing: the two tests run at `h = 5/48` again, their bound unchanged,
+  and the quadrant agrees with the box to `5.0e−14` after sixteen steps
+  (`4.0e−11` on 0.2.12), the bitant to `4.6e−14` (`7.5e−11`). The
+  rotating quadrant's moving case fell from `1.05e−8` to `4.65e−9`, not
+  to 0.2.12's `1.3e−10` **(open)**. One claim moved with the anchor: the
+  moving `:damped` core's relaxation compared every core point with the
+  target, and at `t1` the hole's center is the node `x = −2h` to
+  rounding; the anchor put the node `3e−17` below the center where 0.2.12
+  put it `8e−17` above, the target there depends on the side, and the
+  frozen core's distance from it went from 24 to 138. That node is now
+  left out, and the numbers are 0.2.12's again (14.47 against 24.22).
 
 ### Finite-difference stencils
 
