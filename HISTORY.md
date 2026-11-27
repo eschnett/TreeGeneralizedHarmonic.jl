@@ -305,12 +305,23 @@ its spelling**)**."
   `N = 8` and 16 (4.68 before; the coarse samples' error fell, 5.8e−4 →
   2.2e−4, the fine one's is unchanged, and TreeAMR's `interpolate` is bit
   for bit 0.2.12's on a refined vertex set), so the test asks `≥ 3`. The
-  moving hole on the quadrant and the bitant now differs from the box by
-  `1.1e−8` and `1.5e−8` (`4.0e−11` before), above `ε^{2/3}` of the scale:
-  the largest difference is at a primary interior point in the layer next
-  to the core, not on a block face or a wall, which points at the core's
-  wall planes, projected onto parity by TreeAMR in the quadrant and not in
-  the box, read by the layer's stencils **(open)**.
+  moving hole on the quadrant and the bitant differed from the box by
+  `1.1e−8` and `1.5e−8` (`4.0e−11` before), above `ε^{2/3}` of the scale.
+  The cause is the positions, not the walls: TreeAMR 0.3 forms a position
+  from the patch's low corner and the point's integer coordinate in one
+  rounding (`nodeposition`), and the quadrant's corner (`y = z = 0`) is
+  not the box's (`−5/2`), so at `h = 5/48`, which a double cannot hold,
+  85 % of the quadrant's points sit an ulp (at most `2.2e−16`) from the
+  box's position of the same point. The exact data differ by as much at
+  `t = 0` (`1.9e−12` in the layer, exactly 0 on 0.2.12), and the layer's
+  rate, a centered difference in time, amplifies it to `4e−9` after one
+  step and `1.1e−8` after sixteen. Stage P changes nothing there (the
+  quadrant's fill moves no own point at `t = 0`), so the parity of the
+  core's data is not it. At a dyadic spacing, `h = 1/16` (half-width 2,
+  `N = 16`), the two meshes agree to `5.3e−14` after sixteen steps, bit
+  for bit the same number on 0.2.12 and on 0.3, and the bitant to
+  `8.5e−14`; the two tests now run there, their bound unchanged (the
+  review's request: trace, do not move a bound).
 
 ### Finite-difference stencils
 
