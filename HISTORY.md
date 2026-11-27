@@ -288,8 +288,10 @@ its spelling**)**."
   `block_corners`, the reductions say `primaries`, both outer boundary planes
   are evolved with the hook filling the ghosts beyond (TreeAMR's default
   `wall = :evolved`; under half-open ownership the upper plane was a ghost
-  the hook filled, and `:prescribed` would break the discrete-gradient
-  post-pass's roundoff stationarity at the lower one), `gh_solve`
+  the hook filled; `:prescribed`, tried on TreeAMR 98371bf, which writes
+  outer faces only, leaves the discrete-gradient post-pass's first
+  equation at `5.3e−4` instead of roundoff, since the hook writes the
+  analytic `Π` on the wall), `gh_solve`
   returns a settled state (`settle!`), and `add_noise!` draws per point
   from its position instead of per block from a `Xoshiro` seeded with the
   Morton key, which would give the copies of a shared point different
@@ -299,6 +301,16 @@ its spelling**)**."
   projects a reflecting wall plane onto each variable's parity at every
   fill, which in the frozen core at an octant's corner leaves data that is
   not a metric, and `metric_quantities`' `sqrt` throws there.
+  Measured with the port: the static hole's fit converges at 3.39 between
+  `N = 8` and 16 (4.68 before; the coarse samples' error fell, 5.8e−4 →
+  2.2e−4, the fine one's is unchanged, and TreeAMR's `interpolate` is bit
+  for bit 0.2.12's on a refined vertex set), so the test asks `≥ 3`. The
+  moving hole on the quadrant and the bitant now differs from the box by
+  `1.1e−8` and `1.5e−8` (`4.0e−11` before), above `ε^{2/3}` of the scale:
+  the largest difference is at a primary interior point in the layer next
+  to the core, not on a block face or a wall, which points at the core's
+  wall planes, projected onto parity by TreeAMR in the quadrant and not in
+  the box, read by the layer's stencils **(open)**.
 
 ### Finite-difference stencils
 
