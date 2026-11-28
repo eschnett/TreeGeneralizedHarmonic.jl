@@ -1922,17 +1922,18 @@ perturbation (added 2026-10-02) — from `rng` (any random number generator;
 the caller seeds it, so the package needs none of its own). On a device the
 state is copied to the host and back.
 
-**Each block draws from its own generator (amended 2026-10-19).** One
-`UInt64` is drawn from `rng`, and every block seeds a `Xoshiro` with it and
-its Morton key — root, level and coordinates — and draws its points from
-that, variable by variable and point by point. A block's noise is therefore
-a function of the seed and the block alone: the data depend on the seed and
-the mesh and on nothing else — not the thread count, not the backend, not
-the rank count or which rank holds the block — and a rank draws for its own
-blocks only, in `O(1)` per block. (Until 2026-10-19 one stream ran through
-the leaves in order, which a rank could only reach by drawing every earlier
-rank's numbers; the values changed with the scheme.) Over MPI every rank
-must pass a generator in the same state, which a seeded one is.
+**Each point draws from its position.** One `UInt64` is drawn from `rng`,
+and every point's draw is a hash of it, the point's position and the
+variable. A point on a block face is an own point of every block holding
+it (TreeAMR 0.3, closed blocks), and its copies sit at one position bit
+for bit, so they draw the same number and the data are one function of
+the point. The noise is therefore a function of the seed and the mesh
+alone — not the thread count, not the backend, not the rank count or
+which rank holds the block — and a rank draws for its own blocks only.
+(From 2026-10-19 each block seeded a `Xoshiro` with its Morton key, which
+under closed blocks gives the copies of a shared point different values;
+until then one stream ran through the leaves in order.) Over MPI every
+rank must pass a generator in the same state, which a seeded one is.
 
 **At a reflecting face the noise is projected onto the parity.** The low
 wall plane of a vertex-centered set is owned and evolved, and TreeAMR does
@@ -1966,18 +1967,17 @@ function add_noise!(U::FieldSet{T,3}, rng; amplitude, exclude=nothing) where {T}
     base = rand(rng, UInt64)
     for b in 1:nblocks(host)
         k = blockkey(host, b)
-        block_rng = Xoshiro(UInt64[base, k.root, k.level, k.coords...])
         lo = block_origin(T, forest, k)
-        keep = exclude === nothing ? nothing :
-               map(I -> !exclude(coordinates(host, b, Tuple(I) .+ host.G)),
-                   CartesianIndices(interiorview(host, b, 1)))
+        xs = map(I -> coordinates(host, b, Tuple(I) .+ host.G),
+                 CartesianIndices(interiorview(host, b, 1)))
+        keep = exclude === nothing ? nothing : map(x -> !exclude(x), xs)
         # The block's owned planes on the low faces of a rotating seam.
         onseam = ntuple(d -> seam !== nothing && d in seam &&
                              lo[d] == forest.extents[d][1], Val(3))
         for v in 1:U.nvars
             w = interiorview(host, b, v)
             for I in CartesianIndices(w)
-                δ = A * T(2 * rand(block_rng) - 1)
+                δ = A * T(2 * point_draw(base, xs[I], v) - 1)
                 any(d -> onseam[d] && I[d] == 1, 1:3) && continue
                 (keep === nothing || keep[I]) && (w[I] += δ)
             end
@@ -1997,6 +1997,19 @@ function add_noise!(U::FieldSet{T,3}, rng; amplitude, exclude=nothing) where {T}
     end
     host === U || copyto!(U.work, host.work)
     return U
+end
+
+# A number in `[0, 1)` that is a function of `base`, the position `x` and
+# the variable `v` alone: SplitMix64's finalizer over the positions' bits.
+function point_draw(base::UInt64, x, v::Integer)
+    z = base
+    for c in (map(xd -> reinterpret(UInt64, tofloat64(xd)), Tuple(x))..., UInt64(v))
+        z = (z ⊻ c) + 0x9e3779b97f4a7c15
+        z = (z ⊻ (z >> 30)) * 0xbf58476d1ce4e5b9
+        z = (z ⊻ (z >> 27)) * 0x94d049bb133111eb
+        z ⊻= z >> 31
+    end
+    return (z >> 11) * 0x1.0p-53
 end
 
 # --- data in 3+1 form (step S1) --------------------------------------------------

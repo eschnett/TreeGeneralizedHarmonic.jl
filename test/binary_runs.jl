@@ -403,13 +403,13 @@ function observe(p, t, u, rec)
     b0 = zbin(T)
     init = (all=b0, band=ntuple(_ -> b0, Val(2 * NBAND)))
     rf = mesh_fold(BandFold{T}(c1, c2), TreeAMR.combine, init, p.diag;
-                   vars=DIAG_CGH:DIAG_MASK)
+                   vars=DIAG_CGH:DIAG_MASK, primaries=true)
     all = bandnorms(rf.all)
     # The lapse rows, from the state itself (`scatter!` writes `u` into the
     # working array; the next right-hand side scatters again).
     rA(A) = max(num(rec.holes[A].track_r_max), (fitted_holes ? 1 : unit.r_1) * holes[A].mass)
     lf = mesh_fold(LapseFold{T}(c1, c2, T(rA(1)), T(rA(2)), T(rec.separation / 2)),
-                   TreeAMR.combine, NOLAPSE, p.U, u)
+                   TreeAMR.combine, NOLAPSE, p.U, u; primaries=false)
     lapse = map(b -> b.value, lf)
     # Everything below is the same on every rank; the CSV and the log are rank
     # 0's, and the SimWatch update is collective, so every rank makes it.

@@ -40,7 +40,7 @@ import SpacetimeMetrics as SM
         for b in 1:nleaves(f)
             o = block_origin(T, f, f.leaves[b])
             i = ntuple(d -> round(Int, (x[d] - o[d]) / spacing(T, f, f.leaves[b])), 3)
-            all(d -> 0 ≤ i[d] < f.N, 1:3) && return b, i .+ (1 .+ U.G)
+            all(d -> 0 ≤ i[d] ≤ f.N, 1:3) && return b, i .+ (1 .+ U.G)
         end
         return nothing
     end

@@ -740,9 +740,15 @@ what is specific to a GR code. Each is in `CODE.md` with its reason.
   and the stencils step by a stride per axis — one place to get it wrong instead of
   1600.
   See `CODE.md`, "Field sets and layout"; `CODE.md`, "One right-hand-side evaluation".
-- **`N = 8` does not exist at every order.** TreeAMR's vertex invariant
-  is `N ≥ 2G + 2`, so `q = 4, 6, 8` need `N ≥ 8, 10, 12`.
+- **`N = 8` does not exist at every order.** TreeAMR's invariant is
+  `N ≥ 2G` in 0.3 (`N ≥ 2G + 2` along a stagger before), so `q = 4, 6, 8`
+  need `N ≥ 6, 8, 10`; the tests keep the sizes they had.
   See `CODE.md`, "Field sets and layout".
+- **A block holds its closed box** (TreeAMR 0.3): read a state through
+  `settle!`, never an integrator's raw state, whose copies of a shared
+  point are as integrated; a sum or a
+  count takes `primaries = true`; a position comes from `point_position`
+  (`nodeposition`). See `CODE.md`, "Field sets and layout".
 - **A closure in a kernel must not capture a name assigned twice in that
   body**. Give each branch its own names.
   See `CODE.md`, "Precision, threads, devices".

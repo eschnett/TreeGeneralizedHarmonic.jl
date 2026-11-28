@@ -323,7 +323,11 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         gather!(u, U)
         A = statearray(u, U)
         N = forest.N
-        pts = [(b, i, j, k) for b in 1:nblocks(U), k in 1:N, j in 1:N, i in 1:N]
+        # Primaries only: a block holds both face planes (TreeAMR 0.3), and
+        # the counts take each point once, at its primary copy.
+        pmask = primary_mask(U)
+        pts = [(b, i, j, k) for b in 1:nblocks(U), k in 1:N, j in 1:N, i in 1:N
+               if isprimary(pmask, i, j, k, b)]
         rad(pt) = sqrt(sum(abs2, coordinates(U, pt[1],
                                              (pt[2] + G, pt[3] + G, pt[4] + G))))
         pick(lo, hi) = pts[findfirst(pt -> lo < rad(pt) < hi, pts)]

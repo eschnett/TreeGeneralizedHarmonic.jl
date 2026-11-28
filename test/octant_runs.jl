@@ -740,7 +740,7 @@ function row_fold(p, center, edges, dir, ::Val{NL}, ::Val{NS}, ::Val{NH}) where 
             trail=ntuple(_ -> bin, Val(NH)), lead=ntuple(_ -> bin, Val(NH)))
     f = RowFold{T,NL,NS,NH}(center, edges, dir)
     return mesh_fold(f, TreeAMR.combine, init, p.diag; vars=DIAG_CGH:DIAG_ERR,
-                     tag=k -> nearboundary(p.U.forest, k))
+                     tag=k -> nearboundary(p.U.forest, k), primaries=true)
 end
 
 # A bin's norms, in the record's shape: the slots are `C_a` (1:4), `ℋ` (5),
@@ -967,7 +967,8 @@ function observe(p, t, u, rec)
     rf = row_fold(p, c_t, bands, dir, Val(nlev), Val(nshell), Val(split_on ? nshell : 0))
     pts = binnorms(rf.all)
     st = mesh_fold(statefold, TreeAMR.combine,
-                   (n=Sum(zero(T)), sq=Sum(zero(T)), mx=Max(zero(T))), p.U, u)
+                   (n=Sum(zero(T)), sq=Sum(zero(T)), mx=Max(zero(T))), p.U, u;
+                   primaries=true)
     s2 = sqrt(st.sq.value / (st.n.value * p.U.nvars))
     s∞ = st.mx.value
     bnd = binnorms(rf.bnd)

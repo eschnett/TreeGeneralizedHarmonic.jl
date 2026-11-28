@@ -266,7 +266,7 @@ end
 
         # The composite cache against each hole's own, on the run's last mesh.
         U = FieldSet{T}(a.forest, 20; G=q ÷ 2 + 1, centering=vertexcentered(3))
-        origins = block_origins(U.forest, T)
+        origins = TreeGeneralizedHarmonic.block_corners(U.forest, T)
         spacings = block_spacings(U.forest, T)
         tf = T(1 // 10)
         both = TGHH.fill_target!(TGHH.target_cache(U), origins, spacings, a.interior, a.fits, tf)

@@ -605,6 +605,11 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
     for i in eachindex(u)
         u[i] += T(1 // 1000) * sin(T(i))
     end
+    # The perturbation gives the copies of a shared point (TreeAMR 0.3: a
+    # block holds both face planes) different values, and the kernel reads
+    # the primary's, which the fill gives every copy: unify, so that the
+    # state compared with is the one the kernel sees.
+    unify!(u, fs, p_damped.schedule)
     uin = copy(u)
 
     du_i = similar(u)

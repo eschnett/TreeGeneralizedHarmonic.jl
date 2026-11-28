@@ -48,7 +48,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         for b in 1:nleaves(f)
             o = block_origin(T, f, f.leaves[b])
             i = ntuple(d -> round(Int, (x[d] - o[d]) / spacing(T, f, f.leaves[b])), 3)
-            all(d -> 0 ≤ i[d] < f.N, 1:3) && return b, i .+ (1 .+ U.G)
+            all(d -> 0 ≤ i[d] ≤ f.N, 1:3) && return b, i .+ (1 .+ U.G)
         end
         return nothing
     end
@@ -225,12 +225,18 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         gather!(u, U)
         p = GHProblem(U, GhostSchedule(U, ops), oct; q=q)
         adm_constraint!(p, u, zero(T))
+        # Each point once, at its primary copy: a block holds both face
+        # planes (TreeAMR 0.3).
         hostsum, hostmax, npts = zero(T), zero(T), 0
+        pmask = primary_mask(p.diag)
         for b in 1:nleaves(f)
             c = interiorview(p.diag, b, TreeGeneralizedHarmonic.DIAG_HAM)
-            hostsum += sum(abs2, c)
+            for I in CartesianIndices(c)
+                isprimary(pmask, Tuple(I)..., b) || continue
+                hostsum += c[I]^2
+                npts += 1
+            end
             hostmax = max(hostmax, maximum(abs, c))
-            npts += length(c)
         end
         n = constraint_norms(p; weighting=:points)
         @test evolved_volume(p; weighting=:points) == npts

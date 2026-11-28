@@ -52,7 +52,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         fill_ghosts!(fs, sched; boundary=dirichlet(case, t))
         worst = zero(T)
         for idx in ((1, 5, 5), (2, 5, 5), (G, 5, 5), (5, 1, 5), (5, 5, 2),
-                    (8 + G + 1, 5, 5), (5, 8 + 2G + 1, 5), (8 + 2G + 1, 8 + 2G + 1, 1))
+                    (8 + G + 2, 5, 5), (5, 8 + 2G + 1, 5), (8 + 2G + 1, 8 + 2G + 1, 1))
             vals = state_tuple(boosted, t, coordinates(fs, 1, idx))
             for w in 1:20
                 worst = max(worst, abs(fs.work[idx..., w, 1] - vals[w]))
@@ -135,7 +135,7 @@ isdefined(@__MODULE__, :TEST_TIER) || include("tiers.jl")  # `@full_tier`
         fit = build_fit(analytic_sampler(cf.background, 0.0; δ=gf.h / 8), gf,
                         cf.interior; cont=1, bounds=bd)
         @test iszero(fit.params.center.v)
-        origins = block_origins(forest, T)
+        origins = TreeGeneralizedHarmonic.block_corners(forest, T)
         spacings = block_spacings(forest, T)
         c0 = target_cache(fs)
         c1 = target_cache(fs)

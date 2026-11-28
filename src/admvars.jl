@@ -124,8 +124,8 @@ at = ADMMetric(p, u, t)(M)
 checks that `M` is vertex-centered and on this problem's forest (`===`), and
 returns the kernel-side object. That object is `isbits` once adapted to the
 backend (`Adapt.adapt`, which a KernelAbstractions launch applies). `n` is the
-**owned** index, `1 ≤ n[d] ≤ N`, the index `map_blocks!` hands a kernel over
-the default range, and `b` the local block. The call returns
+**own** index, `1 ≤ n[d] ≤ N + 1` (a block's closed box, TreeAMR 0.3), the
+index `map_blocks!` hands a kernel over the default range, and `b` the local block. The call returns
 [`adm_vars`](@ref)'s second method at the stored index `n + G`, with this
 package's `1/h` and `q`. An owned index means the same point in every
 vertex-centered set on the forest, so `M`'s own `G` does not enter.
@@ -177,8 +177,8 @@ end
                                                b::Int) where {A,S,G,q}
     I = (n[1] + G, n[2] + G, n[3] + G)
     @boundscheck begin
-        N = size(at.work, 1) - 2G - 1
-        ok = (1 <= n[1] <= N) & (1 <= n[2] <= N) & (1 <= n[3] <= N)
+        M = size(at.work, 1) - 2G          # N + 1, the closed box
+        ok = (1 <= n[1] <= M) & (1 <= n[2] <= M) & (1 <= n[3] <= M)
         ok || _owned_out_of_range(at.work, I, b)
         checkbounds(at.spacings, b)
     end

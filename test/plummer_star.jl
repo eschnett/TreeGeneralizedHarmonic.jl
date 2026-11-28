@@ -65,9 +65,11 @@ end
 
 function SampledMatter(::Type{T}, forest, bg; t=zero(T)) where {T}
     fs = FieldSet{T}(forest, 10; G=0, centering=vertexcentered(3))
-    N = forest.N
+    # Every own vertex: a block's closed box, `1:N+1` (TreeAMR 0.3), which
+    # is where the right-hand side asks.
+    M = forest.N + 1
     c8π = 8 * T(π)
-    for b in 1:nblocks(fs), k in 1:N, j in 1:N, i in 1:N
+    for b in 1:nblocks(fs), k in 1:M, j in 1:M, i in 1:M
         x = coordinates(fs, b, (i, j, k))
         p = SVector{4,T}(T(t), x[1], x[2], x[3])
         g = SpacetimeMetrics.metric(bg, p)

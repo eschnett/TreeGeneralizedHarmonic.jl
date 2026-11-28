@@ -425,15 +425,29 @@ interior residual and the indicator sit beside them.
 
 The field sets are **vertex-centered and `GHProblem` refuses anything
 else**. The table above already decided it; what made it
-an assertion is that the masks and the interior profiles turn an owned
-index into a position — `point_position`, written to reproduce TreeAMR's
-`coordinates` expression bit for bit — and a staggered set would be
-evaluated half a cell from where its values sit.
+an assertion is that the masks and the interior profiles turn an own
+index into a position — `point_position`, TreeAMR's `nodeposition` from
+the block's corners (`block_corners`), as `coordinates` forms it, bit for
+bit — and a staggered set would be evaluated half a cell from where its
+values sit.
+
+**Closed blocks (TreeAMR 0.3).** A block owns both face planes of each
+dimension, `N + 1` points along it, so the state holds `(N + 1)^3` points
+a variable per block and a point on a block face is an own point of every
+block holding it. The fill gives the copies one value, the primary's; the
+integrator carries each copy with its own right-hand side, so a state is
+read through `settle!` (a fill and a gather), which `gh_solve` does before
+it returns. Every sum or count over the points takes `primaries = true`,
+every maximum or minimum `primaries = false`; positions come from
+`nodeposition`, so the copies of a point sit at one position, and the
+noise is a function of the point's position (`add_noise!`). A refinement
+box is in cell indices, the cells touching the firing nodes.
 
 `q` is the finite-difference order (below), and `G = q/2 + 1` because
 the Kreiss–Oliger operator of order `q + 2` reaches one point further
-than the derivatives do. TreeAMR's vertex invariant `N ≥ 2G + 2` then
-puts `N ≥ 8, 10, 12` at `q = 4, 6, 8`; the tests use `N = 8` where that
+than the derivatives do. TreeAMR's vertex invariant was `N ≥ 2G + 2`
+before closed blocks (it is `N ≥ 2G` in 0.3), which put `N ≥ 8, 10, 12` at
+`q = 4, 6, 8`; the tests use `N = 8` where that
 allows it and `N = 10` at `q = 6` (`FieldSet` refuses `N = 8` at `q = 6`), the proof-of-concept runs `N = 16` or `32`. The working array is
 `((N + 2G + 1)/N)^3` times the state: 2.6 at `N = 16, G = 3`, 1.7 at
 `N = 32`, which is the price of wide ghosts on small blocks and the
@@ -1169,10 +1183,11 @@ solution is known everywhere at every time, so the boundary data is the
 solution and a wave leaving through the boundary is absorbed to
 truncation order. The same hook goes to `regrid!` and to
 `adapt_to_initial_data!` (TreeHydro's "the hook goes to three places"),
-each with the time of that call. For a vertex-centered field set the
-domain's upper boundary plane belongs to nobody and the hook fills it;
-the lower boundary points are owned and evolved with ghosts the hook
-filled below them.
+each with the time of that call. For a vertex-centered field set both
+boundary planes of the domain are own points of their blocks (TreeAMR
+0.3) and evolved, with ghosts the hook filled beyond them — TreeAMR's
+default `wall = :evolved`, which the lower plane always was; under
+half-open ownership the upper plane was a ghost the hook filled.
 
 This is the only outer boundary the package has. A radiative condition
 for a solution that is *not* known at the boundary needs a hook that
@@ -3914,7 +3929,8 @@ at  = adm(M)                    # bound to the consumer's vertex set M
 - **Binding.** `M` must be vertex-centered and on the same forest (`===`),
   which fixes `N` and the blocks. Otherwise binding throws an
   `ArgumentError`.
-- **The index is the owned index** `n`, with `1 ≤ n[d] ≤ N`, as
+- **The index is the owned index** `n`, with `1 ≤ n[d] ≤ N + 1` (a
+  block's closed box since TreeAMR 0.3, both face planes), as
   `map_blocks!` hands it to a kernel over the default range; `b` is the
   local block. The adapter adds this package's `G` and reads the block's
   own `1/h`. An owned index is the same in every vertex-centered set on the
@@ -3992,7 +4008,8 @@ of TreeGRRMHD's state, and a coupled run passes a new one at every stage.
   - `gh_rhs!` binds it to the state's field set on the host, and the
     binding checks that it can answer for that set.
   - The kernel calls the bound object at its owned vertices with the owned
-    index and never stores the result. `S` is an `SVector{3,T}` and `Sij` a
+    index, `1 … N+1` along each dimension since TreeAMR 0.3, and never
+    stores the result: a matter adapter answers on the closed box. `S` is an `SVector{3,T}` and `Sij` a
     symmetric `SMatrix{3,3,T}`.
   - It is the kernel's seventh `Val`, `HASMATTER` (`W` is the sixth). Unlike
     the other six it is built in `gh_rhs!`, from the bound adapter's *type*,
@@ -4489,9 +4506,10 @@ What was left for this package, `src/distributed.jl` and the paths it fixed:
   recruits neighbours that may be another rank's, so `refine_flags` gathers
   every rank's marks as TreeAMR's `isbits` `RegridMark`s, dilates and clamps
   the whole vector alike on every rank, and hands `regrid!` this rank's slice.
-- **`add_noise!` draws per block**: a `Xoshiro` seeded from one draw of the
-  caller's generator and the block's Morton key, so the noise is a function
-  of the seed and the mesh alone.
+- **`add_noise!` draws per point**: a hash of one draw of the caller's
+  generator, the point's position and the variable, so the noise is a
+  function of the seed and the mesh alone, and the copies of a shared point
+  (TreeAMR 0.3) draw the same number.
 - **The host analysis runs on rank 0 alone.** The
   horizon find, the track's update and the fitted target's fits are host
   computations whose iteration counts nobody knows in advance and which read

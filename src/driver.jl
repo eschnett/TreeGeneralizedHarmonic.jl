@@ -2140,7 +2140,7 @@ function fill_fitted_initial!(U::FieldSet{T,3}, case::GHCase{T},
                   geom, spec; cont=cont, bounds=bounds, backend=backend)
     end
     target = target_cache(U)
-    origins = to_backend(backend, block_origins(U.forest, T))
+    origins = to_backend(backend, block_corners(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))
     fill_target!(target, origins, spacings, geom, (fit, nothing), zero(T);
                  rate=rate)
@@ -2180,7 +2180,7 @@ function fill_holes_fitted_initial!(U::FieldSet{T,3}, case::GHCase{T},
                               backend=backend)
                 end for A in 1:K)
     target = target_cache(U)
-    origins = to_backend(backend, block_origins(U.forest, T))
+    origins = to_backend(backend, block_corners(U.forest, T))
     spacings = to_backend(backend, block_spacings(U.forest, T))
     fill_target!(target, origins, spacings, geom, ntuple(A -> (fit[A], nothing), Val(K)),
                  zero(T); rate=rate)
@@ -2474,7 +2474,7 @@ function discrete_gradient_momentum!(U::FieldSet{T,3}, case::GHCase{T}, t,
     else
         fill_ghosts!(U, schedule; boundary=boundary)
     end
-    origins = to_backend(get_backend(U.work), block_origins(U.forest, T))
+    origins = to_backend(get_backend(U.work), block_corners(U.forest, T))
     spacings = to_backend(get_backend(U.work), block_spacings(U.forest, T))
     map_blocks!(discrete_momentum_kernel!, U, U.work, origins, spacings,
                 case.background, interior, T(t), Val(U.G), Val(Int(q)))

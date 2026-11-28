@@ -34,9 +34,13 @@ kernel on every backend and cannot read the block's interior; a condition
 defined by position alone is precisely this shape. It closes over the
 background and `t`, both `isbits`.
 
-For a vertex-centered field set the domain's upper boundary plane belongs
-to no block's owned range and the hook fills it; the lower boundary points
-are owned and evolved, with the ghosts below them filled from here.
+For a vertex-centered field set both boundary planes of the domain are own
+points of their blocks (TreeAMR 0.3, closed blocks), and both are evolved,
+with the ghosts beyond them filled from here: TreeAMR's default `wall =
+:evolved`, which is what the lower plane always was. (Under TreeAMR 0.2's
+half-open ownership the upper plane was a ghost the hook filled.) The
+discrete-gradient post-pass relies on it: a plane the hook wrote would
+carry the analytic `Π`, not the post-pass's (`driver_tests.jl`).
 
 Returning `nothing` for a fully periodic case is what lets the
 right-hand side branch once, on a `Bool` it stores, instead of handing

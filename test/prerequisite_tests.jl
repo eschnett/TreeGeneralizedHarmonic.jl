@@ -132,9 +132,11 @@ prereq_backgrounds(::Type{T}) where {T} =
         # The host loop the launch is compared against. It goes through
         # `coordinates`, which takes *stored* indices — owned point `i` is
         # stored at `i + G` — and which is the only positional arithmetic
-        # anything in this package outside a kernel is allowed to do.
+        # anything in this package outside a kernel is allowed to do. A
+        # block's own points are its closed box, `1:N+1` (TreeAMR 0.3).
         ref = zeros(T, size(fs.work))
-        for b in 1:nblocks(fs), k in 1:PREREQ_N, j in 1:PREREQ_N, i in 1:PREREQ_N
+        M = PREREQ_N + 1
+        for b in 1:nblocks(fs), k in 1:M, j in 1:M, i in 1:M
             idx = (i + PREREQ_G, j + PREREQ_G, k + PREREQ_G)
             vals = prereq_state(bg, coordinates(fs, b, idx))
             for v in 1:PREREQ_NVARS

@@ -283,6 +283,86 @@ its spelling**)**."
   down). Steps 5 and 6 add the masked error, the interior residual and the
   indicator beside them. That the field sets are vertex-centered and
   `GHProblem` refuses anything else was added in step 4.
+- **2026-11-26 (TreeAMR's M22 step 10).** Ported to TreeAMR 0.3's closed
+  blocks: `point_position` forms positions through `nodeposition` from
+  `block_corners`, the reductions say `primaries`, both outer boundary planes
+  are evolved with the hook filling the ghosts beyond (TreeAMR's default
+  `wall = :evolved`; under half-open ownership the upper plane was a ghost
+  the hook filled; `:prescribed`, tried on TreeAMR 98371bf, which writes
+  outer faces only, leaves the discrete-gradient post-pass's first
+  equation at `5.3e−4` instead of roundoff, since the hook writes the
+  analytic `Π` on the wall), `gh_solve`
+  returns a settled state (`settle!`), and `add_noise!` draws per point
+  from its position instead of per block from a `Xoshiro` seeded with the
+  Morton key, which would give the copies of a shared point different
+  values; the noise data changed with it. The metric adapter and a matter
+  adapter answer on the closed box, `1 … N+1`. The two constraint monitors
+  skip masked points instead of computing and discarding: TreeAMR 0.3
+  projects a reflecting wall plane onto each variable's parity at every
+  fill, which in the frozen core at an octant's corner leaves data that is
+  not a metric, and `metric_quantities`' `sqrt` throws there.
+  Measured with the port: the static hole's fit converges at 3.39 between
+  `N = 8` and 16 (4.68 before; the coarse samples' error fell, 5.8e−4 →
+  2.2e−4, the fine one's is unchanged, and TreeAMR's `interpolate` is bit
+  for bit 0.2.12's on a refined vertex set), so the test asks `≥ 3`. The
+  coarse samples' error is the only one that moved: 5.8e−4 → 2.2e−4 at
+  `N = 8`, 2.03e−5 and 1.43e−6 at 16 and 32 on both (a rate of 3.83
+  from 16 to 32 on both). The evolved state's fit against the analytic
+  one (`fit_tests.jl`, at `t = 3/20 M`) failed its two claims tied to the
+  samples: the surface improved (0.0316 → 0.0192, the samples 0.034 →
+  0.021, the run's L∞ error 0.035 → 0.022) and the center did not move
+  (0.0315 → 0.0319), the fit's own inward extrapolation, in the same
+  components on both; 0.2.12 had passed `center ≤ surface` by 0.3 %.
+  Erik's decision (2026-11-26): "Rewrite GH's two fit_tests claims
+  against the run's error". The center and the whole sweep are bounded
+  by `2 err_linf`, the surface by `1.5` of the samples' error. The
+  moving hole on the quadrant and the bitant differed from the box by
+  `1.1e−8` and `1.5e−8` (`4.0e−11` before), above `ε^{2/3}` of the scale.
+  The cause is the positions, not the walls: TreeAMR 0.3 forms a position
+  from the patch's low corner and the point's integer coordinate in one
+  rounding (`nodeposition`), and the quadrant's corner (`y = z = 0`) is
+  not the box's (`−5/2`), so at `h = 5/48`, which a double cannot hold,
+  85 % of the quadrant's points sit an ulp (at most `2.2e−16`) from the
+  box's position of the same point. The exact data differ by as much at
+  `t = 0` (`1.9e−12` in the layer, exactly 0 on 0.2.12), and the layer's
+  rate, a centered difference in time, amplifies it to `4e−9` after one
+  step and `1.1e−8` after sixteen. Stage P changes nothing there (the
+  quadrant's fill moves no own point at `t = 0`), so the parity of the
+  core's data is not it. At a dyadic spacing, `h = 1/16` (half-width 2,
+  `N = 16`), the two meshes agree to `5.3e−14` after sixteen steps, bit
+  for bit the same number on 0.2.12 and on 0.3, and the bitant to
+  `8.5e−14`. TreeAMR's step 10b then anchored positions at zero where
+  zero is on a patch's grid (Erik: "yes, design and add this."), which
+  makes the quadrant's and the box's positions the same bits at any
+  spacing: the two tests run at `h = 5/48` again, their bound unchanged,
+  and the quadrant agrees with the box to `5.0e−14` after sixteen steps
+  (`4.0e−11` on 0.2.12), the bitant to `4.6e−14` (`7.5e−11`). The
+  rotating quadrant's moving case fell from `1.05e−8` to `4.65e−9`, not
+  to 0.2.12's `1.3e−10`, for a reason of its own (below). One claim moved with the anchor: the
+  moving `:damped` core's relaxation compared every core point with the
+  target, and at `t1` the hole's center is the node `x = −2h` to
+  rounding; the anchor put the node `3e−17` below the center where 0.2.12
+  put it `8e−17` above, the target there depends on the side, and the
+  frozen core's distance from it went from 24 to 138. That node is now
+  left out, and the numbers are 0.2.12's again (14.47 against 24.22). The node is left out of both sides of the
+  comparison. A hole at rest at the origin of a centred box now always
+  has a node exactly at `r = 0` (0.2.12 put it `±1.1e−16` away at a
+  spacing a double cannot hold), and the core rules take their explicit
+  `iszero(r)` branch there (`n = ẑ`) instead of a direction rounding
+  chose.
+  The rotating quadrant against the box (traced 2026-11-27, accepted by
+  the review): the first difference enters at the first fill, on the
+  seam planes' own points only. The quadrant's two seam planes are
+  copies of each other through the turn, and stage 0 makes them one
+  number, exactly through the turn; on 0.2.12 both planes were owned and
+  evolved side by side, as the box's are, and the box's values at `p`
+  and `Rp` differ by the background's asymmetry, 136–610 ulps there. The
+  moving layer's time difference amplifies it: at rest `4.3e−14` →
+  `8.1e−13`, moving `1.3e−10` → `4.65e−9`, on the axis `1.2e−10` →
+  `2.7e−11`, and off the seam the quadrant matches the box as well as or
+  better than before. The quadrant is the symmetric one of the two; the
+  bounds hold (`1.25e−12` and `9.1e−8`), and the comment names the
+  source.
 
 ### Finite-difference stencils
 
